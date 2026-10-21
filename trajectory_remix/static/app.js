@@ -84,6 +84,8 @@ function action(fn) {
 }
 function setDirty(value = true) {
   dirty = value;
+  document.title = document.title.replace(/^\*\s*/, "");
+  if (value) document.title = "* " + document.title;
   $("dirty-indicator").textContent = value ? "Unapplied changes" : "";
   $("apply-sample").disabled = !value || !!state?.status.running;
 }

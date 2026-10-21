@@ -56,6 +56,7 @@ const click = async (id) => {
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
 assert.equal($("sample-title").textContent, "react-to-stream-warning");
 assert.equal($("apply-sample").disabled, true);
+assert.equal(w.document.title, "Trajectory Remix");
 $("tick-number").value = "60";
 $("tick-number").onchange({ target: $("tick-number") });
 // Synchronize pending API reads in the emulated DOM, not a browser automation wait.
@@ -76,6 +77,7 @@ await [...w.document.querySelectorAll(".tab")]
 const eventCount = w.document.querySelectorAll(".event-card").length;
 assert(eventCount >= 10);
 await click("add-event");
+assert.equal(w.document.title, "* Trajectory Remix");
 assert.equal(w.document.querySelectorAll(".event-card").length, eventCount + 1);
 await [...w.document.querySelectorAll(".tab")]
   .find((b) => b.dataset.view === "json")
@@ -99,6 +101,7 @@ for (const [key, events] of Object.entries(original.replay))
 $("sample-json").value = JSON.stringify(original);
 $("sample-json").oninput();
 await click("apply-sample");
+assert.equal(w.document.title, "Trajectory Remix");
 assert.equal($("apply-sample").disabled, true);
 assert.doesNotMatch($("diagnostics").textContent, /Invalid marker/);
 await click("settings-button");
@@ -130,6 +133,8 @@ assert.equal($("edit-menu").contains($("settings-button")), true);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
 $("sample-json").focus();
+$("sample-json").oninput();
+assert.equal(w.document.title, "* Trajectory Remix");
 const saveShortcut = new w.KeyboardEvent("keydown", {
   key: "s",
   ctrlKey: true,
@@ -137,10 +142,23 @@ const saveShortcut = new w.KeyboardEvent("keydown", {
 });
 w.document.dispatchEvent(saveShortcut);
 assert.equal(saveShortcut.defaultPrevented, true);
+for (
+  let i = 0;
+  i < 30 && !requests.some((request) => request.path === "/api/checkpoint");
+  i++
+)
+  await new Promise((r) => setTimeout(r, 20));
 assert(requests.some((request) => request.path === "/api/checkpoint"));
-for (let i = 0; i < 30 && $("save-status").textContent === "Not saved yet"; i++)
+for (
+  let i = 0;
+  i < 30 &&
+  (w.document.title.startsWith("*") ||
+    !/^Saved /.test($("save-status").textContent));
+  i++
+)
   await new Promise((r) => setTimeout(r, 20));
 assert.match($("save-status").textContent, /^Saved /);
+assert.equal(w.document.title, "Trajectory Remix");
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
