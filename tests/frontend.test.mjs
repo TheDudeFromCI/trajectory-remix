@@ -32,6 +32,9 @@ await [...w.document.querySelectorAll('.tab')].find(b=>b.dataset.view==='json').
 const original=JSON.parse($('sample-json').value);original.replay['1'][0].content='bad{N_TICKS:1}';
 $('sample-json').value=JSON.stringify(original);$('sample-json').oninput();await click('apply-sample');
 assert.match($('diagnostics').textContent,/Invalid marker/);
+assert($('diagnostics').querySelector('.diagnostics-close'));
+await $('diagnostics').querySelector('.diagnostics-close').onclick();
+assert.equal($('diagnostics').hidden,true);
 original.replay['1'][0].content='Scanning archive... WARNING: retrying chunk 7.{N_TICK:4} Backing off while the connection recovers. Resuming scan... Verified 192 files. Done.{N_TICK:5}';
 // Remove the intentionally added unopened empty stream.
 delete original.replay['170'];
