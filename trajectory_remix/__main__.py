@@ -19,10 +19,10 @@ def main():
     parser.add_argument("--eos", default="<|eos|>")
     parser.add_argument("--noop", default="<|noop|>")
     parser.add_argument(
-        "--dataset", type=Path, help="Load JSON, JSONL or .kidra-dataset at startup"
-    )
-    parser.add_argument(
-        "--data-dir", type=Path, default=Path.home() / ".local/share/trajectory-remix"
+        "--dataset",
+        type=Path,
+        required=True,
+        help="Project .kidra-dataset file; created if missing and saved to on every save",
     )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
@@ -37,8 +37,8 @@ def main():
             Tokenizer.from_file(str(args.tokenizer)), args.bos, args.eos, args.noop
         )
         if args.export:
-            if not args.dataset:
-                parser.error("--export requires --dataset")
+            if not args.dataset.exists():
+                parser.error(f"--dataset not found: {args.dataset}")
 
             samples, _ = parse_import(
                 args.dataset.name, args.dataset.read_text("utf-8")
@@ -73,7 +73,7 @@ def main():
 
         print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
         uvicorn.run(
-            create_app(compiler, args.data_dir, args.dataset),
+            create_app(compiler, args.dataset),
             host="127.0.0.1",
             port=args.port,
             log_level="warning",

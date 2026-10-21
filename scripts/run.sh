@@ -10,7 +10,7 @@ fi
 
 # Defaults to the demo tokenizer; pass your own args to override.
 if [ "$#" -eq 0 ]; then
-    set -- --tokenizer examples/demo-tokenizer.json
+    set -- --tokenizer examples/demo-tokenizer.json --dataset demo.kidra-dataset
 fi
 
 exec .venv/bin/python -m trajectory_remix "$@"

@@ -4,6 +4,7 @@ Run npm install --prefix tests first. These are DOM tests, not visual browser QA
 """
 
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,8 @@ with socket.socket() as sock:
     port = sock.getsockname()[1]
 base = f"http://127.0.0.1:{port}"
 with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
+    dataset = Path(temp) / "project.kidra-dataset"
+    shutil.copy(root / "examples/reactive-sample.json", dataset)
     server = subprocess.Popen(
         [
             sys.executable,
@@ -26,11 +29,9 @@ with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
             "--tokenizer",
             "examples/demo-tokenizer.json",
             "--dataset",
-            "examples/reactive-sample.json",
+            str(dataset),
             "--port",
             str(port),
-            "--data-dir",
-            temp,
         ],
         cwd=root,
     )

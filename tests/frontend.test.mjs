@@ -118,7 +118,8 @@ assert.match($("config-content").textContent, /Consecutive failure limit/);
 await click("save-config");
 await click("close-settings");
 assert($("file-save").textContent === "Save");
-assert($("file-save-as").textContent === "Save As...");
+assert.equal($("file-save-as"), null);
+assert.equal($("load-dataset"), null);
 assert.equal($("checkpoint"), null);
 assert.equal(w.document.querySelector("header .brand"), null);
 assert.equal(
@@ -128,7 +129,6 @@ assert.equal(
   "FileEditHelp",
 );
 assert.equal($("file-menu").contains($("import-button")), true);
-assert.equal($("file-menu").contains($("load-dataset")), true);
 assert.equal($("edit-menu").contains($("settings-button")), true);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);

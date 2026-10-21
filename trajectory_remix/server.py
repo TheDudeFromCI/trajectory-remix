@@ -15,6 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .compiler import CompileError, Compiler, chunks
 from .dataset import (
+    atomic_save,
     new_sample,
     parse_import,
     public_config,
@@ -27,16 +28,18 @@ from .runner import Runner
 MAX_BODY = 40_000_000
 
 
-def create_app(
-    compiler: Compiler, data_dir: Path, dataset: Path | None = None, client=None
-):
+def create_app(compiler: Compiler, dataset: Path, client=None):
     state = {"samples": [], "config": default_config(), "revision": 0}
-    if dataset:
+    if dataset.suffix.lower() == ".jsonl":
+        raise ValueError("--dataset must be a JSON/.kidra-dataset file, not JSONL")
+    if dataset.exists():
         samples, config = parse_import(dataset.name, dataset.read_text("utf-8"))
         state["samples"] = samples
         if config:
             state["config"] = validate_config(config)
-    runner = Runner(state, compiler, data_dir / "autosave.kidra-dataset", client)
+    else:
+        atomic_save(dataset, snapshot([], state["config"]))
+    runner = Runner(state, compiler, dataset, client)
     token = secrets.token_urlsafe(32)
     previews = OrderedDict()
     static = Path(__file__).parent / "static"
@@ -156,7 +159,6 @@ def create_app(
                 "vocab": compiler.tokenizer.get_vocab_size(),
                 "special": compiler.special,
             },
-            "autosave": str(runner.save_path),
         }
 
     @app.get("/api/samples/{index}")
@@ -261,22 +263,6 @@ def create_app(
         if plan_id not in previews:
             raise HTTPException(404, "Preview expired; compile the sample again")
         return compiler.frame(previews[plan_id], tick)
-
-    @app.get("/api/download")
-    async def download():
-        raw = json.dumps(
-            snapshot(state["samples"], state["config"]),
-            ensure_ascii=False,
-            indent=2,
-            allow_nan=False,
-        )
-        return StreamingResponse(
-            iter([raw]),
-            media_type="application/json",
-            headers={
-                "Content-Disposition": 'attachment; filename="trajectory-remix.kidra-dataset"'
-            },
-        )
 
     @app.post("/api/checkpoint")
     async def checkpoint():

@@ -23,8 +23,11 @@ reproducible first run:
 ```bash
 python -m trajectory_remix \
   --tokenizer examples/demo-tokenizer.json \
-  --dataset examples/reactive-sample.json
+  --dataset demo.kidra-dataset
 ```
+
+`--dataset` is required: the file is created if missing and is the only save
+target. Use File > Import to add `examples/reactive-sample.json`.
 
 Use your actual training tokenizer for real datasets. The demo tokenizer is only
 a fixture. The Hugging Face `tokenizers` library loads the tokenizer locally;
@@ -44,8 +47,8 @@ generation job. Stop the job in the dashboard or terminate the server.
 
 1. **Import samples** accepts multiple `.json`, `.jsonl`, and `.kidra-dataset`
    files in one batch. JSON may contain one trajectory, an array, or a `samples`
-   array. JSONL contains one trajectory per nonempty line. **Load dataset**
-   replaces the current session with a saved `.kidra-dataset`; Import appends.
+   array. JSONL contains one trajectory per nonempty line. Import appends to
+   the current session.
    Import is atomic:
    malformed JSON or duplicate sample IDs rejects the batch without changing
    existing data. Structurally invalid trajectories remain editable and show
@@ -65,9 +68,8 @@ generation job. Stop the job in the dashboard or terminate the server.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
-6. **Save dataset** downloads an editable `.kidra-dataset`. **Checkpoint to
-   disk** writes the server's atomic autosave. Generation also checkpoints every
-   configured N accepted samples and flushes pending accepted samples on stop.
+6. **Save** (Ctrl+S) writes the server's `--dataset` project file. Generation
+   also saves every configured N accepted samples and on stop.
 7. **Export tokens** exports the selected sample or whole dataset as chunked
    token JSONL. Every selected sample must compile before export begins.
 
@@ -86,12 +88,11 @@ names, generation settings, sample metadata, tags and loss controls. The tokeniz
 is an explicit startup input and is not embedded; token exports contain its
 SHA-256 fingerprint. Marker timings change with tokenizer tokenization.
 
-Autosaves default to `~/.local/share/trajectory-remix/autosave.kidra-dataset`.
-Use `--data-dir /path/to/project-data` to change that location. Reload explicitly:
+Reload a saved dataset at startup:
 
 ```bash
 python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset ~/.local/share/trajectory-remix/autosave.kidra-dataset
+  --dataset project.kidra-dataset
 ```
 
 ## Replay contract

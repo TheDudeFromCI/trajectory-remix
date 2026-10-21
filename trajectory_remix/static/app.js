@@ -150,7 +150,6 @@ function renderStatus() {
     "delete-sample",
     "apply-sample",
     "import-button",
-    "load-dataset",
     "save-config",
   ])
     $(id).disabled = s.running;
@@ -1180,7 +1179,6 @@ async function saveConfig() {
 }
 $("sample-search").oninput = renderSamples;
 $("import-button").onclick = () => $("file-input").click();
-$("load-dataset").onclick = () => $("dataset-input").click();
 $("file-input").onchange = action(async (e) => {
   if (dirty) await compileSample(true);
   const files = await Promise.all(
@@ -1195,32 +1193,6 @@ $("file-input").onchange = action(async (e) => {
   if (state.samples.length)
     await selectSample(Math.max(0, state.samples.length - 1), true);
   toast("Samples imported.");
-});
-$("dataset-input").onchange = action(async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  if (
-    state.samples.length &&
-    !confirm(
-      "Replace the current dataset with this file? Save current changes first to keep them.",
-    )
-  ) {
-    e.target.value = "";
-    return;
-  }
-  await json("import", "POST", {
-    files: [{ name: file.name, text: await file.text() }],
-    replace: true,
-    load_config: true,
-  });
-  e.target.value = "";
-  selected = -1;
-  sample = null;
-  plan = null;
-  setDirty(false);
-  await refresh();
-  if (state.samples.length) await selectSample(0, true);
-  toast("Dataset loaded.");
 });
 $("new-sample").onclick = action(async () => {
   if (dirty) await compileSample(true);
@@ -1292,11 +1264,6 @@ $("edit-menu-button").onclick = () => toggleMenu("edit");
 $("file-save").onclick = action(async () => {
   closeMenus();
   await saveSession();
-});
-$("file-save-as").onclick = action(async () => {
-  closeMenus();
-  if (dirty) await compileSample(true);
-  await download("download", "trajectory-remix.kidra-dataset");
 });
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".file-menu")) closeMenus();
