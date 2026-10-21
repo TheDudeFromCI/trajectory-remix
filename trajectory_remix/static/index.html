@@ -1,18 +1,289 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="remix-token" content="__REMIX_TOKEN__"><title>Trajectory Remix</title><link rel="stylesheet" href="/static/style.css"><script type="module" src="/static/app.js"></script></head>
-<body>
-<header><div class="brand"><span class="brand-mark">TR</span><div><strong>Trajectory Remix</strong><small>PROJECT KIDRA · DATASET STUDIO</small></div></div><div class="header-info"><span class="dot"></span><span id="tokenizer-status">Tokenizer connected</span></div><nav><button id="import-button">Import samples</button><button id="load-dataset">Load dataset</button><button id="save-dataset">Save dataset</button><button id="export-button" class="primary">Export tokens</button><button id="settings-button" title="Configure endpoints and generation">Configuration</button></nav><input type="file" id="dataset-input" accept=".kidra-dataset" hidden><input type="file" id="file-input" multiple accept=".json,.jsonl,.kidra-dataset" hidden></header>
-<div class="workspace"><aside class="sidebar"><div class="side-heading"><span>DATASET</span><span id="sample-count" class="badge">0</span><button id="new-sample" class="square" title="Create sample">+</button></div><input id="sample-search" class="search" placeholder="Filter samples…" aria-label="Filter samples"><div id="sample-list"></div><div class="sidebar-footer"><button id="checkpoint">Checkpoint to disk</button><small id="save-status">Unsaved session</small></div></aside>
-<main><div class="sample-heading"><div><div class="eyebrow">TRAJECTORY WORKSPACE</div><h1 id="sample-title">No sample selected</h1></div><div class="sample-actions"><button id="duplicate">Duplicate</button><button id="delete-sample" class="danger-text">Delete</button></div></div>
-<div class="tabbar"><div class="tabs"><button class="tab active" data-view="replay">Replay</button><button class="tab" data-view="events">Events</button><button class="tab" data-view="json">Source JSON</button></div><div class="tab-actions"><span id="dirty-indicator"></span><button id="validate-sample">LLM validate</button><button id="apply-sample" class="primary">Apply & compile</button></div></div>
-<section id="replay-view" class="view"><div class="replay-toolbar"><span><span class="live-icon"></span> <b id="open-count">0</b> active windows</span><label><input id="show-closed" type="checkbox" checked> Show closed</label><span id="replay-note">Post-commit state at selected tick</span></div><div id="window-grid" class="window-grid"></div></section>
-<section id="events-view" class="view" hidden><div class="editor-toolbar"><label>Sample ID <input id="sample-id"></label><label>Idle loss weight <input id="noop-weight" type="number" min="0" step="0.01"></label><button id="add-event">+ Add event</button></div><div class="hint">Open a window once. Close it with a generated EOS. Markers: <code>{N_TICK:4}</code>; reaction start: <code>{N_TICK:4}+1</code>. Changes are applied together.</div><div id="event-list"></div></section>
-<section id="json-view" class="view" hidden><textarea id="sample-json" spellcheck="false" aria-label="Trajectory JSON"></textarea></section>
-<div id="diagnostics" class="diagnostics" hidden></div>
-<section class="timeline-section"><div class="timeline-controls"><div class="transport"><button id="first-tick" title="First tick">|◀</button><button id="prev-tick" title="Previous tick (Left)">◀</button><button id="play" class="primary" title="Play or pause (Space)">Play</button><button id="next-tick" title="Next tick (Right)">▶</button><button id="last-tick" title="Last tick">▶|</button><span class="tick-display">TICK <input id="tick-number" value="0" type="number" min="0" aria-label="Current tick"> / <b id="max-tick">0</b></span></div><div class="timeline-options"><label>Speed <select id="play-speed"><option value="2">2 ticks/s</option><option value="10" selected>10 ticks/s</option><option value="30">30 ticks/s</option><option value="120">120 ticks/s</option></select></label><label>Zoom <input id="timeline-zoom" type="range" min="1" max="24" value="5"></label></div></div><input id="tick-scrubber" type="range" min="0" max="0" value="0" aria-label="Scrub trajectory"><div class="timeline-legend"><span><i class="generated"></i> Model output</span><span><i class="external"></i> External input</span><span><i class="idle"></i> Open / idle</span><span><i class="anchor"></i> Time anchor</span><span id="timeline-event"></span></div><div id="timeline-scroll"><div id="timeline-space"><canvas id="timeline" aria-label="Window lifecycle and content stream timeline"></canvas></div></div></section>
-</main><aside class="inspector"><div class="side-heading">GENERATION CONTROL</div><div class="run-status"><span id="run-dot" class="dot"></span><b id="run-status">Idle</b></div><div class="stat-grid"><div><b id="accepted-stat">0</b><small>ACCEPTED</small></div><div><b id="attempt-stat">0</b><small>ATTEMPTS</small></div></div><button id="generate-one" class="primary full">Generate sample</button><button id="auto-start" class="full">Start automatic mode</button><div class="two-buttons"><button id="pause-run">Pause</button><button id="stop-run" class="danger-text">Stop</button></div><div class="side-heading subheading">CONDITIONS</div><div id="selected-tags" class="tag-list"></div><button id="edit-tags" class="text-button">Edit tasks & conditions</button><div class="side-heading subheading">ACTIVITY</div><div id="activity-log"><small>No generation activity.</small></div></aside></div>
-<div id="toast" role="status" hidden></div>
-<dialog id="settings-dialog"><div class="dialog-header"><div><div class="eyebrow">GENERATION PIPELINE</div><h2>Configuration</h2></div><button id="close-settings" class="square" aria-label="Close configuration">×</button></div><div class="config-tabs"><button class="active" data-config="endpoints">Endpoints</button><button data-config="tasks">Tasks</button><button data-config="conditions">Conditions</button><button data-config="automatic">Automatic mode</button></div><div id="config-content"></div><div class="dialog-footer"><span>Keys stay in server memory; use environment variables for persistence.</span><button id="save-config" class="primary">Save configuration</button></div></dialog>
-<dialog id="export-dialog"><div class="dialog-header"><h2>Export training streams</h2><button id="close-export" class="square">×</button></div><div class="export-body"><p>Chunks keep all parallel windows for each tick together. Every record includes tokenizer IDs, loss masks, weights, lifecycle metadata and causal visibility rules.</p><label>Samples <select id="export-scope"><option value="all">Entire dataset</option><option value="current">Current sample</option></select></label><label>Ticks per chunk <input id="chunk-size" type="number" min="1" max="100000" value="64"></label><div class="hint">Chunks reference earlier context. Keep the prefix computation graph attached for packed full-gradient training. Do not concatenate windows into a standard single-stream causal sequence.</div><button id="download-export" class="primary">Download chunked JSONL</button></div></dialog>
-<dialog id="report-dialog"><div class="dialog-header"><h2>Validation report</h2><button id="close-report" class="square">×</button></div><pre id="validation-report"></pre></dialog>
-</body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="remix-token" content="__REMIX_TOKEN__" />
+    <title>Trajectory Remix</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script type="module" src="/static/app.js"></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span class="brand-mark">TR</span>
+        <div>
+          <strong>Trajectory Remix</strong
+          ><small>PROJECT KIDRA · DATASET STUDIO</small>
+        </div>
+      </div>
+      <div class="header-info">
+        <span class="dot"></span
+        ><span id="tokenizer-status">Tokenizer connected</span>
+      </div>
+      <nav>
+        <button id="import-button">Import samples</button
+        ><button id="load-dataset">Load dataset</button
+        ><button id="save-dataset">Save dataset</button
+        ><button id="export-button" class="primary">Export tokens</button
+        ><button
+          id="settings-button"
+          title="Configure endpoints and generation"
+        >
+          Configuration
+        </button>
+      </nav>
+      <input
+        type="file"
+        id="dataset-input"
+        accept=".kidra-dataset"
+        hidden
+      /><input
+        type="file"
+        id="file-input"
+        multiple
+        accept=".json,.jsonl,.kidra-dataset"
+        hidden
+      />
+    </header>
+    <div class="workspace">
+      <aside class="sidebar">
+        <div class="side-heading">
+          <span>DATASET</span><span id="sample-count" class="badge">0</span
+          ><button id="new-sample" class="square" title="Create sample">
+            +
+          </button>
+        </div>
+        <input
+          id="sample-search"
+          class="search"
+          placeholder="Filter samples…"
+          aria-label="Filter samples"
+        />
+        <div id="sample-list"></div>
+        <div class="sidebar-footer">
+          <button id="checkpoint">Checkpoint to disk</button
+          ><small id="save-status">Unsaved session</small>
+        </div>
+      </aside>
+      <main>
+        <div class="sample-heading">
+          <div>
+            <div class="eyebrow">TRAJECTORY WORKSPACE</div>
+            <h1 id="sample-title">No sample selected</h1>
+          </div>
+          <div class="sample-actions">
+            <button id="duplicate">Duplicate</button
+            ><button id="delete-sample" class="danger-text">Delete</button>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div class="tabs">
+            <button class="tab active" data-view="replay">Replay</button
+            ><button class="tab" data-view="events">Events</button
+            ><button class="tab" data-view="json">Source JSON</button>
+          </div>
+          <div class="tab-actions">
+            <span id="dirty-indicator"></span
+            ><button id="validate-sample">LLM validate</button
+            ><button id="apply-sample" class="primary">Apply & compile</button>
+          </div>
+        </div>
+        <section id="replay-view" class="view">
+          <div class="replay-toolbar">
+            <span
+              ><span class="live-icon"></span> <b id="open-count">0</b> active
+              windows</span
+            ><label
+              ><input id="show-closed" type="checkbox" checked /> Show
+              closed</label
+            ><span id="replay-note">Post-commit state at selected tick</span>
+          </div>
+          <div id="window-grid" class="window-grid"></div>
+        </section>
+        <section id="events-view" class="view" hidden>
+          <div class="editor-toolbar">
+            <label>Sample ID <input id="sample-id" /></label
+            ><label
+              >Idle loss weight
+              <input
+                id="noop-weight"
+                type="number"
+                min="0"
+                step="0.01" /></label
+            ><button id="add-event">+ Add event</button>
+          </div>
+          <div class="hint">
+            Open a window once. Close it with a generated EOS. Markers:
+            <code>{N_TICK:4}</code>; reaction start: <code>{N_TICK:4}+1</code>.
+            Changes are applied together.
+          </div>
+          <div id="event-list"></div>
+        </section>
+        <section id="json-view" class="view" hidden>
+          <textarea
+            id="sample-json"
+            spellcheck="false"
+            aria-label="Trajectory JSON"
+          ></textarea>
+        </section>
+        <div id="diagnostics" class="diagnostics" hidden></div>
+        <section class="timeline-section">
+          <div class="timeline-controls">
+            <div class="transport">
+              <button id="first-tick" title="First tick">|◀</button
+              ><button id="prev-tick" title="Previous tick (Left)">◀</button
+              ><button id="play" class="primary" title="Play or pause (Space)">
+                Play</button
+              ><button id="next-tick" title="Next tick (Right)">▶</button
+              ><button id="last-tick" title="Last tick">▶|</button
+              ><span class="tick-display"
+                >TICK
+                <input
+                  id="tick-number"
+                  value="0"
+                  type="number"
+                  min="0"
+                  aria-label="Current tick"
+                />
+                / <b id="max-tick">0</b></span
+              >
+            </div>
+            <div class="timeline-options">
+              <label
+                >Speed
+                <select id="play-speed">
+                  <option value="2">2 ticks/s</option>
+                  <option value="10" selected>10 ticks/s</option>
+                  <option value="30">30 ticks/s</option>
+                  <option value="120">120 ticks/s</option>
+                </select></label
+              ><label
+                >Zoom
+                <input
+                  id="timeline-zoom"
+                  type="range"
+                  min="1"
+                  max="24"
+                  value="5"
+              /></label>
+            </div>
+          </div>
+          <input
+            id="tick-scrubber"
+            type="range"
+            min="0"
+            max="0"
+            value="0"
+            aria-label="Scrub trajectory"
+          />
+          <div class="timeline-legend">
+            <span><i class="generated"></i> Model output</span
+            ><span><i class="external"></i> External input</span
+            ><span><i class="idle"></i> Open / idle</span
+            ><span><i class="anchor"></i> Time anchor</span
+            ><span id="timeline-event"></span>
+          </div>
+          <div id="timeline-scroll">
+            <div id="timeline-space">
+              <canvas
+                id="timeline"
+                aria-label="Window lifecycle and content stream timeline"
+              ></canvas>
+            </div>
+          </div>
+        </section>
+      </main>
+      <aside class="inspector">
+        <div class="side-heading">GENERATION CONTROL</div>
+        <div class="run-status">
+          <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
+        </div>
+        <div class="stat-grid">
+          <div><b id="accepted-stat">0</b><small>ACCEPTED</small></div>
+          <div><b id="attempt-stat">0</b><small>ATTEMPTS</small></div>
+        </div>
+        <button id="generate-one" class="primary full">Generate sample</button
+        ><button id="auto-start" class="full">Start automatic mode</button>
+        <div class="two-buttons">
+          <button id="pause-run">Pause</button
+          ><button id="stop-run" class="danger-text">Stop</button>
+        </div>
+        <div class="side-heading subheading">CONDITIONS</div>
+        <div id="selected-tags" class="tag-list"></div>
+        <button id="edit-tags" class="text-button">
+          Edit tasks & conditions
+        </button>
+        <div class="side-heading subheading">ACTIVITY</div>
+        <div id="activity-log"><small>No generation activity.</small></div>
+      </aside>
+    </div>
+    <div id="toast" role="status" hidden></div>
+    <dialog id="settings-dialog">
+      <div class="dialog-header">
+        <div>
+          <div class="eyebrow">GENERATION PIPELINE</div>
+          <h2>Configuration</h2>
+        </div>
+        <button
+          id="close-settings"
+          class="square"
+          aria-label="Close configuration"
+        >
+          ×
+        </button>
+      </div>
+      <div class="config-tabs">
+        <button class="active" data-config="endpoints">Endpoints</button
+        ><button data-config="tasks">Tasks</button
+        ><button data-config="conditions">Conditions</button
+        ><button data-config="automatic">Automatic mode</button>
+      </div>
+      <div id="config-content"></div>
+      <div class="dialog-footer">
+        <span
+          >Keys stay in server memory; use environment variables for
+          persistence.</span
+        ><button id="save-config" class="primary">Save configuration</button>
+      </div>
+    </dialog>
+    <dialog id="export-dialog">
+      <div class="dialog-header">
+        <h2>Export training streams</h2>
+        <button id="close-export" class="square">×</button>
+      </div>
+      <div class="export-body">
+        <p>
+          Chunks keep all parallel windows for each tick together. Every record
+          includes tokenizer IDs, loss masks, weights, lifecycle metadata and
+          causal visibility rules.
+        </p>
+        <label
+          >Samples
+          <select id="export-scope">
+            <option value="all">Entire dataset</option>
+            <option value="current">Current sample</option>
+          </select></label
+        ><label
+          >Ticks per chunk
+          <input id="chunk-size" type="number" min="1" max="100000" value="64"
+        /></label>
+        <div class="hint">
+          Chunks reference earlier context. Keep the prefix computation graph
+          attached for packed full-gradient training. Do not concatenate windows
+          into a standard single-stream causal sequence.
+        </div>
+        <button id="download-export" class="primary">
+          Download chunked JSONL
+        </button>
+      </div>
+    </dialog>
+    <dialog id="report-dialog">
+      <div class="dialog-header">
+        <h2>Validation report</h2>
+        <button id="close-report" class="square">×</button>
+      </div>
+      <pre id="validation-report"></pre>
+    </dialog>
+  </body>
+</html>

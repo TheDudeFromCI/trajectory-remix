@@ -1,5 +1,7 @@
 {
   "private": true,
   "description": "Optional DOM integration checks; no frontend runtime dependencies",
-  "devDependencies": {"happy-dom": "21.0.4"}
+  "devDependencies": {
+    "happy-dom": "21.0.4"
+  }
 }

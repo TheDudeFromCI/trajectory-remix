@@ -1,10 +1,10 @@
 from __future__ import annotations
+
 import copy
 import hashlib
-from collections import OrderedDict
-import io
 import json
 import secrets
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,15 +13,23 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .compiler import Compiler, CompileError, chunks
-from .dataset import FORMAT, new_sample, parse_import, public_config, snapshot, reject_constant
-from .llm import default_config, validate_config, SampleBuilder, TAGS
+from .compiler import CompileError, Compiler, chunks
+from .dataset import (
+    new_sample,
+    parse_import,
+    public_config,
+    reject_constant,
+    snapshot,
+)
+from .llm import TAGS, SampleBuilder, default_config, validate_config
 from .runner import Runner
 
 MAX_BODY = 40_000_000
 
 
-def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, client=None):
+def create_app(
+    compiler: Compiler, data_dir: Path, dataset: Path | None = None, client=None
+):
     state = {"samples": [], "config": default_config(), "revision": 0}
     if dataset:
         samples, config = parse_import(dataset.name, dataset.read_text("utf-8"))
@@ -42,7 +50,10 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
     app.state.dataset = state
     app.state.runner = runner
     app.state.csrf = token
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"])
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+    )
 
     @app.middleware("http")
     async def local_guard(request, call_next):
@@ -50,19 +61,28 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
         # Blocks hostile pages posting to a local generation/file-writing service.
         if request.url.path.startswith("/api/"):
             if request.headers.get("x-remix-token") != token:
-                return JSONResponse({"detail": "Missing local session token; reload the dashboard"}, status_code=403)
+                return JSONResponse(
+                    {"detail": "Missing local session token; reload the dashboard"},
+                    status_code=403,
+                )
             origin = request.headers.get("origin")
             if origin and origin != str(request.base_url).rstrip("/"):
-                return JSONResponse({"detail": "Cross-origin requests are blocked"}, status_code=403)
+                return JSONResponse(
+                    {"detail": "Cross-origin requests are blocked"}, status_code=403
+                )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+        )
         return response
 
     @app.exception_handler(CompileError)
     async def compile_error(request, error):
-        return JSONResponse({"detail": str(error), "diagnostics": [error.diagnostic()]}, status_code=422)
+        return JSONResponse(
+            {"detail": str(error), "diagnostics": [error.diagnostic()]}, status_code=422
+        )
 
     @app.exception_handler(ValueError)
     async def value_error(request, error):
@@ -84,7 +104,9 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
 
     def editable():
         if runner.status["running"]:
-            raise HTTPException(409, "Stop generation before editing the dataset or configuration")
+            raise HTTPException(
+                409, "Stop generation before editing the dataset or configuration"
+            )
 
     def sample_at(index):
         if not 0 <= index < len(state["samples"]):
@@ -99,11 +121,43 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
-        return HTMLResponse((static / "index.html").read_text().replace("__REMIX_TOKEN__", token))
+        return HTMLResponse(
+            (static / "index.html").read_text().replace("__REMIX_TOKEN__", token)
+        )
 
     @app.get("/api/state")
     async def get_state():
-        return {"samples": [{"index": i, "id": s.get("id", "untitled"), "events": sum(len(v) for v in s.get("replay", {}).values() if isinstance(v, list)) if isinstance(s.get("replay"), dict) else 0, "tags": s.get("metadata", {}).get("tags", []) if isinstance(s.get("metadata"), dict) and isinstance(s["metadata"].get("tags", []), list) else []} for i, s in enumerate(state["samples"])], "config": public_config(state["config"]), "revision": state["revision"], "status": runner.status, "logs": list(runner.logs), "tags": TAGS, "tokenizer": {"sha256": compiler.fingerprint, "vocab": compiler.tokenizer.get_vocab_size(), "special": compiler.special}, "autosave": str(runner.save_path)}
+        return {
+            "samples": [
+                {
+                    "index": i,
+                    "id": s.get("id", "untitled"),
+                    "events": sum(
+                        len(v)
+                        for v in s.get("replay", {}).values()
+                        if isinstance(v, list)
+                    )
+                    if isinstance(s.get("replay"), dict)
+                    else 0,
+                    "tags": s.get("metadata", {}).get("tags", [])
+                    if isinstance(s.get("metadata"), dict)
+                    and isinstance(s["metadata"].get("tags", []), list)
+                    else [],
+                }
+                for i, s in enumerate(state["samples"])
+            ],
+            "config": public_config(state["config"]),
+            "revision": state["revision"],
+            "status": runner.status,
+            "logs": list(runner.logs),
+            "tags": TAGS,
+            "tokenizer": {
+                "sha256": compiler.fingerprint,
+                "vocab": compiler.tokenizer.get_vocab_size(),
+                "special": compiler.special,
+            },
+            "autosave": str(runner.save_path),
+        }
 
     @app.get("/api/samples/{index}")
     async def get_sample(index: int):
@@ -118,7 +172,9 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
             for group in sample["replay"].values():
                 for event in group:
                     if "content" in event:
-                        event["content"] = event["content"].replace("<|eos|>", compiler.special["eos"])
+                        event["content"] = event["content"].replace(
+                            "<|eos|>", compiler.special["eos"]
+                        )
         if not isinstance(sample, dict):
             raise ValueError("sample must be an object")
         unique_samples(state["samples"] + [sample])
@@ -158,7 +214,11 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
             raise ValueError("files must be a nonempty list")
         imported, config = [], None
         for item in files:
-            if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("text"), str):
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str)
+                or not isinstance(item.get("text"), str)
+            ):
                 raise ValueError("Each imported file requires name and text")
             try:
                 samples, incoming = parse_import(item["name"], item["text"])
@@ -184,8 +244,12 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
             sample = sample_at(data.get("index", -1))
         plan = compiler.compile(sample)
         if len(plan["rows"]) > 50_000:
-            raise ValueError("Preview exceeds 50,000 rows; export via CLI or split the trajectory")
-        plan_id = hashlib.sha256(json.dumps(sample, sort_keys=True).encode()).hexdigest()[:24]
+            raise ValueError(
+                "Preview exceeds 50,000 rows; export via CLI or split the trajectory"
+            )
+        plan_id = hashlib.sha256(
+            json.dumps(sample, sort_keys=True).encode()
+        ).hexdigest()[:24]
         previews[plan_id] = plan
         previews.move_to_end(plan_id)
         while len(previews) > 6:
@@ -200,8 +264,19 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
 
     @app.get("/api/download")
     async def download():
-        raw = json.dumps(snapshot(state["samples"], state["config"]), ensure_ascii=False, indent=2, allow_nan=False)
-        return StreamingResponse(iter([raw]), media_type="application/json", headers={"Content-Disposition": 'attachment; filename="trajectory-remix.kidra-dataset"'})
+        raw = json.dumps(
+            snapshot(state["samples"], state["config"]),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        )
+        return StreamingResponse(
+            iter([raw]),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": 'attachment; filename="trajectory-remix.kidra-dataset"'
+            },
+        )
 
     @app.post("/api/checkpoint")
     async def checkpoint():
@@ -212,18 +287,30 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
     async def export(request: Request):
         data = await body(request)
         indices = data.get("indices", list(range(len(state["samples"]))))
-        if not isinstance(indices, list) or not indices or any(type(i) is not int for i in indices):
+        if (
+            not isinstance(indices, list)
+            or not indices
+            or any(type(i) is not int for i in indices)
+        ):
             raise ValueError("Select at least one sample to export")
         size = data.get("ticks_per_chunk", 64)
         if type(size) is not int or not 1 <= size <= 100_000:
             raise ValueError("ticks_per_chunk must be an integer between 1 and 100000")
         # Validate everything before sending any bytes, so no half-valid export.
         plans = [compiler.compile(sample_at(i)) for i in indices]
+
         def records():
             for plan in plans:
                 for chunk in chunks(plan, size):
                     yield json.dumps(chunk, ensure_ascii=False, allow_nan=False) + "\n"
-        return StreamingResponse(records(), media_type="application/x-ndjson", headers={"Content-Disposition": 'attachment; filename="kidra-token-chunks.jsonl"'})
+
+        return StreamingResponse(
+            records(),
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition": 'attachment; filename="kidra-token-chunks.jsonl"'
+            },
+        )
 
     @app.put("/api/config")
     async def config(request: Request):
@@ -235,7 +322,11 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
         for endpoint in candidate["endpoints"]:
             if endpoint.pop("clear_key", False):
                 endpoint.pop("api_key", None)
-            elif not endpoint.get("api_key") and endpoint["id"] in old and old[endpoint["id"]].get("api_key"):
+            elif (
+                not endpoint.get("api_key")
+                and endpoint["id"] in old
+                and old[endpoint["id"]].get("api_key")
+            ):
                 endpoint["api_key"] = old[endpoint["id"]]["api_key"]
         state["config"] = candidate
         state["revision"] += 1
@@ -245,7 +336,10 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
     async def start(request: Request):
         data = await body(request)
         task_ids = data.get("task_ids")
-        if task_ids is not None and (not isinstance(task_ids, list) or any(not isinstance(t, str) for t in task_ids)):
+        if task_ids is not None and (
+            not isinstance(task_ids, list)
+            or any(not isinstance(t, str) for t in task_ids)
+        ):
             raise ValueError("task_ids must be an array of task identifiers")
         seed_index = data.get("seed_index")
         if seed_index is not None:
@@ -253,8 +347,15 @@ def create_app(compiler: Compiler, data_dir: Path, dataset: Path | None = None, 
                 raise ValueError("seed_index must be an integer")
             sample_at(seed_index)
             if data.get("automatic"):
-                raise ValueError("Filling an existing sample is only supported for a single run")
-        runner.start(single=not data.get("automatic", False), task_ids=task_ids, seed_index=seed_index, validate=data.get("validate"))
+                raise ValueError(
+                    "Filling an existing sample is only supported for a single run"
+                )
+        runner.start(
+            single=not data.get("automatic", False),
+            task_ids=task_ids,
+            seed_index=seed_index,
+            validate=data.get("validate"),
+        )
         return {"ok": True}
 
     @app.post("/api/stop")

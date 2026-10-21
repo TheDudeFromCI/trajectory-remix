@@ -3,11 +3,13 @@
 There is deliberately no Python execution, shell, OS file access, URL fetch, or
 plugin import. The only outbound capability is an injected bounded LLM broker.
 """
+
 from __future__ import annotations
+
 import json
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
 
@@ -18,30 +20,89 @@ class ToolError(ValueError):
 # Function descriptors accepted by OpenAI-compatible chat/completions.
 DEFINITIONS = [
     ("time_now", "Read the sample's synthetic clock.", {}),
-    ("time_advance", "Advance synthetic time without real sleeping.", {"seconds": {"type": "number", "minimum": 0}}),
-    ("file_write", "Write a UTF-8 text file inside the virtual RAM filesystem.", {"path": {"type": "string"}, "content": {"type": "string"}}),
+    (
+        "time_advance",
+        "Advance synthetic time without real sleeping.",
+        {"seconds": {"type": "number", "minimum": 0}},
+    ),
+    (
+        "file_write",
+        "Write a UTF-8 text file inside the virtual RAM filesystem.",
+        {"path": {"type": "string"}, "content": {"type": "string"}},
+    ),
     ("file_read", "Read a virtual text file.", {"path": {"type": "string"}}),
     ("file_list", "List all virtual files.", {}),
     ("file_delete", "Delete a virtual file.", {"path": {"type": "string"}}),
-    ("memory_save", "Save a searchable memory record.", {"key": {"type": "string"}, "text": {"type": "string"}}),
-    ("memory_search", "Retrieve memories ranked by lexical overlap (local RAG).", {"query": {"type": "string"}}),
-    ("note_save", "Create/update a task or note; status may be todo, doing or done.", {"key": {"type": "string"}, "text": {"type": "string"}, "status": {"type": "string", "enum": ["todo", "doing", "done"]}}),
+    (
+        "memory_save",
+        "Save a searchable memory record.",
+        {"key": {"type": "string"}, "text": {"type": "string"}},
+    ),
+    (
+        "memory_search",
+        "Retrieve memories ranked by lexical overlap (local RAG).",
+        {"query": {"type": "string"}},
+    ),
+    (
+        "note_save",
+        "Create/update a task or note; status may be todo, doing or done.",
+        {
+            "key": {"type": "string"},
+            "text": {"type": "string"},
+            "status": {"type": "string", "enum": ["todo", "doing", "done"]},
+        },
+    ),
     ("note_list", "List tasks and notes.", {}),
     ("note_delete", "Delete a task/note.", {"key": {"type": "string"}}),
-    ("skill_save", "Store a text skill in the sample sandbox.", {"name": {"type": "string"}, "content": {"type": "string"}}),
+    (
+        "skill_save",
+        "Store a text skill in the sample sandbox.",
+        {"name": {"type": "string"}, "content": {"type": "string"}},
+    ),
     ("skill_load", "Load a sample sandbox skill.", {"name": {"type": "string"}}),
     ("skill_list", "List available sample skills.", {}),
-    ("subagent", "Delegate a bounded task to the attached LLM; child has its own RAM sandbox.", {"task": {"type": "string"}}),
+    (
+        "subagent",
+        "Delegate a bounded task to the attached LLM; child has its own RAM sandbox.",
+        {"task": {"type": "string"}},
+    ),
 ]
-SCHEMAS = [{"type": "function", "function": {"name": name, "description": desc, "parameters": {"type": "object", "properties": args, "required": list(args), "additionalProperties": False}}} for name, desc, args in DEFINITIONS]
+SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": {
+                "type": "object",
+                "properties": args,
+                "required": list(args),
+                "additionalProperties": False,
+            },
+        },
+    }
+    for name, desc, args in DEFINITIONS
+]
 
 
 class Sandbox:
-    def __init__(self, seed="2030-01-01T09:00:00+00:00", seconds_per_call=1, broker=None, depth=0, max_calls=64, max_bytes=2_000_000):
-        self.clock = datetime.fromisoformat(seed.replace("Z", "+00:00"))
+    def __init__(
+        self,
+        seed="2030-01-01T09:00:00+00:00",
+        seconds_per_call=1,
+        broker=None,
+        depth=0,
+        max_calls=64,
+        max_bytes=2_000_000,
+    ):
+        self.clock = datetime.fromisoformat(seed)
         if self.clock.tzinfo is None:
-            self.clock = self.clock.replace(tzinfo=timezone.utc)
-        if type(seconds_per_call) not in (int, float) or not math.isfinite(seconds_per_call) or not 0 <= seconds_per_call <= 31_536_000:
+            self.clock = self.clock.replace(tzinfo=UTC)
+        if (
+            type(seconds_per_call) not in (int, float)
+            or not math.isfinite(seconds_per_call)
+            or not 0 <= seconds_per_call <= 31_536_000
+        ):
             raise ToolError("seconds_per_call must be finite and nonnegative")
         self.step = seconds_per_call
         self.broker, self.depth = broker, depth
@@ -55,8 +116,16 @@ class Sandbox:
         self.closed = True
 
     def path(self, path):
-        if not isinstance(path, str) or not path or "\x00" in path or "\\" in path or ".." in PurePosixPath(path).parts:
-            raise ToolError("Virtual paths must not contain traversal, NUL or backslashes")
+        if (
+            not isinstance(path, str)
+            or not path
+            or "\x00" in path
+            or "\\" in path
+            or ".." in PurePosixPath(path).parts
+        ):
+            raise ToolError(
+                "Virtual paths must not contain traversal, NUL or backslashes"
+            )
         return "/" + str(PurePosixPath(path)).lstrip("/")
 
     def check_args(self, name, args):
@@ -67,9 +136,16 @@ class Sandbox:
             raise ToolError(f"{name} requires exactly: {', '.join(schema)}")
         for key, spec in schema.items():
             v = args[key]
-            if spec["type"] == "string" and (not isinstance(v, str) or len(v) > 200_000):
+            if spec["type"] == "string" and (
+                not isinstance(v, str) or len(v) > 200_000
+            ):
                 raise ToolError(f"Invalid string argument: {key}")
-            if spec["type"] == "number" and (type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > 31_536_000):
+            if spec["type"] == "number" and (
+                type(v) not in (int, float)
+                or not math.isfinite(v)
+                or v < 0
+                or v > 31_536_000
+            ):
                 raise ToolError(f"Invalid seconds: {v}")
             if "enum" in spec and v not in spec["enum"]:
                 raise ToolError(f"Invalid {key}")
@@ -79,7 +155,10 @@ class Sandbox:
     def put(self, store, key, value):
         candidate = dict(store)
         candidate[key] = value
-        total = sum(len(json.dumps(candidate if s is store else s).encode()) for s in (self.files, self.memory, self.notes, self.skills))
+        total = sum(
+            len(json.dumps(candidate if s is store else s).encode())
+            for s in (self.files, self.memory, self.notes, self.skills)
+        )
         if total > self.max_bytes:
             raise ToolError("Sample sandbox memory quota exceeded")
         store[key] = value
@@ -122,7 +201,11 @@ class Sandbox:
                     ranked.append({"key": key, "text": text, "score": score})
             return sorted(ranked, key=lambda r: (-r["score"], r["key"]))[:8]
         if name == "note_save":
-            return self.put(self.notes, args["key"], {"text": args["text"], "status": args["status"]})
+            return self.put(
+                self.notes,
+                args["key"],
+                {"text": args["text"], "status": args["status"]},
+            )
         if name == "note_list":
             return self.notes.copy()
         if name == "note_delete":

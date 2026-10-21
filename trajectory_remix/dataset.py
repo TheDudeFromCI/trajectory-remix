@@ -1,4 +1,5 @@
 """Dataset persistence. API keys never enter dataset files."""
+
 import copy
 import json
 import os
@@ -8,12 +9,46 @@ from pathlib import Path
 
 FORMAT = "trajectory-remix/kidra-dataset/1"
 
+
 def reject_constant(value):
     raise ValueError(f"Nonstandard JSON constant: {value}")
 
 
 def new_sample():
-    return {"schema-version": "1.0", "id": str(uuid.uuid4()), "tick-policy": "external-first", "defaults": {"implicit-noop-loss-weight": .1}, "replay": {"0": [{"op": "open", "window": "system", "window-type": "system"}, {"op": "append", "window": "system", "source": "system", "content": "You are Kidra, a coordinator."}, {"op": "open", "window": "user", "window-type": "chat"}, {"op": "append", "window": "user", "source": "user", "content": "Inspect the task and respond."}, {"op": "open", "window": "reasoning", "window-type": "reasoning"}, {"op": "open", "window": "chat", "window-type": "chat"}], "1": [{"op": "generate", "window": "reasoning", "content": "I will inspect the request.<|eos|>"}], "50": [{"op": "generate", "window": "chat", "content": "Ready.<|eos|>"}]}}
+    return {
+        "schema-version": "1.0",
+        "id": str(uuid.uuid4()),
+        "tick-policy": "external-first",
+        "defaults": {"implicit-noop-loss-weight": 0.1},
+        "replay": {
+            "0": [
+                {"op": "open", "window": "system", "window-type": "system"},
+                {
+                    "op": "append",
+                    "window": "system",
+                    "source": "system",
+                    "content": "You are Kidra, a coordinator.",
+                },
+                {"op": "open", "window": "user", "window-type": "chat"},
+                {
+                    "op": "append",
+                    "window": "user",
+                    "source": "user",
+                    "content": "Inspect the task and respond.",
+                },
+                {"op": "open", "window": "reasoning", "window-type": "reasoning"},
+                {"op": "open", "window": "chat", "window-type": "chat"},
+            ],
+            "1": [
+                {
+                    "op": "generate",
+                    "window": "reasoning",
+                    "content": "I will inspect the request.<|eos|>",
+                }
+            ],
+            "50": [{"op": "generate", "window": "chat", "content": "Ready.<|eos|>"}],
+        },
+    }
 
 
 def parse_import(name, text):

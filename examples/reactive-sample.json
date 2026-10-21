@@ -6,11 +6,7 @@
     "implicit-noop-loss-weight": 0.1
   },
   "metadata": {
-    "tags": [
-      "software",
-      "interruption",
-      "tool-use"
-    ]
+    "tags": ["software", "interruption", "tool-use"]
   },
   "replay": {
     "0": [

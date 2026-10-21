@@ -1,8 +1,9 @@
 """Single-owner generation loop with bounded retries and atomic checkpoints."""
+
 import asyncio
 import copy
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .dataset import atomic_save, snapshot
 from .llm import SampleBuilder
@@ -16,17 +17,25 @@ class Runner:
         self.save_lock = asyncio.Lock()
         self.resume_event = asyncio.Event()
         self.resume_event.set()
-        self.status = {"running": False, "paused": False, "accepted": 0, "attempts": 0, "failures": 0, "last_error": None, "last_saved": None}
+        self.status = {
+            "running": False,
+            "paused": False,
+            "accepted": 0,
+            "attempts": 0,
+            "failures": 0,
+            "last_error": None,
+            "last_saved": None,
+        }
         self.logs = deque(maxlen=250)
 
     def log(self, message):
-        self.logs.append({"time": datetime.now(timezone.utc).isoformat(), "message": message})
+        self.logs.append({"time": datetime.now(UTC).isoformat(), "message": message})
 
     async def save(self):
         async with self.save_lock:
             data = snapshot(copy.deepcopy(self.state["samples"]), self.state["config"])
             await asyncio.to_thread(atomic_save, self.save_path, data)
-            self.status["last_saved"] = datetime.now(timezone.utc).isoformat()
+            self.status["last_saved"] = datetime.now(UTC).isoformat()
             self.log(f"Saved {len(data['samples'])} samples to {self.save_path.name}")
 
     def start(self, single=False, task_ids=None, seed_index=None, validate=None):
@@ -35,10 +44,23 @@ class Runner:
         config = copy.deepcopy(self.state["config"])
         if validate is not None:
             config["automatic"]["validate"] = bool(validate)
-        seed = copy.deepcopy(self.state["samples"][seed_index]) if seed_index is not None else None
-        self.status.update(running=True, paused=False, accepted=0, attempts=0, failures=0, last_error=None)
+        seed = (
+            copy.deepcopy(self.state["samples"][seed_index])
+            if seed_index is not None
+            else None
+        )
+        self.status.update(
+            running=True,
+            paused=False,
+            accepted=0,
+            attempts=0,
+            failures=0,
+            last_error=None,
+        )
         self.resume_event.set()
-        self.job = asyncio.create_task(self.run(config, single, task_ids, seed, seed_index))
+        self.job = asyncio.create_task(
+            self.run(config, single, task_ids, seed, seed_index)
+        )
 
     async def stop(self):
         if self.job and not self.job.done():
@@ -64,20 +86,31 @@ class Runner:
         dirty = 0
         consecutive = 0
         try:
-            while (not max_samples or self.status["accepted"] < max_samples) and (not max_attempts or self.status["attempts"] < max_attempts):
+            while (not max_samples or self.status["accepted"] < max_samples) and (
+                not max_attempts or self.status["attempts"] < max_attempts
+            ):
                 await self.resume_event.wait()
                 self.status["attempts"] += 1
                 feedback = ""
                 accepted = None
                 for retry in range(options.get("regenerations", 2) + 1):
                     await self.resume_event.wait()
-                    builder = SampleBuilder(self.compiler, config, self.client, self.log)
+                    builder = SampleBuilder(
+                        self.compiler, config, self.client, self.log
+                    )
                     try:
                         sample = await builder.generate(feedback, task_ids, seed)
                         if options.get("validate", True):
                             report = await builder.validators(sample)
                             if not report["valid"]:
-                                raise ValueError("Validator rejected sample: " + "; ".join(s for r in report["reports"] for s in r["feedback"]))
+                                raise ValueError(
+                                    "Validator rejected sample: "
+                                    + "; ".join(
+                                        s
+                                        for r in report["reports"]
+                                        for s in r["feedback"]
+                                    )
+                                )
                             sample.setdefault("metadata", {})["validation"] = report
                         accepted = sample
                         break
@@ -91,7 +124,9 @@ class Runner:
                             if secret:
                                 feedback = feedback.replace(secret, "[redacted]")
                         self.status["last_error"] = feedback
-                        self.log(f"Attempt {self.status['attempts']}, regeneration {retry}: {feedback}")
+                        self.log(
+                            f"Attempt {self.status['attempts']}, regeneration {retry}: {feedback}"
+                        )
                 if accepted is not None:
                     if seed_index is None:
                         self.state["samples"].append(accepted)
@@ -109,7 +144,10 @@ class Runner:
                     consecutive += 1
                     self.status["failures"] += 1
                     action = options.get("failure_action", "stop")
-                    if consecutive >= options.get("max_consecutive_failures", 3) or action == "stop":
+                    if (
+                        consecutive >= options.get("max_consecutive_failures", 3)
+                        or action == "stop"
+                    ):
                         self.log("Stopped after generation failure threshold")
                         break
                     if action == "pause":
