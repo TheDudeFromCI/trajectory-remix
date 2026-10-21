@@ -9,29 +9,24 @@
     <script type="module" src="/static/app.js"></script>
   </head>
   <body>
-    <header>
-      <div class="brand">
-        <span class="brand-mark">TR</span>
-        <div>
-          <strong>Trajectory Remix</strong
-          ><small>PROJECT KIDRA · DATASET STUDIO</small>
+    <header class="toolbar">
+      <nav aria-label="Application menu" class="menu-bar">
+        <div class="file-menu">
+          <button id="file-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">File</button>
+          <div id="file-menu" class="file-menu-popup" role="menu" hidden>
+            <button id="import-button" role="menuitem">Import</button>
+            <button id="load-dataset" role="menuitem">Load</button>
+            <button id="file-save" role="menuitem">Save</button>
+            <button id="file-save-as" role="menuitem">Save As...</button>
+          </div>
         </div>
-      </div>
-      <div class="header-info">
-        <span class="dot"></span
-        ><span id="tokenizer-status">Tokenizer connected</span>
-      </div>
-      <nav>
-        <button id="import-button">Import samples</button
-        ><button id="load-dataset">Load dataset</button
-        ><button id="save-dataset">Save dataset</button
-        ><button id="export-button" class="primary">Export tokens</button
-        ><button
-          id="settings-button"
-          title="Configure endpoints and generation"
-        >
-          Configuration
-        </button>
+        <div class="file-menu">
+          <button id="edit-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">Edit</button>
+          <div id="edit-menu" class="file-menu-popup" role="menu" hidden>
+            <button id="settings-button" role="menuitem" title="Configure endpoints and generation">Configuration</button>
+          </div>
+        </div>
+        <span class="menu-label">Help</span>
       </nav>
       <input
         type="file"
@@ -62,8 +57,7 @@
         />
         <div id="sample-list"></div>
         <div class="sidebar-footer">
-          <button id="checkpoint">Checkpoint to disk</button
-          ><small id="save-status">Unsaved session</small>
+          <small id="save-status">Unsaved session</small>
         </div>
       </aside>
       <main>
@@ -196,6 +190,7 @@
       </main>
       <aside class="inspector">
         <div class="side-heading">GENERATION CONTROL</div>
+        <button id="export-button">Export tokens</button>
         <div class="run-status">
           <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
         </div>

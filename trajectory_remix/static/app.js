@@ -131,8 +131,6 @@ async function refresh(initial = false) {
   }
 }
 function renderStatus() {
-  $("tokenizer-status").textContent =
-    `${state.tokenizer.vocab.toLocaleString()} tokens · ${state.tokenizer.sha256.slice(0, 8)}`;
   $("sample-count").textContent = state.samples.length;
   const s = state.status;
   $("run-status").textContent = s.running
@@ -159,8 +157,8 @@ function renderStatus() {
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
   $("save-status").textContent = s.last_saved
-    ? `Checkpoint ${new Date(s.last_saved).toLocaleTimeString()}`
-    : "No disk checkpoint yet";
+    ? `Saved ${new Date(s.last_saved).toLocaleTimeString()}`
+    : "Not saved yet";
   $("selected-tags").replaceChildren(
     ...(state.config.tags || []).map((t) => node("span", "tag", t)),
   );
@@ -1179,6 +1177,8 @@ async function saveConfig() {
   toast("Configuration saved.");
 }
 $("sample-search").oninput = renderSamples;
+$("import-button").onclick = () => $("file-input").click();
+$("load-dataset").onclick = () => $("dataset-input").click();
 $("file-input").onchange = action(async (e) => {
   if (dirty) await compileSample(true);
   const files = await Promise.all(
@@ -1194,8 +1194,6 @@ $("file-input").onchange = action(async (e) => {
     await selectSample(Math.max(0, state.samples.length - 1), true);
   toast("Samples imported.");
 });
-$("import-button").onclick = () => $("file-input").click();
-$("load-dataset").onclick = () => $("dataset-input").click();
 $("dataset-input").onchange = action(async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -1269,15 +1267,37 @@ $("delete-sample").onclick = action(async () => {
     renderReplay();
   }
 });
-$("save-dataset").onclick = action(async () => {
+async function saveSession() {
+  if (dirty) await compileSample(true);
+  await json("checkpoint", "POST");
+  await refresh();
+  toast("Dataset saved.");
+}
+function closeMenus() {
+  for (const name of ["file", "edit"]) {
+    $(name + "-menu").hidden = true;
+    $(name + "-menu-button").setAttribute("aria-expanded", "false");
+  }
+}
+function toggleMenu(name) {
+  const open = $(name + "-menu").hidden;
+  closeMenus();
+  $(name + "-menu").hidden = !open;
+  $(name + "-menu-button").setAttribute("aria-expanded", String(open));
+}
+$("file-menu-button").onclick = () => toggleMenu("file");
+$("edit-menu-button").onclick = () => toggleMenu("edit");
+$("file-save").onclick = action(async () => {
+  closeMenus();
+  await saveSession();
+});
+$("file-save-as").onclick = action(async () => {
+  closeMenus();
   if (dirty) await compileSample(true);
   await download("download", "trajectory-remix.kidra-dataset");
 });
-$("checkpoint").onclick = action(async () => {
-  if (dirty) await compileSample(true);
-  const r = await json("checkpoint", "POST");
-  toast("Checkpoint saved: " + r.path);
-  await refresh();
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".file-menu")) closeMenus();
 });
 $("validate-sample").onclick = action(async () => {
   if (!sample) throw new Error("Select a sample first");
@@ -1393,9 +1413,12 @@ $("timeline").onmousemove = (e) => {
   e.target.title = text;
 };
 new ResizeObserver(drawTimeline).observe($("timeline-scroll"));
-$("settings-button").onclick = openSettings;
 $("edit-tags").onclick = () => {
   configTab = "conditions";
+  openSettings();
+};
+$("settings-button").onclick = () => {
+  closeMenus();
   openSettings();
 };
 $("close-settings").onclick = () => $("settings-dialog").close();
@@ -1434,6 +1457,12 @@ $("download-export").onclick = action(async () => {
   $("export-dialog").close();
 });
 document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    $("file-save").click();
+    return;
+  }
+  if (e.key === "Escape") closeMenus();
   if (
     ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName) ||
     document.querySelector("dialog[open]")

@@ -103,53 +103,62 @@ small {
   font-size: 11px;
 }
 header {
-  height: 76px;
+  height: 36px;
   display: flex;
   align-items: center;
-  gap: 28px;
   border-bottom: 1px solid var(--border);
-  padding: 0 12px;
-  background: #121926;
+  padding: 0 8px;
+  background: #1b1b1b;
 }
-.brand {
+.menu-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 256px;
+  height: 100%;
+  gap: 2px;
 }
-.brand-mark {
-  background: var(--accent);
-  color: #132b2a;
-  font-size: 15px;
-  font-weight: 850;
+.menu-trigger,
+.menu-label {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #d4d4d4;
+  font-size: 13px;
+  font-weight: 400;
+}
+.menu-trigger:hover {
+  background: #333;
+}
+.menu-label {
+  cursor: default;
+}
+.file-menu {
+  position: relative;
+}
+.file-menu-popup {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 150px;
   display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  gap: 2px;
+  padding: 4px;
+  background: #192231;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 20px #0008;
 }
-.brand strong {
-  display: block;
-  font-size: 17px;
-  letter-spacing: -0.4px;
+.file-menu-popup[hidden] {
+  display: none;
 }
-.brand small {
-  display: block;
-  font-size: 9px;
-  letter-spacing: 1.5px;
-  margin-top: 2.5px;
-}
-.header-info {
-  color: var(--muted);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 11px;
-}
-header nav {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
+.file-menu-popup button {
+  border-color: transparent;
+  text-align: left;
+  padding: 6px 8px;
 }
 .dot {
   height: 7px;
@@ -161,7 +170,7 @@ header nav {
 .workspace {
   display: grid;
   grid-template-columns: 222px minmax(430px, 1fr) 246px;
-  height: calc(100vh - 76px);
+  height: calc(100vh - 36px);
 }
 .sidebar,
 .inspector {
@@ -898,19 +907,6 @@ dialog::backdrop {
   .workspace {
     grid-template-columns: 190px minmax(420px, 1fr) 210px;
   }
-  header {
-    gap: 15px;
-    padding: 0 8px;
-  }
-  .header-info {
-    display: none;
-  }
-  .brand {
-    min-width: 235px;
-  }
-  header nav button {
-    padding: 4px;
-  }
   .timeline-options {
     display: none;
   }
@@ -933,9 +929,6 @@ dialog::backdrop {
   }
   .workspace {
     grid-template-columns: 180px minmax(400px, 1fr);
-  }
-  header .brand {
-    min-width: 210px;
   }
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

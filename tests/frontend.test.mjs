@@ -9,7 +9,11 @@ const w = new Window({
 });
 w.document.write(html);
 w.structuredClone = structuredClone;
-w.fetch = (path, options) => fetch(new URL(path, base), options);
+const requests = [];
+w.fetch = (path, options) => {
+  requests.push({ path, options });
+  return fetch(new URL(path, base), options);
+};
 w.confirm = () => true;
 w.ResizeObserver = class {
   observe() {}
@@ -110,11 +114,38 @@ await w.document.querySelector('[data-config="automatic"]').onclick();
 assert.match($("config-content").textContent, /Consecutive failure limit/);
 await click("save-config");
 await click("close-settings");
+assert($("file-save").textContent === "Save");
+assert($("file-save-as").textContent === "Save As...");
+assert.equal($("checkpoint"), null);
+assert.equal(w.document.querySelector("header .brand"), null);
+assert.equal(
+  [...w.document.querySelectorAll("header .menu-trigger, header .menu-label")]
+    .map((item) => item.textContent)
+    .join(""),
+  "FileEditHelp",
+);
+assert.equal($("file-menu").contains($("import-button")), true);
+assert.equal($("file-menu").contains($("load-dataset")), true);
+assert.equal($("edit-menu").contains($("settings-button")), true);
+await click("edit-menu-button");
+assert.equal($("edit-menu").hidden, false);
+$("sample-json").focus();
+const saveShortcut = new w.KeyboardEvent("keydown", {
+  key: "s",
+  ctrlKey: true,
+  cancelable: true,
+});
+w.document.dispatchEvent(saveShortcut);
+assert.equal(saveShortcut.defaultPrevented, true);
+assert(requests.some((request) => request.path === "/api/checkpoint"));
+for (let i = 0; i < 30 && $("save-status").textContent === "Not saved yet"; i++)
+  await new Promise((r) => setTimeout(r, 20));
+assert.match($("save-status").textContent, /^Saved /);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 12,
+    checks: 22,
     errors,
   }),
 );
