@@ -1,0 +1,133 @@
+"""Single-owner generation loop with bounded retries and atomic checkpoints."""
+import asyncio
+import copy
+from collections import deque
+from datetime import datetime, timezone
+
+from .dataset import atomic_save, snapshot
+from .llm import SampleBuilder
+
+
+class Runner:
+    def __init__(self, state, compiler, save_path, client=None):
+        self.state, self.compiler, self.save_path = state, compiler, save_path
+        self.client = client
+        self.job = None
+        self.save_lock = asyncio.Lock()
+        self.resume_event = asyncio.Event()
+        self.resume_event.set()
+        self.status = {"running": False, "paused": False, "accepted": 0, "attempts": 0, "failures": 0, "last_error": None, "last_saved": None}
+        self.logs = deque(maxlen=250)
+
+    def log(self, message):
+        self.logs.append({"time": datetime.now(timezone.utc).isoformat(), "message": message})
+
+    async def save(self):
+        async with self.save_lock:
+            data = snapshot(copy.deepcopy(self.state["samples"]), self.state["config"])
+            await asyncio.to_thread(atomic_save, self.save_path, data)
+            self.status["last_saved"] = datetime.now(timezone.utc).isoformat()
+            self.log(f"Saved {len(data['samples'])} samples to {self.save_path.name}")
+
+    def start(self, single=False, task_ids=None, seed_index=None, validate=None):
+        if self.job and not self.job.done():
+            raise ValueError("Generation is already running")
+        config = copy.deepcopy(self.state["config"])
+        if validate is not None:
+            config["automatic"]["validate"] = bool(validate)
+        seed = copy.deepcopy(self.state["samples"][seed_index]) if seed_index is not None else None
+        self.status.update(running=True, paused=False, accepted=0, attempts=0, failures=0, last_error=None)
+        self.resume_event.set()
+        self.job = asyncio.create_task(self.run(config, single, task_ids, seed, seed_index))
+
+    async def stop(self):
+        if self.job and not self.job.done():
+            self.job.cancel()
+            try:
+                await self.job
+            except asyncio.CancelledError:
+                pass
+        self.status.update(running=False, paused=False)
+
+    def pause(self):
+        self.resume_event.clear()
+        self.status["paused"] = True
+
+    def resume(self):
+        self.resume_event.set()
+        self.status["paused"] = False
+
+    async def run(self, config, single, task_ids, seed=None, seed_index=None):
+        options = config.get("automatic", {})
+        max_samples = 1 if single else options.get("max_samples", 10)
+        max_attempts = options.get("max_attempts", 30)
+        dirty = 0
+        consecutive = 0
+        try:
+            while (not max_samples or self.status["accepted"] < max_samples) and (not max_attempts or self.status["attempts"] < max_attempts):
+                await self.resume_event.wait()
+                self.status["attempts"] += 1
+                feedback = ""
+                accepted = None
+                for retry in range(options.get("regenerations", 2) + 1):
+                    await self.resume_event.wait()
+                    builder = SampleBuilder(self.compiler, config, self.client, self.log)
+                    try:
+                        sample = await builder.generate(feedback, task_ids, seed)
+                        if options.get("validate", True):
+                            report = await builder.validators(sample)
+                            if not report["valid"]:
+                                raise ValueError("Validator rejected sample: " + "; ".join(s for r in report["reports"] for s in r["feedback"]))
+                            sample.setdefault("metadata", {})["validation"] = report
+                        accepted = sample
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        # Keep API credentials out of retained logs and feedback.
+                        feedback = str(e)[:4000]
+                        for ep in config["endpoints"]:
+                            secret = ep.get("api_key")
+                            if secret:
+                                feedback = feedback.replace(secret, "[redacted]")
+                        self.status["last_error"] = feedback
+                        self.log(f"Attempt {self.status['attempts']}, regeneration {retry}: {feedback}")
+                if accepted is not None:
+                    if seed_index is None:
+                        self.state["samples"].append(accepted)
+                    else:
+                        self.state["samples"][seed_index] = accepted
+                    self.state["revision"] += 1
+                    self.status["accepted"] += 1
+                    consecutive = 0
+                    dirty += 1
+                    self.log(f"Accepted {accepted['id']}")
+                    if dirty >= options.get("autosave_every", 5):
+                        await self.save()
+                        dirty = 0
+                else:
+                    consecutive += 1
+                    self.status["failures"] += 1
+                    action = options.get("failure_action", "stop")
+                    if consecutive >= options.get("max_consecutive_failures", 3) or action == "stop":
+                        self.log("Stopped after generation failure threshold")
+                        break
+                    if action == "pause":
+                        self.pause()
+                if max_samples and self.status["accepted"] >= max_samples:
+                    break
+                await asyncio.sleep(options.get("delay_seconds", 1))
+        except asyncio.CancelledError:
+            self.log("Generation stopped; current incomplete sample discarded")
+            raise
+        except Exception as e:
+            self.status["last_error"] = str(e)
+            self.log(f"Runner stopped: {e}")
+        finally:
+            if dirty:
+                try:
+                    await self.save()
+                except Exception as e:
+                    self.status["last_error"] = f"Checkpoint failed: {e}"
+                    self.log(self.status["last_error"])
+            self.status.update(running=False, paused=False)
