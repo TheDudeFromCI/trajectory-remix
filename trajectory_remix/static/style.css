@@ -1,6 +1,6 @@
 .diagnostics {
   position: relative;
-  padding-right: 44px;
+  padding-right: 22px;
 }
 .diagnostics-close {
   position: absolute;
@@ -42,7 +42,7 @@ button {
   border: 1px solid var(--border);
   background: #1b2535;
   border-radius: 6px;
-  padding: 8px 12px;
+  padding: 4px 6px;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -63,7 +63,7 @@ button.primary:hover {
   background: #a1f0d9;
 }
 .square {
-  padding: 3px 9px;
+  padding: 1.5px 4.5px;
   font-size: 19px;
 }
 .danger-text {
@@ -75,7 +75,7 @@ textarea {
   border: 1px solid var(--border);
   background: #0f1622;
   border-radius: 5px;
-  padding: 8px;
+  padding: 4px;
   outline: none;
 }
 input:focus,
@@ -108,7 +108,7 @@ header {
   align-items: center;
   gap: 28px;
   border-bottom: 1px solid var(--border);
-  padding: 0 24px;
+  padding: 0 12px;
   background: #121926;
 }
 .brand {
@@ -137,7 +137,7 @@ header {
   display: block;
   font-size: 9px;
   letter-spacing: 1.5px;
-  margin-top: 5px;
+  margin-top: 2.5px;
 }
 .header-info {
   color: var(--muted);
@@ -166,7 +166,7 @@ header nav {
 .sidebar,
 .inspector {
   background: #111925;
-  padding: 20px 14px;
+  padding: 10px 7px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -185,7 +185,7 @@ header nav {
   letter-spacing: 1.5px;
   color: #a4b4cc;
   font-weight: 700;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 .side-heading .square {
   margin-left: auto;
@@ -194,16 +194,16 @@ header nav {
   background: #263449;
   font-size: 10px;
   letter-spacing: 0;
-  padding: 3px 6px;
+  padding: 1.5px 3px;
   border-radius: 5px;
 }
 .search {
   width: 100%;
-  margin-bottom: 14px;
+  margin-bottom: 7px;
 }
 .sidebar-footer {
   margin-top: auto;
-  padding-top: 14px;
+  padding-top: 7px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -223,8 +223,8 @@ header nav {
   width: 100%;
   border: 1px solid transparent;
   background: transparent;
-  margin-bottom: 6px;
-  padding: 12px;
+  margin-bottom: 3px;
+  padding: 6px;
   border-radius: 7px;
 }
 .sample-item.active {
@@ -237,7 +237,7 @@ header nav {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  margin-bottom: 7px;
+  margin-bottom: 3.5px;
 }
 .sample-item small {
   display: block;
@@ -247,7 +247,7 @@ header nav {
 .sample-item .item-num {
   color: var(--accent);
   font-size: 10px;
-  margin-right: 6px;
+  margin-right: 3px;
 }
 main {
   display: flex;
@@ -259,7 +259,7 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 25px 26px 19px;
+  padding: 12.5px 13px 9.5px;
   gap: 12px;
 }
 .eyebrow {
@@ -270,13 +270,13 @@ main {
 h1 {
   font-size: 20px;
   letter-spacing: -0.5px;
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   overflow-wrap: anywhere;
 }
 h2 {
   font-size: 22px;
   letter-spacing: -0.5px;
-  margin: 7px 0;
+  margin: 3.5px 0;
 }
 .sample-actions {
   display: flex;
@@ -286,7 +286,7 @@ h2 {
   display: flex;
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
-  padding: 0 25px 0;
+  padding: 0 12.5px 0;
   gap: 8px;
   min-height: 48px;
 }
@@ -299,7 +299,7 @@ h2 {
   border: 0;
   border-radius: 0;
   color: var(--muted);
-  padding: 12px 0;
+  padding: 6px 0;
 }
 .tab.active {
   color: var(--accent);
@@ -309,7 +309,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
 }
 #dirty-indicator {
   color: #e8c483;
@@ -319,7 +319,7 @@ h2 {
   flex: 1;
   min-height: 120px;
   overflow: auto;
-  padding: 18px 25px;
+  padding: 9px 12.5px;
 }
 .view[hidden] {
   display: none;
@@ -330,7 +330,7 @@ h2 {
   align-items: center;
   color: var(--muted);
   font-size: 11px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 #replay-note {
   margin-left: auto;
@@ -342,7 +342,7 @@ h2 {
   height: 6px;
   background: var(--accent);
   border-radius: 50%;
-  margin-right: 4px;
+  margin-right: 2px;
 }
 .window-grid {
   display: grid;
@@ -367,7 +367,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 6px 7px;
   background: #192231;
   border-bottom: 1px solid var(--border);
 }
@@ -387,7 +387,7 @@ h2 {
 }
 .window-content {
   margin: 0;
-  padding: 14px;
+  padding: 7px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 240px;
@@ -399,14 +399,14 @@ h2 {
     monospace;
 }
 .window-foot {
-  padding: 8px 14px;
+  padding: 4px 7px;
   color: var(--muted);
   border-top: 1px solid #202c3b;
   font-size: 9px;
   letter-spacing: 0.4px;
 }
 .empty {
-  padding: 42px 20px;
+  padding: 21px 10px;
   max-width: 600px;
   color: var(--muted);
   line-height: 1.8;
@@ -415,12 +415,12 @@ h2 {
   display: block;
   color: var(--text);
   font-size: 17px;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .timeline-section {
   border-top: 1px solid var(--border);
   background: #111925;
-  padding: 14px 22px 10px;
+  padding: 7px 11px 5px;
   flex-shrink: 0;
 }
 .timeline-controls,
@@ -437,10 +437,10 @@ h2 {
 }
 .transport button {
   font-size: 11px;
-  padding: 6px 8px;
+  padding: 3px 4px;
 }
 .tick-display {
-  margin-left: 8px;
+  margin-left: 4px;
   color: var(--muted);
   font:
     10px ui-monospace,
@@ -450,7 +450,7 @@ h2 {
 .tick-display input {
   width: 62px;
   font-size: 11px;
-  padding: 5px;
+  padding: 2.5px;
 }
 .tick-display b {
   color: var(--text);
@@ -465,28 +465,28 @@ h2 {
   width: 65px;
 }
 .timeline-options select {
-  padding: 4px;
+  padding: 2px;
   font-size: 10px;
 }
 #tick-scrubber {
   width: 100%;
   height: 12px;
   padding: 0;
-  margin: 14px 0 8px;
+  margin: 7px 0 4px;
 }
 .timeline-legend {
   display: flex;
   gap: 15px;
   color: var(--muted);
   font-size: 9px;
-  margin: 0 0 10px;
+  margin: 0 0 5px;
   align-items: center;
 }
 .timeline-legend i {
   display: inline-block;
   height: 6px;
   width: 12px;
-  margin-right: 5px;
+  margin-right: 2.5px;
   border-radius: 2px;
 }
 .generated {
@@ -529,7 +529,7 @@ h2 {
   display: flex;
   gap: 9px;
   align-items: center;
-  margin: 2px 0 20px;
+  margin: 1px 0 10px;
 }
 .run-status b {
   font-weight: 550;
@@ -538,13 +538,13 @@ h2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-bottom: 18px;
+  margin-bottom: 9px;
 }
 .stat-grid > div {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
-  padding: 12px;
+  padding: 6px;
 }
 .stat-grid b {
   font:
@@ -556,11 +556,11 @@ h2 {
   display: block;
   font-size: 8px;
   letter-spacing: 1px;
-  margin-top: 7px;
+  margin-top: 3.5px;
 }
 .full {
   width: 100%;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .two-buttons {
   display: flex;
@@ -571,8 +571,8 @@ h2 {
 }
 .subheading {
   border-top: 1px solid var(--border);
-  padding-top: 20px;
-  margin-top: 20px;
+  padding-top: 10px;
+  margin-top: 10px;
 }
 .tag-list {
   display: flex;
@@ -584,7 +584,7 @@ h2 {
   background: #223245;
   color: #bfd0e3;
   border: 1px solid #31445b;
-  padding: 5px 7px;
+  padding: 2.5px 3.5px;
   border-radius: 4px;
 }
 .text-button {
@@ -592,7 +592,7 @@ h2 {
   border: 0;
   color: var(--accent);
   text-align: left;
-  padding: 12px 0;
+  padding: 6px 0;
   font-size: 10px;
 }
 #activity-log {
@@ -605,19 +605,19 @@ h2 {
   color: var(--muted);
 }
 .log-line {
-  padding: 7px 0;
+  padding: 3.5px 0;
   border-bottom: 1px solid #202c3b;
   overflow-wrap: anywhere;
 }
 .log-line time {
   color: #596e8c;
-  margin-right: 6px;
+  margin-right: 3px;
 }
 .diagnostics {
   max-height: 130px;
   overflow: auto;
   border-top: 1px solid #674c32;
-  padding: 10px 25px;
+  padding: 5px 12.5px;
   background: #2a211b;
   font-size: 11px;
   line-height: 1.6;
@@ -628,7 +628,7 @@ h2 {
   color: #ffb4b8;
 }
 .diagnostic-row {
-  padding: 3px 0;
+  padding: 1.5px 0;
 }
 .diagnostic-row b {
   font-family: ui-monospace, monospace;
@@ -639,7 +639,7 @@ h2 {
   left: 50%;
   transform: translateX(-50%);
   max-width: 700px;
-  padding: 13px 18px;
+  padding: 6.5px 9px;
   border-radius: 8px;
   background: #29463f;
   color: #d7fff0;
@@ -657,7 +657,7 @@ h2 {
   display: flex;
   gap: 12px;
   align-items: end;
-  margin-bottom: 14px;
+  margin-bottom: 7px;
   flex-wrap: wrap;
 }
 .editor-toolbar label {
@@ -678,14 +678,14 @@ h2 {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.7;
-  margin: 10px 0 15px;
+  margin: 5px 0 7.5px;
 }
 .event-card {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
-  padding: 14px;
-  margin-bottom: 12px;
+  padding: 7px;
+  margin-bottom: 6px;
 }
 .event-header {
   display: flex;
@@ -706,7 +706,7 @@ h2 {
 .event-card textarea {
   width: 100%;
   min-height: 100px;
-  margin-top: 10px;
+  margin-top: 5px;
   font:
     12px/1.6 ui-monospace,
     monospace;
@@ -716,7 +716,7 @@ h2 {
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 5px;
 }
 .event-options label {
   display: flex;
@@ -734,7 +734,7 @@ h2 {
   font:
     10px ui-monospace,
     monospace;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 #sample-json {
   width: 100%;
@@ -748,7 +748,7 @@ h2 {
 .segmented-note {
   color: #e9c682;
   font-size: 11px;
-  margin-top: 10px;
+  margin-top: 5px;
 }
 dialog {
   background: #131c2a;
@@ -765,7 +765,7 @@ dialog::backdrop {
   backdrop-filter: blur(3px);
 }
 .dialog-header {
-  padding: 22px 26px;
+  padding: 11px 13px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -779,7 +779,7 @@ dialog::backdrop {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 17px 26px;
+  padding: 8.5px 13px;
   border-top: 1px solid var(--border);
   font-size: 10px;
   color: var(--muted);
@@ -787,7 +787,7 @@ dialog::backdrop {
 .config-tabs {
   display: flex;
   gap: 8px;
-  padding: 16px 26px;
+  padding: 8px 13px;
   border-bottom: 1px solid var(--border);
 }
 .config-tabs button {
@@ -800,7 +800,7 @@ dialog::backdrop {
   color: var(--accent);
 }
 #config-content {
-  padding: 20px 26px;
+  padding: 10px 13px;
   max-height: 54vh;
   overflow: auto;
 }
@@ -808,8 +808,8 @@ dialog::backdrop {
   border: 1px solid var(--border);
   background: var(--panel);
   border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 14px;
+  padding: 8px;
+  margin-bottom: 7px;
 }
 .config-card h3 {
   font-size: 14px;
@@ -819,7 +819,7 @@ dialog::backdrop {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
   gap: 12px;
 }
 .card-top label {
@@ -866,14 +866,14 @@ dialog::backdrop {
   background: #213f3a;
 }
 .export-body {
-  padding: 25px;
+  padding: 12.5px;
   line-height: 1.8;
 }
 .export-body label {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 14px 0;
+  margin: 7px 0;
 }
 .export-body p {
   color: var(--muted);
@@ -886,7 +886,7 @@ dialog::backdrop {
   max-width: 720px;
 }
 #validation-report {
-  padding: 24px;
+  padding: 12px;
   white-space: pre-wrap;
   font:
     12px/1.7 ui-monospace,
@@ -900,7 +900,7 @@ dialog::backdrop {
   }
   header {
     gap: 15px;
-    padding: 0 16px;
+    padding: 0 8px;
   }
   .header-info {
     display: none;
@@ -909,19 +909,19 @@ dialog::backdrop {
     min-width: 235px;
   }
   header nav button {
-    padding: 8px;
+    padding: 4px;
   }
   .timeline-options {
     display: none;
   }
   .tabbar {
-    padding: 0 16px;
+    padding: 0 8px;
   }
   .view {
-    padding: 16px;
+    padding: 8px;
   }
   .sample-heading {
-    padding: 20px 16px;
+    padding: 10px 8px;
   }
   .tab-actions button {
     font-size: 10px;
@@ -943,14 +943,14 @@ dialog::backdrop {
 }
 @media (max-height: 800px) {
   .timeline-section {
-    padding-top: 9px;
+    padding-top: 4.5px;
   }
   #timeline-scroll {
     max-height: 150px;
   }
   .sample-heading {
-    padding-top: 16px;
-    padding-bottom: 14px;
+    padding-top: 8px;
+    padding-bottom: 7px;
   }
   .window-card {
     min-height: 125px;
