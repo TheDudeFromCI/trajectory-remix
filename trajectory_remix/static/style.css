@@ -715,6 +715,10 @@ h2 {
 .event-header .event-delete {
   margin-left: auto;
 }
+.event-header .event-add-below {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .event-card textarea {
   width: 100%;
   min-height: 100px;

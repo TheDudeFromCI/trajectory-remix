@@ -619,6 +619,23 @@ function renderEvents() {
           },
           "danger-text event-delete",
         ),
+        button(
+          "+ Add Event Below",
+          () => {
+            eventDraft.splice(i + 1, 0, {
+              key: item.key,
+              event: {
+                op: "generate",
+                window: "new-window",
+                content: "",
+                loss: { mask: "auto", weight: 1 },
+              },
+            });
+            update();
+            renderEvents();
+          },
+          "event-add-below",
+        ),
       );
       card.append(head);
       if (e.op === "open") {

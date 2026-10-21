@@ -76,9 +76,18 @@ await [...w.document.querySelectorAll(".tab")]
   .onclick();
 const eventCount = w.document.querySelectorAll(".event-card").length;
 assert(eventCount >= 10);
+const firstEvent = w.document.querySelector(".event-card");
+const firstEventKey = firstEvent.querySelector(".event-header input").value;
+await firstEvent.querySelector(".event-add-below").onclick();
+const eventCards = w.document.querySelectorAll(".event-card");
+assert.equal(eventCards.length, eventCount + 1);
+assert.equal(
+  eventCards[1].querySelector(".event-header input").value,
+  firstEventKey,
+);
 await click("add-event");
 assert.equal(w.document.title, "* Trajectory Remix");
-assert.equal(w.document.querySelectorAll(".event-card").length, eventCount + 1);
+assert.equal(w.document.querySelectorAll(".event-card").length, eventCount + 2);
 await [...w.document.querySelectorAll(".tab")]
   .find((b) => b.dataset.view === "json")
   .onclick();
