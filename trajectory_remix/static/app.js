@@ -330,11 +330,7 @@ function renderReplay() {
     const content = data?.text || "";
     card.append(
       head,
-      node(
-        "pre",
-        "window-content",
-        content || (unopened ? "Not opened yet." : "No content."),
-      ),
+      windowContent(content || (unopened ? "Not opened yet." : "No content.")),
     );
     const count = data?.cached_tokens || 0;
     card.append(
@@ -536,6 +532,18 @@ function field(label, control, cls = "") {
   const n = node("label", cls, label);
   n.append(control);
   return n;
+}
+function windowContent(text) {
+  const content = node("pre", "window-content");
+  const parts = text.split(/(\r\n|\r|\n)/);
+  for (const part of parts) {
+    if (/^(\r\n|\r|\n)$/.test(part)) {
+      content.append(node("span", "newline-indicator", "↵"), part);
+    } else {
+      content.append(part);
+    }
+  }
+  return content;
 }
 function checkbox(value, onChange) {
   const n = node("input");

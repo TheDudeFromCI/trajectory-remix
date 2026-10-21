@@ -93,7 +93,7 @@ assert($("diagnostics").querySelector(".diagnostics-close"));
 await $("diagnostics").querySelector(".diagnostics-close").onclick();
 assert.equal($("diagnostics").hidden, true);
 original.replay["1"][0].content =
-  "Scanning archive... WARNING: retrying chunk 7.{N_TICK:4} Backing off while the connection recovers. Resuming scan... Verified 192 files. Done.{N_TICK:5}";
+  "Scanning archive...\nWARNING: retrying chunk 7.{N_TICK:4} Backing off while the connection recovers. Resuming scan... Verified 192 files. Done.{N_TICK:5}";
 // Remove the intentionally added unopened empty stream.
 delete original.replay["170"];
 for (const [key, events] of Object.entries(original.replay))
@@ -104,6 +104,12 @@ await click("apply-sample");
 assert.equal(w.document.title, "Trajectory Remix");
 assert.equal($("apply-sample").disabled, true);
 assert.doesNotMatch($("diagnostics").textContent, /Invalid marker/);
+for (let i = 0; i < 30 && !$("window-grid").textContent.includes("↵"); i++)
+  await new Promise((r) => setTimeout(r, 20));
+assert(
+  w.document.querySelector("#window-grid").textContent.includes("↵"),
+  JSON.stringify($("window-grid").textContent),
+);
 await click("settings-button");
 assert($("settings-dialog").hasAttribute("open"));
 await w.document.querySelector('[data-config="tasks"]').onclick();
