@@ -51,6 +51,7 @@ const click = async (id) => {
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
 assert.equal($("sample-title").textContent, "react-to-stream-warning");
+assert.equal($("apply-sample").disabled, true);
 $("tick-number").value = "60";
 $("tick-number").onchange({ target: $("tick-number") });
 // Synchronize pending API reads in the emulated DOM, not a browser automation wait.
@@ -79,6 +80,7 @@ const original = JSON.parse($("sample-json").value);
 original.replay["1"][0].content = "bad{N_TICKS:1}";
 $("sample-json").value = JSON.stringify(original);
 $("sample-json").oninput();
+assert.equal($("apply-sample").disabled, false);
 await click("apply-sample");
 assert.match($("diagnostics").textContent, /Invalid marker/);
 assert($("diagnostics").querySelector(".diagnostics-close"));
@@ -91,7 +93,9 @@ delete original.replay["170"];
 for (const [key, events] of Object.entries(original.replay))
   original.replay[key] = events.filter((e) => e.window !== "new-window");
 $("sample-json").value = JSON.stringify(original);
+$("sample-json").oninput();
 await click("apply-sample");
+assert.equal($("apply-sample").disabled, true);
 assert.doesNotMatch($("diagnostics").textContent, /Invalid marker/);
 await click("settings-button");
 assert($("settings-dialog").hasAttribute("open"));

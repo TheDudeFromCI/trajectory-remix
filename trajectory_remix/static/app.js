@@ -85,6 +85,7 @@ function action(fn) {
 function setDirty(value = true) {
   dirty = value;
   $("dirty-indicator").textContent = value ? "Unapplied changes" : "";
+  $("apply-sample").disabled = !value || !!state?.status.running;
 }
 function diagnostics(items = []) {
   $("diagnostics").replaceChildren();
@@ -153,6 +154,7 @@ function renderStatus() {
     "save-config",
   ])
     $(id).disabled = s.running;
+  $("apply-sample").disabled = s.running || !dirty;
   $("pause-run").textContent = s.paused ? "Resume" : "Pause";
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
