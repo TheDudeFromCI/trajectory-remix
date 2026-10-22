@@ -19,7 +19,8 @@ let configDraft,
   editRevision = 0,
   autoCompileDelayMs = loadAutoCompileDelay(),
   pollBusy = false,
-  compileBusy = false;
+  compileBusy = false,
+  sampleRevision = null;
 const colors = [
   "#7be0c3",
   "#bba6fb",
@@ -114,7 +115,6 @@ function setDirty(value = true) {
   dirty = value;
   if (value) {
     editRevision++;
-    dirty = false;
     scheduleCompile();
   } else {
     clearTimeout(compileTimer);
@@ -159,7 +159,23 @@ async function refresh(initial = false) {
     renderStatus();
     if (changed || initial) renderSamples();
     if (initial && state.samples.length) await selectSample(0, true);
-    if (selected >= state.samples.length) {
+    if (
+      !initial &&
+      sample &&
+      next.revision !== sampleRevision &&
+      !compileBusy &&
+      !hasPendingChanges()
+    ) {
+      const current = state.samples.find((s) => s.id === sample.id);
+      if (current) await selectSample(current.index, true);
+      else {
+        selected = -1;
+        sample = null;
+        plan = null;
+        renderReplay();
+      }
+    }
+    if (selected >= state.samples.length && !hasPendingChanges()) {
       selected = -1;
       sample = null;
       plan = null;
@@ -256,7 +272,9 @@ async function selectSample(index, force = false) {
   clearTimeout(compileTimer);
   compileTimer = null;
   pause();
-  sample = await json("samples/" + index);
+  const response = await api("samples/" + index);
+  sample = await response.json();
+  sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
   setDirty(false);
   $("sample-json").value = JSON.stringify(sample, null, 2);
@@ -294,7 +312,11 @@ async function compileSample(persist = true) {
     }
     // Persist an invalid draft too: it must remain editable and downloadable.
     if (persist) {
-      await json("samples/" + selected, "PUT", { sample });
+      const result = await json("samples/" + selected, "PUT", {
+        sample,
+        expected_revision: sampleRevision,
+      });
+      sampleRevision = result.revision;
       if (revision === editRevision) setDirty(false);
       await refresh();
     }

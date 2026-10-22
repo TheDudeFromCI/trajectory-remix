@@ -34,9 +34,11 @@ class Runner:
     async def save(self):
         async with self.save_lock:
             data = snapshot(copy.deepcopy(self.state["samples"]), self.state["config"])
+            revision = self.state["revision"]
             await asyncio.to_thread(atomic_save, self.save_path, data)
             self.status["last_saved"] = datetime.now(UTC).isoformat()
             self.log(f"Saved {len(data['samples'])} samples to {self.save_path.name}")
+            return revision
 
     def start(self, single=False, task_ids=None, seed_index=None, validate=None):
         if self.job and not self.job.done():
