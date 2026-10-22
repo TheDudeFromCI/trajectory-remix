@@ -38,7 +38,34 @@ def validate_call(event, path):
         raise CompileError("Subagent replay requires a recorded outcome", path)
 
 
-def compile_sandbox(items, sample):
+def chat_context_at(items, tick, order, eos_id, metadata):
+    """Chat writes land in phase B, before any same-tick generated EOS."""
+    opened = False
+    closed = False
+    for item in items:
+        event = item["event"]
+        if event["window"] != "chat":
+            continue
+        start = item["tick"]
+        if event["op"] == "tool-call":
+            # Tool windows are implicitly open from tick zero.
+            opened = True
+        elif event["op"] == "open":
+            if start < tick or (start == tick and item["order"] < order):
+                opened = True
+        elif event["op"] == "generate" and eos_id in item["encoded"].ids:
+            end = start + len(item["encoded"].ids) - 1
+            if end < tick:
+                closed = True
+    return {
+        "chat_open": opened and not closed,
+        "agent_name": (
+            metadata.get("agent_name", "Kidra") if isinstance(metadata, dict) else "Kidra"
+        ),
+    }
+
+
+def compile_sandbox(items, sample, eos_id):
     metadata = sample.get("metadata", {})
     clock = metadata.get("synthetic_clock", {}) if isinstance(metadata, dict) else {}
     if not isinstance(clock, dict) or set(clock) - {"seed", "seconds_per_call"}:
@@ -91,9 +118,17 @@ def compile_sandbox(items, sample):
                     sandbox.start_call(call["tool"], call["arguments"])
                     outcome = copy.deepcopy(event["outcome"])
                 else:
+                    context = (
+                        chat_context_at(
+                            items, call["end"], call["order"], eos_id, metadata
+                        )
+                        if call["tool"] == "chat" else {}
+                    )
                     outcome = {
                         "ok": True,
-                        "result": sandbox.call_sync(call["tool"], call["arguments"]),
+                        "result": sandbox.call_sync(
+                            call["tool"], call["arguments"], **context
+                        ),
                     }
             except (ToolError, ValueError, OverflowError) as error:
                 outcome = {"ok": False, "error": str(error)}

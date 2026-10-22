@@ -266,6 +266,47 @@ header {
   flex-direction: column;
   gap: 10px;
 }
+.metadata-panel {
+  flex: 0 1 auto;
+  max-height: 45%;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 10px;
+}
+.metadata-panel fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.metadata-panel label, .metadata-panel summary, #metadata-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+.metadata-panel input, .metadata-panel textarea {
+  width: 100%;
+  min-width: 0;
+}
+.metadata-panel details {
+  margin: 6px 0;
+}
+.metadata-panel summary {
+  cursor: pointer;
+}
+.metadata-panel textarea {
+  min-height: 110px;
+  margin-top: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+#metadata-status {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
 .sidebar-footer small {
   line-height: 1.5;
   overflow-wrap: anywhere;

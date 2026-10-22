@@ -23,14 +23,19 @@
   clock in another window, and verify the resumed request can attend to its
   result without seeing the pending write outcome. They also cover tick-0 BOS,
   reusable tool windows, request anchors, segment losses and dispatch timing.
+- Chat checks cover message framing, metadata speaker names, missing/closed
+  windows, completion-time lifecycle, literal arguments, exported loss masks,
+  generation error feedback and undoable MCP recording. DOM checks cover the
+  sidebar metadata editor, nested-property preservation, Source JSON sync,
+  metadata Undo/Redo, invalid metadata JSON and selecting the chat tool.
 - CLI export succeeds on the included reactive sample.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an
 HTTPX mocked OpenAI-compatible transport. No live provider credentials were
-available, so actual model/provider behavior is unverified. Visual inspection
-in a real browser was blocked by the execution environment's network separation
-and unavailable browser binary; the DOM checks are not visual browser QA.
+available, so actual model/provider behavior is unverified. The metadata sidebar
+layout and chat message display were also inspected in headless Chromium. The
+DOM checks use an emulated browser and do not replace full interactive browser QA.
 
 Re-run the tests when changing compiler visibility, stream timing, tokenization,
 window closure, tool capabilities or generation task assembly. The reactive

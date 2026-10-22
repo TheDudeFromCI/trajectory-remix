@@ -374,6 +374,13 @@ restored state.
 
 These commands use the same `Sandbox` dispatcher as trajectory generation:
 
+- Chat messages: `chat` with `{"content":"Hello!"}`. It requires an open
+  window named `chat`. For `call_simulated_tool`, supply `record_sample_id` to
+  use that trajectory's open chat window and agent name, and record the message
+  as an undoable edit. Standalone sessions have no chat window and return an
+  error observation. Scheduled `create_tool_call` events check the window at
+  completion. `metadata.agent_name` supplies the speaker (default: Kidra), and
+  `metadata.user_name` can store the user's name.
 - Synthetic clock: `time_now`, `time_advance`.
 - Virtual RAM filesystem: `file_write`, `file_read`, `file_list`, `file_delete`.
 - Lexical memory search: `memory_save`, `memory_search`.

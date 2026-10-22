@@ -135,7 +135,7 @@ class ToolSessions:
             )
         return copy.deepcopy(entry)
 
-    async def call(self, session_id, name, arguments, recorder=None):
+    async def call(self, session_id, name, arguments, recorder=None, context=None):
         session = self.get(session_id)
         if session.lock.locked():
             raise ToolSessionError("Tool session has an in-flight call", "busy")
@@ -151,7 +151,7 @@ class ToolSessions:
             candidate = copy.deepcopy(session.sandbox)
             try:
                 try:
-                    result = await candidate.call(name, arguments)
+                    result = await candidate.call(name, arguments, **(context or {}))
                     outcome = {"ok": True, "result": result}
                 except (ToolError, ValueError, OverflowError) as error:
                     outcome = {"ok": False, "error": str(error)}

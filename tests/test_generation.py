@@ -29,6 +29,35 @@ class FakeClient:
         return value if isinstance(value, dict) else {"content": value}
 
 
+@pytest.mark.parametrize("open_chat", [True, False, None])
+async def test_generated_chat_matches_replay_and_reports_errors(compiler, sample, open_chat):
+    config = minimal_config()
+    config["tasks"] = [config["tasks"][1]]
+    sample["metadata"] = {"agent_name": "Nova", "user_name": "Alex"}
+    if open_chat:
+        sample["replay"]["0"].append({"op": "open", "window": "chat"})
+    fake = FakeClient([
+        {"content": None, "tool_calls": [{
+            "id": "message", "type": "function",
+            "function": {"name": "chat", "arguments": json.dumps({"content": "Hi, Alex!"})},
+        }]},
+        "Done.",
+    ])
+    generated = await SampleBuilder(compiler, config, fake).generate(
+        seed=sample if open_chat is not None else None
+    )
+    plan = compiler.compile(generated)
+    outcome = json.loads(next(m["content"] for m in fake.messages[1] if m["role"] == "tool"))
+    assert outcome == plan["tool_calls"][0]["outcome"]
+    assert outcome["ok"] is bool(open_chat)
+    if open_chat:
+        assert compiler.frame(plan, plan["max_tick"])["windows"]["chat"]["text"] == (
+            "<|msg|>Nova: Hi, Alex!<|/msg|>\n"
+        )
+    else:
+        assert 'No window named "chat"' in outcome["error"]
+
+
 def minimal_config():
     c = default_config()
     c["tasks"] = [c["tasks"][1], c["tasks"][2], c["tasks"][-1]]

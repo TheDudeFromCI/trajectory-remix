@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from tokenizers import Tokenizer
 
-from .tools import tool_message, tool_request
+from .tools import tool_message, tool_request, tool_text
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
@@ -333,7 +333,7 @@ class Compiler:
                 "path": owner["path"],
                 "phase": "B" if owner["content_op"] == "append" else "D",
             }
-        sandbox, tool_calls = compile_sandbox(prepared, sample)
+        sandbox, tool_calls = compile_sandbox(prepared, sample, self.ids["eos"])
         calls_by_path = {call["path"]: call for call in tool_calls}
         expanded = []
         tool_windows = {call["window"] for call in tool_calls}
@@ -395,6 +395,30 @@ class Compiler:
                     },
                 ]
             )
+            if call["tool"] == "chat" and call["outcome"]["ok"]:
+                message = {
+                    "op": "append",
+                    "window": "chat",
+                    "source": "tool",
+                    "content": tool_text(
+                        call["outcome"]["result"]["content"], self.special.values()
+                    ),
+                    "loss": {"mask": "exclude"},
+                }
+                expanded.append(
+                    {
+                        **item,
+                        "event": message,
+                        "tick": call["end"],
+                        "path": item["path"] + ".chat",
+                        "instant": True,
+                        "rate": 1,
+                        "synthetic_chat": True,
+                        "encoded": self.encode(
+                            message, item["path"], noop_weight, literal=True
+                        ),
+                    }
+                )
         prepared = expanded
         for order, item in enumerate(prepared):
             item["order"] = order
@@ -531,7 +555,12 @@ class Compiler:
                         )
                     writers[wid].append(delivery)
             for wid, group in writers.items():
-                distinct = {x["item"]["order"]: x["item"] for x in group}
+                # Tool messages are external input in B and may arrive while the
+                # model emits its next chat token in D (including EOS).
+                distinct = {
+                    x["item"]["order"]: x["item"] for x in group
+                    if not x["item"].get("synthetic_chat")
+                }
                 if len(distinct) > 1 and not all(
                     p["event"]["op"] == "append" and p["instant"]
                     for p in distinct.values()

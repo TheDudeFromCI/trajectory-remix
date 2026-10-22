@@ -80,6 +80,36 @@ assert.equal(
 );
 assert.equal($("timeline").closest("main"), w.document.querySelector("main"));
 assert.equal(w.document.title, "Trajectory Remix");
+assert.equal($("metadata-panel").closest(".sidebar"), w.document.querySelector(".sidebar"));
+assert.equal($("metadata-fields").disabled, false);
+const initialMetadata = JSON.parse($("metadata-json").value);
+$("agent-name").value = "Nova";
+$("agent-name").oninput();
+$("user-name").value = "Alex";
+$("user-name").oninput();
+await [...w.document.querySelectorAll(".tab")].find((b) => b.dataset.view === "json").onclick();
+let metadataDraft = JSON.parse($("sample-json").value);
+assert.deepEqual(metadataDraft.metadata, { ...initialMetadata, agent_name: "Nova", user_name: "Alex" });
+metadataDraft.metadata.custom = { nested: [1, "kept"] };
+$("sample-json").value = JSON.stringify(metadataDraft);
+$("sample-json").oninput();
+assert.deepEqual(JSON.parse($("metadata-json").value).custom, { nested: [1, "kept"] });
+$("user-name").value = "Sam";
+$("user-name").oninput();
+assert.equal(JSON.parse($("sample-json").value).metadata.user_name, "Sam");
+await click("file-save");
+await click("undo-edit");
+assert.equal($("agent-name").value, initialMetadata.agent_name || "");
+await click("redo-edit");
+assert.equal($("agent-name").value, "Nova");
+assert.equal($("user-name").value, "Sam");
+assert.deepEqual(JSON.parse($("metadata-json").value).custom, { nested: [1, "kept"] });
+await [...w.document.querySelectorAll(".tab")].find((b) => b.dataset.view === "events").onclick();
+$("metadata-json").value = "[]";
+$("metadata-json").oninput();
+assert.match($("metadata-status").textContent, /JSON object/);
+$("metadata-json").value = JSON.stringify({ ...initialMetadata, agent_name: "Nova", user_name: "Sam", custom: { nested: [1, "kept"] } });
+$("metadata-json").oninput();
 $("tick-number").value = "60";
 $("tick-number").onchange({ target: $("tick-number") });
 // Synchronize pending API reads in the emulated DOM, not a browser automation wait.
@@ -158,6 +188,11 @@ assert(
 await click("edit-menu-button");
 await click("generation-menu-button");
 await click("settings-button");
+assert($("settings-dialog").hasAttribute("open"));
+await click("close-settings");
+await click("edit-menu-button");
+await click("generation-menu-button");
+await click("status-button");
 assert.equal($("generation-panel").hidden, false);
 await click("edit-tags");
 assert($("settings-dialog").hasAttribute("open"));
@@ -440,11 +475,28 @@ jump(Number($("max-tick").textContent));
 await waitFor(() => /file_write · completed/.test($("sandbox-calls").textContent));
 assert.match(findToolWindow().textContent, /<tool>/);
 assert.match(findToolWindow().textContent, /<tool_result>/);
+// Chat is selectable as a synthetic tool and appends into the existing chat window.
+await click("add-tool-call");
+let chatCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const chatTick = chatCard.querySelector(".event-header input");
+chatTick.value = "0";
+chatTick.oninput();
+const chatSelect = chatCard.querySelector(".event-options select");
+assert([...chatSelect.options].some((o) => o.value === "chat"));
+chatSelect.value = "chat";
+chatSelect.onchange();
+chatCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const chatArgs = chatCard.querySelector('textarea[aria-label="arguments JSON"]');
+chatArgs.value = JSON.stringify({ content: "Hi, Sam!" });
+chatArgs.oninput();
+await click("file-save");
+jump(0);
+await waitFor(() => /<\|msg\|>Nova: Hi, Sam!<\|\/msg\|>/.test($("window-grid").textContent));
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 56,
+    checks: 73,
     errors,
   }),
 );
