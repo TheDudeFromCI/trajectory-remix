@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, Compiler, chunks
 from .dataset import (
     atomic_save,
@@ -46,13 +47,22 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        await runner.stop()
+        try:
+            yield
+        finally:
+            try:
+                await runner.stop()
+            finally:
+                commands.tool_sessions.close()
 
     app = FastAPI(title="Trajectory Remix", lifespan=lifespan)
     app.state.dataset = state
     app.state.runner = runner
+    app.state.history = runner.history
     app.state.csrf = token
+    commands = TrajectoryCommands(state, compiler, runner, client)
+    app.state.commands = commands
+    app.state.tool_sessions = commands.tool_sessions
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
@@ -90,6 +100,13 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
     @app.exception_handler(ValueError)
     async def value_error(request, error):
         return JSONResponse({"detail": str(error)}, status_code=422)
+
+    @app.exception_handler(CommandError)
+    async def command_error(request, error):
+        status = {"not_found": 404, "conflict": 409, "busy": 409}.get(error.code, 422)
+        return JSONResponse(
+            {"detail": str(error), "code": error.code}, status_code=status
+        )
 
     async def body(request):
         raw = bytearray()
@@ -151,6 +168,7 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
             ],
             "config": public_config(state["config"]),
             "revision": state["revision"],
+            "history": runner.history.view(),
             "status": runner.status,
             "logs": list(runner.logs),
             "tags": TAGS,
@@ -163,7 +181,23 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
 
     @app.get("/api/samples/{index}")
     async def get_sample(index: int):
-        return sample_at(index)
+        return JSONResponse(
+            sample_at(index), headers={"X-Remix-Revision": str(state["revision"])}
+        )
+
+    @app.get("/api/mcp/tools")
+    async def mcp_tools():
+        return {"tools": commands.tools()}
+
+    @app.post("/api/mcp/call")
+    async def mcp_call(request: Request):
+        data = await body(request)
+        if set(data) - {"name", "arguments"} or not isinstance(data.get("name"), str):
+            raise ValueError("Expected tool name and arguments")
+        arguments = data.get("arguments", {})
+        if not isinstance(arguments, dict):
+            raise ValueError("arguments must be an object")
+        return await commands.call(data["name"], arguments)
 
     @app.post("/api/samples")
     async def create_sample(request: Request):
@@ -180,8 +214,9 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         if not isinstance(sample, dict):
             raise ValueError("sample must be an object")
         unique_samples(state["samples"] + [sample])
-        state["samples"].append(sample)
-        state["revision"] += 1
+        runner.history.commit(
+            state["samples"] + [sample], "Create trajectory in dashboard"
+        )
         return {"index": len(state["samples"]) - 1}
 
     @app.put("/api/samples/{index}")
@@ -189,22 +224,32 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         editable()
         sample_at(index)
         data = await body(request)
+        expected_revision = data.get("expected_revision")
+        if expected_revision is not None:
+            if type(expected_revision) is not int or expected_revision < 0:
+                raise ValueError("expected_revision must be a nonnegative integer")
+            if expected_revision != state["revision"]:
+                raise HTTPException(
+                    409, "Dataset changed; reload the sample before saving"
+                )
         sample = data.get("sample")
         if not isinstance(sample, dict):
             raise ValueError("sample must be an object")
         updated = state["samples"].copy()
         updated[index] = sample
         unique_samples(updated)
-        state["samples"] = updated
-        state["revision"] += 1
-        return {"ok": True}
+        runner.history.commit(
+            updated, f"Edit trajectory in dashboard: {sample.get('id', 'untitled')}"
+        )
+        return {"ok": True, "revision": state["revision"]}
 
     @app.delete("/api/samples/{index}")
     async def delete_sample(index: int):
         editable()
         sample_at(index)
-        state["samples"].pop(index)
-        state["revision"] += 1
+        updated = state["samples"].copy()
+        updated.pop(index)
+        runner.history.commit(updated, "Delete trajectory in dashboard")
         return {"ok": True}
 
     @app.post("/api/import")
@@ -234,8 +279,7 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         # Batch import is transactional: no mutations before all files validate.
         if data.get("load_config") and config:
             state["config"] = config
-        state["samples"] = updated
-        state["revision"] += 1
+        runner.history.commit(updated, "Import trajectories in dashboard")
         return {"imported": len(imported)}
 
     @app.post("/api/compile")

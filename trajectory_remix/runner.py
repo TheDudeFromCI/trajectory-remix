@@ -5,6 +5,7 @@ import copy
 from collections import deque
 from datetime import UTC, datetime
 
+from .changes import SampleHistory
 from .dataset import atomic_save, snapshot
 from .llm import SampleBuilder
 
@@ -13,6 +14,7 @@ class Runner:
     def __init__(self, state, compiler, save_path, client=None):
         self.state, self.compiler, self.save_path = state, compiler, save_path
         self.client = client
+        self.history = SampleHistory(state)
         self.job = None
         self.save_lock = asyncio.Lock()
         self.resume_event = asyncio.Event()
@@ -34,9 +36,11 @@ class Runner:
     async def save(self):
         async with self.save_lock:
             data = snapshot(copy.deepcopy(self.state["samples"]), self.state["config"])
+            revision = self.state["revision"]
             await asyncio.to_thread(atomic_save, self.save_path, data)
             self.status["last_saved"] = datetime.now(UTC).isoformat()
             self.log(f"Saved {len(data['samples'])} samples to {self.save_path.name}")
+            return revision
 
     def start(self, single=False, task_ids=None, seed_index=None, validate=None):
         if self.job and not self.job.done():
@@ -128,11 +132,14 @@ class Runner:
                             f"Attempt {self.status['attempts']}, regeneration {retry}: {feedback}"
                         )
                 if accepted is not None:
+                    updated = self.state["samples"].copy()
                     if seed_index is None:
-                        self.state["samples"].append(accepted)
+                        updated.append(accepted)
                     else:
-                        self.state["samples"][seed_index] = accepted
-                    self.state["revision"] += 1
+                        updated[seed_index] = accepted
+                    self.history.commit(
+                        updated, f"Generate trajectory: {accepted['id']}"
+                    )
                     self.status["accepted"] += 1
                     consecutive = 0
                     dirty += 1

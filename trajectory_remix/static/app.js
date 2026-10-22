@@ -19,7 +19,8 @@ let configDraft,
   editRevision = 0,
   autoCompileDelayMs = loadAutoCompileDelay(),
   pollBusy = false,
-  compileBusy = false;
+  compileBusy = false,
+  sampleRevision = null;
 const colors = [
   "#7be0c3",
   "#bba6fb",
@@ -114,7 +115,6 @@ function setDirty(value = true) {
   dirty = value;
   if (value) {
     editRevision++;
-    dirty = false;
     scheduleCompile();
   } else {
     clearTimeout(compileTimer);
@@ -159,7 +159,23 @@ async function refresh(initial = false) {
     renderStatus();
     if (changed || initial) renderSamples();
     if (initial && state.samples.length) await selectSample(0, true);
-    if (selected >= state.samples.length) {
+    if (
+      !initial &&
+      sample &&
+      next.revision !== sampleRevision &&
+      !compileBusy &&
+      !hasPendingChanges()
+    ) {
+      const current = state.samples.find((s) => s.id === sample.id);
+      if (current) await selectSample(current.index, true);
+      else {
+        selected = -1;
+        sample = null;
+        plan = null;
+        renderReplay();
+      }
+    }
+    if (selected >= state.samples.length && !hasPendingChanges()) {
       selected = -1;
       sample = null;
       plan = null;
@@ -194,6 +210,7 @@ function renderStatus() {
   $("pause-run").textContent = s.paused ? "Resume" : "Pause";
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
+  renderHistoryActions();
   $("save-status").textContent = s.last_saved
     ? `Saved ${new Date(s.last_saved).toLocaleTimeString()}`
     : "Not saved yet";
@@ -213,6 +230,13 @@ function renderStatus() {
         return row;
       }),
   );
+}
+function renderHistoryActions() {
+  for (const [id, direction] of [["undo-edit", "undo"], ["redo-edit", "redo"]]) {
+    const available = state?.history?.[direction] || [];
+    $(id).disabled = state?.status.running || compileBusy || !available.length;
+    $(id).title = available[0]?.label || `Nothing to ${direction}`;
+  }
 }
 function renderSamples() {
   const filter = $("sample-search").value.toLowerCase();
@@ -256,7 +280,9 @@ async function selectSample(index, force = false) {
   clearTimeout(compileTimer);
   compileTimer = null;
   pause();
-  sample = await json("samples/" + index);
+  const response = await api("samples/" + index);
+  sample = await response.json();
+  sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
   setDirty(false);
   $("sample-json").value = JSON.stringify(sample, null, 2);
@@ -283,6 +309,7 @@ async function compileSample(persist = true) {
   clearTimeout(compileTimer);
   compileTimer = null;
   compileBusy = true;
+  renderHistoryActions();
   pause();
   try {
     if (view === "json") sample = JSON.parse($("sample-json").value);
@@ -294,7 +321,11 @@ async function compileSample(persist = true) {
     }
     // Persist an invalid draft too: it must remain editable and downloadable.
     if (persist) {
-      await json("samples/" + selected, "PUT", { sample });
+      const result = await json("samples/" + selected, "PUT", {
+        sample,
+        expected_revision: sampleRevision,
+      });
+      sampleRevision = result.revision;
       if (revision === editRevision) setDirty(false);
       await refresh();
     }
@@ -315,6 +346,7 @@ async function compileSample(persist = true) {
     }
   } finally {
     compileBusy = false;
+    renderHistoryActions();
   }
 }
 function setTick(value) {
@@ -1314,6 +1346,19 @@ async function saveSession() {
   await refresh();
   toast("Dataset saved.");
 }
+async function changeHistory(direction) {
+  if (compileBusy) throw new Error("Wait for the current compilation to finish.");
+  if (hasPendingChanges()) await compileSample(true);
+  const history = await json("mcp/call", "POST", { name: "get_edit_history" });
+  await json("mcp/call", "POST", {
+    name: direction === "undo" ? "undo_edits" : "redo_edits",
+    arguments: { expected_revision: history.revision },
+  });
+  await refresh();
+  closeMenus();
+}
+$("undo-edit").onclick = action(() => changeHistory("undo"));
+$("redo-edit").onclick = action(() => changeHistory("redo"));
 function closeMenus() {
   for (const name of ["file", "edit"]) {
     $(name + "-menu").hidden = true;
@@ -1559,6 +1604,12 @@ document.addEventListener("keydown", (e) => {
     document.querySelector("dialog[open]")
   )
     return;
+  if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    const redo = e.key.toLowerCase() === "y" || e.shiftKey;
+    $(redo ? "redo-edit" : "undo-edit").click();
+    return;
+  }
   if (e.code === "Space") {
     e.preventDefault();
     $("play").click();

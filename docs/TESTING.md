@@ -1,11 +1,17 @@
 # Verification
 
-- 74 Python tests pass with `python -m pytest -q`.
-- 12 DOM integration checks pass with `python tests/run_frontend.py` after
+- Python tests run with `python -m pytest -q`. Install `.[mcp,test]` to also
+  exercise official-client MCP protocol tests and the stdio bridge; MCP tests
+  are skipped when the optional SDK is absent. Authoring tests cover atomic
+  edits, revision conflicts, patches, metadata, diagnostics and timeline inspection.
+- DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
   loading, playback controls, event and JSON editing, marker diagnostics and
-  task/endpoint/condition/automatic configuration surfaces.
+  task/endpoint/condition/automatic configuration surfaces, external MCP edits,
+  and protection of pending browser edits during conflicts.
+  They also exercise dataset Undo/Redo menu actions, keyboard shortcuts, and
+  undoing a pending draft after it is persisted.
 - CLI export succeeds on the included reactive sample.
 - A Python wheel builds successfully and contains all dashboard assets.
 

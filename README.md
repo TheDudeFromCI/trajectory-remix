@@ -43,6 +43,29 @@ python -m trajectory_remix --tokenizer tokenizer.json \
 The process owns the dataset session. Closing the browser does not stop an active
 generation job. Stop the job in the dashboard or terminate the server.
 
+## MCP support
+
+Install `python -m pip install -e '.[mcp]'`, start the dashboard normally, then
+connect an MCP client to the stdio command:
+
+```bash
+python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
+```
+
+The bridge exposes 37 tools for trajectory creation, full JSON inspection,
+duplication, metadata updates, event editing and content patches, validation,
+window history, anchors, timeline snapshots, atomic batches, source diffs,
+undo/redo, simulated-tool sessions and saving. It shares the running
+dashboard session. Edits appear in the dashboard on its next refresh; pending
+browser edits are protected by revision checks. Use `save_dataset` to persist.
+
+**Edit → Undo / Redo** also restores source edits made through MCP, the dashboard
+or generation. Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) invoke dataset history
+outside text editors; focused editors retain their native text undo behavior.
+
+See [MCP setup and tool reference](docs/MCP.md) for client configuration,
+examples, validation options and limits.
+
 ## Dashboard workflow
 
 1. **Import samples** accepts multiple `.json`, `.jsonl`, and `.kidra-dataset`

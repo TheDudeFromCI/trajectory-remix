@@ -10,9 +10,18 @@ const w = new Window({
 w.document.write(html);
 w.structuredClone = structuredClone;
 const requests = [];
-w.fetch = (path, options) => {
+let holdNextCompile = false,
+  releaseCompile = null,
+  completedStateReads = 0;
+w.fetch = async (path, options) => {
   requests.push({ path, options });
-  return fetch(new URL(path, base), options);
+  const response = await fetch(new URL(path, base), options);
+  if (path === "/api/state") completedStateReads++;
+  if (path === "/api/compile" && holdNextCompile) {
+    holdNextCompile = false;
+    await new Promise((resolve) => (releaseCompile = resolve));
+  }
+  return response;
 };
 w.confirm = () => true;
 w.ResizeObserver = class {
@@ -183,7 +192,7 @@ assert.equal($("edit-menu").hidden, false);
 assert.equal($("edit-menu").contains($("preferences-button")), true);
 for (const id of ["duplicate", "delete-sample"])
   assert.equal($("edit-menu").contains($(id)), true);
-assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 2);
+assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 3);
 await click("preferences-button");
 assert($("preferences-dialog").hasAttribute("open"));
 assert.equal($("auto-compile-delay").value, "1");
@@ -226,11 +235,97 @@ for (
   await new Promise((r) => setTimeout(r, 20));
 assert.match($("save-status").textContent, /^Saved /);
 assert.equal(w.document.title, "Trajectory Remix");
+
+// External MCP edits refresh the selected sample; pending local edits survive a conflict.
+const tool = async (name, args) => {
+  const response = await fetch(base + "/api/mcp/call", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+    },
+    body: JSON.stringify({ name, arguments: args }),
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  return response.json();
+};
+const currentId = JSON.parse($("sample-json").value).id;
+await tool("update_trajectory_metadata", {
+  sample_id: currentId,
+  patch: { metadata: { title: "MCP metadata edit" } },
+});
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata?.title === "MCP metadata edit",
+);
+const localDraft = JSON.parse($("sample-json").value);
+localDraft.metadata.title = "Pending browser draft";
+$("sample-json").value = JSON.stringify(localDraft);
+$("sample-json").oninput();
+await tool("update_trajectory_metadata", {
+  sample_id: currentId,
+  patch: { metadata: { title: "Concurrent MCP edit" } },
+});
+await waitFor(() => /Dataset changed/.test($("toast").textContent));
+await new Promise((resolve) => setTimeout(resolve, 1700));
+assert.equal(JSON.parse($("sample-json").value).metadata.title, "Pending browser draft");
+const remote = await tool("get_trajectory", { sample_id: currentId });
+assert.equal(remote.sample.metadata.title, "Concurrent MCP edit");
+await w.document.querySelector(".sample-item.active").onclick();
+assert.equal(JSON.parse($("sample-json").value).metadata.title, "Concurrent MCP edit");
+assert.equal(w.document.title, "Trajectory Remix");
+
+// A revision observed while compilation is busy must still refresh on a later poll.
+holdNextCompile = true;
+const nextDraft = JSON.parse($("sample-json").value);
+nextDraft.metadata.title = "Browser save before compile";
+$("sample-json").value = JSON.stringify(nextDraft);
+$("sample-json").oninput();
+await waitFor(() => releaseCompile !== null);
+await tool("update_trajectory_metadata", {
+  sample_id: currentId,
+  patch: { metadata: { title: "MCP edit during compile" } },
+});
+const stateReadsBeforePoll = completedStateReads;
+await waitFor(() => completedStateReads > stateReadsBeforePoll);
+await new Promise((resolve) => setTimeout(resolve, 50));
+releaseCompile();
+releaseCompile = null;
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+);
+await waitFor(() => !$("undo-edit").disabled);
+await click("undo-edit");
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "Browser save before compile",
+);
+await waitFor(() => !$("redo-edit").disabled);
+await click("redo-edit");
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+);
+await waitFor(() => !$("undo-edit").disabled);
+$("undo-edit").focus();
+w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "Browser save before compile",
+);
+await waitFor(() => !$("redo-edit").disabled);
+w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true, shiftKey: true }));
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+);
+await waitFor(() => !$("undo-edit").disabled);
+const pendingUndoDraft = JSON.parse($("sample-json").value);
+pendingUndoDraft.metadata.title = "Pending draft to undo";
+$("sample-json").value = JSON.stringify(pendingUndoDraft);
+$("sample-json").oninput();
+await click("undo-edit");
+assert.equal(JSON.parse($("sample-json").value).metadata.title, "MCP edit during compile");
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 34,
+    checks: 48,
     errors,
   }),
 );
