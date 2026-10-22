@@ -56,6 +56,12 @@ const click = async (id) => {
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
 assert.equal($("sample-title").textContent, "react-to-stream-warning");
 assert.equal($("apply-sample").disabled, true);
+assert.equal($("replay-view").hidden, false);
+assert.equal(
+  w.document.querySelector(".editor-panel").parentElement,
+  $("workspace"),
+);
+assert.equal($("timeline").closest("main"), w.document.querySelector("main"));
 assert.equal(w.document.title, "Trajectory Remix");
 $("tick-number").value = "60";
 $("tick-number").onchange({ target: $("tick-number") });
@@ -76,6 +82,7 @@ await [...w.document.querySelectorAll(".tab")]
   .onclick();
 const eventCount = w.document.querySelectorAll(".event-card").length;
 assert(eventCount >= 10);
+assert.equal($("replay-view").hidden, false);
 const firstEvent = w.document.querySelector(".event-card");
 const firstEventKey = firstEvent.querySelector(".event-header input").value;
 await firstEvent.querySelector(".event-add-below").onclick();
@@ -91,6 +98,7 @@ assert.equal(w.document.querySelectorAll(".event-card").length, eventCount + 2);
 await [...w.document.querySelectorAll(".tab")]
   .find((b) => b.dataset.view === "json")
   .onclick();
+assert.equal($("replay-view").hidden, false);
 const original = JSON.parse($("sample-json").value);
 original.replay["1"][0].content = "bad{N_TICKS:1}";
 $("sample-json").value = JSON.stringify(original);
@@ -184,7 +192,7 @@ assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 22,
+    checks: 27,
     errors,
   }),
 );

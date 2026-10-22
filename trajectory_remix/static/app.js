@@ -6,7 +6,7 @@ let state,
   plan = null,
   tick = 0,
   dirty = false,
-  view = "replay",
+  view = "events",
   playing = null;
 let frameRequest = false,
   currentFrame = null;
@@ -221,7 +221,7 @@ async function selectSample(index, force = false) {
   if (validEventShape()) loadEvents();
   else {
     view = "json";
-    for (const name of ["replay", "events", "json"])
+    for (const name of ["events", "json"])
       $(name + "-view").hidden = name !== "json";
     document
       .querySelectorAll(".tab")
@@ -774,7 +774,7 @@ async function changeView(next) {
   document
     .querySelectorAll(".tab")
     .forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  for (const name of ["replay", "events", "json"])
+  for (const name of ["events", "json"])
     $(name + "-view").hidden = name !== view;
   if (view === "events") {
     if (!validEventShape()) {
@@ -784,7 +784,6 @@ async function changeView(next) {
     loadEvents();
   }
   if (view === "json") $("sample-json").value = JSON.stringify(sample, null, 2);
-  if (view === "replay" && dirty) await compileSample(false);
   drawTimeline();
 }
 async function download(path, filename, method = "GET", body) {

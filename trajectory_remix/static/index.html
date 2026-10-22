@@ -42,7 +42,7 @@
         hidden
       />
     </header>
-    <div class="workspace">
+    <div id="workspace" class="workspace">
       <aside class="sidebar">
         <div class="side-heading">
           <span>DATASET</span><span id="sample-count" class="badge">0</span
@@ -73,17 +73,12 @@
           </div>
         </div>
         <div class="tabbar">
-          <div class="tabs">
-            <button class="tab active" data-view="replay">Replay</button
-            ><button class="tab" data-view="events">Events</button
-            ><button class="tab" data-view="json">Source JSON</button>
-          </div>
           <div class="tab-actions">
             <span id="dirty-indicator"></span
             ><button id="apply-sample" class="primary" disabled>Apply & compile</button>
           </div>
         </div>
-        <section id="replay-view" class="view">
+        <section id="replay-view" class="view replay-view">
           <div class="replay-toolbar">
             <span
               ><span class="live-icon"></span> <b id="open-count">0</b> active
@@ -94,32 +89,6 @@
             ><span id="replay-note">Post-commit state at selected tick</span>
           </div>
           <div id="window-grid" class="window-grid"></div>
-        </section>
-        <section id="events-view" class="view" hidden>
-          <div class="editor-toolbar">
-            <label>Sample ID <input id="sample-id" /></label
-            ><label
-              >Idle loss weight
-              <input
-                id="noop-weight"
-                type="number"
-                min="0"
-                step="0.01" /></label
-            ><button id="add-event">+ Add event</button>
-          </div>
-          <div class="hint">
-            Open a window once. Close it with a generated EOS. Markers:
-            <code>{N_TICK:4}</code>; reaction start: <code>{N_TICK:4}+1</code>.
-            Changes are applied together.
-          </div>
-          <div id="event-list"></div>
-        </section>
-        <section id="json-view" class="view" hidden>
-          <textarea
-            id="sample-json"
-            spellcheck="false"
-            aria-label="Trajectory JSON"
-          ></textarea>
         </section>
         <div id="diagnostics" class="diagnostics" hidden></div>
         <section class="timeline-section">
@@ -188,6 +157,38 @@
           </div>
         </section>
       </main>
+      <aside class="editor-panel" aria-label="Sample editor">
+        <div class="editor-tabs" role="tablist" aria-label="Editor view">
+          <button class="tab active" data-view="events" role="tab">Events</button
+          ><button class="tab" data-view="json" role="tab">Source JSON</button>
+        </div>
+        <section id="events-view" class="view editor-view" role="tabpanel">
+          <div class="editor-toolbar">
+            <label>Sample ID <input id="sample-id" /></label
+            ><label
+              >Idle loss weight
+              <input
+                id="noop-weight"
+                type="number"
+                min="0"
+                step="0.01" /></label
+            ><button id="add-event">+ Add event</button>
+          </div>
+          <div class="hint">
+            Open a window once. Close it with a generated EOS. Markers:
+            <code>{N_TICK:4}</code>; reaction start: <code>{N_TICK:4}+1</code>.
+            Changes are applied together.
+          </div>
+          <div id="event-list"></div>
+        </section>
+        <section id="json-view" class="view editor-view" role="tabpanel" hidden>
+          <textarea
+            id="sample-json"
+            spellcheck="false"
+            aria-label="Trajectory JSON"
+          ></textarea>
+        </section>
+      </aside>
     </div>
     <aside id="generation-panel" class="floating-panel" aria-label="Generation control" hidden>
       <div id="generation-panel-header" class="floating-header">
