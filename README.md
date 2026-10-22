@@ -90,7 +90,9 @@ examples, validation options and limits.
    **+ EOS** button inserts the configured EOS spelling. A normal explicit
    `close` operation is rejected. Segmented content is edited in Source JSON.
    **+ Tool call** schedules a synthetic tool with JSON arguments, a duration in
-   ticks, and a fresh result window ID.
+   ticks, and a tool window ID. Tool windows exist from tick 0; each contains
+   both the request and result. Select streamed delivery to author a request
+   over multiple ticks, with optional custom text, NOOPs and anchors.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
@@ -250,8 +252,9 @@ generation tasks into a new sample. Enable followup tasks to include further
 turns.
 
 Tools use standard `tools` / `tool_calls` on `POST /chat/completions`.
-Tool call arguments become supervised call-window text and actual dispatcher
-results become masked tool-result windows. Results remain open through downstream
+Tool call arguments become supervised `<tool>{"tool":...,"args":...}</tool>`
+text and actual dispatcher results become masked `<tool_result>...</tool_result>`
+text in the same tool window, open from tick 0. Results remain open through downstream
 reasoning and responses, then receive generated EOS. Tool-enabled tasks require
 `start=auto`; explicitly timed tool interactions can be authored in the replay. Non-tool providers work with tools
 disabled. Models must return ordinary textual completion content. Truncated,
@@ -328,10 +331,27 @@ tick 175 commits `new`. Tools execute atomically at `start + duration-ticks`
 (default duration: zero). Reads observe state at completion. Equal completion
 ticks follow the compiler's stable replay order. Failures produce an error
 observation and retain any clock/call-budget effects of the attempted call.
-Each call opens its fresh result window at completion and appends the actual
-JSON outcome as excluded-loss external input. Use generated EOS to close it.
-Call arguments are control data; generated LLM tool calls also retain their
-supervised call-window text.
+Tool windows are implicitly open from tick 0, with one BOS and idle NOOPs even
+before their first request. Each call appends a `<tool>` request at its start
+and the actual JSON outcome inside `<tool_result>` at completion. Instant
+requests and all results are excluded-loss external input by default. Use
+generated EOS to close the window after consuming its results. Multiple calls
+may reuse one open tool window; explicit opens must be at tick 0 with type `tool`.
+
+Set `delivery: "stream"` to generate the request one token per tick, with normal
+supervision. Execution starts on the tick after the final request token;
+`duration-ticks` measures execution only. Omit `content`/`segments` to use the
+canonical `<tool>{"tool":...,"args":...}</tool>` request. Custom `content` or
+`segments` support the same anchors, NOOPs and loss controls as `generate`.
+The structured `tool` and `arguments` fields determine execution; custom text is
+the authored model transcript and should describe those arguments.
+
+[The parallel-tools sample](examples/parallel-tools.json) pauses a file-write
+request halfway through its arguments using NOOPs, checks the clock in a second
+window, then resumes writing with the timestamp. Both windows exist from tick 0;
+the clock result is visible to the resumed request, while the pending write has
+not changed sandbox state. This uses a virtual file write in place of a database
+query because the built-in sandbox does not provide SQL.
 
 Generation records these executable events, including elapsed whole seconds as
 logical duration ticks (subsecond calls take zero ticks). Running a task in an
@@ -378,7 +398,8 @@ It is a local single-user tool, not a multi-user/public hosting service.
 
 The existing MCP bridge also exposes `create_tool_call(sample_id, tick, tool,
 arguments, duration_ticks=0, window=null, outcome=null, position=null,
-expected_revision=null)` and `get_sandbox_state(sample_id, tick,
+expected_revision=null, delivery="instant", content=null, segments=null,
+loss=null)` and `get_sandbox_state(sample_id, tick,
 include_calls=true)`. Discover schemas with `list_simulated_tools`. Scheduled
 calls compile before committing one undoable edit, support `apply_batch` and
 revision guards, and save with `save_dataset`. Both commands operate on the

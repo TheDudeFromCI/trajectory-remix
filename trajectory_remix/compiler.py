@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from tokenizers import Tokenizer
 
-from .tools import tool_json
+from .tools import tool_message, tool_request
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
@@ -222,7 +222,23 @@ class Compiler:
                 }
                 if event["op"] == "tool-call":
                     validate_call(event, path)
-                elif event["op"] != "open":
+                if event["op"] != "open":
+                    content_event = event
+                    literal = False
+                    if event["op"] == "tool-call":
+                        content_event = {
+                            **event,
+                            "op": (
+                                "generate"
+                                if event.get("delivery", "instant") == "stream"
+                                else "append"
+                            ),
+                        }
+                        if "content" not in event and "segments" not in event:
+                            content_event["content"] = tool_request(
+                                event["tool"], event["arguments"], self.special.values()
+                            )
+                            literal = True
                     if event["op"] == "append" and (
                         not isinstance(event.get("source"), str) or not event["source"]
                     ):
@@ -231,7 +247,7 @@ class Compiler:
                         "delivery", "stream" if event["op"] == "generate" else "instant"
                     ) not in ("instant", "stream"):
                         raise CompileError("delivery must be instant or stream", path)
-                    if event["op"] == "generate" and (
+                    if content_event["op"] == "generate" and (
                         event.get("delivery", "stream") != "stream"
                         or event.get("tokens-per-tick", 1) != 1
                     ):
@@ -240,10 +256,19 @@ class Compiler:
                         )
                     item["rate"] = integer(event.get("tokens-per-tick", 1), path, 1)
                     item["instant"] = (
-                        event["op"] == "append"
+                        content_event["op"] == "append"
                         and event.get("delivery", "instant") == "instant"
                     )
-                    item["encoded"] = self.encode(event, path, noop_weight)
+                    item["content_op"] = content_event["op"]
+                    item["encoded"] = self.encode(
+                        content_event, path, noop_weight, literal=literal
+                    )
+                    if event["op"] == "tool-call":
+                        item["request_event"] = content_event
+                        if self.ids["eos"] in item["encoded"].ids:
+                            raise CompileError(
+                                "Tool request cannot close before its result", path
+                            )
                     for aid, boundary in item["encoded"].anchors:
                         if aid in owners:
                             raise CompileError(f"Duplicate anchor {aid}", path)
@@ -274,9 +299,9 @@ class Compiler:
                     "tick": captured,
                     "window": owner["event"]["window"],
                     "path": owner["path"],
-                    "phase": "B" if owner["event"]["op"] == "append" else "D",
+                    "phase": "B" if owner["content_op"] == "append" else "D",
                 }
-                if delta == 0 and owner["event"]["op"] == "generate" and n > 0:
+                if delta == 0 and owner["content_op"] == "generate" and n > 0:
                     raise CompileError(
                         f"Anchor {aid} captures a phase-D output; dependent event must start at +1 or later",
                         item["path"],
@@ -284,8 +309,8 @@ class Compiler:
                 if (
                     delta == 0
                     and n > 0
-                    and owner["event"]["op"] == "append"
-                    and item["event"]["op"] != "generate"
+                    and owner["content_op"] == "append"
+                    and item.get("content_op") != "generate"
                 ):
                     raise CompileError(
                         f"Anchor {aid} is captured in phase B; open/append dependents must start at +1 or later",
@@ -306,33 +331,56 @@ class Compiler:
                 "tick": owner["tick"] + offset,
                 "window": owner["event"]["window"],
                 "path": owner["path"],
-                "phase": "B" if owner["event"]["op"] == "append" else "D",
+                "phase": "B" if owner["content_op"] == "append" else "D",
             }
         sandbox, tool_calls = compile_sandbox(prepared, sample)
         calls_by_path = {call["path"]: call for call in tool_calls}
         expanded = []
+        tool_windows = {call["window"] for call in tool_calls}
+        explicit_opens = {
+            item["event"]["window"]: item
+            for item in prepared
+            if item["event"]["op"] == "open"
+        }
+        for window in sorted(tool_windows):
+            if window in explicit_opens:
+                opener = explicit_opens[window]
+                if opener["tick"] != 0 or opener["event"].get("window-type") != "tool":
+                    raise CompileError(
+                        "Tool windows must open at tick 0 with window-type tool",
+                        opener["path"],
+                    )
+            else:
+                expanded.append(
+                    {
+                        "event": {"op": "open", "window": window, "window-type": "tool"},
+                        "key": "0",
+                        "tick": 0,
+                        "path": f"tool-windows[{window}].open",
+                    }
+                )
         for item in prepared:
             if item["event"]["op"] != "tool-call":
                 expanded.append(item)
                 continue
             call = calls_by_path[item["path"]]
-            # The result window first becomes visible when the call completes.
-            # Tool arguments remain data; only allowlisted sandbox operations run.
-            opener = {"op": "open", "window": call["window"], "window-type": "tool"}
+            # Requests and results share a window that has existed since tick zero.
+            # Only allowlisted sandbox operations run; request text remains data.
             result = {
                 "op": "append",
                 "window": call["window"],
                 "source": "tool",
-                "content": tool_json(call["outcome"], self.special.values()),
+                "content": tool_message(
+                    "tool_result", call["outcome"], self.special.values()
+                ),
                 "loss": {"mask": "exclude"},
             }
             expanded.extend(
                 [
                     {
                         **item,
-                        "event": opener,
-                        "tick": call["end"],
-                        "path": item["path"] + ".open",
+                        "event": item["request_event"],
+                        "path": item["path"] + ".request",
                     },
                     {
                         **item,

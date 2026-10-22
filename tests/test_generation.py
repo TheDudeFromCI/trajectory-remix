@@ -70,6 +70,13 @@ async def test_tool_grounded_generation_and_validation(compiler):
     assert any(e["op"] == "tool-call" and e["tool"] == "note_save" for e in events)
     assert any(m["role"] == "tool" for m in fake.messages[2])
     plan = compiler.compile(sample)
+    tool_windows = [w for w in plan["windows"] if w["type"] == "tool"]
+    assert len(tool_windows) == 1 and tool_windows[0]["open"] == 0
+    tool_window = tool_windows[0]["id"]
+    spans = [e for e in plan["events"] if e["window"] == tool_window]
+    assert any(e["op"] == "generate" and e["text"].startswith("<tool>") for e in spans)
+    assert any(e["op"] == "append" and e["text"].startswith("<tool_result>") for e in spans)
+    assert not any(w["id"].startswith("tool-call-") for w in plan["windows"])
     assert compiler.frame(plan, plan["max_tick"])["sandbox"]["notes"] == {
         "n": {"text": "check", "status": "todo"}
     }

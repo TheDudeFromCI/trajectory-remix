@@ -13,7 +13,7 @@ import httpx
 
 from .compiler import KEY
 from .dataset import reject_constant
-from .tools import SCHEMAS, Sandbox, tool_json
+from .tools import SCHEMAS, Sandbox
 
 TAGS = [
     "competent",
@@ -581,14 +581,6 @@ class SampleBuilder:
                 function = call["function"]
                 self.serial += 1
                 suffix = str(self.serial)
-                self.add_stream(
-                    f"tool-call-{suffix}",
-                    tool_json(function, self.compiler.special.values()).replace(
-                        "{N_TICK", "\\{N_TICK"
-                    ),
-                    close=True,
-                    request_id=call["id"],
-                )
                 args = json.loads(
                     function.get("arguments", "{}"), parse_constant=reject_constant
                 )
@@ -605,6 +597,7 @@ class SampleBuilder:
                     "window": f"tool-result-{suffix}",
                     "tool": function.get("name"),
                     "arguments": args,
+                    "delivery": "stream",
                     "duration-ticks": int(monotonic() - started),
                     "request-id": call["id"],
                 }

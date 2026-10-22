@@ -1,0 +1,51 @@
+{
+  "schema-version": "1.0",
+  "id": "parallel-tool-request",
+  "tick-policy": "external-first",
+  "metadata": {
+    "tags": [
+      "parallel-tools"
+    ],
+    "synthetic_clock": {
+      "seed": "2030-01-01T09:00:00Z",
+      "seconds_per_call": 1
+    }
+  },
+  "replay": {
+    "1": [
+      {
+        "op": "tool-call",
+        "window": "write-summary",
+        "tool": "file_write",
+        "arguments": {
+          "path": "/summary.txt",
+          "content": "2030-01-01T09:00:01+00:00 Document summary."
+        },
+        "delivery": "stream",
+        "content": "<tool>{\"tool\":\"file_write\",\"args\":{\"path\":\"/summary.txt\",\"content\":\"{N_TICK:1}<|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|>2030-01-01T09:00:01+00:00 Document summary.\"}}</tool>{N_TICK:2}"
+      }
+    ],
+    "{N_TICK:1}+1": [
+      {
+        "op": "tool-call",
+        "window": "clock",
+        "tool": "time_now",
+        "arguments": {},
+        "duration-ticks": 2,
+        "delivery": "stream"
+      }
+    ],
+    "{N_TICK:2}+2": [
+      {
+        "op": "generate",
+        "window": "write-summary",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "clock",
+        "content": "<|eos|>"
+      }
+    ]
+  }
+}

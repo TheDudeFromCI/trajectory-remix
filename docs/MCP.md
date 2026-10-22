@@ -82,7 +82,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: false`.
 | `get_window_history` | Read one window's lifecycle, cumulative text, event spans and token rows. |
 | `preview_snapshots` | Read post-commit window state at ticks across an inclusive range. |
 | `list_simulated_tools` | Discover the simulated tools' exact schemas and per-session availability. |
-| `create_tool_call` | Schedule an executable tool event with arguments, duration and a fresh result window. |
+| `create_tool_call` | Schedule an executable tool event with a shared request/result window open from tick 0. |
 | `get_sandbox_state` | Inspect trajectory sandbox state and call statuses at a selected tick. |
 | `create_tool_session` | Create an isolated virtual-tool workbench with clock and quotas. |
 | `list_tool_sessions` | List workbenches with quotas, clock and state counts. |
@@ -107,8 +107,10 @@ it returns `valid: false` with diagnostics.
 `create_tool_call` schedules an executable synthetic tool event in a trajectory.
 It accepts `sample_id`, string `tick` (numeric or anchor expression), `tool`, and
 an `arguments` object. Optional fields are `duration_ticks` (default 0), `window`
-(fresh result window ID; generated when omitted), `outcome` (recorded subagent
-only), `position`, and `expected_revision`. Compilation must succeed before one
+(tool window ID; generated when omitted), `outcome` (recorded subagent
+only), `position`, `expected_revision`, `delivery` (`instant` or `stream`),
+`content` or `segments` (custom request text), and `loss` (request supervision).
+Compilation must succeed before one
 undoable source edit commits. It is also available inside `apply_batch`. Save
 with `save_dataset` as with other edits.
 
@@ -127,16 +129,25 @@ with `save_dataset` as with other edits.
 }
 ```
 
-Changes and masked result-window content commit atomically at tick 175. Before
-completion the old sandbox state remains visible. Equal completions use stable
+The tool window exists from tick 0. The default instant `<tool>` request appends
+at tick 150; changes and masked `<tool_result>` content commit atomically in the
+same window at tick 175. Before completion the old sandbox state remains visible.
+With `delivery: "stream"`, the request emits one model token per tick starting
+at `tick`; execution starts on the next tick after its final token, and duration
+is measured from that dispatch. Custom `content`/`segments` can include anchors
+and NOOPs to pause a request while a parallel call returns, then resume with its
+result. Omitted text produces a canonical request from `tool` and `arguments`;
+those structured fields always determine execution. Result text is always masked.
+Multiple calls can share an open tool window. Equal completions use stable
 replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
 tool failures become `{ok:false,error:...}` observations. Only `subagent` accepts
 a recorded `outcome`; compilation and inspection never repeat an LLM request.
 
 `get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
 and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
-`calls` and started `tool_calls`. Each call has resolved `start`/`end`, arguments
-and status; running calls omit their future outcome. The output limit is 4 MB;
+`calls` and started `tool_calls`. Each call has resolved `request_start`, execution
+`start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
+composing and running calls omit their future outcome. The output limit is 4 MB;
 use `include_calls=false` to omit call logs when inspecting a large state.
 `preview_snapshots` also includes sandbox state for each requested tick.
 
@@ -409,9 +420,10 @@ and advances synthetic time by `seconds_per_call`; `time_advance` additionally
 advances by its requested seconds. Source inspection with `get_tool_session`
 does not advance time or consume calls.
 
-Recording appends supervised call-window text with generated EOS, followed by
-masked tool-result content in an open window. Matching request IDs link the two
-windows. Results remain open for subsequent trajectory reasoning; close them
+Recording appends supervised `<tool>` request text followed by masked
+`<tool_result>` content in the same tool window, open from tick 0. The response's
+`call_window` and `result_window` identify that same window. Results remain open
+for subsequent trajectory reasoning; close them
 later with generated EOS if appropriate. Marker-looking strings and special
 tokens in tool JSON are escaped as literal data while preserving their decoded
 values. Recording requires a compilable sample or a new empty draft and stopped

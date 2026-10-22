@@ -160,9 +160,11 @@ async def test_recording_actual_results_is_valid_atomic_and_undoable(studio):
         for e in events
         if e["window"] == recording["call_window"] and e["op"] == "generate"
     )
-    assert generated["content"].endswith("<|eos|>")
-    actual_call = json.loads(generated["content"].removesuffix("<|eos|>"))
-    assert json.loads(actual_call["arguments"]) == entry["arguments"]
+    assert recording["call_window"] == recording["result_window"]
+    actual_call = json.loads(generated["content"].removeprefix("<tool>").removesuffix("</tool>"))
+    assert actual_call == {"tool": entry["name"], "args": entry["arguments"]}
+    opener = next(e for e in sample["replay"]["0"] if e["window"] == recording["call_window"])
+    assert opener == {"op": "open", "window": recording["call_window"], "window-type": "tool"}
     appended = next(
         e
         for e in events
@@ -170,7 +172,7 @@ async def test_recording_actual_results_is_valid_atomic_and_undoable(studio):
     )
     assert (
         appended["loss"] == {"mask": "exclude"}
-        and json.loads(appended["content"]) == entry["outcome"]
+        and json.loads(appended["content"].removeprefix("<tool_result>").removesuffix("</tool_result>")) == entry["outcome"]
     )
     assert appended["request-id"] == generated["request-id"] == recording["request_id"]
     assert (await call(studio, "validate_trajectory", sample_id="test"))["valid"]
@@ -261,14 +263,15 @@ async def test_recorded_marker_and_control_token_text_stays_literal(studio):
         for e in events
         if e["window"] == written["recording"]["call_window"] and e["op"] == "generate"
     )
-    function = json.loads(generated["content"].removesuffix("<|eos|>"))
-    assert json.loads(function["arguments"])["content"] == content
+    function = json.loads(generated["content"].removeprefix("<tool>").removesuffix("</tool>"))
+    assert function["args"]["content"] == content
     event = next(
         e
         for e in events
         if e["window"] == result["recording"]["result_window"] and e["op"] == "append"
     )
-    assert json.loads(event["content"])["result"]["content"] == content
+    outcome = json.loads(event["content"].removeprefix("<tool_result>").removesuffix("</tool_result>"))
+    assert outcome["result"]["content"] == content
 
 
 @pytest.mark.parametrize(

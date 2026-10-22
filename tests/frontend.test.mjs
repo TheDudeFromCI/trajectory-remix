@@ -414,6 +414,32 @@ assert.match($("timeline-event").textContent, /file_write · 150–200/);
 jump(100);
 await waitFor(() => /files \(0\)/.test($("sandbox-state").textContent));
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
+// Tool windows already exist at tick zero, and streamed requests share the result window.
+jump(0);
+await waitFor(() => /Sandbox · tick 0/.test($("sandbox-title").textContent));
+const toolWindowId = updatedToolCard.querySelector(".event-window").value;
+const findToolWindow = () => [...w.document.querySelectorAll(".window-card")]
+  .find((card) => card.querySelector("strong").textContent === toolWindowId);
+assert.ok(findToolWindow());
+assert.doesNotMatch(findToolWindow().className, /future/);
+const requestDelivery = updatedToolCard.querySelectorAll(".event-options select")[1];
+requestDelivery.value = "stream";
+requestDelivery.onchange();
+const customRequest = updatedToolCard.querySelector('input[type="checkbox"]');
+customRequest.checked = true;
+customRequest.onchange();
+const requestArea = w.document.querySelector('textarea[aria-label="Tool request text"]');
+requestArea.value = '<tool>{"tool":"file_write",<|noop|>"args":{"path":"history.txt","content":"new file version"}}</tool>';
+requestArea.oninput();
+await waitFor(() => Number($("max-tick").textContent) > 200);
+jump(160);
+await waitFor(() => /file_write · composing/.test($("sandbox-calls").textContent));
+assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
+assert.doesNotMatch(findToolWindow().textContent, /<tool_result>/);
+jump(Number($("max-tick").textContent));
+await waitFor(() => /file_write · completed/.test($("sandbox-calls").textContent));
+assert.match(findToolWindow().textContent, /<tool>/);
+assert.match(findToolWindow().textContent, /<tool_result>/);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
