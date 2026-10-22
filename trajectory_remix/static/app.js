@@ -1825,7 +1825,11 @@ $("edit-tags").onclick = () => {
   configTab = "conditions";
   openSettings();
 };
-$("settings-button").onclick = openGenerationPanel;
+$("settings-button").onclick = () => {
+  closeMenus();
+  openSettings();
+};
+$("status-button").onclick = openGenerationPanel;
 $("close-settings").onclick = () => $("settings-dialog").close();
 $("save-config").onclick = action(saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
