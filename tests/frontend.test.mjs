@@ -69,6 +69,8 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
+assert.match($("window-grid").textContent, /<\|cxt\|>Window: 2↵\nPurpose: reasoning<\|\/cxt\|>/);
+assert.match($("window-grid").textContent, /slot 2/);
 assert.equal($("sample-title"), null);
 assert.equal(w.document.querySelector(".tabbar"), null);
 assert.equal($("replay-view").querySelector("#dirty-indicator") !== null, true);

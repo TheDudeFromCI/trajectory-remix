@@ -52,6 +52,7 @@ async def test_generated_chat_matches_replay_and_reports_errors(compiler, sample
     assert outcome["ok"] is bool(open_chat)
     if open_chat:
         assert compiler.frame(plan, plan["max_tick"])["windows"]["chat"]["text"] == (
+            "<|cxt|>Window: 2\nPurpose: document<|/cxt|>"
             "<|msg|>Nova: Hi, Alex!<|/msg|>\n"
         )
     else:
@@ -278,7 +279,7 @@ def test_window_order_and_prefix_visibility(compiler, sample):
     p = compiler.compile(sample)
     w = selected_windows(p, compiler, {"visible": ["b", "a"], "visible_tick": 1})
     assert [v["window"] for v in w] == ["b", "a"]
-    assert w[1]["content"] == "x"
+    assert w[1]["content"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>x"
 
 
 async def test_tool_results_remain_live_through_reasoning(compiler):
@@ -435,8 +436,8 @@ async def test_explicit_start_prefix_limits_task_context(compiler, sample):
     finally:
         s.close()
     windows = json.loads(fake.messages[0][1]["content"])["windows"]
-    assert next(w for w in windows if w["window"] == "a")["content"] == "ab"
-    assert next(w for w in windows if w["window"] == "b")["content"] == ""
+    assert next(w for w in windows if w["window"] == "a")["content"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>ab"
+    assert next(w for w in windows if w["window"] == "b")["content"] == "<|cxt|>Window: 1\nPurpose: document<|/cxt|>"
 
 
 async def test_pause_on_failure_and_resume(compiler, tmp_path):

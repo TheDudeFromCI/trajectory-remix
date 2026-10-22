@@ -15,7 +15,8 @@ tokens: a tick may contain many external tokens and multiple window targets.
 | `tokenizer_sha256`, `special_tokens` | Exact tokenizer identity and native BOS/EOS/NOOP IDs. |
 | `tick_start`, `tick_end` | Inclusive global tick interval. |
 | `requires_prefix_through_row` | Last earlier row needed for context. -1 in the first chunk. |
-| `windows` | Window ID/type and open/close tick. Close null means still open at sample end. |
+| `windows` | Logical window ID/type, numeric `slot`, resolved `header`, and open/close tick. Close null means still open at sample end. |
+| `window_slots` | Mapping from logical IDs to numeric slots, shared by headers, `{WINDOW:id}` references, and the training adapter. |
 | `rows` | All token/decision records, including excluded observations and implicit NOOPs. |
 | `token_ids` | Row-aligned token/target IDs. |
 | `labels` | Token ID where loss is enabled; -100 otherwise. No further target shifting. |
@@ -29,8 +30,21 @@ advance it. `event` identifies the source replay event; `implicit` identifies an
 omitted idle target. `input_rank` orders same-tick external insertions.
 
 Do not interpret the flat `token_ids` array as a standard causal chat sequence.
-BOS is context, external rows insert context, and D rows are independent model
+BOS and automatic headers are context, external rows insert context, and D rows are independent model
 decisions. NOOP is a prediction target but never a durable memory token.
+
+At opening, `op: "open"` inserts BOS, followed immediately by `op: "header"`
+rows in phase A. Header rows are durable with zero loss and consecutive local
+positions. They are available to same-tick B/D queries and leave KV with the
+rest of their window on closure. `defaults.window-headers: false` omits them.
+Headers consume no ticks, but increase context length and shift local positions.
+
+Authored `{WINDOW:id}` markers resolve before tokenization, so their numeric
+replacement determines token counts, loss segment boundaries and anchor timing.
+Slots follow first declarations in canonical replay-key/list order, independent
+of resolved ticks. Implicit tool windows may be listed first in `windows` while
+having a later slot; consumers must use `slot` rather than the array index.
+The reference adapter falls back to array indices for older exports without slots.
 
 ## Exact attention visibility
 
@@ -41,9 +55,9 @@ decisions. NOOP is a prediction target but never a durable memory token.
    so its prior window context remains visible to other decisions that tick,
    then becomes unavailable at the next tick.
 3. Earlier ticks are visible, subject to window lifetime.
-4. A phase-D query sees same-tick phase-A BOS and phase-B external insertions.
+4. A phase-D query sees same-tick phase-A BOS/headers and phase-B external insertions.
    It sees no phase-D output from any window, including its own target.
-5. A supervised phase-B external query sees phase-A BOS and earlier phase-B
+5. A supervised phase-B external query sees phase-A BOS/headers and earlier phase-B
    insertions (`input_rank`). It cannot read its target or later external text.
 6. No future tick is visible.
 
@@ -91,7 +105,7 @@ loss_sum, weight_sum = 0, 0
 
 for chunk in ordered_sample_chunks:
     for tick_group in group_by_tick(chunk.rows):
-        # A: allocate windows, insert BOS with no loss.
+        # A: allocate windows, insert BOS and automatic header with no loss.
         # B: causally insert external content. Normally excluded from target loss.
         #    If an observation is supervised, compute its logit before insertion.
         # C: predict all model-owned targets from ONE after-B snapshot.

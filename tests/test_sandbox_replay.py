@@ -35,7 +35,7 @@ def test_history_at_completion_and_backwards_scrubbing(compiler, sample):
             assert state["tool_calls"][-1]["status"] == "running"
             assert "outcome" not in state["tool_calls"][-1]
             text = compiler.frame(plan, tick)["windows"]["second"]["text"]
-            assert text.startswith('<tool>{"tool": "file_write"')
+            assert text.startswith('<|cxt|>Window: 3\nPurpose: tool<|/cxt|><tool>{"tool": "file_write"')
             assert "<tool_result>" not in text
     assert plan["tool_calls"][-1]["outcome"]["result"]["content"] == "new"
     assert next(w for w in plan["windows"] if w["id"] == "second")["open"] == 0
@@ -200,9 +200,10 @@ def test_paused_request_can_consume_parallel_tool_result(compiler, sample):
     resume = paused + pause_ticks + 1
     assert clock["end"] < resume < write["start"]
     assert write["start"] == plan["anchors"]["2"]["tick"] + 1
-    assert compiler.frame(plan, 0)["windows"]["write"]["text"] == ""
+    header = "<|cxt|>Window: 2\nPurpose: tool<|/cxt|>"
+    assert compiler.frame(plan, 0)["windows"]["write"]["text"] == header
     during = compiler.frame(plan, clock["end"])
-    assert during["windows"]["write"]["text"] == prefix
+    assert during["windows"]["write"]["text"] == header + prefix
     assert "<tool_result>" in during["windows"]["clock"]["text"]
     assert during["sandbox"]["files"] == {}
     assert next(c for c in during["sandbox"]["tool_calls"] if c["window"] == "write")["status"] == "composing"
@@ -218,7 +219,7 @@ def test_paused_request_can_consume_parallel_tool_result(compiler, sample):
     assert not any(visible_to(resumed, r, plan["windows"]) for r in future)
     final = compiler.frame(plan, plan["max_tick"])
     assert final["sandbox"]["files"] == {"/summary": timestamp + " Summary recorded."}
-    assert final["windows"]["write"]["text"].startswith(prefix + suffix + "<tool_result>")
+    assert final["windows"]["write"]["text"].startswith(header + prefix + suffix + "<tool_result>")
     assert all(r["loss_mask"] == 0 for r in future)
     assert [r for chunk in chunks(plan, 7) for r in chunk["rows"]] == rows
 

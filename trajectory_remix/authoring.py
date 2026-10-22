@@ -10,6 +10,7 @@ import copy
 import difflib
 import inspect
 import json
+import re
 import uuid
 from collections import OrderedDict
 from contextvars import ContextVar
@@ -621,7 +622,8 @@ class TrajectoryCommands:
     ):
         """Rename a window across every event atomically; reject collisions with an existing window.
 
-        Free-form content and metadata are not rewritten.
+        Structured {WINDOW:id} references in content/segments follow the rename.
+        Other free-form content, escaped references and metadata are not rewritten.
         """
         index, sample = self._draft(sample_id, expected_revision)
         if not new_window or len(new_window) > 128:
@@ -640,6 +642,18 @@ class TrajectoryCommands:
             raise CommandError("Window not found", "not_found")
         for event in chosen:
             event["window"] = new_window
+        reference = re.compile(r"(?<!\\)\{WINDOW:" + re.escape(window) + r"\}")
+        for event in events:
+            parts = [event] + (
+                event.get("segments", []) if isinstance(event.get("segments"), list) else []
+            )
+            for part in parts:
+                if isinstance(part, dict):
+                    for field in ("content", "text"):
+                        if isinstance(part.get(field), str):
+                            part[field] = reference.sub(
+                                lambda _: "{WINDOW:" + new_window + "}", part[field]
+                            )
         return {**self._commit(sample, index, validate), "events_changed": len(chosen)}
 
     @command()
@@ -1208,7 +1222,7 @@ class TrajectoryCommands:
             call_window,
             tool_request(
                 entry["name"], entry["arguments"], self.compiler.special.values()
-            ).replace("{N_TICK", "\\u007bN_TICK"),
+            ).replace("{N_TICK", "\\u007bN_TICK").replace("{WINDOW", "\\u007bWINDOW"),
             close=False,
             request_id=request_id,
         )
@@ -1216,7 +1230,7 @@ class TrajectoryCommands:
             result_window,
             tool_message(
                 "tool_result", entry["outcome"], self.compiler.special.values()
-            ).replace("{N_TICK", "\\u007bN_TICK"),
+            ).replace("{N_TICK", "\\u007bN_TICK").replace("{WINDOW", "\\u007bWINDOW"),
             op="append",
             source="tool",
             close=False,
@@ -1231,7 +1245,7 @@ class TrajectoryCommands:
                 "chat",
                 tool_text(
                     entry["outcome"]["result"]["content"], self.compiler.special.values()
-                ).replace("{N_TICK", "\\{N_TICK"),
+                ).replace("{N_TICK", "\\{N_TICK").replace("{WINDOW", "\\{WINDOW"),
                 op="append",
                 source="tool",
                 loss={"mask": "exclude"},

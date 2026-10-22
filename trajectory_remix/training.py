@@ -66,7 +66,7 @@ def query_batch(plan, target_rows):
     window lifetime and input_rank. Loss masks never affect key visibility.
     """
     memory = [r for r in plan["rows"] if r["durable"]]
-    windows = {w["id"]: i for i, w in enumerate(plan["windows"])}
+    windows = {w["id"]: w.get("slot", i) for i, w in enumerate(plan["windows"])}
     targets = [r for r in target_rows if r["loss_weight"] > 0]
     allowed = [[visible_to(q, k, plan["windows"]) for k in memory] for q in targets]
     previous = []
