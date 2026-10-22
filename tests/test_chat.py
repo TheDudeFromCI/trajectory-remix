@@ -21,7 +21,8 @@ def test_chat_completion_scrubbing_and_export(compiler, sample):
     for tick in [4, 5, 0, 5, 2]:
         frame = compiler.frame(plan, tick)
         assert frame["windows"]["chat"]["text"] == (
-            "<|msg|>Kidra: Hello!<|/msg|>\n" if tick == 5 else ""
+            "<|cxt|>Window: 2\nPurpose: document<|/cxt|>"
+            + ("<|msg|>Kidra: Hello!<|/msg|>\n" if tick == 5 else "")
         )
     call = plan["tool_calls"][0]
     assert call["outcome"]["ok"]
@@ -61,6 +62,7 @@ def test_chat_checks_window_at_completion_and_keeps_order(compiler, sample):
     sample["metadata"] = {"agent_name": "Nova", "user_name": "Alex", "custom": {"a": 1}}
     plan = compiler.compile(sample)
     assert compiler.frame(plan, 5)["windows"]["chat"]["text"] == (
+        "<|cxt|>Window: 3\nPurpose: document<|/cxt|>"
         "<|msg|>Nova: first<|/msg|>\n<|msg|>Nova: second<|/msg|>\n"
     )
     sample["metadata"]["agent_name"] = "Kidra"
@@ -99,8 +101,9 @@ def test_streamed_chat_request_waits_for_dispatch_and_completion(compiler, sampl
     call = plan["tool_calls"][0]
     assert (call["request_start"], call["start"], call["end"]) == (1, 4, 6)
     assert compiler.frame(plan, 2)["sandbox"]["tool_calls"][0]["status"] == "composing"
-    assert compiler.frame(plan, 5)["windows"]["chat"]["text"] == ""
+    assert compiler.frame(plan, 5)["windows"]["chat"]["text"] == "<|cxt|>Window: 3\nPurpose: document<|/cxt|>"
     assert compiler.frame(plan, 6)["windows"]["chat"]["text"] == (
+        "<|cxt|>Window: 3\nPurpose: document<|/cxt|>"
         "<|msg|>Kidra: Hello!<|/msg|>\n"
     )
 

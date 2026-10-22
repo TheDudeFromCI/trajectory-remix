@@ -7,6 +7,7 @@ one encoding of the entire visible content, never separately tokenized fragments
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections import defaultdict
@@ -17,6 +18,7 @@ from tokenizers import Tokenizer
 from .tools import tool_message, tool_request, tool_text
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
+WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")
 KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
 MAX_TICKS = 100_000
 MAX_ROWS = 500_000
@@ -72,7 +74,16 @@ class Compiler:
             raise ValueError("BOS, EOS and NOOP must have distinct IDs")
         self.fingerprint = hashlib.sha256(tokenizer.to_str().encode()).hexdigest()
 
-    def encode(self, event, path, noop_weight, literal=False):
+    def window_header(self, slot, purpose):
+        """Frame literal metadata without letting it introduce header/control tokens."""
+
+        def field(value):
+            escaped = json.dumps(value, ensure_ascii=False)[1:-1]
+            return tool_text(escaped, self.special.values()).replace("<", r"\u003c")
+
+        return f"<|cxt|>Window: {slot}\nPurpose: {field(purpose)}<|/cxt|>"
+
+    def encode(self, event, path, noop_weight, literal=False, window_slots=None):
         if ("content" in event) == ("segments" in event):
             raise CompileError("Supply exactly one of content or segments", path)
         segments = event.get(
@@ -101,10 +112,19 @@ class Compiler:
             if literal:
                 visible, i = raw, len(raw)
             while i < len(raw):
-                escaped = raw.startswith("\\{N_TICK", i)
-                if escaped:
-                    visible += "{N_TICK"
-                    i += len("\\{N_TICK")
+                if raw.startswith(("\\{N_TICK", "\\{WINDOW"), i):
+                    visible += "{"
+                    i += 2
+                elif raw.startswith("{WINDOW", i):
+                    match = WINDOW.match(raw, i)
+                    if not match:
+                        raise CompileError(
+                            "Invalid window marker; expected {WINDOW:window_id}", path
+                        )
+                    if window_slots is None or match[1] not in window_slots:
+                        raise CompileError(f"Unknown window reference {match[1]!r}", path)
+                    visible += str(window_slots[match[1]])
+                    i = match.end()
                 elif raw.startswith("{N_TICK", i):
                     match = ANCHOR.match(raw, i)
                     if not match:
@@ -178,14 +198,34 @@ class Compiler:
         if not isinstance(defaults, dict):
             raise CompileError("defaults must be an object", "defaults")
         noop_weight = weight(defaults.get("implicit-noop-loss-weight", 0.1), "defaults")
+        window_headers = defaults.get("window-headers", True)
+        if type(window_headers) is not bool:
+            raise CompileError(
+                "window-headers must be a boolean", "defaults.window-headers"
+            )
         prepared, owners = [], {}
-        # Stable tie-breaking independent of JSON object insertion order.
-        for key in sorted(
+        # Assign slots before tokenization: reference widths can affect anchors.
+        # First declaration in canonical replay-key/list order wins, independent
+        # of JSON object insertion order and resolved (possibly symbolic) ticks.
+        keys = sorted(
             replay,
             key=lambda k: (
                 (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))
             ),
-        ):
+        )
+        window_slots = {}
+        for key in keys:
+            group = replay[key]
+            if isinstance(group, list):
+                for event in group:
+                    if isinstance(event, dict) and event.get("op") in (
+                        "open", "tool-call"
+                    ):
+                        window = event.get("window")
+                        if isinstance(window, str) and window not in window_slots:
+                            window_slots[window] = len(window_slots)
+        # Stable tie-breaking independent of JSON object insertion order.
+        for key in keys:
             if not isinstance(key, str) or not KEY.fullmatch(key):
                 raise CompileError(
                     "Invalid tick expression: use an integer or {N_TICK:n}+offset",
@@ -261,7 +301,9 @@ class Compiler:
                     )
                     item["content_op"] = content_event["op"]
                     item["encoded"] = self.encode(
-                        content_event, path, noop_weight, literal=literal
+                        content_event, path, noop_weight,
+                        literal=literal,
+                        window_slots=window_slots,
                     )
                     if event["op"] == "tool-call":
                         item["request_event"] = content_event
@@ -427,6 +469,20 @@ class Compiler:
         for item in prepared:
             event, start = item["event"], item["tick"]
             if event["op"] == "open":
+                item["header"] = self.encode(
+                    {
+                        "op": "append",
+                        "content": (
+                            self.window_header(
+                                window_slots[event["window"]],
+                                event.get("window-type", "document"),
+                            ) if window_headers else ""
+                        ),
+                    },
+                    item["path"] + ".header",
+                    noop_weight,
+                    literal=True,
+                )
                 scheduled[start].append(
                     {
                         "item": item,
@@ -533,9 +589,11 @@ class Compiler:
                         )
                     windows[wid] = {
                         "id": wid,
+                        "slot": window_slots[wid],
                         "type": e.get("window-type", "document"),
                         "open": tick,
                         "close": None,
+                        "header": item["header"].text,
                     }
                     live.add(wid)
                 else:
@@ -587,6 +645,15 @@ class Compiler:
                     input_rank,
                 )
                 input_rank += 1
+                if phase == "A":
+                    # Initialization is atomic: BOS then masked context, available
+                    # before B/C without consuming ticks or moving content anchors.
+                    for tid in item["header"].ids:
+                        row(
+                            tick, "A", wid, tid, 0, True, "header",
+                            item["path"] + ".header", input_rank,
+                        )
+                        input_rank += 1
                 if phase == "D" and delivery["token_id"] == self.ids["eos"]:
                     windows[wid]["close"] = tick
                     live.remove(wid)
@@ -617,6 +684,7 @@ class Compiler:
             "special_tokens": self.ids,
             "max_tick": max_tick,
             "windows": list(windows.values()),
+            "window_slots": window_slots,
             "anchors": captures,
             "events": events,
             "tool_calls": tool_calls,
@@ -699,6 +767,7 @@ def chunks(plan: dict, ticks_per_chunk=64):
             "tick_end": min(start + ticks_per_chunk - 1, plan["max_tick"]),
             "requires_prefix_through_row": chosen[0]["index"] - 1 if chosen else -1,
             "windows": plan["windows"],
+            "window_slots": plan["window_slots"],
             "rows": chosen,
             "token_ids": [r["token_id"] for r in chosen],
             "loss_mask": [r["loss_mask"] for r in chosen],

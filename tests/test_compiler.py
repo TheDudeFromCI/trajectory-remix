@@ -36,7 +36,7 @@ def test_bos_noop_eos_masks(compiler, sample):
     eos = next(r for r in p["rows"] if r["token_id"] == compiler.ids["eos"])
     assert eos["loss_mask"] == 1 and eos["tick"] == 3
     assert next(w for w in p["windows"] if w["id"] == "a")["close"] == 3
-    assert compiler.frame(p, 2)["windows"]["a"]["text"] == "x"
+    assert compiler.frame(p, 2)["windows"]["a"]["text"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>x"
 
 
 def test_same_tick_parallel_causality(compiler, sample):
@@ -311,7 +311,7 @@ def test_multiple_instant_appends_order(compiler, sample):
         {"op": "append", "window": "a", "source": "user", "content": "cd"},
     ]
     p = compiler.compile(sample)
-    assert compiler.frame(p, 1)["windows"]["a"]["text"] == "abcd"
+    assert compiler.frame(p, 1)["windows"]["a"]["text"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>abcd"
     keys = [r for r in p["rows"] if r["op"] == "append"]
     assert visible_to(keys[1], keys[0], p["windows"])
     assert not visible_to(keys[0], keys[1], p["windows"])

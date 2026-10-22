@@ -333,6 +333,7 @@ def selected_windows(plan, compiler, task):
         result.append(
             {
                 "window": window["id"],
+                "slot": window["slot"],
                 "type": window["type"],
                 "closed": window["close"] is not None and window["close"] <= at,
                 "content": compiler.tokenizer.decode(tokens, skip_special_tokens=False),

@@ -29,6 +29,10 @@
   sidebar metadata editor, nested-property preservation, Source JSON sync,
   metadata Undo/Redo, invalid metadata JSON and selecting the chat tool.
 - CLI export succeeds on the included reactive sample.
+- Window header/reference checks cover initialization order, loss masks, same-tick
+  visibility, closure, implicit/repeated tool calls, native tokenizer IDs, stable
+  numeric slots, multi-digit references, anchors, segment masks, literal tool
+  data, unknown markers, export round trips, task layouts and undoable renames.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an

@@ -164,7 +164,12 @@ contract; it is not an audit of the current ProjectKidra repository.
 }
 ```
 
-- Phase A opens windows and inserts exactly one BOS, excluded from loss.
+- Phase A opens windows and inserts exactly one BOS followed by an automatic
+  `<|cxt|>Window: 4\nPurpose: tool<|/cxt|>` header (with an actual newline).
+  Both are durable conditioning context excluded from loss. The header uses the
+  window's numeric slot and `window-type` (default `document`), including for
+  implicitly opened tool windows. Initialization is atomic at the opening tick;
+  it consumes no extra ticks and does not move content anchors.
 - Phase B applies external appends, instantaneous or streamed. Instant is the
   append default; streamed appends default to one token per tick and may set
   `tokens-per-tick` to a positive integer.
@@ -190,6 +195,24 @@ contract; it is not an audit of the current ProjectKidra repository.
   anchors are errors. An anchor that splits a tokenizer token is an error.
   Tokenization is performed once on the entire marker-free content, not each
   fragment. `\{N_TICK:4}` preserves literal marker text.
+- Use `{WINDOW:tool0}` in authored `content` or segment `text` to refer to a
+  window by its stable logical ID. Compilation/export replaces it with that
+  window's numeric slot, e.g. `4`, before tokenization and anchor resolution.
+  Source JSON retains the marker. `\{WINDOW:tool0}` preserves literal text;
+  malformed markers and references to undeclared windows are errors. References
+  may target a later declaration or an implicit tool window. Tool arguments and
+  actual sandbox observations remain literal data.
+- Slots are allocated from zero in first-declaration order (`open` or `tool-call`),
+  using the compiler's numeric-then-symbolic replay-key order and event list
+  order. Reordering JSON object keys does not change the mapping. The mapping
+  is per trajectory and is exported as `window_slots` and each window's `slot`;
+  changing declarations can change slot numbers, so use markers in source.
+  Slots are not reused and no fixed 15-window limit is imposed.
+- Headers appear in replay, task context and token exports. The tokenizer is
+  never modified: context delimiters use existing dedicated tokens when present,
+  otherwise ordinary tokenizer-native text tokens. Header metadata escapes
+  newlines and embedded control/framing tokens. To reproduce legacy body-only
+  conditioning, set `defaults.window-headers` to `false` (default `true`).
 - A phase-D capture cannot trigger a same-tick event. A phase-B capture can
   trigger same-tick generation in another window, but opening or appending from
   that capture requires `+1`. Use `+1` for portable reaction schedules.

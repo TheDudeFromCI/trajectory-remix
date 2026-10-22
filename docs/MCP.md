@@ -202,8 +202,15 @@ is excluded. For example:
 For `update_event`, settings replace individual field values; `remove_fields`
 removes optional fields. Use `patch_event_content` for text/segments. Changing an
 event's `window` affects that event alone; `rename_window` changes all event
-references. Free-form content and metadata are not rewritten by a window rename.
+references and unescaped `{WINDOW:id}` markers in content/segments. Other
+free-form content, escaped markers and metadata are not rewritten by a rename.
 Close windows using a generate event with the configured EOS token, never `close`.
+
+Every window receives an automatic masked header at opening. Use
+`{WINDOW:tool0}` in authored content to refer to a stable logical window ID;
+compilation/export resolves the marker to a numeric slot shared with its header.
+`get_window_history` and timeline snapshots include these headers in `text` and
+return `header`/`slot` in window metadata. Literal markers use `\{WINDOW:tool0}`.
 
 `move_event` accepts either `to_tick` or a signed `tick_offset`. Offsetting
 `"12"` by `-2` produces `"10"`; offsetting `"{N_TICK:7}+1"` by `2` produces

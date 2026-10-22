@@ -461,7 +461,7 @@ function renderReplay() {
     head.append(
       dot,
       node("strong", "", w.id),
-      node("small", "", unopened ? "scheduled" : closed ? "closed" : w.type),
+      node("small", "", `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`),
     );
     const data = currentFrame?.windows?.[w.id];
     const content = data?.text || "";
@@ -1055,14 +1055,14 @@ function renderEvents() {
             e.content = area.value;
             update();
             markers.textContent = (
-              area.value.match(/\{N_TICKS?[^}]*\}/g) || []
+              area.value.match(/\{(?:N_TICKS?|WINDOW)[^}]*\}/g) || []
             ).join(" · ");
           };
           card.append(area);
           const markers = node(
             "div",
             "event-marker",
-            (e.content?.match(/\{N_TICKS?[^}]*\}/g) || []).join(" · "),
+            (e.content?.match(/\{(?:N_TICKS?|WINDOW)[^}]*\}/g) || []).join(" · "),
           );
           card.append(markers);
         }

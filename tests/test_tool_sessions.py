@@ -41,6 +41,7 @@ async def test_chat_session_uses_recording_target_and_is_undoable(studio, compil
     plan = compiler.compile(current)
     assert plan["anchors"] == {}
     assert compiler.frame(plan, plan["max_tick"])["windows"]["chat"]["text"] == (
+        "<|cxt|>Window: 2\nPurpose: document<|/cxt|>"
         "<|msg|>Nova: Hello {N_TICK:9}<|/msg|>\n"
     )
     await call(studio, "undo_edits")
