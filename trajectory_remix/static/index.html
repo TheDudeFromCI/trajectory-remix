@@ -22,6 +22,7 @@
           <button id="edit-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">Edit</button>
           <div id="edit-menu" class="file-menu-popup" role="menu" hidden>
             <button id="preferences-button" role="menuitem">Preferences</button>
+            <hr role="separator" />
             <div class="submenu">
               <button id="generation-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Generation ▸</button>
               <div id="generation-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
@@ -31,6 +32,9 @@
                 <button id="auto-start" role="menuitem">Create Sample Batch</button>
               </div>
             </div>
+            <hr role="separator" />
+            <button id="duplicate" role="menuitem">Duplicate</button>
+            <button id="delete-sample" class="danger-text" role="menuitem">Delete</button>
           </div>
         </div>
         <span class="menu-label">Help</span>
@@ -63,26 +67,12 @@
         </div>
       </aside>
       <main>
-        <div class="sample-heading">
-          <div>
-            <div class="eyebrow">TRAJECTORY WORKSPACE</div>
-            <h1 id="sample-title">No sample selected</h1>
-          </div>
-          <div class="sample-actions">
-            <button id="duplicate">Duplicate</button
-            ><button id="delete-sample" class="danger-text">Delete</button>
-          </div>
-        </div>
-        <div class="tabbar">
-          <div class="tab-actions">
-            <span id="dirty-indicator"></span>
-          </div>
-        </div>
         <section id="replay-view" class="view replay-view">
           <div class="replay-toolbar">
             <span
               ><span class="live-icon"></span> <b id="open-count">0</b> active
               windows</span
+            ><span id="dirty-indicator"></span
             ><label
               ><input id="show-closed" type="checkbox" checked /> Show
               closed</label

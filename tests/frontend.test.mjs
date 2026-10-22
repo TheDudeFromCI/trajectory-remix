@@ -60,7 +60,9 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
-assert.equal($("sample-title").textContent, "react-to-stream-warning");
+assert.equal($("sample-title"), null);
+assert.equal(w.document.querySelector(".tabbar"), null);
+assert.equal($("replay-view").querySelector("#dirty-indicator") !== null, true);
 assert.equal($("apply-sample"), null);
 assert.equal($("replay-view").hidden, false);
 assert.equal(
@@ -179,6 +181,9 @@ for (const id of ["generate-one", "validate-sample", "auto-start"])
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
 assert.equal($("edit-menu").contains($("preferences-button")), true);
+for (const id of ["duplicate", "delete-sample"])
+  assert.equal($("edit-menu").contains($(id)), true);
+assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 2);
 await click("preferences-button");
 assert($("preferences-dialog").hasAttribute("open"));
 assert.equal($("auto-compile-delay").value, "1");

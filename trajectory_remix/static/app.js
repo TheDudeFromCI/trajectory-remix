@@ -259,7 +259,6 @@ async function selectSample(index, force = false) {
   sample = await json("samples/" + index);
   selected = index;
   setDirty(false);
-  $("sample-title").textContent = sample.id || "Untitled sample";
   $("sample-json").value = JSON.stringify(sample, null, 2);
   renderSamples();
   if (validEventShape()) loadEvents();
@@ -299,7 +298,6 @@ async function compileSample(persist = true) {
       if (revision === editRevision) setDirty(false);
       await refresh();
     }
-    $("sample-title").textContent = sample.id || "Untitled sample";
     $("sample-json").value = JSON.stringify(sample, null, 2);
     try {
       plan = await json("compile", "POST", { sample });
@@ -1307,7 +1305,6 @@ $("delete-sample").onclick = action(async () => {
   await refresh();
   if (state.samples.length) await selectSample(0, true);
   else {
-    $("sample-title").textContent = "No sample selected";
     renderReplay();
   }
 });

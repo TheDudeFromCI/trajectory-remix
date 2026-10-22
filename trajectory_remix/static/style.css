@@ -160,6 +160,12 @@ header {
   text-align: left;
   padding: 6px 8px;
 }
+.file-menu-popup hr[role="separator"] {
+  width: 100%;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
 .dot {
   height: 7px;
   width: 7px;
@@ -308,13 +314,6 @@ main {
   min-height: 0;
   overflow: hidden;
 }
-.sample-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12.5px 13px 9.5px;
-  gap: 12px;
-}
 .eyebrow {
   color: var(--muted);
   font-size: 9px;
@@ -334,14 +333,6 @@ h2 {
 .sample-actions {
   display: flex;
   gap: 7px;
-}
-.tabbar {
-  display: flex;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  padding: 0 12.5px 0;
-  gap: 8px;
-  min-height: 48px;
 }
 .tabs {
   display: flex;
@@ -383,12 +374,6 @@ h2 {
   overflow: auto;
   padding: 9px 12px;
 }
-.tab-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 4px;
-}
 #dirty-indicator {
   color: #e8c483;
   font-size: 10px;
@@ -401,6 +386,9 @@ h2 {
 }
 .view[hidden] {
   display: none;
+}
+.view.replay-view {
+  padding-top: 0;
 }
 .replay-toolbar {
   display: flex;
@@ -1006,17 +994,8 @@ dialog::backdrop {
   .timeline-options {
     display: none;
   }
-  .tabbar {
-    padding: 0 8px;
-  }
   .view {
     padding: 8px;
-  }
-  .sample-heading {
-    padding: 10px 8px;
-  }
-  .tab-actions button {
-    font-size: 10px;
   }
 }
 @media (max-width: 980px) {
@@ -1051,10 +1030,6 @@ dialog::backdrop {
   }
   #timeline-scroll {
     max-height: 150px;
-  }
-  .sample-heading {
-    padding-top: 8px;
-    padding-bottom: 7px;
   }
   .window-card {
     min-height: 125px;
