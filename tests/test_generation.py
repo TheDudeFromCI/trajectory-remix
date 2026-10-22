@@ -349,3 +349,9 @@ async def test_multiple_acceptances_flush_below_autosave_threshold(compiler, tmp
     r.start()
     await r.job
     assert len(json.loads((tmp_path / "checkpoint").read_text())["samples"]) == 2
+    saved = json.loads((tmp_path / "checkpoint").read_text())["samples"]
+    assert len(r.history.view()["undo"]) == 2
+    r.history.restore("undo", 2)
+    assert state["samples"] == []
+    r.history.restore("redo", 2)
+    assert state["samples"] == saved

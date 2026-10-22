@@ -192,7 +192,7 @@ assert.equal($("edit-menu").hidden, false);
 assert.equal($("edit-menu").contains($("preferences-button")), true);
 for (const id of ["duplicate", "delete-sample"])
   assert.equal($("edit-menu").contains($(id)), true);
-assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 2);
+assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 3);
 await click("preferences-button");
 assert($("preferences-dialog").hasAttribute("open"));
 assert.equal($("auto-compile-delay").value, "1");
@@ -293,11 +293,39 @@ releaseCompile = null;
 await waitFor(
   () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
 );
+await waitFor(() => !$("undo-edit").disabled);
+await click("undo-edit");
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "Browser save before compile",
+);
+await waitFor(() => !$("redo-edit").disabled);
+await click("redo-edit");
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+);
+await waitFor(() => !$("undo-edit").disabled);
+$("undo-edit").focus();
+w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "Browser save before compile",
+);
+await waitFor(() => !$("redo-edit").disabled);
+w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true, shiftKey: true }));
+await waitFor(
+  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+);
+await waitFor(() => !$("undo-edit").disabled);
+const pendingUndoDraft = JSON.parse($("sample-json").value);
+pendingUndoDraft.metadata.title = "Pending draft to undo";
+$("sample-json").value = JSON.stringify(pendingUndoDraft);
+$("sample-json").oninput();
+await click("undo-edit");
+assert.equal(JSON.parse($("sample-json").value).metadata.title, "MCP edit during compile");
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 43,
+    checks: 48,
     errors,
   }),
 );

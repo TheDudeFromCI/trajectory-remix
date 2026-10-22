@@ -1,22 +1,7 @@
 import copy
 import json
 
-import httpx
 import pytest
-
-from trajectory_remix.server import create_app
-
-
-@pytest.fixture
-async def studio(compiler, tmp_path, sample):
-    app = create_app(compiler, tmp_path / "project.kidra-dataset")
-    app.state.dataset["samples"].append(copy.deepcopy(sample))
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app),
-        base_url="http://testserver",
-        headers={"X-Remix-Token": app.state.csrf},
-    ) as client:
-        yield app, client
 
 
 async def call(studio, name, **arguments):

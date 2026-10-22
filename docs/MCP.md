@@ -71,17 +71,30 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: false`.
 | `patch_event_content` | Replace text/segments, or apply character-range patches. |
 | `delete_event` | Remove an event and its empty tick group. |
 | `rename_window` | Rename a window across all events, rejecting collisions. |
+| `apply_batch` | Apply up to 100 source edits atomically, with final validation and optional dry run. |
+| `diff_trajectories` | Compare source JSON against another sample or candidate; return JSON Patch and optional text diff. |
+| `get_edit_history` | View the session's available source undo/redo actions and optional patch details. |
+| `undo_edits` | Undo one or more source actions as one revision change. |
+| `redo_edits` | Reapply undone source actions. |
 | `validate_trajectory` | Compile and optionally run configured semantic LLM validators. |
 | `get_diagnostics` | Read compiler errors/warnings, optionally filtered by severity. |
 | `get_anchors` | Read resolved anchor ticks, phases and owning event paths/windows. |
 | `get_window_history` | Read one window's lifecycle, cumulative text, event spans and token rows. |
 | `preview_snapshots` | Read post-commit window state at ticks across an inclusive range. |
+| `list_simulated_tools` | Discover the simulated tools' exact schemas and per-session availability. |
+| `create_tool_session` | Create an isolated virtual-tool workbench with clock and quotas. |
+| `list_tool_sessions` | List workbenches with quotas, clock and state counts. |
+| `get_tool_session` | Inspect virtual files, memories, notes, skills and actual-call logs. |
+| `call_simulated_tool` | Execute a simulated tool, optionally recording its real call/result on a trajectory. |
+| `record_tool_interaction` | Record an earlier actual interaction without executing it again. |
+| `reset_tool_session` | Clear a workbench and restore its initial clock/budget. |
+| `delete_tool_session` | Destroy a workbench's RAM state and log. |
 | `save_dataset` | Atomically save the session to the dashboard's configured dataset file. |
 
 Tools include JSON input schemas, read-only/destructive annotations, strict type
 validation, and rejection of unknown argument names. Errors set MCP `isError`
 and include a message, plus a code where applicable (`conflict`, `busy`,
-`not_found`, `invalid_arguments`, `unknown_tool`). Compilation errors include
+`not_found`, `invalid_arguments`, `unknown_tool`, `quota_exceeded`). Compilation errors include
 diagnostic paths. A failed `validate_trajectory` is a successful inspection:
 it returns `valid: false` with diagnostics.
 
@@ -221,6 +234,167 @@ trajectory if its compiled plan exceeds the row limit. List/history page sizes
 are bounded to 5,000 entries. Full source reads return untruncated sample JSON.
 The existing 40 MB request and compiler tick/row limits also apply.
 
+## Atomic batches and diffs
+
+`apply_batch` accepts an `edits` array containing `{name, arguments}` objects.
+Supported names are the twelve trajectory/event mutation commands from
+`create_trajectory` through `rename_window`; the input schema enumerates them.
+Read tools, saves, batches, history actions and simulated-tool commands cannot
+be nested in a batch. Supply `expected_revision` on the outer batch only.
+
+For example, this batch creates a generated stream and its opener together:
+
+```json
+{
+  "edits": [
+    {
+      "name": "create_event",
+      "arguments": {
+        "sample_id": "example", "tick": "1",
+        "event": {"op": "generate", "window": "new-chat", "content": "OK<|eos|>"}
+      }
+    },
+    {
+      "name": "create_event",
+      "arguments": {
+        "sample_id": "example", "tick": "0",
+        "event": {"op": "open", "window": "new-chat"}
+      }
+    }
+  ],
+  "validate": true,
+  "dry_run": true,
+  "expected_revision": 5
+}
+```
+
+The default `validate: true` compiles changed surviving samples at the end, so
+an intermediate state may be invalid. Individual edits may also explicitly
+request validation. Any failed edit or final validation leaves source, revision,
+and history unchanged. Unchanged invalid samples do not block editing another
+sample. A successful batch increments the revision once and creates one undo
+action, across all affected samples. Intermediate revision numbers are private.
+
+`dry_run: true` validates and returns prospective results/changes without editing
+anything. Batch `changes` are RFC 6902 add/remove/replace operations against the
+dataset's **sample array**. Diff-tool `changes` are operations against a **single
+sample object**. These are inspection outputs; the batch interface accepts named
+edits, not arbitrary patches.
+
+`diff_trajectories` requires `sample_id` and exactly one of `other_sample_id` or
+`other_sample` (candidate JSON). `ignore_id: true` helps compare duplicates.
+`offset`/`limit` paginate operations. `include_unified: true` adds a readable JSON
+diff, capped at 200,000 characters with `unified_truncated` indicating truncation.
+Diffs work on invalid drafts and never compile or mutate either input.
+
+## Undo and redo
+
+`get_edit_history` lists undo actions newest first and redo actions in the order
+they will be reapplied. `include_changes: true` adds each action's forward patch.
+Use `undo_edits` / `redo_edits` with `steps` (1–50, default 1) and optional
+`expected_revision`. Multiple steps are restored atomically and increment the
+revision once. Undo is allowed to restore an invalid draft. New source changes
+discard the redo branch. Source changes made by browser CRUD/import, generation,
+MCP edits, batches and tool-interaction recording share this history.
+
+The dashboard also has **Edit → Undo / Redo**. It persists pending source edits
+before undoing them. During an active compilation, wait for it to finish.
+Outside focused text editors and open dialogs, Ctrl/Cmd+Z undoes, and
+Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes. Text inputs retain native text undo.
+
+History retains up to 50 actions / 32 MB of serialized history entries in RAM.
+Old or oversized actions may be evicted, with a notice in `get_edit_history`.
+History resets on restart and is not written to datasets. Configuration changes,
+credentials, saves, and virtual-tool session state are excluded. Undo/redo must
+wait until generation is stopped; undoing a generation changes the session but
+does not rewrite an earlier checkpoint until the next save. Untracked source
+changes cannot be overwritten by undo/redo. Use `save_dataset` to persist a
+restored state.
+
+## Simulated Remix tool sessions
+
+These commands use the same `Sandbox` dispatcher as trajectory generation:
+
+- Synthetic clock: `time_now`, `time_advance`.
+- Virtual RAM filesystem: `file_write`, `file_read`, `file_list`, `file_delete`.
+- Lexical memory search: `memory_save`, `memory_search`.
+- Notes/tasks: `note_save`, `note_list`, `note_delete`.
+- Text skills: `skill_save`, `skill_load`, `skill_list`.
+- Optional configured LLM: `subagent`.
+
+Start with `list_simulated_tools` to read exact names, required arguments and
+availability. Create a workbench with `create_tool_session`, for example:
+
+```json
+{
+  "session_id": "experiment",
+  "clock_seed": "2030-01-01T09:00:00Z",
+  "seconds_per_call": 1,
+  "max_calls": 64
+}
+```
+
+Clock and call-budget defaults come from the dashboard configuration. Sessions
+are independent of each other and of generation sandboxes. They are not tied
+to a sample ID; record their interactions into any suitable trajectory. Virtual
+paths never access host files. Sessions do not expose shell commands, process
+execution, arbitrary URL fetching, or host credentials.
+
+`call_simulated_tool` can execute and record a call together:
+
+```json
+{
+  "session_id": "experiment",
+  "name": "file_write",
+  "arguments": {"path": "/report.txt", "content": "Verified 192 files."},
+  "record_sample_id": "example",
+  "expected_revision": 7
+}
+```
+
+Without `record_sample_id`, the call changes only the workbench. The response
+contains an interaction ID, the actual arguments, outcome and synthetic clock.
+`outcome.ok: false` represents an actual simulated failure (for example a missing
+file) and may also be recorded. Invalid arguments are rejected before execution.
+Every dispatched call, including reads and failed operations, consumes one call
+and advances synthetic time by `seconds_per_call`; `time_advance` additionally
+advances by its requested seconds. Source inspection with `get_tool_session`
+does not advance time or consume calls.
+
+Recording appends supervised call-window text with generated EOS, followed by
+masked tool-result content in an open window. Matching request IDs link the two
+windows. Results remain open for subsequent trajectory reasoning; close them
+later with generated EOS if appropriate. Marker-looking strings and special
+tokens in tool JSON are escaped as literal data while preserving their decoded
+values. Recording requires a compilable sample or a new empty draft and stopped
+generation. Source and virtual state/log commit together; a rejected recording
+leaves them unchanged. Undoing a recording restores source only, so it never
+silently reverses a tool experiment.
+
+Use `record_tool_interaction` with `sample_id`, `session_id` and `interaction_id`
+to record a retained earlier result without consuming another call. Recording
+the same interaction twice in one sample is rejected. A recording removed by
+undo may be recorded again from the retained log.
+
+`get_tool_session` returns RAM state and the call log; `include_state` and
+`include_log` can reduce its output. `list_tool_sessions` gives summaries.
+`reset_tool_session` clears state/log and restores the initial clock and budget;
+`delete_tool_session` destroys it. There are at most eight sessions, each limited
+to 256 calls, up to 2 MB of virtual storage, and a 4 MB retained call log. Old log
+entries are evicted, so record useful interactions before they expire. Session
+state and logs disappear on server shutdown and are excluded from dataset saves
+unless explicitly recorded as trajectory events. In-flight calls prevent another
+call, reset or deletion of that workbench; cancellation preserves prior state.
+
+To enable `subagent`, create the session with `subagent_endpoint` set to an
+existing configured endpoint ID. Each subagent call sends only the delegated
+task and a text-only instruction; it sends neither the parent's RAM state nor
+trajectory context. It has no tools or recursive delegation and must return
+nonempty text of at most 200,000 characters. Provider calls use configured
+credentials without exposing them. Provider failures are reported without raw
+error details. Rejected recording can roll back virtual state and source, but
+cannot undo a provider request that has already occurred.
+
 ## Verification
 
 ```bash
@@ -235,5 +409,6 @@ temporary live dashboard. Core authoring tests run without the MCP extra; MCP
 protocol tests are skipped when the SDK is absent. DOM tests cover external edits
 and pending-browser-draft conflicts. Semantic providers are mocked in tests.
 
-Useful next additions would be atomic multi-command batches, trajectory diffs,
-and undo/redo history.
+Tests also cover batch rollback and final-state validation, JSON Patch roundtrips,
+history across browser/generation/MCP edits, sandbox isolation, call budgets,
+literal marker content, recording, cancellation and in-flight revision conflicts.

@@ -7,21 +7,46 @@ several commands; validate=True makes a single edit conditional on compilation.
 from __future__ import annotations
 
 import copy
+import difflib
 import inspect
 import json
 import uuid
 from collections import OrderedDict
+from contextvars import ContextVar
 from typing import Annotated, Literal, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
+from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import KEY, CompileError
 from .dataset import new_sample
-from .llm import SampleBuilder
+from .llm import LLMClient, SampleBuilder
+from .tool_sessions import ToolSessionError, ToolSessions
+from .tools import ToolError
 
 Nonnegative = Annotated[int, Field(ge=0)]
 PageSize = Annotated[int, Field(ge=1, le=5000)]
 Revision = Nonnegative | None
+EditName = Literal[
+    "create_trajectory",
+    "duplicate_trajectory",
+    "replace_trajectory",
+    "delete_trajectory",
+    "update_trajectory_metadata",
+    "create_event",
+    "update_event",
+    "move_event",
+    "duplicate_event",
+    "patch_event_content",
+    "delete_event",
+    "rename_window",
+]
+
+
+class BatchEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: EditName
+    arguments: dict
 
 
 class CommandError(ValueError):
@@ -37,7 +62,7 @@ class TextPatch(BaseModel):
     text: str
 
 
-def command(*, write=False, destructive=False):
+def command(*, write=False, destructive=False, open_world=False):
     def decorate(method):
         hints = get_type_hints(method, include_extras=True)
         fields = {
@@ -56,7 +81,7 @@ def command(*, write=False, destructive=False):
         method.command_annotations = {
             "readOnlyHint": not write,
             "destructiveHint": destructive,
-            "openWorldHint": method.__name__ == "validate_trajectory",
+            "openWorldHint": open_world or method.__name__ == "validate_trajectory",
         }
         return method
 
@@ -77,9 +102,12 @@ def merge_patch(target, patch):
 
 
 class TrajectoryCommands:
-    def __init__(self, state, compiler, runner, client=None):
+    def __init__(self, state, compiler, runner, client=None, history=None):
         self.state, self.compiler, self.runner = state, compiler, runner
         self.client = client
+        self.history = history if history is not None else runner.history
+        self.action = ContextVar("trajectory_command", default="Edit trajectory")
+        self.tool_sessions = ToolSessions()
         self.cache = OrderedDict()
         self.commands = {
             name: getattr(self, name)
@@ -107,15 +135,21 @@ class TrajectoryCommands:
         except ValidationError as error:
             raise CommandError(str(error)) from error
         # Preserve nested TextPatch objects rather than dumping them to dicts.
-        result = fn(
-            **{
-                field.alias: getattr(model, name)
-                for name, field in type(model).model_fields.items()
-            }
-        )
-        if inspect.isawaitable(result):
-            result = await result
-        return copy.deepcopy(result)
+        token = self.action.set(name)
+        try:
+            result = fn(
+                **{
+                    field.alias: getattr(model, name)
+                    for name, field in type(model).model_fields.items()
+                }
+            )
+            if inspect.isawaitable(result):
+                result = await result
+            return copy.deepcopy(result)
+        except (HistoryError, ToolSessionError) as error:
+            raise CommandError(str(error), error.code) from error
+        finally:
+            self.action.reset(token)
 
     def _find(self, sample_id):
         for index, sample in enumerate(self.state["samples"]):
@@ -147,11 +181,12 @@ class TrajectoryCommands:
         json.dumps(sample, allow_nan=False)
         if validate:
             self.compiler.compile(sample)
+        updated = self.state["samples"].copy()
         if index is None:
-            self.state["samples"].append(sample)
+            updated.append(sample)
         else:
-            self.state["samples"][index] = sample
-        self.state["revision"] += 1
+            updated[index] = sample
+        self.history.commit(updated, f"{self.action.get()}: {ident}")
         return {"sample_id": ident, "revision": self.state["revision"], "saved": False}
 
     def _draft(self, sample_id, expected_revision):
@@ -312,8 +347,9 @@ class TrajectoryCommands:
     def delete_trajectory(self, sample_id: str, expected_revision: Revision = None):
         """Remove a trajectory from the session. Call save_dataset to persist the deletion."""
         index, _ = self._draft(sample_id, expected_revision)
-        self.state["samples"].pop(index)
-        self.state["revision"] += 1
+        updated = self.state["samples"].copy()
+        updated.pop(index)
+        self.history.commit(updated, f"delete_trajectory: {sample_id}")
         return {
             "sample_id": sample_id,
             "revision": self.state["revision"],
@@ -761,6 +797,392 @@ class TrajectoryCommands:
             "max_tick": plan["max_tick"],
             "frames": frames,
         }
+
+    @command(write=True, destructive=True)
+    async def apply_batch(
+        self,
+        edits: Annotated[list[BatchEdit], Field(min_length=1, max_length=100)],
+        validate: bool = True,
+        dry_run: bool = False,
+        expected_revision: Revision = None,
+    ):
+        """Apply up to 100 trajectory/event edits atomically as one undoable action.
+
+        edits contains {name, arguments} using authoring command names. Nested batches,
+        tool calls, saves and history operations are excluded. Per-edit expected_revision
+        is not allowed; the outer revision guards the transaction. validate checks all
+        changed surviving samples at the end; per-edit validate can still be requested.
+        dry_run returns the prospective JSON Patch against the sample array without committing.
+        """
+        self._editable(expected_revision)
+        before = self.state["samples"]
+        working = {**self.state, "samples": copy.deepcopy(before)}
+        worker = TrajectoryCommands(
+            working,
+            self.compiler,
+            self.runner,
+            self.client,
+            history=SampleHistory(working, max_entries=0),
+        )
+        results = []
+        for position, edit in enumerate(edits):
+            if "expected_revision" in edit.arguments:
+                raise CommandError(
+                    "Use expected_revision on the batch, not its individual edits"
+                )
+            try:
+                result = await worker.call(edit.name, edit.arguments)
+            except CommandError as error:
+                raise CommandError(
+                    f"Batch edit {position} ({edit.name}): {error}", error.code
+                ) from error
+            result.pop("revision", None)
+            results.append(result)
+        after = working["samples"]
+        if validate:
+            originals = {s["id"]: s for s in before if isinstance(s.get("id"), str)}
+            for sample in after:
+                ident = sample.get("id")
+                if isinstance(ident, str):
+                    unchanged = json_equal(sample, originals.get(ident))
+                else:
+                    unchanged = any(json_equal(sample, old) for old in before)
+                if not unchanged:
+                    self.compiler.compile(sample)
+        changes = json_changes(before, after)
+        if not dry_run:
+            self.history.commit(after, f"Batch: {len(edits)} edits")
+        return {
+            "revision": self.state["revision"],
+            "results": results,
+            "changes": changes,
+            "dry_run": dry_run,
+            "saved": False,
+        }
+
+    @command()
+    def diff_trajectories(
+        self,
+        sample_id: str,
+        other_sample_id: str | None = None,
+        other_sample: dict | None = None,
+        ignore_id: bool = False,
+        include_unified: bool = False,
+        offset: Nonnegative = 0,
+        limit: PageSize = 100,
+    ):
+        """Compare source JSON with another trajectory or supplied candidate, including invalid drafts.
+
+        Supply exactly one of other_sample_id or other_sample. Returns paged RFC 6902
+        operations transforming this sample into the other. ignore_id excludes IDs.
+        Optional unified JSON text diff is capped at 200,000 characters.
+        """
+        if (other_sample_id is None) == (other_sample is None):
+            raise CommandError("Supply exactly one of other_sample_id or other_sample")
+        before = copy.deepcopy(self._find(sample_id)[1])
+        after = copy.deepcopy(
+            self._find(other_sample_id)[1]
+            if other_sample_id is not None
+            else other_sample
+        )
+        if ignore_id:
+            before.pop("id", None)
+            after.pop("id", None)
+        changes = json_changes(before, after)
+        result = {
+            "revision": self.state["revision"],
+            "equal": not changes,
+            "changes": changes[offset : offset + limit],
+            "total_changes": len(changes),
+        }
+        if include_unified:
+            lines = difflib.unified_diff(
+                json.dumps(
+                    before, sort_keys=True, indent=2, ensure_ascii=False
+                ).splitlines(keepends=True),
+                json.dumps(
+                    after, sort_keys=True, indent=2, ensure_ascii=False
+                ).splitlines(keepends=True),
+                fromfile=sample_id,
+                tofile=other_sample_id or "candidate",
+            )
+            parts, remaining = [], 200_000
+            result["unified_truncated"] = False
+            for line in lines:
+                parts.append(line[:remaining])
+                remaining -= len(line)
+                if remaining < 0:
+                    result["unified_truncated"] = True
+                    break
+            result["unified_diff"] = "".join(parts)
+        return result
+
+    @command()
+    def get_edit_history(self, include_changes: bool = False):
+        """View available undo/redo actions for source samples across MCP, browser and generation edits.
+
+        Newest/next actions appear first. History is session-only, bounded to 50 actions
+        and 32 MB; configuration and simulated tool sessions are excluded.
+        include_changes includes each action's forward JSON Patch against the sample array.
+        """
+        return self.history.view(include_changes)
+
+    @command(write=True, destructive=True)
+    def undo_edits(
+        self,
+        steps: Annotated[int, Field(ge=1, le=50)] = 1,
+        expected_revision: Revision = None,
+    ):
+        """Undo source edits as one revision change. Stop generation first; save to persist."""
+        self._editable(expected_revision)
+        return self.history.restore("undo", steps)
+
+    @command(write=True, destructive=True)
+    def redo_edits(
+        self,
+        steps: Annotated[int, Field(ge=1, le=50)] = 1,
+        expected_revision: Revision = None,
+    ):
+        """Reapply undone source edits. A new source edit discards the redo branch."""
+        self._editable(expected_revision)
+        return self.history.restore("redo", steps)
+
+    @command()
+    def list_simulated_tools(self, session_id: str | None = None):
+        """Discover the real Remix simulated-tool schemas, including clock, RAM files, memories, notes and skills.
+
+        Dispatch with call_simulated_tool. subagent is available only when a session
+        explicitly selects a configured endpoint. Even read calls advance the clock.
+        """
+        return self.tool_sessions.definitions(session_id)
+
+    @command(write=True)
+    def create_tool_session(
+        self,
+        session_id: str | None = None,
+        clock_seed: str | None = None,
+        seconds_per_call: Annotated[
+            float, Field(ge=0, le=31_536_000, allow_inf_nan=False)
+        ]
+        | None = None,
+        max_calls: Annotated[int, Field(ge=1, le=256)] | None = None,
+        max_bytes: Annotated[int, Field(ge=128, le=2_000_000)] = 2_000_000,
+        subagent_endpoint: str | None = None,
+    ):
+        """Create an isolated simulated-tool workbench (up to eight sessions).
+
+        Defaults use the configured synthetic clock and call budget. Sessions are RAM-only,
+        separate from generation sandboxes, and excluded from saves/source edit history.
+        subagent_endpoint optionally enables bounded text-only requests to that configured
+        endpoint; no parent RAM state or trajectory context is sent to it.
+        """
+        clock = self.state["config"].get("clock", {})
+        options = {
+            "seed": clock_seed
+            if clock_seed is not None
+            else clock.get("seed", "2030-01-01T09:00:00+00:00"),
+            "seconds_per_call": seconds_per_call
+            if seconds_per_call is not None
+            else clock.get("seconds_per_call", 1),
+            "max_calls": max_calls
+            if max_calls is not None
+            else self.state["config"].get("max_tool_calls", 64),
+            "max_bytes": max_bytes,
+        }
+        if subagent_endpoint is not None:
+            if not any(
+                e["id"] == subagent_endpoint for e in self.state["config"]["endpoints"]
+            ):
+                raise CommandError(
+                    "Configured subagent endpoint not found", "not_found"
+                )
+
+            async def broker(task, depth):
+                endpoint = next(
+                    (
+                        e
+                        for e in self.state["config"]["endpoints"]
+                        if e["id"] == subagent_endpoint
+                    ),
+                    None,
+                )
+                if endpoint is None:
+                    raise ToolError("Configured subagent endpoint no longer exists")
+                try:
+                    message = await (self.client or LLMClient()).complete(
+                        copy.deepcopy(endpoint),
+                        [
+                            {
+                                "role": "system",
+                                "content": "Complete this delegated task. No tools or parent workspace are available.",
+                            },
+                            {"role": "user", "content": task},
+                        ],
+                        tools=None,
+                    )
+                except Exception as error:
+                    raise ToolError("Configured subagent request failed") from error
+                text = message.get("content") if isinstance(message, dict) else None
+                if (
+                    not isinstance(text, str)
+                    or not text.strip()
+                    or len(text) > 200_000
+                    or message.get("tool_calls")
+                ):
+                    raise ToolError(
+                        "Subagent must return nonempty text of at most 200,000 characters without tool calls"
+                    )
+                return text
+
+            options["broker"] = broker
+        return self.tool_sessions.create(session_id, options, subagent_endpoint)
+
+    @command()
+    def list_tool_sessions(self):
+        """List live simulated-tool workbenches with quotas, clock and state counts."""
+        return {
+            "sessions": [
+                self.tool_sessions.inspect(ident, False, False)
+                for ident in self.tool_sessions.sessions
+            ],
+            "max_sessions": self.tool_sessions.max_sessions,
+        }
+
+    @command()
+    def get_tool_session(
+        self, session_id: str, include_state: bool = True, include_log: bool = True
+    ):
+        """Inspect virtual files, memory, notes, skills and the bounded actual-call log.
+
+        Inspection does not consume a simulated call or advance time. Endpoint credentials
+        are excluded. Interaction IDs can be used with record_tool_interaction.
+        """
+        return self.tool_sessions.inspect(session_id, include_state, include_log)
+
+    @command(write=True, destructive=True, open_world=True)
+    async def call_simulated_tool(
+        self,
+        session_id: str,
+        name: str,
+        arguments: dict,
+        record_sample_id: str | None = None,
+        expected_revision: Revision = None,
+    ):
+        """Execute a simulated Remix tool in a session, preserving its real outcome and state.
+
+        Discover exact name/arguments with list_simulated_tools. Valid dispatched failures
+        return outcome.ok=false and consume clock/budget. Invalid arguments do not execute.
+        record_sample_id also appends actual call/result windows as one undoable source edit.
+        Recording requires a compilable sample (or empty draft) and stopped generation.
+        A rejected recording leaves the virtual state/log unchanged. Configured subagent
+        requests can contact an LLM; their external request cannot be rolled back.
+        """
+        if expected_revision is not None and record_sample_id is None:
+            raise CommandError(
+                "expected_revision applies to recording; supply record_sample_id"
+            )
+        recorder = None
+        if record_sample_id is not None:
+            self._editable(expected_revision)
+            self._find(record_sample_id)
+            recorder = lambda entry: self._record_interaction(
+                record_sample_id, entry, expected_revision
+            )
+        return await self.tool_sessions.call(session_id, name, arguments, recorder)
+
+    def _record_interaction(self, sample_id, entry, expected_revision):
+        index, sample = self._draft(sample_id, expected_revision)
+        replay = self._replay(sample)
+        events = [
+            e for group in replay.values() if isinstance(group, list) for e in group
+        ]
+        call_window, result_window = (
+            f"tool-call-{entry['id']}",
+            f"tool-result-{entry['id']}",
+        )
+        if any(
+            isinstance(e, dict) and e.get("window") in (call_window, result_window)
+            for e in events
+        ):
+            raise CommandError(
+                "This interaction is already recorded in the trajectory", "conflict"
+            )
+        builder = SampleBuilder(self.compiler, self.state["config"], self.client)
+        builder.sample = sample
+        builder.next_tick = (
+            self.compiler.compile(sample)["max_tick"] + 1 if events else 0
+        )
+        start_tick = builder.next_tick
+        request_id = "remix-mcp-" + entry["id"]
+
+        def payload(value):
+            # Keep marker-looking text and control tokens inside JSON as literal data.
+            # JSON readers recover the exact original strings from these escapes.
+            text = json.dumps(value, ensure_ascii=False, allow_nan=False).replace(
+                "{N_TICK", "\\u007bN_TICK"
+            )
+            for spelling in self.compiler.special.values():
+                first = spelling[0].encode("utf-16-be")
+                escaped = "".join(
+                    "\\u" + first[i : i + 2].hex() for i in range(0, len(first), 2)
+                )
+                text = text.replace(spelling, escaped + spelling[1:])
+            return text
+
+        builder.add_stream(
+            call_window,
+            payload(
+                {
+                    "name": entry["name"],
+                    "arguments": json.dumps(entry["arguments"], ensure_ascii=False),
+                }
+            ),
+            close=True,
+            request_id=request_id,
+        )
+        builder.add_stream(
+            result_window,
+            payload(entry["outcome"]),
+            op="append",
+            source="tool",
+            close=False,
+            loss={"mask": "exclude"},
+            request_id=request_id,
+        )
+        return {
+            **self._commit(builder.sample, index),
+            "interaction_id": entry["id"],
+            "request_id": request_id,
+            "call_window": call_window,
+            "result_window": result_window,
+            "start_tick": start_tick,
+        }
+
+    @command(write=True, destructive=True)
+    def record_tool_interaction(
+        self,
+        sample_id: str,
+        session_id: str,
+        interaction_id: str,
+        expected_revision: Revision = None,
+    ):
+        """Append a previous actual simulated call/result to a trajectory without executing it again.
+
+        Uses supervised call text with generated EOS and masked, open tool-result content.
+        Repeated recording of the same interaction in one trajectory is rejected.
+        """
+        entry = self.tool_sessions.interaction(session_id, interaction_id)
+        return self._record_interaction(sample_id, entry, expected_revision)
+
+    @command(write=True, destructive=True)
+    def reset_tool_session(self, session_id: str):
+        """Clear a workbench's RAM state/log and restore its initial clock and call budget."""
+        return self.tool_sessions.reset(session_id)
+
+    @command(write=True, destructive=True)
+    def delete_tool_session(self, session_id: str):
+        """Destroy one simulated-tool workbench and its RAM state/log."""
+        return self.tool_sessions.delete(session_id)
 
     @command(write=True)
     async def save_dataset(self):

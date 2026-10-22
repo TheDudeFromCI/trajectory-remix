@@ -10,6 +10,8 @@
   loading, playback controls, event and JSON editing, marker diagnostics and
   task/endpoint/condition/automatic configuration surfaces, external MCP edits,
   and protection of pending browser edits during conflicts.
+  They also exercise dataset Undo/Redo menu actions, keyboard shortcuts, and
+  undoing a pending draft after it is persisted.
 - CLI export succeeds on the included reactive sample.
 - A Python wheel builds successfully and contains all dashboard assets.
 

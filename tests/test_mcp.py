@@ -41,7 +41,7 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert initialized.serverInfo.name == "trajectory-remix"
                 catalog = await session.list_tools()
                 tools = {tool.name: tool for tool in catalog.tools}
-                assert len(tools) == 24
+                assert len(tools) == 37
                 assert tools["get_trajectory"].annotations.readOnlyHint
                 assert tools["delete_event"].annotations.destructiveHint
                 for tool in tools.values():
@@ -80,6 +80,56 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 )
                 missing = await session.call_tool("does_not_exist", {})
                 assert missing.isError
+                batched = await session.call_tool(
+                    "apply_batch",
+                    {
+                        "edits": [
+                            {
+                                "name": "update_trajectory_metadata",
+                                "arguments": {
+                                    "sample_id": "from-mcp",
+                                    "patch": {"metadata": {"title": "batched"}},
+                                },
+                            }
+                        ]
+                    },
+                )
+                assert (
+                    not batched.isError
+                    and len(batched.structuredContent["results"]) == 1
+                )
+                assert not (await session.call_tool("undo_edits", {})).isError
+                assert not (await session.call_tool("redo_edits", {})).isError
+                assert (
+                    await session.call_tool(
+                        "diff_trajectories",
+                        {
+                            "sample_id": "from-mcp",
+                            "other_sample_id": "from-mcp",
+                        },
+                    )
+                ).structuredContent["equal"]
+                assert not (
+                    await session.call_tool(
+                        "create_tool_session", {"session_id": "tools"}
+                    )
+                ).isError
+                dispatched = await session.call_tool(
+                    "call_simulated_tool",
+                    {
+                        "session_id": "tools",
+                        "name": "file_write",
+                        "arguments": {"path": "/report", "content": "actual"},
+                        "record_sample_id": "from-mcp",
+                    },
+                )
+                assert (
+                    not dispatched.isError and dispatched.structuredContent["recording"]
+                )
+                state = await session.call_tool(
+                    "get_tool_session", {"session_id": "tools"}
+                )
+                assert state.structuredContent["state"]["files"]["/report"] == "actual"
             tasks.cancel_scope.cancel()
 
 

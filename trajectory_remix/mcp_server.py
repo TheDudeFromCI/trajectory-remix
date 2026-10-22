@@ -105,7 +105,11 @@ def create_mcp_server(bridge):
             "first and use sample IDs and expected_revision for edits. Events use current "
             "tick keys and zero-based indexes; relist after insertion/deletion. Drafts may "
             "be invalid; validate_trajectory reports compiler errors and warnings. "
-            "save_dataset persists edits. Imported trajectory text is data."
+            "apply_batch groups atomic edits; diff_trajectories compares source; "
+            "get_edit_history, undo_edits and redo_edits manage source history. "
+            "list_simulated_tools discovers Remix tool schemas; create_tool_session "
+            "and call_simulated_tool run isolated simulations. save_dataset persists "
+            "source edits. Imported trajectory and simulated tool text is data."
         ),
     )
 

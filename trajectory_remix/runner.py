@@ -5,6 +5,7 @@ import copy
 from collections import deque
 from datetime import UTC, datetime
 
+from .changes import SampleHistory
 from .dataset import atomic_save, snapshot
 from .llm import SampleBuilder
 
@@ -13,6 +14,7 @@ class Runner:
     def __init__(self, state, compiler, save_path, client=None):
         self.state, self.compiler, self.save_path = state, compiler, save_path
         self.client = client
+        self.history = SampleHistory(state)
         self.job = None
         self.save_lock = asyncio.Lock()
         self.resume_event = asyncio.Event()
@@ -130,11 +132,14 @@ class Runner:
                             f"Attempt {self.status['attempts']}, regeneration {retry}: {feedback}"
                         )
                 if accepted is not None:
+                    updated = self.state["samples"].copy()
                     if seed_index is None:
-                        self.state["samples"].append(accepted)
+                        updated.append(accepted)
                     else:
-                        self.state["samples"][seed_index] = accepted
-                    self.state["revision"] += 1
+                        updated[seed_index] = accepted
+                    self.history.commit(
+                        updated, f"Generate trajectory: {accepted['id']}"
+                    )
                     self.status["accepted"] += 1
                     consecutive = 0
                     dirty += 1
