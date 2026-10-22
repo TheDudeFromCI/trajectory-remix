@@ -178,6 +178,22 @@ for (const id of ["generate-one", "validate-sample", "auto-start"])
   assert.equal($("generation-menu").contains($(id)), true);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
+assert.equal($("edit-menu").contains($("preferences-button")), true);
+await click("preferences-button");
+assert($("preferences-dialog").hasAttribute("open"));
+assert.equal($("auto-compile-delay").value, "1");
+$("auto-compile-delay").value = "0.2";
+await $("preferences-form").onsubmit({ preventDefault() {} });
+assert.equal($("preferences-dialog").hasAttribute("open"), false);
+assert.equal(
+  w.localStorage.getItem("trajectory-remix.auto-compile-delay"),
+  "200",
+);
+const compileCountBeforePreference = compileCount();
+$("sample-json").oninput();
+await waitFor(() => compileCount() > compileCountBeforePreference);
+await click("edit-menu-button");
+assert.equal($("edit-menu").hidden, false);
 $("sample-json").focus();
 $("sample-json").oninput();
 assert.equal(w.document.title, "* Trajectory Remix");
@@ -209,7 +225,7 @@ assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 27,
+    checks: 34,
     errors,
   }),
 );

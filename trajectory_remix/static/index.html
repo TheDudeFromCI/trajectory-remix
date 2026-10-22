@@ -21,6 +21,7 @@
         <div class="file-menu">
           <button id="edit-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">Edit</button>
           <div id="edit-menu" class="file-menu-popup" role="menu" hidden>
+            <button id="preferences-button" role="menuitem">Preferences</button>
             <div class="submenu">
               <button id="generation-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Generation ▸</button>
               <div id="generation-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
@@ -217,6 +218,35 @@
       </div>
     </aside>
     <div id="toast" role="status" hidden></div>
+    <dialog id="preferences-dialog">
+      <div class="dialog-header">
+        <div>
+          <div class="eyebrow">EDITOR</div>
+          <h2>Preferences</h2>
+        </div>
+        <button id="close-preferences" class="square" aria-label="Close preferences">
+          ×
+        </button>
+      </div>
+      <form id="preferences-form" class="preferences-body">
+        <label for="auto-compile-delay">Compile after inactivity</label>
+        <div class="preferences-delay">
+          <input
+            id="auto-compile-delay"
+            type="number"
+            min="0.1"
+            max="60"
+            step="0.1"
+            required
+          />
+          <span>seconds</span>
+        </div>
+        <div class="dialog-footer">
+          <button id="cancel-preferences" type="button">Cancel</button>
+          <button class="primary" type="submit">Save preferences</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="settings-dialog">
       <div class="dialog-header">
         <div>

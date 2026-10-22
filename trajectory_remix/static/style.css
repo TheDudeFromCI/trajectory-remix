@@ -869,6 +869,26 @@ dialog::backdrop {
   font-size: 10px;
   color: var(--muted);
 }
+.preferences-body {
+  padding-top: 14px;
+}
+.preferences-body > label {
+  display: block;
+  padding: 0 13px 8px;
+}
+.preferences-delay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 13px 14px;
+  color: var(--muted);
+}
+.preferences-delay input {
+  width: 100px;
+}
+.preferences-body .dialog-footer {
+  justify-content: flex-end;
+}
 .config-tabs {
   display: flex;
   gap: 8px;

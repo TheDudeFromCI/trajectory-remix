@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
+const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
 let state,
   selected = -1,
   sample = null,
@@ -16,6 +17,7 @@ let configDraft,
   toastTimer,
   compileTimer,
   editRevision = 0,
+  autoCompileDelayMs = loadAutoCompileDelay(),
   pollBusy = false,
   compileBusy = false;
 const colors = [
@@ -84,6 +86,16 @@ function action(fn) {
     }
   };
 }
+function loadAutoCompileDelay() {
+  try {
+    const saved = Number(localStorage.getItem(AUTO_COMPILE_DELAY_KEY));
+    return Number.isFinite(saved) && saved >= 100 && saved <= 60000
+      ? saved
+      : 1000;
+  } catch {
+    return 1000;
+  }
+}
 function scheduleCompile() {
   clearTimeout(compileTimer);
   compileTimer = setTimeout(
@@ -95,7 +107,7 @@ function scheduleCompile() {
       compileTimer = null;
       await compileSample(true);
     }),
-    1000,
+    autoCompileDelayMs,
   );
 }
 function setDirty(value = true) {
@@ -1351,6 +1363,24 @@ function toggleMenu(name) {
 }
 $("file-menu-button").onclick = () => toggleMenu("file");
 $("edit-menu-button").onclick = () => toggleMenu("edit");
+$("preferences-button").onclick = () => {
+  closeMenus();
+  $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
+  $("preferences-dialog").showModal();
+};
+$("close-preferences").onclick = () => $("preferences-dialog").close();
+$("cancel-preferences").onclick = () => $("preferences-dialog").close();
+$("preferences-form").onsubmit = action(async (event) => {
+  event.preventDefault();
+  const delaySeconds = Number($("auto-compile-delay").value);
+  if (!Number.isFinite(delaySeconds) || delaySeconds < 0.1 || delaySeconds > 60)
+    throw new Error("Compile delay must be between 0.1 and 60 seconds.");
+  const delayMs = Math.round(delaySeconds * 1000);
+  localStorage.setItem(AUTO_COMPILE_DELAY_KEY, String(delayMs));
+  autoCompileDelayMs = delayMs;
+  if (compileTimer !== null) scheduleCompile();
+  $("preferences-dialog").close();
+});
 for (const name of ["file", "edit"])
   $(name + "-menu-button").onmouseenter = () => {
     const anyOpen = !$("file-menu").hidden || !$("edit-menu").hidden;
