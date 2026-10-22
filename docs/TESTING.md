@@ -19,6 +19,10 @@
   generation continuity, and masked result visibility in token exports. MCP
   checks schedule calls through the official stdio client and shared dashboard,
   including source history, revision conflicts, atomic batches and persistence.
+  Parallel tool tests pause a streamed request with supervised NOOPs, run the
+  clock in another window, and verify the resumed request can attend to its
+  result without seeing the pending write outcome. They also cover tick-0 BOS,
+  reusable tool windows, request anchors, segment losses and dispatch timing.
 - CLI export succeeds on the included reactive sample.
 - A Python wheel builds successfully and contains all dashboard assets.
 

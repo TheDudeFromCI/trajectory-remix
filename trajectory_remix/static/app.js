@@ -821,7 +821,7 @@ function renderEvents() {
         update();
       });
       win.className = "event-window";
-      win.placeholder = e.op === "tool-call" ? "Result window ID" : "Window ID";
+      win.placeholder = e.op === "tool-call" ? "Tool window ID" : "Window ID";
       head.append(
         win,
         button("↑", () => {
@@ -921,7 +921,45 @@ function renderEvents() {
         duration.min = "0";
         duration.step = "1";
         options.append(field("Duration (ticks)", duration));
+        options.append(
+          field(
+            "Request delivery",
+            select(["instant", "stream"], e.delivery || "instant", (value) => {
+              e.delivery = value;
+              update();
+            }),
+          ),
+          field(
+            "Custom request text",
+            checkbox("content" in e || "segments" in e, (value) => {
+              if (value) e.content = "";
+              else {
+                delete e.content;
+                delete e.segments;
+              }
+              update();
+              renderEvents();
+            }),
+          ),
+        );
         card.append(options);
+        if (e.segments) {
+          card.append(
+            node("div", "segmented-note", "Edit request segments and loss masks in Source JSON."),
+          );
+        } else if ("content" in e) {
+          const area = node("textarea");
+          area.setAttribute("aria-label", "Tool request text");
+          area.value = e.content;
+          area.spellcheck = false;
+          area.oninput = () => {
+            e.content = area.value;
+            update();
+          };
+          card.append(
+            field("Request text (anchors and NOOPs supported for streams)", area),
+          );
+        }
         for (const key of e.tool === "subagent"
           ? ["arguments", "outcome"]
           : ["arguments"]) {
@@ -946,7 +984,7 @@ function renderEvents() {
           node(
             "small",
             "hint",
-            "A fresh result window opens at completion. Sandbox changes commit at that tick.",
+            "Tool windows are open from tick 0. Request and result share the window. Streamed requests emit one token per tick; execution begins on the following tick. Duration counts execution ticks.",
           ),
         );
       } else {

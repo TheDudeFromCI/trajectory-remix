@@ -114,3 +114,32 @@ async def test_scheduled_calls_compile_atomically_in_batches(studio):
         frames["frames"][2]["sandbox"]["tool_calls"][-1]["outcome"]["result"]["content"]
         == "old"
     )
+
+
+async def test_streamed_call_schema_history_and_shared_window(studio):
+    first = await call(
+        studio, "create_tool_call", sample_id="test", tick="1",
+        tool="time_now", arguments={}, window="tools", delivery="stream",
+        segments=[{"text": "abc<|noop|>{N_TICK:1}", "loss": {"mask": "include"}}],
+        duration_ticks=2,
+    )
+    assert first["tool_call"]["request_start"] == 1
+    assert first["tool_call"]["start"] == 5
+    assert first["tool_call"]["end"] == 7
+    composing = await call(studio, "get_sandbox_state", sample_id="test", tick=3)
+    assert composing["sandbox"]["tool_calls"][0]["status"] == "composing"
+    assert "outcome" not in composing["sandbox"]["tool_calls"][0]
+    # Reusing the same window returns the newly scheduled call, not the first one.
+    second = await call(
+        studio, "create_tool_call", sample_id="test", tick="8",
+        tool="file_list", arguments={}, window="tools",
+    )
+    assert second["tool_call"]["tool"] == "file_list"
+    assert second["tool_call"]["start"] == 8
+    before = copy.deepcopy(studio[0].state.dataset)
+    rejected = await studio[1].post("/api/samples/0/tool-calls", json={
+        "tick": "9", "tool": "time_now", "arguments": {},
+        "content": "x", "segments": [{"text": "y"}],
+    })
+    assert rejected.status_code == 422
+    assert studio[0].state.dataset == before

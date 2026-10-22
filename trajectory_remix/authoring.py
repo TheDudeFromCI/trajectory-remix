@@ -22,7 +22,7 @@ from .compiler import KEY, CompileError
 from .dataset import new_sample
 from .llm import LLMClient, SampleBuilder
 from .tool_sessions import ToolSessionError, ToolSessions
-from .tools import ToolError
+from .tools import ToolError, tool_message, tool_request
 
 Nonnegative = Annotated[int, Field(ge=0)]
 PageSize = Annotated[int, Field(ge=1, le=5000)]
@@ -971,13 +971,19 @@ class TrajectoryCommands:
         outcome: dict | None = None,
         position: Nonnegative | None = None,
         expected_revision: Revision = None,
+        delivery: Literal["instant", "stream"] = "instant",
+        content: str | None = None,
+        segments: list[dict] | None = None,
+        loss: dict | None = None,
     ):
         """Schedule an executable synthetic tool event and compile before committing one undoable edit.
 
-        The trajectory's sandbox changes atomically at tick + duration_ticks. A fresh
-        result window opens there with masked actual output. tick accepts numeric or
-        anchor expressions. Only subagent requires a recorded outcome; replay never
-        contacts an endpoint. Workbench sessions remain separate. Save with save_dataset.
+        Tool windows exist from tick 0; request and masked result share that window.
+        Instant delivery dispatches at tick; stream generates one request token per
+        tick and dispatches on the next tick after the last token. Optional content
+        or segments replace the canonical <tool> request and support anchors/NOOPs.
+        Sandbox changes at dispatch + duration_ticks. Only subagent requires a
+        recorded outcome; replay never contacts an endpoint. Save with save_dataset.
         """
         index, sample = self._draft(sample_id, expected_revision)
         event = {
@@ -988,12 +994,17 @@ class TrajectoryCommands:
                 window if window is not None else f"tool-result-{uuid.uuid4().hex[:12]}"
             ),
             "duration-ticks": duration_ticks,
+            "delivery": delivery,
         }
+        for key, value in (("content", content), ("segments", segments), ("loss", loss)):
+            if value is not None:
+                event[key] = value
         if outcome is not None:
             event["outcome"] = outcome
         address = self._insert(sample, tick, event, position)
         plan = self.compiler.compile(sample)
-        call = next(c for c in plan["tool_calls"] if c["window"] == event["window"])
+        path = f"replay[{address['tick']}][{address['event_index']}]"
+        call = next(c for c in plan["tool_calls"] if c["path"] == path)
         return {**self._commit(sample, index), **address, "tool_call": call}
 
     @command()
@@ -1140,7 +1151,8 @@ class TrajectoryCommands:
 
         Discover exact name/arguments with list_simulated_tools. Valid dispatched failures
         return outcome.ok=false and consume clock/budget. Invalid arguments do not execute.
-        record_sample_id also appends actual call/result windows as one undoable source edit.
+        record_sample_id also appends the actual call/result in one tick-0 tool window
+        as one undoable source edit.
         Recording requires a compilable sample (or empty draft) and stopped generation.
         A rejected recording leaves the virtual state/log unchanged. Configured subagent
         requests can contact an LLM; their external request cannot be rolled back.
@@ -1164,12 +1176,10 @@ class TrajectoryCommands:
         events = [
             e for group in replay.values() if isinstance(group, list) for e in group
         ]
-        call_window, result_window = (
-            f"tool-call-{entry['id']}",
-            f"tool-result-{entry['id']}",
-        )
+        call_window = result_window = f"tool-result-{entry['id']}"
         if any(
-            isinstance(e, dict) and e.get("window") in (call_window, result_window)
+            isinstance(e, dict)
+            and e.get("window") in (f"tool-call-{entry['id']}", result_window)
             for e in events
         ):
             raise CommandError(
@@ -1183,34 +1193,22 @@ class TrajectoryCommands:
         start_tick = builder.next_tick
         request_id = "remix-mcp-" + entry["id"]
 
-        def payload(value):
-            # Keep marker-looking text and control tokens inside JSON as literal data.
-            # JSON readers recover the exact original strings from these escapes.
-            text = json.dumps(value, ensure_ascii=False, allow_nan=False).replace(
-                "{N_TICK", "\\u007bN_TICK"
-            )
-            for spelling in self.compiler.special.values():
-                first = spelling[0].encode("utf-16-be")
-                escaped = "".join(
-                    "\\u" + first[i : i + 2].hex() for i in range(0, len(first), 2)
-                )
-                text = text.replace(spelling, escaped + spelling[1:])
-            return text
-
+        replay.setdefault("0", []).append(
+            {"op": "open", "window": result_window, "window-type": "tool"}
+        )
         builder.add_stream(
             call_window,
-            payload(
-                {
-                    "name": entry["name"],
-                    "arguments": json.dumps(entry["arguments"], ensure_ascii=False),
-                }
-            ),
-            close=True,
+            tool_request(
+                entry["name"], entry["arguments"], self.compiler.special.values()
+            ).replace("{N_TICK", "\\u007bN_TICK"),
+            close=False,
             request_id=request_id,
         )
         builder.add_stream(
             result_window,
-            payload(entry["outcome"]),
+            tool_message(
+                "tool_result", entry["outcome"], self.compiler.special.values()
+            ).replace("{N_TICK", "\\u007bN_TICK"),
             op="append",
             source="tool",
             close=False,
@@ -1236,7 +1234,7 @@ class TrajectoryCommands:
     ):
         """Append a previous actual simulated call/result to a trajectory without executing it again.
 
-        Uses supervised call text with generated EOS and masked, open tool-result content.
+        Uses supervised <tool> text and masked <tool_result> text in one tick-0 window.
         Repeated recording of the same interaction in one trajectory is rejected.
         """
         entry = self.tool_sessions.interaction(session_id, interaction_id)

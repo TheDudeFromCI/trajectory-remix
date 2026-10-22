@@ -56,7 +56,10 @@ def compile_sandbox(items, sample):
             event = item["event"]
             if event["op"] != "tool-call":
                 continue
-            end = item["tick"] + event.get("duration-ticks", 0)
+            start = item["tick"] + (
+                len(item["encoded"].ids) if not item["instant"] else 0
+            )
+            end = start + event.get("duration-ticks", 0)
             if end >= MAX_TICKS:
                 raise CompileError("Tool completion exceeds tick limit", item["path"])
             calls.append(
@@ -65,7 +68,8 @@ def compile_sandbox(items, sample):
                     "window": event["window"],
                     "tool": event["tool"],
                     "arguments": copy.deepcopy(event["arguments"]),
-                    "start": item["tick"],
+                    "request_start": item["tick"],
+                    "start": start,
                     "end": end,
                     "order": item["order"],
                     **(
@@ -131,7 +135,9 @@ def sandbox_frame(plan, tick):
         {
             **{k: copy.deepcopy(v) for k, v in call.items() if k != "outcome"},
             "status": (
-                "running"
+                "composing"
+                if tick < call["start"]
+                else "running"
                 if tick < call["end"]
                 else "completed" if call["outcome"]["ok"] else "failed"
             ),
@@ -142,6 +148,6 @@ def sandbox_frame(plan, tick):
             ),
         }
         for call in plan["tool_calls"]
-        if call["start"] <= tick
+        if call["request_start"] <= tick
     ]
     return state

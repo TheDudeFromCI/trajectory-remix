@@ -33,6 +33,16 @@ def tool_json(value, special_tokens):
     )
 
 
+def tool_message(tag, value, special_tokens):
+    """Keep JSON data from introducing protocol tags or model control tokens."""
+    payload = tool_json(value, special_tokens).replace("<", "\\u003c")
+    return f"<{tag}>{payload}</{tag}>"
+
+
+def tool_request(tool, arguments, special_tokens):
+    return tool_message("tool", {"tool": tool, "args": arguments}, special_tokens)
+
+
 # Function descriptors accepted by OpenAI-compatible chat/completions.
 DEFINITIONS = [
     ("time_now", "Read the sample's synthetic clock.", {}),
