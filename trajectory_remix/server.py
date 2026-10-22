@@ -25,6 +25,7 @@ from .dataset import (
 )
 from .llm import TAGS, SampleBuilder, default_config, validate_config
 from .runner import Runner
+from .tools import SCHEMAS
 
 MAX_BODY = 40_000_000
 
@@ -152,17 +153,21 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
                 {
                     "index": i,
                     "id": s.get("id", "untitled"),
-                    "events": sum(
-                        len(v)
-                        for v in s.get("replay", {}).values()
-                        if isinstance(v, list)
-                    )
-                    if isinstance(s.get("replay"), dict)
-                    else 0,
-                    "tags": s.get("metadata", {}).get("tags", [])
-                    if isinstance(s.get("metadata"), dict)
-                    and isinstance(s["metadata"].get("tags", []), list)
-                    else [],
+                    "events": (
+                        sum(
+                            len(v)
+                            for v in s.get("replay", {}).values()
+                            if isinstance(v, list)
+                        )
+                        if isinstance(s.get("replay"), dict)
+                        else 0
+                    ),
+                    "tags": (
+                        s.get("metadata", {}).get("tags", [])
+                        if isinstance(s.get("metadata"), dict)
+                        and isinstance(s["metadata"].get("tags", []), list)
+                        else []
+                    ),
                 }
                 for i, s in enumerate(state["samples"])
             ],
@@ -172,6 +177,7 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
             "status": runner.status,
             "logs": list(runner.logs),
             "tags": TAGS,
+            "tools": SCHEMAS,
             "tokenizer": {
                 "sha256": compiler.fingerprint,
                 "vocab": compiler.tokenizer.get_vocab_size(),
@@ -198,6 +204,37 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         if not isinstance(arguments, dict):
             raise ValueError("arguments must be an object")
         return await commands.call(data["name"], arguments)
+
+    @app.get("/api/tools")
+    async def list_tools():
+        return {"tools": SCHEMAS}
+
+    @app.get("/api/samples/{index}/sandbox/{tick}")
+    async def get_sandbox(index: int, tick: int):
+        result = await commands.call(
+            "get_sandbox_state",
+            {
+                "sample_id": sample_at(index).get("id"),
+                "tick": tick,
+            },
+        )
+        return result["sandbox"]
+
+    @app.post("/api/samples/{index}/tool-calls")
+    async def add_tool_call(index: int, request: Request):
+        editable()
+        data = await body(request)
+        at = data.get("tick")
+        if type(at) not in (int, str):
+            raise ValueError("tick must be an integer or anchor expression")
+        return await commands.call(
+            "create_tool_call",
+            {
+                **data,
+                "sample_id": sample_at(index).get("id"),
+                "tick": str(at),
+            },
+        )
 
     @app.post("/api/samples")
     async def create_sample(request: Request):

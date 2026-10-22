@@ -6,13 +6,14 @@ import copy
 import json
 import os
 import uuid
+from time import monotonic
 from urllib.parse import urlparse
 
 import httpx
 
 from .compiler import KEY
 from .dataset import reject_constant
-from .tools import SCHEMAS, Sandbox, ToolError
+from .tools import SCHEMAS, Sandbox, tool_json
 
 TAGS = [
     "competent",
@@ -473,14 +474,19 @@ class SampleBuilder:
         key = str(self.next_tick) if start == "auto" else str(start)
         events = self.sample["replay"].setdefault(key, [])
         all_events = [e for group in self.sample["replay"].values() for e in group]
-        if not any(e["op"] == "open" and e["window"] == window for e in all_events):
+        if not any(
+            e["op"] in ("open", "tool-call") and e["window"] == window
+            for e in all_events
+        ):
             events.append(
                 {
                     "op": "open",
                     "window": window,
-                    "window-type": source
-                    if op == "append"
-                    else ("reasoning" if "reason" in window else "chat"),
+                    "window-type": (
+                        source
+                        if op == "append"
+                        else ("reasoning" if "reason" in window else "chat")
+                    ),
                     **({"request-id": request_id} if request_id else {}),
                 }
             )
@@ -577,26 +583,36 @@ class SampleBuilder:
                 suffix = str(self.serial)
                 self.add_stream(
                     f"tool-call-{suffix}",
-                    json.dumps(function, ensure_ascii=False),
+                    tool_json(function, self.compiler.special.values()).replace(
+                        "{N_TICK", "\\{N_TICK"
+                    ),
                     close=True,
                     request_id=call["id"],
                 )
-                try:
-                    args = json.loads(function.get("arguments", "{}"))
-                    result = await sandbox.call(function.get("name"), args)
-                    tool_result = json.dumps(
-                        {"ok": True, "result": result}, ensure_ascii=False
-                    )
-                except (ToolError, ValueError, KeyError) as e:
-                    tool_result = json.dumps({"ok": False, "error": str(e)})
-                self.add_stream(
-                    f"tool-result-{suffix}",
-                    tool_result,
-                    op="append",
-                    source="tool",
-                    close=False,
-                    request_id=call["id"],
+                args = json.loads(
+                    function.get("arguments", "{}"), parse_constant=reject_constant
                 )
+                if not isinstance(args, dict):
+                    raise ValueError("Tool arguments must be a JSON object")
+                started = monotonic()
+                try:
+                    result = await sandbox.call(function.get("name"), args)
+                    outcome = {"ok": True, "result": result}
+                except (ValueError, KeyError, OverflowError) as e:
+                    outcome = {"ok": False, "error": str(e)}
+                event = {
+                    "op": "tool-call",
+                    "window": f"tool-result-{suffix}",
+                    "tool": function.get("name"),
+                    "arguments": args,
+                    "duration-ticks": int(monotonic() - started),
+                    "request-id": call["id"],
+                }
+                if event["tool"] == "subagent":
+                    event["outcome"] = outcome
+                self.sample["replay"].setdefault(str(self.next_tick), []).append(event)
+                self.next_tick = self.compiler.compile(self.sample)["max_tick"] + 1
+                tool_result = json.dumps(outcome, ensure_ascii=False)
                 messages.append(
                     {"role": "tool", "tool_call_id": call["id"], "content": tool_result}
                 )
@@ -665,12 +681,20 @@ class SampleBuilder:
             finally:
                 child.close()
 
+        metadata = self.sample.get("metadata", {})
         sandbox = Sandbox(
-            **self.config.get("clock", {}),
+            **(
+                metadata.get("synthetic_clock", {})
+                if isinstance(metadata, dict)
+                else {}
+            ),
             broker=broker,
             max_calls=self.config.get("max_tool_calls", 64),
         )
         try:
+            if self.sample["replay"]:
+                plan = self.compiler.compile(self.sample)
+                sandbox.restore(self.compiler.frame(plan, plan["max_tick"])["sandbox"])
             tasks = [
                 t
                 for t in self.config["tasks"]

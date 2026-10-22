@@ -364,11 +364,61 @@ assert.equal(
   JSON.parse($("sample-json").value).metadata.title,
   "MCP edit during compile",
 );
+// Author an actual sandbox call and scrub across its completion in both directions.
+await [...w.document.querySelectorAll(".tab")]
+  .find((b) => b.dataset.view === "events")
+  .onclick();
+await click("add-tool-call");
+const toolCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const at = toolCard.querySelector(".event-header input");
+at.value = "150";
+at.oninput();
+const toolSelect = toolCard.querySelector(".event-options select");
+toolSelect.value = "file_write";
+toolSelect.onchange();
+const updatedToolCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const args = updatedToolCard.querySelector(
+  'textarea[aria-label="arguments JSON"]',
+);
+args.value = JSON.stringify({
+  path: "history.txt",
+  content: "new file version",
+});
+args.oninput();
+const duration = updatedToolCard.querySelector(
+  '.event-options input[type="number"]',
+);
+duration.value = "50";
+duration.oninput();
+await waitFor(() => $("max-tick").textContent === "200");
+const jump = (value) => {
+  $("tick-number").value = String(value);
+  $("tick-number").onchange({ target: $("tick-number") });
+};
+jump(175);
+await waitFor(() =>
+  /file_write · running/.test($("sandbox-calls").textContent),
+);
+assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
+jump(200);
+await waitFor(() => /new file version/.test($("sandbox-state").textContent));
+assert.match($("sandbox-calls").textContent, /file_write · completed/);
+const resultCards = w.document.querySelectorAll(".window-card").length;
+$("timeline").onmousemove({
+  target: $("timeline"),
+  clientX:
+    125 + 175 * +$("timeline-zoom").value - $("timeline-scroll").scrollLeft,
+  clientY: 35 + resultCards * 32,
+});
+assert.match($("timeline-event").textContent, /file_write · 150–200/);
+jump(100);
+await waitFor(() => /files \(0\)/.test($("sandbox-state").textContent));
+assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 48,
+    checks: 56,
     errors,
   }),
 );

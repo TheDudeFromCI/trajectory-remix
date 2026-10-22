@@ -9,12 +9,28 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
 
 class ToolError(ValueError):
     pass
+
+
+def tool_json(value, special_tokens):
+    """Serialize observations/calls without embedding model control tokens."""
+    escapes = {}
+    for spelling in special_tokens:
+        units = spelling.encode("utf-16-be")
+        escapes[json.dumps(spelling, ensure_ascii=False)[1:-1]] = "".join(
+            f"\\u{int.from_bytes(units[i:i + 2], 'big'):04x}"
+            for i in range(0, len(units), 2)
+        )
+    pattern = "|".join(re.escape(s) for s in sorted(escapes, key=len, reverse=True))
+    return re.sub(
+        pattern, lambda m: escapes[m[0]], json.dumps(value, ensure_ascii=False)
+    )
 
 
 # Function descriptors accepted by OpenAI-compatible chat/completions.
@@ -115,6 +131,25 @@ class Sandbox:
             store.clear()
         self.closed = True
 
+    def snapshot(self):
+        return deepcopy(
+            {
+                "clock": self.clock.isoformat(),
+                "calls": self.calls,
+                "files": self.files,
+                "memory": self.memory,
+                "notes": self.notes,
+                "skills": self.skills,
+            }
+        )
+
+    def restore(self, state):
+        """Restore a compiler-produced snapshot when extending a trajectory."""
+        self.clock = datetime.fromisoformat(state["clock"])
+        self.calls = state["calls"]
+        for name in ("files", "memory", "notes", "skills"):
+            setattr(self, name, deepcopy(state[name]))
+
     def path(self, path):
         if (
             not isinstance(path, str)
@@ -164,7 +199,7 @@ class Sandbox:
         store[key] = value
         return {"saved": key}
 
-    async def call(self, name, args):
+    def start_call(self, name, args):
         if self.closed:
             raise ToolError("Sandbox has been destroyed")
         self.check_args(name, args)
@@ -172,6 +207,18 @@ class Sandbox:
         if self.calls > self.max_calls:
             raise ToolError("Tool call budget exhausted")
         self.clock += timedelta(seconds=self.step)
+
+    async def call(self, name, args):
+        if name == "subagent":
+            self.start_call(name, args)
+            if self.depth >= 2 or self.broker is None:
+                raise ToolError("Subagent depth/capability limit")
+            return {"response": await self.broker(args["task"], self.depth + 1)}
+        return self.call_sync(name, args)
+
+    def call_sync(self, name, args):
+        """Run deterministic capabilities without an event loop or network IO."""
+        self.start_call(name, args)
         if name == "time_now":
             return {"timestamp": self.clock.isoformat(), "synthetic": True}
         if name == "time_advance":
@@ -222,7 +269,5 @@ class Sandbox:
                 raise ToolError("Skill not found")
             return {"name": args["name"], "content": self.skills[args["name"]]}
         if name == "subagent":
-            if self.depth >= 2 or self.broker is None:
-                raise ToolError("Subagent depth/capability limit")
-            return {"response": await self.broker(args["task"], self.depth + 1)}
+            raise ToolError("Subagent replay requires a recorded outcome")
         raise ToolError("Unsupported tool")

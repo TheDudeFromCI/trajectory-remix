@@ -67,12 +67,12 @@ async def test_tool_grounded_generation_and_validation(compiler):
     report = await b.validators(sample)
     assert report["valid"]
     events = [e for a in sample["replay"].values() for e in a]
-    assert any(
-        e["op"] == "append" and e.get("source") == "tool" and "saved" in e["content"]
-        for e in events
-    )
+    assert any(e["op"] == "tool-call" and e["tool"] == "note_save" for e in events)
     assert any(m["role"] == "tool" for m in fake.messages[2])
-    compiler.compile(sample)
+    plan = compiler.compile(sample)
+    assert compiler.frame(plan, plan["max_tick"])["sandbox"]["notes"] == {
+        "n": {"text": "check", "status": "todo"}
+    }
 
 
 async def test_regeneration_uses_validator_feedback_and_checkpoints(compiler, tmp_path):
@@ -272,6 +272,100 @@ async def test_tool_results_remain_live_through_reasoning(compiler):
     result = next(w for w in p["windows"] if w["id"].startswith("tool-result-"))
     assert result["open"] < reasoning["start"] <= reasoning["end"] < result["close"]
     assert any(r["op"] == "noop" and r["window"] == result["id"] for r in p["rows"])
+
+
+async def test_tool_generation_preserves_literal_data_and_seed_state(compiler, sample):
+    text = "<|eos|>{N_TICK:1}{N_TICKS:bad}"
+    sample["replay"]["1"] = [
+        {
+            "op": "tool-call",
+            "tool": "file_write",
+            "window": "seed-write",
+            "arguments": {"path": "existing", "content": text},
+        }
+    ]
+    config = minimal_config()
+    config["tasks"] = [config["tasks"][1]]
+    fake = FakeClient(
+        [
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "read",
+                        "type": "function",
+                        "function": {
+                            "name": "file_read",
+                            "arguments": json.dumps({"path": "existing"}),
+                        },
+                    }
+                ],
+            },
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "write",
+                        "type": "function",
+                        "function": {
+                            "name": "file_write",
+                            "arguments": json.dumps(
+                                {"path": "literal", "content": text}
+                            ),
+                        },
+                    }
+                ],
+            },
+            "Inspected the virtual files.",
+        ]
+    )
+    builder = SampleBuilder(compiler, config, fake)
+    generated = await builder.generate(seed=sample)
+    tool_message = next(m for m in fake.messages[1] if m["role"] == "tool")
+    assert json.loads(tool_message["content"])["result"]["content"] == text
+    plan = compiler.compile(generated)
+    assert plan["anchors"] == {}
+    assert compiler.frame(plan, plan["max_tick"])["sandbox"]["files"] == {
+        "/existing": text,
+        "/literal": text,
+    }
+
+
+async def test_generated_subagent_records_duration_and_replays_offline(
+    compiler, monkeypatch
+):
+    config = minimal_config()
+    config["tasks"] = [config["tasks"][1]]
+    fake = FakeClient(
+        [
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "child",
+                        "type": "function",
+                        "function": {
+                            "name": "subagent",
+                            "arguments": json.dumps({"task": "Inspect"}),
+                        },
+                    }
+                ],
+            },
+            "Child answer.",
+            "Integrated the answer.",
+        ]
+    )
+    readings = iter([10, 13.75])
+    monkeypatch.setattr("trajectory_remix.llm.monotonic", lambda: next(readings))
+    generated = await SampleBuilder(compiler, config, fake).generate()
+    plan = compiler.compile(generated)
+    call = plan["tool_calls"][0]
+    assert call["end"] - call["start"] == 3
+    assert call["outcome"] == {"ok": True, "result": {"response": "Child answer."}}
+    assert (
+        compiler.frame(plan, call["start"])["sandbox"]["tool_calls"][0]["status"]
+        == "running"
+    )
 
 
 async def test_explicit_start_prefix_limits_task_context(compiler, sample):

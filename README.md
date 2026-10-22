@@ -83,11 +83,14 @@ examples, validation options and limits.
 3. **Timeline** shows window lifetimes, streamed content intervals and anchor
    capture ticks. Generated output is colored by window; external input is
    violet. Pale bars indicate idle/open intervals, and vertical end caps indicate
-   EOS. Hover for event information. Scroll horizontally and change zoom.
+   EOS. Tool calls have separate duration bars; hover for their arguments and
+   start/completion ticks. Scroll horizontally and change zoom.
 4. **Events** edits tick expressions, operations, window IDs, source, delivery
    rate and loss masks. Use **+ Add event**, reorder, or remove an event. The
    **+ EOS** button inserts the configured EOS spelling. A normal explicit
    `close` operation is rejected. Segmented content is edited in Source JSON.
+   **+ Tool call** schedules a synthetic tool with JSON arguments, a duration in
+   ticks, and a fresh result window ID.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
@@ -294,6 +297,54 @@ state. Model text is never executed. They cannot access host files, process
 execution, Docker, dynamic modules, URLs, or arbitrary networks. No eval, exec,
 subprocess or filesystem API is exposed through a tool.
 
+The **Sandbox** panel follows the selected replay tick. Inspect virtual file
+contents, memory, notes, skills, the synthetic clock, and running/completed/failed
+calls. Scrubbing backward restores earlier state. Editing or removing a call
+recomputes subsequent state and results; importing old tool-result text alone
+does not execute a tool or reconstruct its state.
+
+Schedule calls in Events or Source JSON, using numeric ticks or existing anchor
+expressions:
+
+```json
+{
+  "schema-version": "1.0",
+  "id": "sandbox-history",
+  "tick-policy": "external-first",
+  "replay": {
+    "0": [{"op": "tool-call", "window": "initial-write", "tool": "file_write",
+           "arguments": {"path": "/example.txt", "content": "old"}}],
+    "150": [{"op": "tool-call", "window": "updated-write", "tool": "file_write",
+             "arguments": {"path": "/example.txt", "content": "new"},
+             "duration-ticks": 25}],
+    "200": [{"op": "tool-call", "window": "read-result", "tool": "file_read",
+             "arguments": {"path": "/example.txt"}}]
+  }
+}
+```
+
+Tick 100 shows `old`; ticks 150–174 show a running write and the old file;
+tick 175 commits `new`. Tools execute atomically at `start + duration-ticks`
+(default duration: zero). Reads observe state at completion. Equal completion
+ticks follow the compiler's stable replay order. Failures produce an error
+observation and retain any clock/call-budget effects of the attempted call.
+Each call opens its fresh result window at completion and appends the actual
+JSON outcome as excluded-loss external input. Use generated EOS to close it.
+Call arguments are control data; generated LLM tool calls also retain their
+supervised call-window text.
+
+Generation records these executable events, including elapsed whole seconds as
+logical duration ticks (subsecond calls take zero ticks). Running a task in an
+existing sample restores its sandbox before extending it. Clock settings are
+stored in `metadata.synthetic_clock` (`seed`, `seconds_per_call`). Preview and
+export replay deterministic tools locally. A `subagent` event requires its
+recorded `outcome`, for example
+`{"ok":true,"result":{"response":"Recorded answer"}}` or
+`{"ok":false,"error":"Failure reason"}`; replay never repeats an LLM request.
+Other tools compute their outcomes and reject recorded overrides. Compiled
+previews expose `tool_calls` and a bounded delta history; frame responses include
+the selected tick's `sandbox` state without future results.
+
 | Tools | Behavior |
 |---|---|
 | `time_now`, `time_advance` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
@@ -304,10 +355,11 @@ subprocess or filesystem API is exposed through a tool.
 | `subagent` | One attached-LLM task in a fresh child sandbox; no parent memory or host access. Child tool calling is disabled. |
 
 2 MB total state and 200k characters per string; configurable bounded call and
-round budgets. Inputs and tool names are strictly checked; unknown tools return
+round budgets, with at most 256 replay tool events per sample. Inputs and tool names are strictly checked; unknown tools return
 errors. Results are actual simulation outcomes, not fabricated claims of real
-host actions. State is destroyed in `finally` blocks on success, failure and
-cancellation. The subagent's outbound capability is the already configured LLM
+host actions. Live sandbox objects are destroyed in `finally` blocks on success,
+failure and cancellation; recorded replay events reconstruct their historical
+state for inspection. The subagent's outbound capability is the already configured LLM
 broker, not general network access.
 
 This is a **capability sandbox for fixed simulated tools**, not a process-level
@@ -323,6 +375,20 @@ included simulation interpreter.
 The HTTP service also enforces a random per-process session token on API calls,
 trusted local Host values, same-origin checks and a content security policy.
 It is a local single-user tool, not a multi-user/public hosting service.
+
+The existing MCP bridge also exposes `create_tool_call(sample_id, tick, tool,
+arguments, duration_ticks=0, window=null, outcome=null, position=null,
+expected_revision=null)` and `get_sandbox_state(sample_id, tick,
+include_calls=true)`. Discover schemas with `list_simulated_tools`. Scheduled
+calls compile before committing one undoable edit, support `apply_batch` and
+revision guards, and save with `save_dataset`. Both commands operate on the
+running dashboard's trajectory sandbox. Workbench sessions and their recorded
+text observations remain separate from executable replay events. See
+[the MCP reference](docs/MCP.md#trajectory-sandbox-history).
+
+The dashboard's session-guarded API also provides `GET /api/tools`,
+`POST /api/samples/{index}/tool-calls` (same arguments; dashboard edits save with
+the usual checkpoint), and `GET /api/samples/{index}/sandbox/{tick}`.
 
 ## Headless export and tests
 
@@ -356,6 +422,7 @@ cancellation and failure limits. `docs/EXPORT.md` describes the training adapter
 | `dataset.py` | Import normalization, dataset shape, atomic persistence, key removal. |
 | `llm.py` | Config/task defaults, prompt organization, bounded HTTP, generation, validators. |
 | `tools.py` | Isolated RAM capability sandbox and tool schemas. |
+| `sandbox_replay.py` | Tool scheduling, recorded outcomes and historical sandbox deltas. |
 | `runner.py` | Background generation, retry/feedback, pause/stop, autosaves. |
 | `server.py` | Local API and dashboard serving. |
 | `static/` | Dependency-free dashboard, editor, timeline and configuration UI. |
@@ -368,7 +435,8 @@ collator. Endpoint integration is tested with mocks, not a paid/live model.
 Skill persistence and memory retrieval are simulated inside each sample; they
 do not modify the real user's skills or external RAG databases. Generation API
 responses are collected per task, while the resulting sample is replayed at
-logical token ticks. Tool results generated automatically use instant delivery;
-edit them to stream with inline anchors when authoring reactive trajectories.
+logical token ticks. Executable tool-call results commit instantly at completion;
+ordinary append events can stream manually authored observations with inline
+anchors when authoring reactive trajectories.
 
 Primary API/security references: [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/en/api/tokenizer), [Docker Engine security](https://docs.docker.com/engine/security/).

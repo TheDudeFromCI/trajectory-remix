@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 from tokenizers import Tokenizer
 
+from .tools import tool_json
+
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
 MAX_TICKS = 100_000
@@ -70,7 +72,7 @@ class Compiler:
             raise ValueError("BOS, EOS and NOOP must have distinct IDs")
         self.fingerprint = hashlib.sha256(tokenizer.to_str().encode()).hexdigest()
 
-    def encode(self, event, path, noop_weight):
+    def encode(self, event, path, noop_weight, literal=False):
         if ("content" in event) == ("segments" in event):
             raise CompileError("Supply exactly one of content or segments", path)
         segments = event.get(
@@ -96,11 +98,13 @@ class Compiler:
             )
             start = len(text)
             raw, visible, i = seg["text"], "", 0
+            if literal:
+                visible, i = raw, len(raw)
             while i < len(raw):
-                escaped = raw[i] == "\\" and ANCHOR.match(raw, i + 1)
+                escaped = raw.startswith("\\{N_TICK", i)
                 if escaped:
-                    visible += escaped.group(0)
-                    i = escaped.end()
+                    visible += "{N_TICK"
+                    i += len("\\{N_TICK")
                 elif raw.startswith("{N_TICK", i):
                     match = ANCHOR.match(raw, i)
                     if not match:
@@ -154,6 +158,8 @@ class Compiler:
         return Encoded(text, enc.ids, enc.offsets, converted, weights)
 
     def compile(self, sample: dict) -> dict:
+        from .sandbox_replay import compile_sandbox, validate_call
+
         if not isinstance(sample, dict):
             raise CompileError("Sample must be an object", "sample")
         if (
@@ -193,9 +199,10 @@ class Compiler:
                     "open",
                     "append",
                     "generate",
+                    "tool-call",
                 ):
                     raise CompileError(
-                        "Allowed operations: open, append, generate; close via generated EOS",
+                        "Allowed operations: open, append, generate, tool-call; close via generated EOS",
                         path,
                     )
                 for field in ("window-type", "request-id", "caused-by"):
@@ -213,7 +220,9 @@ class Compiler:
                     "path": path,
                     "order": len(prepared),
                 }
-                if event["op"] != "open":
+                if event["op"] == "tool-call":
+                    validate_call(event, path)
+                elif event["op"] != "open":
                     if event["op"] == "append" and (
                         not isinstance(event.get("source"), str) or not event["source"]
                     ):
@@ -299,6 +308,48 @@ class Compiler:
                 "path": owner["path"],
                 "phase": "B" if owner["event"]["op"] == "append" else "D",
             }
+        sandbox, tool_calls = compile_sandbox(prepared, sample)
+        calls_by_path = {call["path"]: call for call in tool_calls}
+        expanded = []
+        for item in prepared:
+            if item["event"]["op"] != "tool-call":
+                expanded.append(item)
+                continue
+            call = calls_by_path[item["path"]]
+            # The result window first becomes visible when the call completes.
+            # Tool arguments remain data; only allowlisted sandbox operations run.
+            opener = {"op": "open", "window": call["window"], "window-type": "tool"}
+            result = {
+                "op": "append",
+                "window": call["window"],
+                "source": "tool",
+                "content": tool_json(call["outcome"], self.special.values()),
+                "loss": {"mask": "exclude"},
+            }
+            expanded.extend(
+                [
+                    {
+                        **item,
+                        "event": opener,
+                        "tick": call["end"],
+                        "path": item["path"] + ".open",
+                    },
+                    {
+                        **item,
+                        "event": result,
+                        "tick": call["end"],
+                        "path": item["path"] + ".result",
+                        "instant": True,
+                        "rate": 1,
+                        "encoded": self.encode(
+                            result, item["path"], noop_weight, literal=True
+                        ),
+                    },
+                ]
+            )
+        prepared = expanded
+        for order, item in enumerate(prepared):
+            item["order"] = order
         scheduled = defaultdict(list)
         events = []
         for item in prepared:
@@ -491,11 +542,15 @@ class Compiler:
             "windows": list(windows.values()),
             "anchors": captures,
             "events": events,
+            "tool_calls": tool_calls,
+            "sandbox": sandbox,
             "rows": rows,
             "diagnostics": warnings,
         }
 
     def frame(self, plan, tick):
+        from .sandbox_replay import sandbox_frame
+
         integer(tick, "tick")
         if tick > plan["max_tick"]:
             raise CompileError("Tick exceeds trajectory end", "tick")
@@ -508,6 +563,7 @@ class Compiler:
                     cumulative[r["window"]].append(r["token_id"])
         return {
             "tick": tick,
+            "sandbox": sandbox_frame(plan, tick),
             "windows": {
                 w["id"]: {
                     "text": self.tokenizer.decode(

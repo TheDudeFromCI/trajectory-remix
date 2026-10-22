@@ -48,6 +48,44 @@ async def test_bad_marker_diagnostic(client):
     assert "Invalid marker" in r.json()["diagnostics"][0]["message"]
 
 
+async def test_tool_authoring_history_and_atomic_rejection(client):
+    await client.post("/api/samples", json={})
+    assert any(
+        s["function"]["name"] == "file_write"
+        for s in (await client.get("/api/tools")).json()["tools"]
+    )
+    before = (await client.get("/api/samples/0")).json()
+    invalid = await client.post(
+        "/api/samples/0/tool-calls",
+        json={
+            "tick": "bad",
+            "tool": "file_list",
+            "arguments": {},
+        },
+    )
+    assert invalid.status_code == 422
+    assert (await client.get("/api/samples/0")).json() == before
+    response = await client.post(
+        "/api/samples/0/tool-calls",
+        json={
+            "tick": 150,
+            "tool": "file_write",
+            "arguments": {"path": "x", "content": "new"},
+            "duration_ticks": 50,
+            "window": "new-result",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["tool_call"]["end"] == 200
+    old = (await client.get("/api/samples/0/sandbox/175")).json()
+    assert old["files"] == {} and old["tool_calls"][-1]["status"] == "running"
+    assert (await client.get("/api/samples/0/sandbox/200")).json()["files"] == {
+        "/x": "new"
+    }
+    assert (await client.get("/api/samples/0/sandbox/201")).status_code == 422
+    assert (await client.get("/api/samples/1/sandbox/0")).status_code == 404
+
+
 async def test_import_is_transactional(client):
     s = new_sample()
     r = await client.post(

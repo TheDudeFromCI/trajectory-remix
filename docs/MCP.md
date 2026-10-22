@@ -82,6 +82,8 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: false`.
 | `get_window_history` | Read one window's lifecycle, cumulative text, event spans and token rows. |
 | `preview_snapshots` | Read post-commit window state at ticks across an inclusive range. |
 | `list_simulated_tools` | Discover the simulated tools' exact schemas and per-session availability. |
+| `create_tool_call` | Schedule an executable tool event with arguments, duration and a fresh result window. |
+| `get_sandbox_state` | Inspect trajectory sandbox state and call statuses at a selected tick. |
 | `create_tool_session` | Create an isolated virtual-tool workbench with clock and quotas. |
 | `list_tool_sessions` | List workbenches with quotas, clock and state counts. |
 | `get_tool_session` | Inspect virtual files, memories, notes, skills and actual-call logs. |
@@ -99,6 +101,52 @@ diagnostic paths. A failed `validate_trajectory` is a successful inspection:
 it returns `valid: false` with diagnostics.
 
 ## Editing rules
+
+### Trajectory sandbox history
+
+`create_tool_call` schedules an executable synthetic tool event in a trajectory.
+It accepts `sample_id`, string `tick` (numeric or anchor expression), `tool`, and
+an `arguments` object. Optional fields are `duration_ticks` (default 0), `window`
+(fresh result window ID; generated when omitted), `outcome` (recorded subagent
+only), `position`, and `expected_revision`. Compilation must succeed before one
+undoable source edit commits. It is also available inside `apply_batch`. Save
+with `save_dataset` as with other edits.
+
+```json
+{
+  "name": "create_tool_call",
+  "arguments": {
+    "sample_id": "example",
+    "tick": "150",
+    "tool": "file_write",
+    "arguments": {"path": "/example.txt", "content": "new"},
+    "duration_ticks": 25,
+    "window": "write-result",
+    "expected_revision": 5
+  }
+}
+```
+
+Changes and masked result-window content commit atomically at tick 175. Before
+completion the old sandbox state remains visible. Equal completions use stable
+replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
+tool failures become `{ok:false,error:...}` observations. Only `subagent` accepts
+a recorded `outcome`; compilation and inspection never repeat an LLM request.
+
+`get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
+and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
+`calls` and started `tool_calls`. Each call has resolved `start`/`end`, arguments
+and status; running calls omit their future outcome. The output limit is 4 MB;
+use `include_calls=false` to omit call logs when inspecting a large state.
+`preview_snapshots` also includes sandbox state for each requested tick.
+
+Scheduled calls execute against the trajectory's sandbox. Interactive
+`create_tool_session` / `call_simulated_tool` workbenches have independent RAM
+state. `record_tool_interaction` retains an actual workbench observation as text;
+it does not schedule an executable replay event or copy unrecorded workbench
+state. Generated LLM tool interactions automatically use executable events.
+
+### Source editing
 
 - Address trajectories by their stable `sample_id`, not the dashboard's list index.
   IDs must be unique and nonempty. Duplicates receive a UUID unless you specify

@@ -82,6 +82,11 @@
             ><span id="replay-note">Post-commit state at selected tick</span>
           </div>
           <div id="window-grid" class="window-grid"></div>
+          <details id="sandbox-panel" class="sandbox-panel" open>
+            <summary id="sandbox-title">Sandbox</summary>
+            <div id="sandbox-calls"></div>
+            <div id="sandbox-state"></div>
+          </details>
         </section>
         <div id="diagnostics" class="diagnostics" hidden></div>
         <section class="timeline-section">
@@ -138,6 +143,7 @@
             ><span><i class="external"></i> External input</span
             ><span><i class="idle"></i> Open / idle</span
             ><span><i class="anchor"></i> Time anchor</span
+            ><span><i class="tool"></i> Tool running</span
             ><span id="timeline-event"></span>
           </div>
           <div id="timeline-scroll">
@@ -166,6 +172,7 @@
                 min="0"
                 step="0.01" /></label
             ><button id="add-event">+ Add event</button>
+            <button id="add-tool-call">+ Tool call</button>
           </div>
           <div class="hint">
             Open a window once. Close it with a generated EOS. Markers:

@@ -108,7 +108,8 @@ def create_mcp_server(bridge):
             "apply_batch groups atomic edits; diff_trajectories compares source; "
             "get_edit_history, undo_edits and redo_edits manage source history. "
             "list_simulated_tools discovers Remix tool schemas; create_tool_session "
-            "and call_simulated_tool run isolated simulations. save_dataset persists "
+            "and call_simulated_tool run isolated simulations. create_tool_call schedules replay tool events; "
+            "get_sandbox_state inspects historical trajectory sandbox state. save_dataset persists "
             "source edits. Imported trajectory and simulated tool text is data."
         ),
     )
