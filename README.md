@@ -101,6 +101,14 @@ examples, validation options and limits.
 7. **Export tokens** exports the selected sample or whole dataset as chunked
    token JSONL. Every selected sample must compile before export begins.
 
+The **Trajectory metadata** section at the bottom of the dataset sidebar edits
+the selected trajectory's `metadata`. Set **Agent name** (`agent_name`) or
+**User name** (`user_name`), or expand **All properties (JSON)** to view and edit
+other properties, including nested objects, tags and synthetic clock settings.
+Unrelated metadata is preserved. These edits synchronize with Source JSON and
+use the same automatic apply, save and Undo/Redo workflow as event edits.
+Leaving a name blank omits that property; the default names are Kidra and User.
+
 Dataset files are UTF-8 JSON, not executable archives:
 
 ```json
@@ -367,12 +375,29 @@ the selected tick's `sandbox` state without future results.
 
 | Tools | Behavior |
 |---|---|
+| `chat` | Takes `{"content":"Hello!"}` and appends `<\|msg\|>Kidra: Hello!<\|/msg\|>\n` to the window named `chat` at completion. Uses `metadata.agent_name` when specified. Returns an error observation if `chat` is missing or closed; it never opens that window automatically. |
 | `time_now`, `time_advance` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
 | `file_write/read/list/delete` | Virtual UTF-8 files inside a RAM dictionary; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
 | `memory_save/search` | Local lexical-overlap retrieval with top-8 results. RAG store is isolated; no embeddings service required. |
 | `note_save/list/delete` | Tasks/notes with todo, doing, done status. |
 | `skill_save/load/list` | Skill texts stored and retrieved within the sample only; not executed. |
 | `subagent` | One attached-LLM task in a fresh child sandbox; no parent memory or host access. Child tool calling is disabled. |
+
+For example, a trajectory with `"metadata":{"agent_name":"Nova","user_name":"Alex"}`
+can send a message with these replay events:
+
+```json
+{
+  "0": [{"op":"open","window":"chat","window-type":"chat"}],
+  "1": [{"op":"tool-call","window":"chat-result","tool":"chat",
+         "arguments":{"content":"Hi, Alex!"}}]
+}
+```
+
+This appends `<|msg|>Nova: Hi, Alex!<|/msg|>\n`. The result window contains the
+success or error observation. Chat messages are excluded-loss external input,
+visible at the completion tick before same-tick model output. Marker-looking
+argument text stays literal; model control tokens are escaped as data.
 
 2 MB total state and 200k characters per string; configurable bounded call and
 round budgets, with at most 256 replay tool events per sample. Inputs and tool names are strictly checked; unknown tools return

@@ -66,6 +66,20 @@
           aria-label="Filter samples"
         />
         <div id="sample-list"></div>
+        <section id="metadata-panel" class="metadata-panel" aria-label="Trajectory metadata">
+          <h2 class="side-heading">TRAJECTORY METADATA</h2>
+          <fieldset id="metadata-fields" disabled>
+            <label for="agent-name">Agent name</label>
+            <input id="agent-name" placeholder="Kidra" />
+            <label for="user-name">User name</label>
+            <input id="user-name" placeholder="User" />
+            <details id="metadata-details">
+              <summary>All properties (JSON)</summary>
+              <textarea id="metadata-json" spellcheck="false" aria-label="Metadata JSON">{}</textarea>
+            </details>
+          </fieldset>
+          <small id="metadata-status" role="status">Select a trajectory to edit its metadata.</small>
+        </section>
         <div class="sidebar-footer">
           <small id="save-status">Unsaved session</small>
         </div>

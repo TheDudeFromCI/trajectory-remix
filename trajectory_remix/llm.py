@@ -13,7 +13,7 @@ import httpx
 
 from .compiler import KEY
 from .dataset import reject_constant
-from .tools import SCHEMAS, Sandbox
+from .tools import SCHEMAS, Sandbox, chat_context
 
 TAGS = [
     "competent",
@@ -588,7 +588,16 @@ class SampleBuilder:
                     raise ValueError("Tool arguments must be a JSON object")
                 started = monotonic()
                 try:
-                    result = await sandbox.call(function.get("name"), args)
+                    context = {}
+                    if function.get("name") == "chat":
+                        windows = (
+                            self.compiler.compile(self.sample)["windows"]
+                            if self.sample["replay"] else []
+                        )
+                        context = chat_context(
+                            windows, self.sample.get("metadata")
+                        )
+                    result = await sandbox.call(function.get("name"), args, **context)
                     outcome = {"ok": True, "result": result}
                 except (ValueError, KeyError, OverflowError) as e:
                     outcome = {"ok": False, "error": str(e)}
@@ -604,7 +613,14 @@ class SampleBuilder:
                 if event["tool"] == "subagent":
                     event["outcome"] = outcome
                 self.sample["replay"].setdefault(str(self.next_tick), []).append(event)
-                self.next_tick = self.compiler.compile(self.sample)["max_tick"] + 1
+                compiled = self.compiler.compile(self.sample)
+                self.next_tick = compiled["max_tick"] + 1
+                if event["tool"] == "chat":
+                    # Return the same completion-time outcome replay will display.
+                    outcome = next(
+                        c["outcome"] for c in compiled["tool_calls"]
+                        if c["window"] == event["window"]
+                    )
                 tool_result = json.dumps(outcome, ensure_ascii=False)
                 messages.append(
                     {"role": "tool", "tool_call_id": call["id"], "content": tool_result}

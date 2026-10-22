@@ -27,6 +27,28 @@ async def tool(studio, name, arguments, session_id="tools", **options):
     )
 
 
+async def test_chat_session_uses_recording_target_and_is_undoable(studio, compiler):
+    await call(studio, "create_tool_session", session_id="tools")
+    standalone = await tool(studio, "chat", {"content": "Hello"})
+    assert not standalone["interaction"]["outcome"]["ok"]
+    sample = studio[0].state.dataset["samples"][0]
+    sample["replay"]["0"].append({"op": "open", "window": "chat"})
+    sample["metadata"] = {"agent_name": "Nova"}
+    before = copy.deepcopy(sample)
+    recorded = await tool(studio, "chat", {"content": "Hello {N_TICK:9}"}, record_sample_id="test")
+    assert recorded["interaction"]["outcome"]["ok"]
+    current = (await call(studio, "get_trajectory", sample_id="test"))["sample"]
+    plan = compiler.compile(current)
+    assert plan["anchors"] == {}
+    assert compiler.frame(plan, plan["max_tick"])["windows"]["chat"]["text"] == (
+        "<|msg|>Nova: Hello {N_TICK:9}<|/msg|>\n"
+    )
+    await call(studio, "undo_edits")
+    assert studio[0].state.dataset["samples"][0] == before
+    await call(studio, "redo_edits")
+    assert studio[0].state.dataset["samples"][0] == current
+
+
 async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_path):
     await call(
         studio,
@@ -39,7 +61,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     definitions = (await call(studio, "list_simulated_tools", session_id="tools"))[
         "tools"
     ]
-    assert len(definitions) == 15
+    assert len(definitions) == 16
     assert not next(d for d in definitions if d["function"]["name"] == "subagent")[
         "available"
     ]

@@ -18,19 +18,33 @@ class ToolError(ValueError):
     pass
 
 
-def tool_json(value, special_tokens):
-    """Serialize observations/calls without embedding model control tokens."""
+def tool_text(text, special_tokens, *, json_encoded=False):
+    """Keep tool data from becoming model-owned control tokens."""
     escapes = {}
     for spelling in special_tokens:
         units = spelling.encode("utf-16-be")
-        escapes[json.dumps(spelling, ensure_ascii=False)[1:-1]] = "".join(
+        key = json.dumps(spelling, ensure_ascii=False)[1:-1] if json_encoded else spelling
+        escapes[key] = "".join(
             f"\\u{int.from_bytes(units[i:i + 2], 'big'):04x}"
             for i in range(0, len(units), 2)
         )
     pattern = "|".join(re.escape(s) for s in sorted(escapes, key=len, reverse=True))
-    return re.sub(
-        pattern, lambda m: escapes[m[0]], json.dumps(value, ensure_ascii=False)
-    )
+    return re.sub(pattern, lambda m: escapes[m[0]], text) if pattern else text
+
+
+def tool_json(value, special_tokens):
+    """Serialize observations/calls without embedding model control tokens."""
+    return tool_text(json.dumps(value, ensure_ascii=False), special_tokens, json_encoded=True)
+
+
+def chat_context(windows, metadata):
+    """Per-call trajectory context; standalone sandboxes have no chat window."""
+    return {
+        "chat_open": any(w["id"] == "chat" and w["close"] is None for w in windows),
+        "agent_name": (
+            metadata.get("agent_name", "Kidra") if isinstance(metadata, dict) else "Kidra"
+        ),
+    }
 
 
 def tool_message(tag, value, special_tokens):
@@ -45,6 +59,11 @@ def tool_request(tool, arguments, special_tokens):
 
 # Function descriptors accepted by OpenAI-compatible chat/completions.
 DEFINITIONS = [
+    (
+        "chat",
+        "Append a message from the agent to the open window named chat; fails if it is not open.",
+        {"content": {"type": "string"}},
+    ),
     ("time_now", "Read the sample's synthetic clock.", {}),
     (
         "time_advance",
@@ -218,17 +237,26 @@ class Sandbox:
             raise ToolError("Tool call budget exhausted")
         self.clock += timedelta(seconds=self.step)
 
-    async def call(self, name, args):
+    async def call(self, name, args, **context):
         if name == "subagent":
             self.start_call(name, args)
             if self.depth >= 2 or self.broker is None:
                 raise ToolError("Subagent depth/capability limit")
             return {"response": await self.broker(args["task"], self.depth + 1)}
-        return self.call_sync(name, args)
+        return self.call_sync(name, args, **context)
 
-    def call_sync(self, name, args):
+    def call_sync(self, name, args, *, chat_open=False, agent_name="Kidra"):
         """Run deterministic capabilities without an event loop or network IO."""
         self.start_call(name, args)
+        if name == "chat":
+            if not chat_open:
+                raise ToolError('No window named "chat" is open')
+            if not isinstance(agent_name, str) or not agent_name.strip():
+                raise ToolError("metadata.agent_name must be a nonempty string")
+            return {
+                "window": "chat",
+                "content": f"<|msg|>{agent_name}: {args['content']}<|/msg|>\n",
+            }
         if name == "time_now":
             return {"timestamp": self.clock.isoformat(), "synthetic": True}
         if name == "time_advance":

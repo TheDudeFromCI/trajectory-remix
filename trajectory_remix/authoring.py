@@ -22,7 +22,7 @@ from .compiler import KEY, CompileError
 from .dataset import new_sample
 from .llm import LLMClient, SampleBuilder
 from .tool_sessions import ToolSessionError, ToolSessions
-from .tools import ToolError, tool_message, tool_request
+from .tools import ToolError, chat_context, tool_message, tool_request, tool_text
 
 Nonnegative = Annotated[int, Field(ge=0)]
 PageSize = Annotated[int, Field(ge=1, le=5000)]
@@ -1162,13 +1162,21 @@ class TrajectoryCommands:
                 "expected_revision applies to recording; supply record_sample_id"
             )
         recorder = None
+        context = None
         if record_sample_id is not None:
             self._editable(expected_revision)
-            self._find(record_sample_id)
+            _, sample = self._find(record_sample_id)
+            if name == "chat":
+                windows = (
+                    self.compiler.compile(sample)["windows"] if sample.get("replay") else []
+                )
+                context = chat_context(windows, sample.get("metadata"))
             recorder = lambda entry: self._record_interaction(
                 record_sample_id, entry, expected_revision
             )
-        return await self.tool_sessions.call(session_id, name, arguments, recorder)
+        return await self.tool_sessions.call(
+            session_id, name, arguments, recorder, context
+        )
 
     def _record_interaction(self, sample_id, entry, expected_revision):
         index, sample = self._draft(sample_id, expected_revision)
@@ -1215,6 +1223,20 @@ class TrajectoryCommands:
             loss={"mask": "exclude"},
             request_id=request_id,
         )
+        if entry["name"] == "chat" and entry["outcome"]["ok"]:
+            plan = self.compiler.compile(builder.sample)
+            if not chat_context(plan["windows"], sample.get("metadata"))["chat_open"]:
+                raise CommandError('No window named "chat" is open')
+            builder.add_stream(
+                "chat",
+                tool_text(
+                    entry["outcome"]["result"]["content"], self.compiler.special.values()
+                ).replace("{N_TICK", "\\{N_TICK"),
+                op="append",
+                source="tool",
+                loss={"mask": "exclude"},
+                request_id=request_id,
+            )
         return {
             **self._commit(builder.sample, index),
             "interaction_id": entry["id"],

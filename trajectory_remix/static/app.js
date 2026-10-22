@@ -340,6 +340,7 @@ async function selectSample(index, force = false) {
   selected = index;
   setDirty(false);
   $("sample-json").value = JSON.stringify(sample, null, 2);
+  loadMetadata(sample);
   renderSamples();
   if (validEventShape()) loadEvents();
   else {
@@ -366,6 +367,8 @@ async function compileSample(persist = true) {
   renderHistoryActions();
   pause();
   try {
+    if ($("metadata-json").validationMessage)
+      throw new Error($("metadata-json").validationMessage);
     if (view === "json") sample = JSON.parse($("sample-json").value);
     else if (view === "events") sample = sampleFromEvents();
     if (!sample) {
@@ -414,6 +417,7 @@ function setTick(value) {
   renderReplay();
 }
 function renderReplay() {
+  if (!sample) loadMetadata(null);
   const grid = $("window-grid");
   grid.replaceChildren();
   $("max-tick").textContent = plan?.max_tick || 0;
@@ -724,6 +728,53 @@ function loadEvents() {
   $("noop-weight").value =
     sample.defaults?.["implicit-noop-loss-weight"] ?? 0.1;
   renderEvents();
+}
+function readMetadata() {
+  const metadata = JSON.parse($("metadata-json").value);
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
+    throw new Error("Metadata must be a JSON object.");
+  return metadata;
+}
+function showMetadataNames(metadata) {
+  $("agent-name").value = typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
+  $("user-name").value = typeof metadata?.user_name === "string" ? metadata.user_name : "";
+}
+function loadMetadata(trajectory) {
+  $("metadata-fields").disabled = !trajectory;
+  $("metadata-json").setCustomValidity("");
+  $("metadata-json").value = JSON.stringify(trajectory?.metadata ?? {}, null, 2);
+  showMetadataNames(trajectory?.metadata);
+  $("metadata-status").textContent = trajectory
+    ? "Defaults to Kidra and User when left blank."
+    : "Select a trajectory to edit its metadata.";
+}
+function updateMetadata() {
+  try {
+    const metadata = readMetadata();
+    $("metadata-json").setCustomValidity("");
+    showMetadataNames(metadata);
+    if (view === "json") {
+      const trajectory = JSON.parse($("sample-json").value);
+      trajectory.metadata = metadata;
+      $("sample-json").value = JSON.stringify(trajectory, null, 2);
+    }
+    $("metadata-status").textContent = "Changes save with this trajectory.";
+  } catch (e) {
+    $("metadata-json").setCustomValidity(e.message);
+    $("metadata-status").textContent = e.message;
+  }
+  setDirty();
+}
+function updateMetadataName(key, value) {
+  try {
+    const metadata = readMetadata();
+    if (value) metadata[key] = value;
+    else delete metadata[key];
+    $("metadata-json").value = JSON.stringify(metadata, null, 2);
+    updateMetadata();
+  } catch (e) {
+    $("metadata-status").textContent = e.message;
+  }
 }
 function input(value, onChange, type = "text") {
   const n = node("input");
@@ -1088,6 +1139,8 @@ function sampleFromEvents() {
   for (const item of eventDraft) (replay[item.key] ??= []).push(item.event);
   return {
     ...sample,
+    ...(sample && ("metadata" in sample || $("metadata-json").value !== "{}")
+      ? { metadata: readMetadata() } : {}),
     id: $("sample-id").value,
     defaults: {
       ...sample.defaults,
@@ -1119,6 +1172,7 @@ async function changeView(next) {
       throw new Error("Malformed event structure; repair it in Source JSON.");
     }
     loadEvents();
+    loadMetadata(sample);
   }
   if (view === "json") $("sample-json").value = JSON.stringify(sample, null, 2);
   drawTimeline();
@@ -1561,7 +1615,18 @@ $("new-sample").onclick = action(async () => {
   await refresh();
   await selectSample(r.index, true);
 });
-$("sample-json").oninput = () => setDirty();
+$("sample-json").oninput = () => {
+  try {
+    loadMetadata(JSON.parse($("sample-json").value));
+  } catch {
+    $("metadata-fields").disabled = true;
+    $("metadata-status").textContent = "Fix Source JSON to edit metadata here.";
+  }
+  setDirty();
+};
+$("metadata-json").oninput = updateMetadata;
+$("agent-name").oninput = () => updateMetadataName("agent_name", $("agent-name").value);
+$("user-name").oninput = () => updateMetadataName("user_name", $("user-name").value);
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
 $("add-event").onclick = () => {
