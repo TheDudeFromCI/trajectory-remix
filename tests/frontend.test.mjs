@@ -53,9 +53,15 @@ const $ = (id) => w.document.getElementById(id);
 const click = async (id) => {
   await $(id).onclick();
 };
+const waitFor = async (predicate, timeout = 3000) => {
+  const deadline = Date.now() + timeout;
+  while (!predicate() && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  assert(predicate(), "Timed out waiting for frontend state");
+};
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
 assert.equal($("sample-title").textContent, "react-to-stream-warning");
-assert.equal($("apply-sample").disabled, true);
+assert.equal($("apply-sample"), null);
 assert.equal($("replay-view").hidden, false);
 assert.equal(
   w.document.querySelector(".editor-panel").parentElement,
@@ -103,8 +109,15 @@ const original = JSON.parse($("sample-json").value);
 original.replay["1"][0].content = "bad{N_TICKS:1}";
 $("sample-json").value = JSON.stringify(original);
 $("sample-json").oninput();
-assert.equal($("apply-sample").disabled, false);
-await click("apply-sample");
+assert.equal($("dirty-indicator").textContent, "Compile pending");
+const compileCount = () =>
+  requests.filter((request) => request.path === "/api/compile").length;
+const compileCountBeforeEdit = compileCount();
+await new Promise((resolve) => setTimeout(resolve, 600));
+$("sample-json").oninput();
+await new Promise((resolve) => setTimeout(resolve, 500));
+assert.equal(compileCount(), compileCountBeforeEdit);
+await waitFor(() => /Invalid marker/.test($("diagnostics").textContent));
 assert.match($("diagnostics").textContent, /Invalid marker/);
 assert($("diagnostics").querySelector(".diagnostics-close"));
 await $("diagnostics").querySelector(".diagnostics-close").onclick();
@@ -117,9 +130,13 @@ for (const [key, events] of Object.entries(original.replay))
   original.replay[key] = events.filter((e) => e.window !== "new-window");
 $("sample-json").value = JSON.stringify(original);
 $("sample-json").oninput();
-await click("apply-sample");
+const compileCountBeforeCorrection = compileCount();
+await waitFor(
+  () =>
+    compileCount() > compileCountBeforeCorrection &&
+    !/Invalid marker/.test($("diagnostics").textContent),
+);
 assert.equal(w.document.title, "Trajectory Remix");
-assert.equal($("apply-sample").disabled, true);
 assert.doesNotMatch($("diagnostics").textContent, /Invalid marker/);
 for (let i = 0; i < 30 && !$("window-grid").textContent.includes("↵"); i++)
   await new Promise((r) => setTimeout(r, 20));

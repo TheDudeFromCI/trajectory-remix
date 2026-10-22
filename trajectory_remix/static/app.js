@@ -14,6 +14,8 @@ let configDraft,
   configTab = "endpoints",
   eventDraft = [],
   toastTimer,
+  compileTimer,
+  editRevision = 0,
   pollBusy = false,
   compileBusy = false;
 const colors = [
@@ -82,12 +84,37 @@ function action(fn) {
     }
   };
 }
+function scheduleCompile() {
+  clearTimeout(compileTimer);
+  compileTimer = setTimeout(
+    action(async () => {
+      if (compileBusy) {
+        scheduleCompile();
+        return;
+      }
+      compileTimer = null;
+      await compileSample(true);
+    }),
+    1000,
+  );
+}
 function setDirty(value = true) {
   dirty = value;
+  if (value) {
+    editRevision++;
+    dirty = false;
+    scheduleCompile();
+  } else {
+    clearTimeout(compileTimer);
+    compileTimer = null;
+  }
+  const pending = dirty || compileTimer !== null;
   document.title = document.title.replace(/^\*\s*/, "");
-  if (value) document.title = "* " + document.title;
-  $("dirty-indicator").textContent = value ? "Unapplied changes" : "";
-  $("apply-sample").disabled = !value || !!state?.status.running;
+  if (pending) document.title = "* " + document.title;
+  $("dirty-indicator").textContent = pending ? "Compile pending" : "";
+}
+function hasPendingChanges() {
+  return dirty || compileTimer !== null;
 }
 function diagnostics(items = []) {
   $("diagnostics").replaceChildren();
@@ -126,7 +153,7 @@ async function refresh(initial = false) {
       plan = null;
       renderReplay();
     }
-    if (!sample && state.samples.length && selected < 0 && !dirty)
+    if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
       await selectSample(state.samples.length - 1, true);
   } finally {
     pollBusy = false;
@@ -148,12 +175,10 @@ function renderStatus() {
     "auto-start",
     "new-sample",
     "delete-sample",
-    "apply-sample",
     "import-button",
     "save-config",
   ])
     $(id).disabled = s.running;
-  $("apply-sample").disabled = s.running || !dirty;
   $("pause-run").textContent = s.paused ? "Resume" : "Pause";
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
@@ -210,7 +235,14 @@ function renderSamples() {
   );
 }
 async function selectSample(index, force = false) {
-  if (!force && dirty && !confirm("Discard unapplied sample edits?")) return;
+  if (
+    !force &&
+    hasPendingChanges() &&
+    !confirm("Discard unapplied sample edits?")
+  )
+    return;
+  clearTimeout(compileTimer);
+  compileTimer = null;
   pause();
   sample = await json("samples/" + index);
   selected = index;
@@ -236,6 +268,9 @@ function pause() {
 }
 async function compileSample(persist = true) {
   if (compileBusy) return;
+  const revision = editRevision;
+  clearTimeout(compileTimer);
+  compileTimer = null;
   compileBusy = true;
   pause();
   try {
@@ -249,7 +284,7 @@ async function compileSample(persist = true) {
     // Persist an invalid draft too: it must remain editable and downloadable.
     if (persist) {
       await json("samples/" + selected, "PUT", { sample });
-      setDirty(false);
+      if (revision === editRevision) setDirty(false);
       await refresh();
     }
     $("sample-title").textContent = sample.id || "Untitled sample";
@@ -1204,7 +1239,7 @@ async function saveConfig() {
 $("sample-search").oninput = renderSamples;
 $("import-button").onclick = () => $("file-input").click();
 $("file-input").onchange = action(async (e) => {
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   const files = await Promise.all(
     [...e.target.files].map(async (f) => ({
       name: f.name,
@@ -1219,12 +1254,11 @@ $("file-input").onchange = action(async (e) => {
   toast("Samples imported.");
 });
 $("new-sample").onclick = action(async () => {
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   const r = await json("samples", "POST", {});
   await refresh();
   await selectSample(r.index, true);
 });
-$("apply-sample").onclick = action(() => compileSample(true));
 $("sample-json").oninput = () => setDirty();
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
@@ -1243,7 +1277,7 @@ $("add-event").onclick = () => {
 };
 $("duplicate").onclick = action(async () => {
   if (!sample) return;
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   const copy = structuredClone(sample);
   copy.id = (copy.id || "sample") + "-copy-" + Date.now().toString(36);
   const r = await json("samples", "POST", { sample: copy });
@@ -1266,7 +1300,7 @@ $("delete-sample").onclick = action(async () => {
   }
 });
 async function saveSession() {
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   await json("checkpoint", "POST");
   await refresh();
   toast("Dataset saved.");
@@ -1332,7 +1366,7 @@ document.addEventListener("click", (e) => {
 $("validate-sample").onclick = action(async () => {
   closeMenus();
   if (!sample) throw new Error("Select a sample first");
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   $("validation-report").textContent = "Validating…";
   $("report-dialog").showModal();
   try {
@@ -1458,20 +1492,20 @@ for (const b of document.querySelectorAll("[data-config]"))
   };
 $("generate-one").onclick = action(async () => {
   openGenerationPanel();
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   await json("run", "POST", { automatic: false });
   await refresh();
 });
 $("auto-start").onclick = action(async () => {
   openGenerationPanel();
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   await json("run", "POST", { automatic: true });
   await refresh();
 });
 $("stop-run").onclick = action(async () => {
   await json("stop", "POST");
   await refresh();
-  if (selected >= 0 && !dirty) await selectSample(selected, true);
+  if (selected >= 0 && !hasPendingChanges()) await selectSample(selected, true);
 });
 $("pause-run").onclick = action(async () => {
   await json("pause", "POST", { resume: state.status.paused });
@@ -1480,7 +1514,7 @@ $("pause-run").onclick = action(async () => {
 $("export-button").onclick = () => $("export-dialog").showModal();
 $("close-export").onclick = () => $("export-dialog").close();
 $("download-export").onclick = action(async () => {
-  if (dirty) await compileSample(true);
+  if (hasPendingChanges()) await compileSample(true);
   const body = { ticks_per_chunk: Number($("chunk-size").value) };
   if ($("export-scope").value === "current") body.indices = [selected];
   await download("export", "kidra-token-chunks.jsonl", "POST", body);
@@ -1512,7 +1546,7 @@ document.addEventListener("keydown", (e) => {
   }
 });
 window.addEventListener("beforeunload", (e) => {
-  if (dirty) {
+  if (hasPendingChanges()) {
     e.preventDefault();
     e.returnValue = "";
   }
@@ -1523,7 +1557,12 @@ setInterval(
     action(async () => {
       const wasRunning = state?.status.running;
       await refresh();
-      if (wasRunning && !state.status.running && selected >= 0 && !dirty)
+      if (
+        wasRunning &&
+        !state.status.running &&
+        selected >= 0 &&
+        !hasPendingChanges()
+      )
         await selectSample(selected, true);
     })(),
   1500,
