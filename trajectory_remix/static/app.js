@@ -1,9 +1,12 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
+const AUTOSAVE_ENABLED_KEY = "trajectory-remix.autosave-enabled";
+const AUTOSAVE_MINUTES_KEY = "trajectory-remix.autosave-minutes";
 let state,
   selected = -1,
   sample = null,
+  savedRevision = null,
   plan = null,
   tick = 0,
   dirty = false,
@@ -16,8 +19,13 @@ let configDraft,
   eventDraft = [],
   toastTimer,
   compileTimer,
+  compileWaiters = [],
+  autosaveTimer,
+  autosaveBusy = false,
   editRevision = 0,
   autoCompileDelayMs = loadAutoCompileDelay(),
+  autosaveEnabled = loadAutosaveEnabled(),
+  autosaveMinutes = loadAutosaveMinutes(),
   pollBusy = false,
   compileBusy = false,
   sampleRevision = null;
@@ -97,6 +105,43 @@ function loadAutoCompileDelay() {
     return 1000;
   }
 }
+function loadAutosaveEnabled() {
+  try {
+    return localStorage.getItem(AUTOSAVE_ENABLED_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+function loadAutosaveMinutes() {
+  try {
+    const saved = Number(localStorage.getItem(AUTOSAVE_MINUTES_KEY));
+    return Number.isInteger(saved) && saved >= 1 && saved <= 120 ? saved : 5;
+  } catch {
+    return 5;
+  }
+}
+function scheduleAutosave() {
+  clearInterval(autosaveTimer);
+  autosaveTimer = null;
+  if (!autosaveEnabled) return;
+  autosaveTimer = setInterval(
+    action(async () => {
+      if (
+        autosaveBusy ||
+        !state ||
+        (!hasPendingChanges() && state.revision === savedRevision)
+      )
+        return;
+      autosaveBusy = true;
+      try {
+        await saveSession();
+      } finally {
+        autosaveBusy = false;
+      }
+    }),
+    autosaveMinutes * 60_000,
+  );
+}
 function scheduleCompile() {
   clearTimeout(compileTimer);
   compileTimer = setTimeout(
@@ -155,6 +200,9 @@ async function refresh(initial = false) {
   try {
     const next = await json("state");
     const changed = !state || next.revision !== state.revision;
+    if (Number.isInteger(next.status.last_saved_revision))
+      savedRevision = next.status.last_saved_revision;
+    else if (savedRevision === null) savedRevision = next.revision;
     state = next;
     renderStatus();
     if (changed || initial) renderSamples();
@@ -211,9 +259,12 @@ function renderStatus() {
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
-  $("save-status").textContent = s.last_saved
-    ? `Saved ${new Date(s.last_saved).toLocaleTimeString()}`
-    : "Not saved yet";
+  const unsaved = hasPendingChanges() || state.revision !== savedRevision;
+  $("save-status").textContent = unsaved
+    ? "Unsaved changes"
+    : s.last_saved
+      ? `Saved ${new Date(s.last_saved).toLocaleTimeString()}`
+      : "Not saved yet";
   $("selected-tags").replaceChildren(
     ...(state.config.tags || []).map((t) => node("span", "tag", t)),
   );
@@ -232,7 +283,10 @@ function renderStatus() {
   );
 }
 function renderHistoryActions() {
-  for (const [id, direction] of [["undo-edit", "undo"], ["redo-edit", "redo"]]) {
+  for (const [id, direction] of [
+    ["undo-edit", "undo"],
+    ["redo-edit", "redo"],
+  ]) {
     const available = state?.history?.[direction] || [];
     $(id).disabled = state?.status.running || compileBusy || !available.length;
     $(id).title = available[0]?.label || `Nothing to ${direction}`;
@@ -347,6 +401,7 @@ async function compileSample(persist = true) {
   } finally {
     compileBusy = false;
     renderHistoryActions();
+    for (const resolve of compileWaiters.splice(0)) resolve();
   }
 }
 function setTick(value) {
@@ -1341,13 +1396,17 @@ $("delete-sample").onclick = action(async () => {
   }
 });
 async function saveSession() {
+  while (compileBusy)
+    await new Promise((resolve) => compileWaiters.push(resolve));
   if (hasPendingChanges()) await compileSample(true);
-  await json("checkpoint", "POST");
+  const result = await json("checkpoint", "POST");
+  savedRevision = result.revision;
   await refresh();
   toast("Dataset saved.");
 }
 async function changeHistory(direction) {
-  if (compileBusy) throw new Error("Wait for the current compilation to finish.");
+  if (compileBusy)
+    throw new Error("Wait for the current compilation to finish.");
   if (hasPendingChanges()) await compileSample(true);
   const history = await json("mcp/call", "POST", { name: "get_edit_history" });
   await json("mcp/call", "POST", {
@@ -1408,7 +1467,13 @@ $("edit-menu-button").onclick = () => toggleMenu("edit");
 $("preferences-button").onclick = () => {
   closeMenus();
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
+  $("autosave-enabled").checked = autosaveEnabled;
+  $("autosave-minutes").value = String(autosaveMinutes);
+  $("autosave-minutes").disabled = !autosaveEnabled;
   $("preferences-dialog").showModal();
+};
+$("autosave-enabled").onchange = () => {
+  $("autosave-minutes").disabled = !$("autosave-enabled").checked;
 };
 $("close-preferences").onclick = () => $("preferences-dialog").close();
 $("cancel-preferences").onclick = () => $("preferences-dialog").close();
@@ -1418,8 +1483,28 @@ $("preferences-form").onsubmit = action(async (event) => {
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0.1 || delaySeconds > 60)
     throw new Error("Compile delay must be between 0.1 and 60 seconds.");
   const delayMs = Math.round(delaySeconds * 1000);
+  const autosaveEnabledValue = $("autosave-enabled").checked;
+  const autosaveMinutesValue = Number($("autosave-minutes").value);
+  if (
+    autosaveEnabledValue &&
+    (!Number.isInteger(autosaveMinutesValue) ||
+      autosaveMinutesValue < 1 ||
+      autosaveMinutesValue > 120)
+  )
+    throw new Error("Autosave interval must be between 1 and 120 minutes.");
+  const nextAutosaveMinutes =
+    Number.isInteger(autosaveMinutesValue) &&
+    autosaveMinutesValue >= 1 &&
+    autosaveMinutesValue <= 120
+      ? autosaveMinutesValue
+      : autosaveMinutes;
   localStorage.setItem(AUTO_COMPILE_DELAY_KEY, String(delayMs));
+  localStorage.setItem(AUTOSAVE_ENABLED_KEY, String(autosaveEnabledValue));
+  localStorage.setItem(AUTOSAVE_MINUTES_KEY, String(nextAutosaveMinutes));
   autoCompileDelayMs = delayMs;
+  autosaveEnabled = autosaveEnabledValue;
+  autosaveMinutes = nextAutosaveMinutes;
+  scheduleAutosave();
   if (compileTimer !== null) scheduleCompile();
   $("preferences-dialog").close();
 });
@@ -1630,6 +1715,7 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 await action(() => refresh(true))();
+scheduleAutosave();
 setInterval(
   () =>
     action(async () => {

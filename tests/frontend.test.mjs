@@ -196,12 +196,30 @@ assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 3);
 await click("preferences-button");
 assert($("preferences-dialog").hasAttribute("open"));
 assert.equal($("auto-compile-delay").value, "1");
+assert.equal($("autosave-enabled").checked, true);
+assert.equal($("autosave-minutes").value, "5");
 $("auto-compile-delay").value = "0.2";
+$("autosave-minutes").value = "2";
 await $("preferences-form").onsubmit({ preventDefault() {} });
 assert.equal($("preferences-dialog").hasAttribute("open"), false);
 assert.equal(
   w.localStorage.getItem("trajectory-remix.auto-compile-delay"),
   "200",
+);
+assert.equal(
+  w.localStorage.getItem("trajectory-remix.autosave-enabled"),
+  "true",
+);
+assert.equal(w.localStorage.getItem("trajectory-remix.autosave-minutes"), "2");
+await click("preferences-button");
+assert.equal($("autosave-minutes").value, "2");
+$("autosave-enabled").checked = false;
+$("autosave-enabled").onchange();
+assert.equal($("autosave-minutes").disabled, true);
+await $("preferences-form").onsubmit({ preventDefault() {} });
+assert.equal(
+  w.localStorage.getItem("trajectory-remix.autosave-enabled"),
+  "false",
 );
 const compileCountBeforePreference = compileCount();
 $("sample-json").oninput();
@@ -242,7 +260,8 @@ const tool = async (name, args) => {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+      "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]')
+        .content,
     },
     body: JSON.stringify({ name, arguments: args }),
   });
@@ -255,7 +274,8 @@ await tool("update_trajectory_metadata", {
   patch: { metadata: { title: "MCP metadata edit" } },
 });
 await waitFor(
-  () => JSON.parse($("sample-json").value).metadata?.title === "MCP metadata edit",
+  () =>
+    JSON.parse($("sample-json").value).metadata?.title === "MCP metadata edit",
 );
 const localDraft = JSON.parse($("sample-json").value);
 localDraft.metadata.title = "Pending browser draft";
@@ -267,11 +287,17 @@ await tool("update_trajectory_metadata", {
 });
 await waitFor(() => /Dataset changed/.test($("toast").textContent));
 await new Promise((resolve) => setTimeout(resolve, 1700));
-assert.equal(JSON.parse($("sample-json").value).metadata.title, "Pending browser draft");
+assert.equal(
+  JSON.parse($("sample-json").value).metadata.title,
+  "Pending browser draft",
+);
 const remote = await tool("get_trajectory", { sample_id: currentId });
 assert.equal(remote.sample.metadata.title, "Concurrent MCP edit");
 await w.document.querySelector(".sample-item.active").onclick();
-assert.equal(JSON.parse($("sample-json").value).metadata.title, "Concurrent MCP edit");
+assert.equal(
+  JSON.parse($("sample-json").value).metadata.title,
+  "Concurrent MCP edit",
+);
 assert.equal(w.document.title, "Trajectory Remix");
 
 // A revision observed while compilation is busy must still refresh on a later poll.
@@ -291,28 +317,42 @@ await new Promise((resolve) => setTimeout(resolve, 50));
 releaseCompile();
 releaseCompile = null;
 await waitFor(
-  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+  () =>
+    JSON.parse($("sample-json").value).metadata.title ===
+    "MCP edit during compile",
 );
 await waitFor(() => !$("undo-edit").disabled);
 await click("undo-edit");
 await waitFor(
-  () => JSON.parse($("sample-json").value).metadata.title === "Browser save before compile",
+  () =>
+    JSON.parse($("sample-json").value).metadata.title ===
+    "Browser save before compile",
 );
 await waitFor(() => !$("redo-edit").disabled);
 await click("redo-edit");
 await waitFor(
-  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+  () =>
+    JSON.parse($("sample-json").value).metadata.title ===
+    "MCP edit during compile",
 );
 await waitFor(() => !$("undo-edit").disabled);
 $("undo-edit").focus();
-w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+w.document.dispatchEvent(
+  new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true }),
+);
 await waitFor(
-  () => JSON.parse($("sample-json").value).metadata.title === "Browser save before compile",
+  () =>
+    JSON.parse($("sample-json").value).metadata.title ===
+    "Browser save before compile",
 );
 await waitFor(() => !$("redo-edit").disabled);
-w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true, shiftKey: true }));
+w.document.dispatchEvent(
+  new w.KeyboardEvent("keydown", { key: "z", ctrlKey: true, shiftKey: true }),
+);
 await waitFor(
-  () => JSON.parse($("sample-json").value).metadata.title === "MCP edit during compile",
+  () =>
+    JSON.parse($("sample-json").value).metadata.title ===
+    "MCP edit during compile",
 );
 await waitFor(() => !$("undo-edit").disabled);
 const pendingUndoDraft = JSON.parse($("sample-json").value);
@@ -320,7 +360,10 @@ pendingUndoDraft.metadata.title = "Pending draft to undo";
 $("sample-json").value = JSON.stringify(pendingUndoDraft);
 $("sample-json").oninput();
 await click("undo-edit");
-assert.equal(JSON.parse($("sample-json").value).metadata.title, "MCP edit during compile");
+assert.equal(
+  JSON.parse($("sample-json").value).metadata.title,
+  "MCP edit during compile",
+);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({

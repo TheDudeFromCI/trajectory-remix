@@ -310,8 +310,8 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
 
     @app.post("/api/checkpoint")
     async def checkpoint():
-        await runner.save()
-        return {"ok": True, "path": str(runner.save_path)}
+        revision = await runner.save()
+        return {"ok": True, "path": str(runner.save_path), "revision": revision}
 
     @app.post("/api/export")
     async def export(request: Request):

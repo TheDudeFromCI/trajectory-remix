@@ -27,6 +27,7 @@ class Runner:
             "failures": 0,
             "last_error": None,
             "last_saved": None,
+            "last_saved_revision": None,
         }
         self.logs = deque(maxlen=250)
 
@@ -39,6 +40,7 @@ class Runner:
             revision = self.state["revision"]
             await asyncio.to_thread(atomic_save, self.save_path, data)
             self.status["last_saved"] = datetime.now(UTC).isoformat()
+            self.status["last_saved_revision"] = revision
             self.log(f"Saved {len(data['samples'])} samples to {self.save_path.name}")
             return revision
 

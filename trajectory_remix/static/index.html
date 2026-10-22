@@ -234,6 +234,22 @@
           />
           <span>seconds</span>
         </div>
+        <label class="preferences-toggle" for="autosave-enabled">
+          <input id="autosave-enabled" type="checkbox" />
+          Autosave project
+        </label>
+        <label class="preferences-label" for="autosave-minutes">Save every</label>
+        <div class="preferences-delay">
+          <input
+            id="autosave-minutes"
+            type="number"
+            min="1"
+            max="120"
+            step="1"
+            required
+          />
+          <span>minutes</span>
+        </div>
         <div class="dialog-footer">
           <button id="cancel-preferences" type="button">Cancel</button>
           <button class="primary" type="submit">Save preferences</button>
