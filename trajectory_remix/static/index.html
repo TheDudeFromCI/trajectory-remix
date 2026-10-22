@@ -21,7 +21,15 @@
         <div class="file-menu">
           <button id="edit-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">Edit</button>
           <div id="edit-menu" class="file-menu-popup" role="menu" hidden>
-            <button id="settings-button" role="menuitem" title="Configure endpoints and generation">Configuration</button>
+            <div class="submenu">
+              <button id="generation-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Generation ▸</button>
+              <div id="generation-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
+                <button id="settings-button" role="menuitem" title="Open the generation panel">Settings</button>
+                <button id="generate-one" role="menuitem">Create Sample</button>
+                <button id="validate-sample" role="menuitem">Validate Sample</button>
+                <button id="auto-start" role="menuitem">Create Sample Batch</button>
+              </div>
+            </div>
           </div>
         </div>
         <span class="menu-label">Help</span>
@@ -72,7 +80,6 @@
           </div>
           <div class="tab-actions">
             <span id="dirty-indicator"></span
-            ><button id="validate-sample">LLM validate</button
             ><button id="apply-sample" class="primary" disabled>Apply & compile</button>
           </div>
         </div>
@@ -181,8 +188,13 @@
           </div>
         </section>
       </main>
-      <aside class="inspector">
-        <div class="side-heading">GENERATION CONTROL</div>
+    </div>
+    <aside id="generation-panel" class="floating-panel" aria-label="Generation control" hidden>
+      <div id="generation-panel-header" class="floating-header">
+        <span class="side-heading">GENERATION CONTROL</span>
+        <button id="close-generation-panel" class="square" title="Close">×</button>
+      </div>
+      <div class="floating-body">
         <button id="export-button">Export tokens</button>
         <div class="run-status">
           <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
@@ -191,8 +203,6 @@
           <div><b id="accepted-stat">0</b><small>ACCEPTED</small></div>
           <div><b id="attempt-stat">0</b><small>ATTEMPTS</small></div>
         </div>
-        <button id="generate-one" class="primary full">Generate sample</button
-        ><button id="auto-start" class="full">Start automatic mode</button>
         <div class="two-buttons">
           <button id="pause-run">Pause</button
           ><button id="stop-run" class="danger-text">Stop</button>
@@ -204,8 +214,8 @@
         </button>
         <div class="side-heading subheading">ACTIVITY</div>
         <div id="activity-log"><small>No generation activity.</small></div>
-      </aside>
-    </div>
+      </div>
+    </aside>
     <div id="toast" role="status" hidden></div>
     <dialog id="settings-dialog">
       <div class="dialog-header">

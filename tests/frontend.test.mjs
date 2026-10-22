@@ -119,7 +119,11 @@ assert(
   w.document.querySelector("#window-grid").textContent.includes("↵"),
   JSON.stringify($("window-grid").textContent),
 );
+await click("edit-menu-button");
+await click("generation-menu-button");
 await click("settings-button");
+assert.equal($("generation-panel").hidden, false);
+await click("edit-tags");
 assert($("settings-dialog").hasAttribute("open"));
 await w.document.querySelector('[data-config="tasks"]').onclick();
 assert.equal(
@@ -144,7 +148,9 @@ assert.equal(
   "FileEditHelp",
 );
 assert.equal($("file-menu").contains($("import-button")), true);
-assert.equal($("edit-menu").contains($("settings-button")), true);
+assert.equal($("generation-menu").contains($("settings-button")), true);
+for (const id of ["generate-one", "validate-sample", "auto-start"])
+  assert.equal($("generation-menu").contains($(id)), true);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
 $("sample-json").focus();

@@ -1277,7 +1277,39 @@ function closeMenus() {
     $(name + "-menu").hidden = true;
     $(name + "-menu-button").setAttribute("aria-expanded", "false");
   }
+  $("generation-menu").hidden = true;
+  $("generation-menu-button").setAttribute("aria-expanded", "false");
 }
+$("generation-menu-button").onclick = () => {
+  $("generation-menu").hidden = false;
+  $("generation-menu-button").setAttribute("aria-expanded", "true");
+};
+function openGenerationPanel() {
+  closeMenus();
+  $("generation-panel").hidden = false;
+}
+$("close-generation-panel").onclick = () =>
+  ($("generation-panel").hidden = true);
+$("generation-panel-header").onmousedown = (e) => {
+  if (e.target.closest("button")) return;
+  const panel = $("generation-panel"),
+    r = panel.getBoundingClientRect(),
+    dx = e.clientX - r.left,
+    dy = e.clientY - r.top;
+  const move = (m) => {
+    panel.style.right = "auto";
+    panel.style.left =
+      Math.max(0, Math.min(innerWidth - 60, m.clientX - dx)) + "px";
+    panel.style.top =
+      Math.max(0, Math.min(innerHeight - 40, m.clientY - dy)) + "px";
+  };
+  const up = () => {
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("mouseup", up);
+  };
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+};
 function toggleMenu(name) {
   const open = $(name + "-menu").hidden;
   closeMenus();
@@ -1286,6 +1318,11 @@ function toggleMenu(name) {
 }
 $("file-menu-button").onclick = () => toggleMenu("file");
 $("edit-menu-button").onclick = () => toggleMenu("edit");
+for (const name of ["file", "edit"])
+  $(name + "-menu-button").onmouseenter = () => {
+    const anyOpen = !$("file-menu").hidden || !$("edit-menu").hidden;
+    if ($(name + "-menu").hidden && anyOpen) toggleMenu(name);
+  };
 $("file-save").onclick = action(async () => {
   closeMenus();
   await saveSession();
@@ -1294,6 +1331,7 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest(".file-menu")) closeMenus();
 });
 $("validate-sample").onclick = action(async () => {
+  closeMenus();
   if (!sample) throw new Error("Select a sample first");
   if (dirty) await compileSample(true);
   $("validation-report").textContent = "Validating…";
@@ -1411,10 +1449,7 @@ $("edit-tags").onclick = () => {
   configTab = "conditions";
   openSettings();
 };
-$("settings-button").onclick = () => {
-  closeMenus();
-  openSettings();
-};
+$("settings-button").onclick = openGenerationPanel;
 $("close-settings").onclick = () => $("settings-dialog").close();
 $("save-config").onclick = action(saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
@@ -1423,11 +1458,13 @@ for (const b of document.querySelectorAll("[data-config]"))
     renderConfig();
   };
 $("generate-one").onclick = action(async () => {
+  openGenerationPanel();
   if (dirty) await compileSample(true);
   await json("run", "POST", { automatic: false });
   await refresh();
 });
 $("auto-start").onclick = action(async () => {
+  openGenerationPanel();
   if (dirty) await compileSample(true);
   await json("run", "POST", { automatic: true });
   await refresh();

@@ -363,5 +363,12 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         builder = SampleBuilder(compiler, copy.deepcopy(state["config"]), client)
         return await builder.validators(sample)
 
+    @app.middleware("http")
+    async def no_cache_static(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.mount("/static", StaticFiles(directory=static), name="static")
     return app

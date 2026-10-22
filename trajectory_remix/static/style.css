@@ -169,11 +169,10 @@ header {
 }
 .workspace {
   display: grid;
-  grid-template-columns: 222px minmax(430px, 1fr) 246px;
+  grid-template-columns: 222px minmax(430px, 1fr);
   height: calc(100vh - 36px);
 }
-.sidebar,
-.inspector {
+.sidebar {
   background: #111925;
   padding: 10px 7px;
   display: flex;
@@ -183,8 +182,52 @@ header {
 .sidebar {
   border-right: 1px solid var(--border);
 }
-.inspector {
-  border-left: 1px solid var(--border);
+.submenu {
+  position: relative;
+}
+.submenu > button {
+  width: 100%;
+  border-color: transparent;
+  text-align: left;
+  padding: 6px 8px;
+}
+.submenu-popup {
+  top: 0;
+  left: 100%;
+}
+.submenu:hover > .submenu-popup[hidden],
+.submenu:focus-within > .submenu-popup[hidden] {
+  display: grid;
+}
+.floating-panel {
+  position: fixed;
+  z-index: 15;
+  top: 48px;
+  right: 16px;
+  width: 260px;
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: #111925;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px #000a;
+}
+.floating-panel[hidden] {
+  display: none;
+}
+.floating-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 0 10px;
+  cursor: move;
+  user-select: none;
+}
+.floating-body {
+  padding: 4px 10px 10px;
+  overflow: auto;
+  min-height: 0;
 }
 .side-heading {
   display: flex;
@@ -912,7 +955,7 @@ dialog::backdrop {
 }
 @media (max-width: 1250px) {
   .workspace {
-    grid-template-columns: 190px minmax(420px, 1fr) 210px;
+    grid-template-columns: 190px minmax(420px, 1fr);
   }
   .timeline-options {
     display: none;
@@ -931,9 +974,6 @@ dialog::backdrop {
   }
 }
 @media (max-width: 980px) {
-  .inspector {
-    display: none;
-  }
   .workspace {
     grid-template-columns: 180px minmax(400px, 1fr);
   }
