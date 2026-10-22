@@ -34,6 +34,7 @@ EditName = Literal[
     "delete_trajectory",
     "update_trajectory_metadata",
     "create_event",
+    "create_tool_call",
     "update_event",
     "move_event",
     "duplicate_event",
@@ -438,7 +439,7 @@ class TrajectoryCommands:
         validate: bool = False,
         expected_revision: Revision = None,
     ):
-        """Insert an open, append or generate event at a numeric or anchor tick key.
+        """Insert an open, append, generate or tool-call event at a numeric or anchor tick key.
 
         position defaults to the end of the tick array. Close via generated EOS.
         """
@@ -778,9 +779,11 @@ class TrajectoryCommands:
                 status = (
                     "pending"
                     if life["open"] > tick
-                    else "closed"
-                    if life["close"] is not None and life["close"] <= tick
-                    else "open"
+                    else (
+                        "closed"
+                        if life["close"] is not None and life["close"] <= tick
+                        else "open"
+                    )
                 )
                 data.update(
                     status=status,
@@ -957,14 +960,73 @@ class TrajectoryCommands:
         return self.tool_sessions.definitions(session_id)
 
     @command(write=True)
+    def create_tool_call(
+        self,
+        sample_id: str,
+        tick: str,
+        tool: str,
+        arguments: dict,
+        duration_ticks: Nonnegative = 0,
+        window: str | None = None,
+        outcome: dict | None = None,
+        position: Nonnegative | None = None,
+        expected_revision: Revision = None,
+    ):
+        """Schedule an executable synthetic tool event and compile before committing one undoable edit.
+
+        The trajectory's sandbox changes atomically at tick + duration_ticks. A fresh
+        result window opens there with masked actual output. tick accepts numeric or
+        anchor expressions. Only subagent requires a recorded outcome; replay never
+        contacts an endpoint. Workbench sessions remain separate. Save with save_dataset.
+        """
+        index, sample = self._draft(sample_id, expected_revision)
+        event = {
+            "op": "tool-call",
+            "tool": tool,
+            "arguments": arguments,
+            "window": (
+                window if window is not None else f"tool-result-{uuid.uuid4().hex[:12]}"
+            ),
+            "duration-ticks": duration_ticks,
+        }
+        if outcome is not None:
+            event["outcome"] = outcome
+        address = self._insert(sample, tick, event, position)
+        plan = self.compiler.compile(sample)
+        call = next(c for c in plan["tool_calls"] if c["window"] == event["window"])
+        return {**self._commit(sample, index), **address, "tool_call": call}
+
+    @command()
+    def get_sandbox_state(
+        self, sample_id: str, tick: Nonnegative, include_calls: bool = True
+    ):
+        """Inspect historical virtual files, memory, notes, skills, clock and tool statuses.
+
+        Post-commit state at tick; running calls omit future results. Reading never
+        executes external requests or mutates a workbench. Set include_calls=False
+        to omit argument/outcome logs from a large preview. Maximum output: 4 MB.
+        """
+        plan = self._plan(sample_id)
+        sandbox = self.compiler.frame(plan, tick)["sandbox"]
+        if not include_calls:
+            sandbox.pop("tool_calls")
+        if len(json.dumps(sandbox, ensure_ascii=False).encode()) > 4_000_000:
+            raise CommandError("Sandbox preview exceeds 4 MB; set include_calls=False")
+        return {
+            "sample_id": sample_id,
+            "tick": tick,
+            "sandbox": sandbox,
+            "revision": self.state["revision"],
+        }
+
+    @command(write=True)
     def create_tool_session(
         self,
         session_id: str | None = None,
         clock_seed: str | None = None,
-        seconds_per_call: Annotated[
-            float, Field(ge=0, le=31_536_000, allow_inf_nan=False)
-        ]
-        | None = None,
+        seconds_per_call: (
+            Annotated[float, Field(ge=0, le=31_536_000, allow_inf_nan=False)] | None
+        ) = None,
         max_calls: Annotated[int, Field(ge=1, le=256)] | None = None,
         max_bytes: Annotated[int, Field(ge=128, le=2_000_000)] = 2_000_000,
         subagent_endpoint: str | None = None,
@@ -978,15 +1040,21 @@ class TrajectoryCommands:
         """
         clock = self.state["config"].get("clock", {})
         options = {
-            "seed": clock_seed
-            if clock_seed is not None
-            else clock.get("seed", "2030-01-01T09:00:00+00:00"),
-            "seconds_per_call": seconds_per_call
-            if seconds_per_call is not None
-            else clock.get("seconds_per_call", 1),
-            "max_calls": max_calls
-            if max_calls is not None
-            else self.state["config"].get("max_tool_calls", 64),
+            "seed": (
+                clock_seed
+                if clock_seed is not None
+                else clock.get("seed", "2030-01-01T09:00:00+00:00")
+            ),
+            "seconds_per_call": (
+                seconds_per_call
+                if seconds_per_call is not None
+                else clock.get("seconds_per_call", 1)
+            ),
+            "max_calls": (
+                max_calls
+                if max_calls is not None
+                else self.state["config"].get("max_tool_calls", 64)
+            ),
             "max_bytes": max_bytes,
         }
         if subagent_endpoint is not None:

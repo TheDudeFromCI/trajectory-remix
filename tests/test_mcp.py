@@ -41,7 +41,7 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert initialized.serverInfo.name == "trajectory-remix"
                 catalog = await session.list_tools()
                 tools = {tool.name: tool for tool in catalog.tools}
-                assert len(tools) == 37
+                assert len(tools) == 39
                 assert tools["get_trajectory"].annotations.readOnlyHint
                 assert tools["delete_event"].annotations.destructiveHint
                 for tool in tools.values():
@@ -273,11 +273,42 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path):
                     bridge = DashboardBridge(client)
                     response = await bridge.request("GET", "/api/samples/0")
                     assert response.json()["id"] == "stdio-test"
+                    scheduled = await session.call_tool(
+                        "create_tool_call",
+                        {
+                            "sample_id": "stdio-test",
+                            "tick": "150",
+                            "tool": "file_write",
+                            "arguments": {"path": "mcp.txt", "content": "saved"},
+                            "duration_ticks": 50,
+                        },
+                    )
+                    assert not scheduled.isError, scheduled
+                    old = await session.call_tool(
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 175}
+                    )
+                    assert old.structuredContent["sandbox"]["files"] == {}
+                    assert (
+                        old.structuredContent["sandbox"]["tool_calls"][-1]["status"]
+                        == "running"
+                    )
+                    current = await session.call_tool(
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 200}
+                    )
+                    assert current.structuredContent["sandbox"]["files"] == {
+                        "/mcp.txt": "saved"
+                    }
                     assert (
                         await session.call_tool("save_dataset", {})
                     ).structuredContent["saved"]
                 assert (
                     json.loads(dataset.read_text())["samples"][0]["id"] == "stdio-test"
+                )
+                assert (
+                    json.loads(dataset.read_text())["samples"][0]["replay"]["150"][0][
+                        "op"
+                    ]
+                    == "tool-call"
                 )
         finally:
             dashboard.terminate()

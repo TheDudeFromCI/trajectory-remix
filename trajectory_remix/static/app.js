@@ -419,6 +419,7 @@ function renderReplay() {
   $("max-tick").textContent = plan?.max_tick || 0;
   $("tick-scrubber").max = plan?.max_tick || 0;
   $("tick-number").max = plan?.max_tick || 0;
+  renderSandbox();
   if (!plan) {
     const empty = node("div", "empty");
     empty.append(
@@ -496,12 +497,72 @@ async function fetchFrame() {
     if (plan && currentFrame?.tick !== tick) setTimeout(fetchFrame, 25);
   }
 }
+function renderSandbox() {
+  $("sandbox-panel").hidden = !plan;
+  $("sandbox-title").textContent = `Sandbox · tick ${tick}`;
+  $("sandbox-calls").replaceChildren();
+  $("sandbox-state").replaceChildren();
+  if (!plan) return;
+  if (currentFrame?.tick !== tick) {
+    $("sandbox-state").textContent = "Loading sandbox…";
+    return;
+  }
+  const sandbox = currentFrame.sandbox;
+  if (!sandbox) return;
+  $("sandbox-state").append(
+    node("p", "", `${sandbox.clock} · ${sandbox.calls} completed calls`),
+  );
+  for (const call of sandbox.tool_calls) {
+    const row = node("details", `sandbox-call ${call.status}`);
+    row.append(
+      node(
+        "summary",
+        "",
+        `${call.tool} · ${call.status} · ticks ${call.start}–${call.end}`,
+      ),
+    );
+    row.append(
+      node(
+        "pre",
+        "window-content",
+        JSON.stringify(
+          { arguments: call.arguments, ...(call.outcome || {}) },
+          null,
+          2,
+        ),
+      ),
+    );
+    $("sandbox-calls").append(row);
+  }
+  for (const name of ["files", "memory", "notes", "skills"]) {
+    const group = node("details", "sandbox-store");
+    group.open = name === "files";
+    const entries = Object.entries(sandbox[name]);
+    group.append(node("summary", "", `${name} (${entries.length})`));
+    for (const [key, value] of entries) {
+      const entry = node("details");
+      entry.append(node("summary", "", key));
+      entry.append(
+        node(
+          "pre",
+          "window-content",
+          typeof value === "string" ? value : JSON.stringify(value, null, 2),
+        ),
+      );
+      group.append(entry);
+    }
+    $("sandbox-state").append(group);
+  }
+}
 function drawTimeline() {
   const canvas = $("timeline"),
     scroll = $("timeline-scroll"),
     space = $("timeline-space");
   const width = Math.max(300, scroll.clientWidth),
-    height = Math.max(100, (plan?.windows.length || 1) * 32 + 30),
+    height = Math.max(
+      100,
+      ((plan?.windows.length || 1) + (plan?.tool_calls?.length || 0)) * 32 + 30,
+    ),
     px = +$("timeline-zoom").value,
     label = 125,
     offset = scroll.scrollLeft;
@@ -560,6 +621,22 @@ function drawTimeline() {
       c.fillRect(x(w.close), y, 2, 18);
     }
   });
+  (plan.tool_calls || []).forEach((call, i) => {
+    const y = 30 + (plan.windows.length + i) * 32;
+    const a = Math.max(label, x(call.start)),
+      b = Math.min(width, x(call.end) + Math.max(px, 3));
+    if (b > a) {
+      c.fillStyle =
+        tick < call.start
+          ? "#667a95"
+          : tick < call.end
+            ? "#e6bc7c"
+            : call.outcome.ok
+              ? "#7be0c3"
+              : "#ee99bc";
+      c.fillRect(a, y + 3, Math.max(2, b - a), 12);
+    }
+  });
   for (const [id, a] of Object.entries(plan.anchors)) {
     const xx = x(a.tick);
     if (xx < label || xx > width) continue;
@@ -599,6 +676,14 @@ function drawTimeline() {
       w.id.length > 15 ? w.id.slice(0, 14) + "…" : w.id,
       24,
       42 + i * 32,
+    );
+  });
+  (plan.tool_calls || []).forEach((call, i) => {
+    c.fillStyle = "#e6bc7c";
+    c.fillText(
+      `↳ ${call.tool}`.slice(0, 18),
+      10,
+      42 + (plan.windows.length + i) * 32,
     );
   });
 }
@@ -699,16 +784,33 @@ function renderEvents() {
       at.title = "Absolute tick or anchor expression";
       head.append(
         at,
-        select(["open", "append", "generate"], e.op, (v) => {
+        select(["open", "append", "generate", "tool-call"], e.op, (v) => {
           e.op = v;
-          if (v === "open") {
+          if (v === "open" || v === "tool-call") {
             delete e.content;
             delete e.segments;
             delete e.loss;
+            delete e.delivery;
+            delete e["tokens-per-tick"];
+            delete e.source;
+            if (v === "tool-call") {
+              e.tool ??= "file_list";
+              e.arguments ??= {};
+              e["duration-ticks"] ??= 0;
+            }
           } else {
             if (!e.segments) e.content ??= "";
             e.loss ??= { mask: "auto" };
             if (v === "append") e.source ??= "tool";
+          }
+          if (v !== "tool-call") {
+            for (const key of [
+              "tool",
+              "arguments",
+              "duration-ticks",
+              "outcome",
+            ])
+              delete e[key];
           }
           update();
           renderEvents();
@@ -719,7 +821,7 @@ function renderEvents() {
         update();
       });
       win.className = "event-window";
-      win.placeholder = "Window ID";
+      win.placeholder = e.op === "tool-call" ? "Result window ID" : "Window ID";
       head.append(
         win,
         button("↑", () => {
@@ -782,6 +884,71 @@ function renderEvents() {
           ),
         );
         card.append(options);
+      } else if (e.op === "tool-call") {
+        const options = node("div", "event-options");
+        const schemas = (state.tools || []).map((s) => s.function);
+        options.append(
+          field(
+            "Tool",
+            select(
+              schemas.map((s) => s.name),
+              e.tool,
+              (value) => {
+                e.tool = value;
+                e.arguments = Object.fromEntries(
+                  Object.entries(
+                    schemas.find((s) => s.name === value).parameters.properties,
+                  ).map(([key, spec]) => [
+                    key,
+                    spec.enum?.[0] ?? (spec.type === "number" ? 0 : ""),
+                  ]),
+                );
+                delete e.outcome;
+                update();
+                renderEvents();
+              },
+            ),
+          ),
+        );
+        const duration = input(
+          e["duration-ticks"] ?? 0,
+          (v) => {
+            e["duration-ticks"] = v;
+            update();
+          },
+          "number",
+        );
+        duration.min = "0";
+        duration.step = "1";
+        options.append(field("Duration (ticks)", duration));
+        card.append(options);
+        for (const key of e.tool === "subagent"
+          ? ["arguments", "outcome"]
+          : ["arguments"]) {
+          const area = node("textarea");
+          area.setAttribute("aria-label", `${key} JSON`);
+          area.value =
+            typeof e[key] === "string"
+              ? e[key]
+              : JSON.stringify(e[key] ?? {}, null, 2);
+          area.spellcheck = false;
+          area.oninput = () => {
+            try {
+              e[key] = JSON.parse(area.value);
+            } catch {
+              e[key] = area.value;
+            }
+            update();
+          };
+          card.append(field(`${key} (JSON)`, area));
+        }
+        card.append(
+          node(
+            "small",
+            "hint",
+            "A fresh result window opens at completion. Sandbox changes commit at that tick.",
+          ),
+        );
       } else {
         if (e.segments) {
           card.append(
@@ -1372,6 +1539,21 @@ $("add-event").onclick = () => {
   setDirty();
   renderEvents();
 };
+$("add-tool-call").onclick = () => {
+  if (!sample) return;
+  eventDraft.push({
+    key: String(tick),
+    event: {
+      op: "tool-call",
+      tool: "file_list",
+      arguments: {},
+      window: `tool-result-${Date.now().toString(36)}`,
+      "duration-ticks": 0,
+    },
+  });
+  setDirty();
+  renderEvents();
+};
 $("duplicate").onclick = action(async () => {
   if (!sample) return;
   if (hasPendingChanges()) await compileSample(true);
@@ -1625,12 +1807,16 @@ $("timeline").onmousemove = (e) => {
   const anchors = Object.entries(plan.anchors)
     .filter(([, a]) => a.tick === t && a.window === w?.id)
     .map(([id]) => `{N_TICK:${id}}`);
-  const text = [
-    ...anchors,
-    ...events.map(
-      (x) => `${x.op} · ${x.start}–${x.end} · ${x.text.slice(0, 100)}`,
-    ),
-  ].join(" | ");
+  const call = plan.tool_calls?.[wi - plan.windows.length];
+  const text =
+    call && call.start <= t && t <= call.end
+      ? `${call.tool} · ${call.start}–${call.end} · ${JSON.stringify(call.arguments)}`
+      : [
+          ...anchors,
+          ...events.map(
+            (x) => `${x.op} · ${x.start}–${x.end} · ${x.text.slice(0, 100)}`,
+          ),
+        ].join(" | ");
   $("timeline-event").textContent = text;
   e.target.title = text;
 };

@@ -416,6 +416,33 @@ h2 {
   gap: 14px;
   align-content: start;
 }
+.sandbox-panel {
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.sandbox-panel summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.sandbox-store,
+.sandbox-call {
+  margin: 8px 0;
+}
+.sandbox-store > details {
+  margin: 6px 12px;
+}
+.sandbox-call.running {
+  color: #e6bc7c;
+}
+.sandbox-call.failed {
+  color: #ee99bc;
+}
+.timeline-legend .tool {
+  background: #e6bc7c;
+}
 .window-card {
   border: 1px solid var(--border);
   border-radius: 8px;

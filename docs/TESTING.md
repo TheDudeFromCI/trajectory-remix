@@ -12,6 +12,13 @@
   and protection of pending browser edits during conflicts.
   They also exercise dataset Undo/Redo menu actions, keyboard shortcuts, and
   undoing a pending draft after it is persisted.
+  Sandbox checks author a delayed file write, inspect its running duration, and
+  scrub forward/backward across completion without displaying future file state.
+- Sandbox replay tests cover completion ordering, all virtual stores, literal
+  marker/control-token data, offline subagent outcomes, edit recomputation,
+  generation continuity, and masked result visibility in token exports. MCP
+  checks schedule calls through the official stdio client and shared dashboard,
+  including source history, revision conflicts, atomic batches and persistence.
 - CLI export succeeds on the included reactive sample.
 - A Python wheel builds successfully and contains all dashboard assets.
 
