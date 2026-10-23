@@ -1,3 +1,4 @@
+from trajectory_remix.storage import DatasetStore
 import copy
 import json
 
@@ -18,7 +19,7 @@ async def source(studio, sample_id="test"):
 
 async def test_trajectory_crud_metadata_and_save(studio, tmp_path):
     created = await call(studio, "create_trajectory", sample_id="empty")
-    assert created == {"sample_id": "empty", "revision": 1, "saved": False}
+    assert created == {"sample_id": "empty", "revision": 1, "saved": True}
     report = await call(studio, "validate_trajectory", sample_id="empty")
     assert not report["valid"]
     await call(
@@ -65,7 +66,7 @@ async def test_trajectory_crud_metadata_and_save(studio, tmp_path):
     )
     await call(studio, "delete_trajectory", sample_id="test")
     saved = await call(studio, "save_dataset")
-    data = json.loads((tmp_path / "project.kidra-dataset").read_text())
+    data = {"samples": list(DatasetStore(tmp_path / "project.kidra-dataset").samples)}
     assert saved["saved"] and saved["revision"] == studio[0].state.dataset["revision"]
     assert [s["id"] for s in data["samples"]] == ["empty", "copy"]
     assert data["samples"][1]["metadata"] == {"title": "replaced"}

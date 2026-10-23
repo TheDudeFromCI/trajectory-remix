@@ -22,6 +22,7 @@ from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import KEY, CompileError
 from .dataset import new_sample
 from .llm import LLMClient, SampleBuilder
+from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import ToolError, chat_context, tool_message, tool_request, tool_text
 
@@ -109,6 +110,7 @@ class TrajectoryCommands:
         self.client = client
         self.history = history if history is not None else runner.history
         self.action = ContextVar("trajectory_command", default="Edit trajectory")
+        self.edit_revision = ContextVar("trajectory_revision", default=None)
         self.tool_sessions = ToolSessions()
         self.cache = OrderedDict()
         self.commands = {
@@ -138,6 +140,7 @@ class TrajectoryCommands:
             raise CommandError(str(error)) from error
         # Preserve nested TextPatch objects rather than dumping them to dicts.
         token = self.action.set(name)
+        revision_token = self.edit_revision.set(self.state["revision"])
         try:
             result = fn(
                 **{
@@ -148,12 +151,19 @@ class TrajectoryCommands:
             if inspect.isawaitable(result):
                 result = await result
             return copy.deepcopy(result)
-        except (HistoryError, ToolSessionError) as error:
+        except (HistoryError, ToolSessionError, StorageConflict) as error:
             raise CommandError(str(error), error.code) from error
         finally:
             self.action.reset(token)
+            self.edit_revision.reset(revision_token)
 
     def _find(self, sample_id):
+        samples = self.state["samples"]
+        if isinstance(samples, (SQLiteSamples, SampleDraft)):
+            found = samples.find(sample_id)
+            if found:
+                return found
+            raise CommandError(f"Trajectory not found: {sample_id}", "not_found")
         for index, sample in enumerate(self.state["samples"]):
             if sample.get("id") == sample_id:
                 return index, sample
@@ -174,22 +184,27 @@ class TrajectoryCommands:
         ident = sample.get("id")
         if not isinstance(ident, str) or not ident:
             raise CommandError("A nonempty sample id is required")
-        if any(
-            i != index and other.get("id") == ident
-            for i, other in enumerate(self.state["samples"])
-        ):
+        samples = self.state["samples"]
+        if isinstance(samples, (SQLiteSamples, SampleDraft)):
+            found = samples.find(ident)
+            duplicate = found is not None and found[0] != index
+        else:
+            duplicate = any(i != index and other.get("id") == ident for i, other in enumerate(samples))
+        if duplicate:
             raise CommandError(f"Duplicate sample ID: {ident}", "conflict")
         # Reject non-JSON values before changing the live session.
         json.dumps(sample, allow_nan=False)
         if validate:
             self.compiler.compile(sample)
         updated = self.state["samples"].copy()
+        if hasattr(self.state, "store") and self.edit_revision.get() is not None:
+            updated.revision = self.edit_revision.get()
         if index is None:
             updated.append(sample)
         else:
             updated[index] = sample
-        self.history.commit(updated, f"{self.action.get()}: {ident}")
-        return {"sample_id": ident, "revision": self.state["revision"], "saved": False}
+        revision = self.history.commit(updated, f"{self.action.get()}: {ident}")
+        return {"sample_id": ident, "revision": revision, "saved": hasattr(self.state, "store")}
 
     def _draft(self, sample_id, expected_revision):
         self._editable(expected_revision)
@@ -266,6 +281,10 @@ class TrajectoryCommands:
         self, query: str = "", offset: Nonnegative = 0, limit: PageSize = 50
     ):
         """List trajectories with metadata; filter by ID or metadata text and paginate."""
+        if isinstance(self.state["samples"], SQLiteSamples):
+            revision = self.state["revision"]
+            total, trajectories = self.state["samples"].store.listing(query, offset, limit)
+            return {"revision": revision, "total": total, "trajectories": trajectories}
         samples = [
             s
             for s in self.state["samples"]
@@ -287,7 +306,8 @@ class TrajectoryCommands:
     @command()
     def get_trajectory(self, sample_id: str):
         """Return the complete, untruncated source sample JSON, including invalid drafts."""
-        return {"sample": self._find(sample_id)[1], "revision": self.state["revision"]}
+        revision = self.state["revision"]
+        return {"sample": self._find(sample_id)[1], "revision": revision}
 
     @command(write=True)
     def create_trajectory(
@@ -347,15 +367,17 @@ class TrajectoryCommands:
 
     @command(write=True, destructive=True)
     def delete_trajectory(self, sample_id: str, expected_revision: Revision = None):
-        """Remove a trajectory from the session. Call save_dataset to persist the deletion."""
+        """Remove a trajectory from the SQLite dataset immediately."""
         index, _ = self._draft(sample_id, expected_revision)
         updated = self.state["samples"].copy()
+        if hasattr(self.state, "store") and self.edit_revision.get() is not None:
+            updated.revision = self.edit_revision.get()
         updated.pop(index)
-        self.history.commit(updated, f"delete_trajectory: {sample_id}")
+        revision = self.history.commit(updated, f"delete_trajectory: {sample_id}")
         return {
             "sample_id": sample_id,
-            "revision": self.state["revision"],
-            "saved": False,
+            "revision": revision,
+            "saved": hasattr(self.state, "store"),
         }
 
     @command()
@@ -833,7 +855,12 @@ class TrajectoryCommands:
         """
         self._editable(expected_revision)
         before = self.state["samples"]
-        working = {**self.state, "samples": copy.deepcopy(before)}
+        working = {
+            "samples": before.copy() if isinstance(before, SQLiteSamples) else copy.deepcopy(before),
+            "config": self.state["config"], "revision": self.state["revision"],
+        }
+        if isinstance(working["samples"], SampleDraft):
+            working["samples"].revision = self.edit_revision.get()
         worker = TrajectoryCommands(
             working,
             self.compiler,
@@ -856,25 +883,29 @@ class TrajectoryCommands:
             result.pop("revision", None)
             results.append(result)
         after = working["samples"]
-        if validate:
-            originals = {s["id"]: s for s in before if isinstance(s.get("id"), str)}
-            for sample in after:
-                ident = sample.get("id")
-                if isinstance(ident, str):
-                    unchanged = json_equal(sample, originals.get(ident))
-                else:
-                    unchanged = any(json_equal(sample, old) for old in before)
-                if not unchanged:
+        if isinstance(after, SampleDraft):
+            if validate:
+                for sample in after.changed_samples():
                     self.compiler.compile(sample)
-        changes = json_changes(before, after)
+            changes = copy.deepcopy(after.operations)
+        else:
+            if validate:
+                originals = {s["id"]: s for s in before if isinstance(s.get("id"), str)}
+                for sample in after:
+                    ident = sample.get("id")
+                    unchanged = json_equal(sample, originals.get(ident)) if isinstance(ident, str) else any(json_equal(sample, old) for old in before)
+                    if not unchanged:
+                        self.compiler.compile(sample)
+            changes = json_changes(before, after)
+        revision = self.edit_revision.get()
         if not dry_run:
-            self.history.commit(after, f"Batch: {len(edits)} edits")
+            revision = self.history.commit(after, f"Batch: {len(edits)} edits")
         return {
-            "revision": self.state["revision"],
+            "revision": revision,
             "results": results,
             "changes": changes,
             "dry_run": dry_run,
-            "saved": False,
+            "saved": not dry_run and hasattr(self.state, "store"),
         }
 
     @command()
@@ -950,7 +981,7 @@ class TrajectoryCommands:
         steps: Annotated[int, Field(ge=1, le=50)] = 1,
         expected_revision: Revision = None,
     ):
-        """Undo source edits as one revision change. Stop generation first; save to persist."""
+        """Undo source edits as one revision change. Stop generation first; the undo commits immediately."""
         self._editable(expected_revision)
         return self.history.restore("undo", steps)
 
@@ -1288,6 +1319,6 @@ class TrajectoryCommands:
 
     @command(write=True)
     async def save_dataset(self):
-        """Atomically save the current session to its configured dataset file (no arbitrary paths)."""
+        """Report a checkpoint of the SQLite dataset; source edits commit immediately."""
         revision = await self.runner.save()
         return {"saved": True, "revision": revision}

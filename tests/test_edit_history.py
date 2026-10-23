@@ -272,7 +272,9 @@ async def test_history_rejects_stale_busy_empty_and_excess_steps(studio):
 
 async def test_history_will_not_overwrite_untracked_source_changes(studio):
     await call(studio, "create_trajectory", sample_id="one")
-    studio[0].state.dataset["samples"][0]["metadata"] = {"untracked": True}
+    source = studio[0].state.dataset["samples"][0]
+    source["metadata"] = {"untracked": True}
+    studio[0].state.dataset["samples"][0] = source
     before = copy.deepcopy(studio[0].state.dataset)
     response = await studio[1].post("/api/mcp/call", json={"name": "undo_edits"})
     assert response.status_code == 409

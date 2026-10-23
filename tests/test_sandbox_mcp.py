@@ -1,3 +1,4 @@
+from trajectory_remix.storage import DatasetStore
 import copy
 import json
 
@@ -24,7 +25,7 @@ async def test_scheduled_calls_share_source_history_and_reject_stale_edits(
         expected_revision=0,
     )
     assert result["tool_call"]["end"] == 200
-    assert result["revision"] == 1 and not result["saved"]
+    assert result["revision"] == 1 and result["saved"]
     old = await call(studio, "get_sandbox_state", sample_id="test", tick=175)
     assert old["sandbox"]["files"] == {}
     assert old["sandbox"]["tool_calls"][-1]["status"] == "running"
@@ -58,7 +59,7 @@ async def test_scheduled_calls_share_source_history_and_reject_stale_edits(
         "sandbox"
     ]["files"] == {"/mcp.txt": "saved"}
     await call(studio, "save_dataset")
-    saved = json.loads((tmp_path / "project.kidra-dataset").read_text())
+    saved = {"samples": list(DatasetStore(tmp_path / "project.kidra-dataset").samples)}
     assert saved["samples"][0]["replay"]["150"][0]["op"] == "tool-call"
 
 

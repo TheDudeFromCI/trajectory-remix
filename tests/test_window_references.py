@@ -97,11 +97,13 @@ def test_escaped_references_and_tool_arguments_are_literal(compiler, sample):
 
 async def test_rename_updates_only_structured_references_and_is_undoable(studio):
     app, client = studio
-    app.state.dataset["samples"][0]["replay"]["1"] = [{
+    source = app.state.dataset["samples"][0]
+    source["replay"]["1"] = [{
         "op": "generate", "window": "b", "segments": [
             {"text": "a {WINDOW:a} "}, {"text": r"\{WINDOW:a} {WINDOW:b}"},
         ],
     }]
+    app.state.dataset["samples"][0] = source
     before = copy.deepcopy(app.state.dataset["samples"][0])
     response = await client.post("/api/mcp/call", json={"name": "rename_window", "arguments": {
         "sample_id": "test", "window": "a", "new_window": "renamed", "validate": True,

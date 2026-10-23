@@ -1115,3 +1115,6 @@ dialog::backdrop {
     max-height: 150px;
   }
 }
+
+.sample-pagination { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px; font-size: 11px; }
+.sample-pagination button { padding: 5px 8px; font-size: 11px; }

@@ -1,3 +1,4 @@
+from trajectory_remix.storage import DatasetStore
 import asyncio
 import json
 import socket
@@ -302,10 +303,10 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path):
                         await session.call_tool("save_dataset", {})
                     ).structuredContent["saved"]
                 assert (
-                    json.loads(dataset.read_text())["samples"][0]["id"] == "stdio-test"
+                    DatasetStore(dataset).samples[0]["id"] == "stdio-test"
                 )
                 assert (
-                    json.loads(dataset.read_text())["samples"][0]["replay"]["150"][0][
+                    DatasetStore(dataset).samples[0]["replay"]["150"][0][
                         "op"
                     ]
                     == "tool-call"

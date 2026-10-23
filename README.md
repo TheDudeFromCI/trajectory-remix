@@ -23,11 +23,12 @@ reproducible first run:
 ```bash
 python -m trajectory_remix \
   --tokenizer examples/demo-tokenizer.json \
-  --dataset demo.kidra-dataset
+  --dataset demo.sqlite
 ```
 
 `--dataset` is required: the file is created if missing and is the only save
-target. Use File > Import to add `examples/reactive-sample.json`.
+target. It is a SQLite database; each accepted edit commits immediately.
+Use File > Import to add `examples/reactive-sample.json`.
 
 Use your actual training tokenizer for real datasets. The demo tokenizer is only
 a fixture. The Hugging Face `tokenizers` library loads the tokenizer locally;
@@ -57,7 +58,8 @@ duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
 dashboard session. Edits appear in the dashboard on its next refresh; pending
-browser edits are protected by revision checks. Use `save_dataset` to persist.
+browser edits are protected by revision checks. Edits commit immediately;
+`save_dataset` reports a checkpoint.
 
 **Edit → Undo / Redo** also restores source edits made through MCP, the dashboard
 or generation. Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) invoke dataset history
@@ -96,8 +98,8 @@ examples, validation options and limits.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
-6. **Save** (Ctrl+S) writes the server's `--dataset` project file. Generation
-   also saves every configured N accepted samples and on stop.
+6. **Save** (Ctrl+S) applies pending browser edits and reports a checkpoint.
+   Applied edits and accepted generated trajectories already commit to SQLite.
 7. **Export tokens** exports the selected sample or whole dataset as chunked
    token JSONL. Every selected sample must compile before export begins.
 
@@ -109,15 +111,26 @@ Unrelated metadata is preserved. These edits synchronize with Source JSON and
 use the same automatic apply, save and Undo/Redo workflow as event edits.
 Leaving a name blank omits that property; the default names are Kidra and User.
 
-Dataset files are UTF-8 JSON, not executable archives:
+Dataset files are SQLite databases, conventionally named `project.sqlite`.
+Trajectories are stored as individual JSON records in rows, with indexed unique
+IDs and separate listing metadata. The server fetches trajectories on demand;
+it does not load or copy the whole dataset. The sidebar searches in SQLite and
+shows 100 results per page. Undo history and compiled previews are bounded.
 
-```json
-{
-  "format": "trajectory-remix/kidra-dataset/1",
-  "samples": [],
-  "config": {"endpoints": [], "tasks": []}
-}
-```
+Writes use WAL mode, a 30-second busy timeout and transactions. Multiple server
+processes can share a local database: revisions detect competing edits, and
+unique constraints prevent duplicate IDs. SQLite serializes writers while
+readers use consistent snapshots. Keep the database on a local filesystem;
+WAL databases can have companion `-wal` and `-shm` files. Use SQLite's backup API
+or stop all writers before copying a database.
+
+Existing `.json`, `.jsonl`, and JSON `.kidra-dataset` files can still be imported.
+To use an old project, start with a new SQLite `--dataset` path, then use
+**File → Import**. Legacy JSON files are never overwritten at startup.
+Bulk replacement imports clear session undo history so the old dataset does not
+have to be loaded into RAM. Token exports remain JSONL and process one trajectory
+at a time, spooling to disk before download so invalid trajectories cannot cause
+a partial export.
 
 API keys are excluded. Datasets preserve prompts, task order, endpoint URLs/model
 names, generation settings, sample metadata, tags and loss controls. The tokenizer
@@ -128,7 +141,7 @@ Reload a saved dataset at startup:
 
 ```bash
 python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset project.kidra-dataset
+  --dataset project.sqlite
 ```
 
 ## Replay contract
@@ -226,7 +239,8 @@ contract; it is not an audit of the current ProjectKidra repository.
 
 Defaults: at most 100,000 ticks and 500,000 expanded rows per compiled sample.
 Interactive previews are limited to 50,000 rows. Imports are limited to 32 MB per
-file and requests to 40 MB. Very large datasets should be split into batches.
+file and requests to 40 MB. Large imports should be split into batches; the SQLite dataset itself has no
+100,000-trajectory limit.
 
 ## LLM tasks and endpoint configuration
 
@@ -306,7 +320,8 @@ fails rather than passing optimistically.
 - `max_samples`: accepted new samples; zero means unlimited.
 - `max_attempts`: candidate attempts; zero means unlimited. An attempt may run
   `regenerations + 1` complete task pipelines.
-- `autosave_every`: accepted samples between atomic disk checkpoints.
+- `autosave_every`: accepted samples between checkpoint progress reports; every
+  accepted sample commits immediately.
 - `delay_seconds`: delay between candidate attempts (minimum 0.1 seconds).
 - `max_consecutive_failures`: hard stop threshold, even with skip/pause chosen.
 - `failure_action`: stop immediately, pause after a failed attempt, or skip to
@@ -317,7 +332,7 @@ fails rather than passing optimistically.
 - `validate`: run enabled LLM validators before accepting a candidate.
 
 Accepted samples enter the dataset immediately. A stop cancels the in-flight HTTP
-request, discards the incomplete candidate and flushes accepted changes. Pause
+request and discards the incomplete candidate. Accepted changes are already durable. Pause
 finishes the in-flight request and blocks at the next pipeline/attempt boundary;
 it is not a provider-side pause. Generator state/quotas are per candidate, and
 credentials are not included in retained datasets. Generation locks dataset
@@ -463,7 +478,7 @@ the usual checkpoint), and `GET /api/samples/{index}/sandbox/{tick}`.
 
 ```bash
 python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset samples.kidra-dataset --export token-chunks.jsonl --chunk-ticks 64
+  --dataset samples.sqlite --export token-chunks.jsonl --chunk-ticks 64
 python -m pytest -q
 ```
 
@@ -488,7 +503,8 @@ cancellation and failure limits. `docs/EXPORT.md` describes the training adapter
 |---|---|
 | `compiler.py` | Schema, anchors, timing, lifecycle, token rows, masks, exact attention predicate. |
 | `training.py` | Export reader, reference query/attention batching, optional PyTorch conversion. |
-| `dataset.py` | Import normalization, dataset shape, atomic persistence, key removal. |
+| `dataset.py` | JSON import normalization, trajectory defaults and key removal. |
+| `storage.py` | SQLite storage, lazy reads, paginated metadata and sparse edits. |
 | `llm.py` | Config/task defaults, prompt organization, bounded HTTP, generation, validators. |
 | `tools.py` | Isolated RAM capability sandbox and tool schemas. |
 | `sandbox_replay.py` | Tool scheduling, recorded outcomes and historical sandbox deltas. |

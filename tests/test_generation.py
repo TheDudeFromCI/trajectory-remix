@@ -1,3 +1,4 @@
+from trajectory_remix.storage import DatasetStore, DatasetState
 import asyncio
 import copy
 import json
@@ -14,6 +15,13 @@ from trajectory_remix.llm import (
 )
 from trajectory_remix.runner import Runner
 from trajectory_remix.tools import Sandbox
+
+
+def make_state(path, config, samples=()):
+    store = DatasetStore(path, config)
+    if samples:
+        store.replace(samples, 0)
+    return DatasetState(store, config)
 
 
 class FakeClient:
@@ -123,14 +131,14 @@ async def test_regeneration_uses_validator_feedback_and_checkpoints(compiler, tm
             '{"valid":true,"feedback":[]}',
         ]
     )
-    state = {"samples": [], "config": c, "revision": 0}
+    state = make_state(tmp_path / "auto.kidra-dataset", c)
     runner = Runner(state, compiler, tmp_path / "auto.kidra-dataset", fake)
     runner.start(single=True)
     await runner.job
     assert runner.status["accepted"] == 1
     assert len(state["samples"]) == 1
     assert "missing details" in fake.messages[2][0]["content"]
-    data = json.loads((tmp_path / "auto.kidra-dataset").read_text())
+    data = {"samples": list(DatasetStore(tmp_path / "auto.kidra-dataset").samples)}
     assert len(data["samples"]) == 1
 
 
@@ -163,7 +171,7 @@ async def test_crash_limits_and_skip(compiler, tmp_path):
         regenerations=0,
     )
     fake = FakeClient([ValueError("crashed")] * 4)
-    state = {"samples": [], "config": c, "revision": 0}
+    state = make_state(tmp_path / "a", c)
     runner = Runner(state, compiler, tmp_path / "a", fake)
     runner.start()
     await runner.job
@@ -189,7 +197,7 @@ async def test_cancellation_destroys_sandbox(compiler, tmp_path, monkeypatch):
             await asyncio.Event().wait()
 
     c = minimal_config()
-    state = {"samples": [], "config": c, "revision": 0}
+    state = make_state(tmp_path / "a", c)
     r = Runner(state, compiler, tmp_path / "a", Blocked())
     r.start()
     await asyncio.wait_for(entered.wait(), 2)
@@ -201,7 +209,7 @@ async def test_cancellation_destroys_sandbox(compiler, tmp_path, monkeypatch):
 async def test_run_task_on_seed(compiler, sample, tmp_path):
     c = minimal_config()
     c["automatic"]["validate"] = False
-    state = {"samples": [sample], "config": c, "revision": 0}
+    state = make_state(tmp_path / "a", c, [sample])
     r = Runner(
         state, compiler, tmp_path / "a", FakeClient(["A generated user request."])
     )
@@ -449,7 +457,7 @@ async def test_pause_on_failure_and_resume(compiler, tmp_path):
         regenerations=0,
         max_consecutive_failures=3,
     )
-    state = {"samples": [], "config": c, "revision": 0}
+    state = make_state(tmp_path / "checkpoint", c)
     runner = Runner(
         state,
         compiler,
@@ -473,14 +481,14 @@ async def test_multiple_acceptances_flush_below_autosave_threshold(compiler, tmp
     c["automatic"].update(
         validate=False, max_samples=2, autosave_every=5, regenerations=0
     )
-    state = {"samples": [], "config": c, "revision": 0}
+    state = make_state(tmp_path / "checkpoint", c)
     r = Runner(
         state, compiler, tmp_path / "checkpoint", FakeClient(["First.", "Second."])
     )
     r.start()
     await r.job
-    assert len(json.loads((tmp_path / "checkpoint").read_text())["samples"]) == 2
-    saved = json.loads((tmp_path / "checkpoint").read_text())["samples"]
+    assert len(list(DatasetStore(tmp_path / "checkpoint").samples)) == 2
+    saved = list(DatasetStore(tmp_path / "checkpoint").samples)
     assert len(r.history.view()["undo"]) == 2
     r.history.restore("undo", 2)
     assert state["samples"] == []

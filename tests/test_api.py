@@ -1,3 +1,4 @@
+from trajectory_remix.storage import DatasetStore
 import json
 
 import httpx
@@ -32,8 +33,7 @@ async def test_crud_compile_frame_export_roundtrip(client, tmp_path):
     assert records[0]["format"] == "kidra-token-chunk/1"
     assert records[0]["tokenizer_sha256"] == p["tokenizer_sha256"]
     assert (await client.post("/api/checkpoint")).status_code == 200
-    saved = (tmp_path / "project.kidra-dataset").read_text()
-    assert parse_import("file.kidra-dataset", saved)[0] == [s]
+    assert list(DatasetStore(tmp_path / "project.kidra-dataset").samples) == [s]
     s["id"] = "edited"
     assert (await client.put("/api/samples/0", json={"sample": s})).status_code == 200
     assert (await client.delete("/api/samples/0")).status_code == 200
@@ -117,7 +117,7 @@ async def test_keys_never_saved_or_read_back(client, tmp_path):
     assert (await client.put("/api/config", json={"config": c})).status_code == 200
     assert "unit-test-secret" not in (await client.get("/api/state")).text
     assert (await client.post("/api/checkpoint")).status_code == 200
-    assert "unit-test-secret" not in (tmp_path / "project.kidra-dataset").read_text()
+    assert b"unit-test-secret" not in (tmp_path / "project.kidra-dataset").read_bytes()
 
 
 async def test_session_guard_and_origin(client):

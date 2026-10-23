@@ -1,11 +1,8 @@
-"""Dataset persistence. API keys never enter dataset files."""
+"""JSON interchange and trajectory defaults. API keys never enter exports."""
 
 import copy
 import json
-import os
-import tempfile
 import uuid
-from pathlib import Path
 
 FORMAT = "trajectory-remix/kidra-dataset/1"
 
@@ -88,21 +85,3 @@ def public_config(config):
     for endpoint in result.get("endpoints", []):
         endpoint.pop("api_key", None)
     return result
-
-
-def snapshot(samples, config):
-    return {"format": FORMAT, "samples": samples, "config": public_config(config)}
-
-
-def atomic_save(path: Path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".remix-", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2, allow_nan=False)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)

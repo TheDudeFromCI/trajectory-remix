@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -7,8 +8,11 @@ import secrets
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
+from tempfile import TemporaryFile
 
-from fastapi import FastAPI, HTTPException, Request
+from starlette.background import BackgroundTask
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -16,31 +20,23 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, Compiler, chunks
 from .dataset import (
-    atomic_save,
     new_sample,
     parse_import,
     public_config,
     reject_constant,
-    snapshot,
 )
 from .llm import TAGS, SampleBuilder, default_config, validate_config
 from .runner import Runner
 from .tools import SCHEMAS
+from .storage import DatasetState, DatasetStore, StorageConflict
 
 MAX_BODY = 40_000_000
 
 
 def create_app(compiler: Compiler, dataset: Path, client=None):
-    state = {"samples": [], "config": default_config(), "revision": 0}
-    if dataset.suffix.lower() == ".jsonl":
-        raise ValueError("--dataset must be a JSON/.kidra-dataset file, not JSONL")
-    if dataset.exists():
-        samples, config = parse_import(dataset.name, dataset.read_text("utf-8"))
-        state["samples"] = samples
-        if config:
-            state["config"] = validate_config(config)
-    else:
-        atomic_save(dataset, snapshot([], state["config"]))
+    store = DatasetStore(dataset, default_config())
+    config = validate_config(json.loads(store.info()[3]))
+    state = DatasetState(store, config)
     runner = Runner(state, compiler, dataset, client)
     token = secrets.token_urlsafe(32)
     previews = OrderedDict()
@@ -98,6 +94,10 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
             {"detail": str(error), "diagnostics": [error.diagnostic()]}, status_code=422
         )
 
+    @app.exception_handler(StorageConflict)
+    async def storage_conflict(request, error):
+        return JSONResponse({"detail": str(error), "code": "conflict"}, status_code=409)
+
     @app.exception_handler(ValueError)
     async def value_error(request, error):
         return JSONResponse({"detail": str(error)}, status_code=422)
@@ -134,12 +134,6 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
             raise HTTPException(404, "Sample not found")
         return state["samples"][index]
 
-    def unique_samples(samples):
-        # Do not silently remap IDs used by external dataset tooling.
-        ids = [s.get("id") for s in samples if isinstance(s.get("id"), str)]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Duplicate sample IDs; rename duplicates before importing")
-
     @app.get("/", response_class=HTMLResponse)
     async def index():
         return HTMLResponse(
@@ -147,34 +141,25 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         )
 
     @app.get("/api/state")
-    async def get_state():
+    async def get_state(
+        offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000),
+        query: str = "", selected_id: str | None = None,
+    ):
+        revision = state["revision"]
+        total, samples = store.listing(query, offset, limit, dashboard=True)
+        selected_index = store.samples.index_of(selected_id) if selected_id is not None else None
         return {
-            "samples": [
-                {
-                    "index": i,
-                    "id": s.get("id", "untitled"),
-                    "events": (
-                        sum(
-                            len(v)
-                            for v in s.get("replay", {}).values()
-                            if isinstance(v, list)
-                        )
-                        if isinstance(s.get("replay"), dict)
-                        else 0
-                    ),
-                    "tags": (
-                        s.get("metadata", {}).get("tags", [])
-                        if isinstance(s.get("metadata"), dict)
-                        and isinstance(s["metadata"].get("tags", []), list)
-                        else []
-                    ),
-                }
-                for i, s in enumerate(state["samples"])
-            ],
+            "samples": samples,
+            "sample_count": len(store.samples),
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "query": query,
+            "selected_index": selected_index,
             "config": public_config(state["config"]),
-            "revision": state["revision"],
+            "revision": revision,
             "history": runner.history.view(),
-            "status": runner.status,
+            "status": {**runner.status, "last_saved_revision": revision},
             "logs": list(runner.logs),
             "tags": TAGS,
             "tools": SCHEMAS,
@@ -187,8 +172,9 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
 
     @app.get("/api/samples/{index}")
     async def get_sample(index: int):
+        revision = state["revision"]
         return JSONResponse(
-            sample_at(index), headers={"X-Remix-Revision": str(state["revision"])}
+            sample_at(index), headers={"X-Remix-Revision": str(revision)}
         )
 
     @app.get("/api/mcp/tools")
@@ -250,17 +236,17 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
                         )
         if not isinstance(sample, dict):
             raise ValueError("sample must be an object")
-        unique_samples(state["samples"] + [sample])
-        runner.history.commit(
-            state["samples"] + [sample], "Create trajectory in dashboard"
-        )
-        return {"index": len(state["samples"]) - 1}
+        updated = state["samples"].copy()
+        updated.append(sample)
+        runner.history.commit(updated, "Create trajectory in dashboard")
+        return {"index": len(updated) - 1}
 
     @app.put("/api/samples/{index}")
     async def update_sample(index: int, request: Request):
         editable()
-        sample_at(index)
         data = await body(request)
+        updated = state["samples"].copy()
+        sample_at(index)
         expected_revision = data.get("expected_revision")
         if expected_revision is not None:
             if type(expected_revision) is not int or expected_revision < 0:
@@ -272,19 +258,19 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
         sample = data.get("sample")
         if not isinstance(sample, dict):
             raise ValueError("sample must be an object")
-        updated = state["samples"].copy()
         updated[index] = sample
-        unique_samples(updated)
-        runner.history.commit(
+        revision = runner.history.commit(
             updated, f"Edit trajectory in dashboard: {sample.get('id', 'untitled')}"
         )
-        return {"ok": True, "revision": state["revision"]}
+        return {"ok": True, "revision": revision}
 
     @app.delete("/api/samples/{index}")
-    async def delete_sample(index: int):
+    async def delete_sample(index: int, expected_revision: int | None = Query(None, ge=0)):
         editable()
-        sample_at(index)
         updated = state["samples"].copy()
+        if expected_revision is not None:
+            updated.revision = expected_revision
+        sample_at(index)
         updated.pop(index)
         runner.history.commit(updated, "Delete trajectory in dashboard")
         return {"ok": True}
@@ -311,12 +297,20 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
             imported.extend(samples)
             if incoming:
                 config = validate_config(incoming)
-        updated = imported if data.get("replace") else state["samples"] + imported
-        unique_samples(updated)
-        # Batch import is transactional: no mutations before all files validate.
-        if data.get("load_config") and config:
-            state["config"] = config
-        runner.history.commit(updated, "Import trajectories in dashboard")
+        # Configuration and trajectories commit in the same SQLite transaction.
+        incoming_config = config if data.get("load_config") else None
+        if data.get("replace"):
+            # Bulk replacement must not pull the previous dataset into undo RAM.
+            revision = store.replace(imported, state["revision"], incoming_config)
+            runner.history.undo_stack.clear()
+            runner.history.redo_stack.clear()
+            runner.history.tip = revision
+            runner.history.notice = "History cleared after replacing the dataset"
+        else:
+            updated = state["samples"].copy()
+            for sample in imported:
+                updated.append(sample)
+            runner.history.commit(updated, "Import trajectories in dashboard", config=incoming_config)
         return {"imported": len(imported)}
 
     @app.post("/api/compile")
@@ -353,36 +347,53 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
     @app.post("/api/export")
     async def export(request: Request):
         data = await body(request)
-        indices = data.get("indices", list(range(len(state["samples"]))))
-        if (
-            not isinstance(indices, list)
-            or not indices
-            or any(type(i) is not int for i in indices)
+        indices = data.get("indices")
+        if indices is not None and (
+            not isinstance(indices, list) or not indices
+            or any(type(i) is not int or i < 0 for i in indices)
         ):
+            raise ValueError("Select at least one sample to export")
+        if indices is None and not len(store.samples):
             raise ValueError("Select at least one sample to export")
         size = data.get("ticks_per_chunk", 64)
         if type(size) is not int or not 1 <= size <= 100_000:
             raise ValueError("ticks_per_chunk must be an integer between 1 and 100000")
-        # Validate everything before sending any bytes, so no half-valid export.
-        plans = [compiler.compile(sample_at(i)) for i in indices]
+        # Spool a consistent snapshot to disk, one compiled trajectory at a time.
+        # Validation still finishes before HTTP headers or output bytes are sent.
+        spool = TemporaryFile(mode="w+b")
+        try:
+            with store.read_samples(indices) as samples:
+                for sample in samples:
+                    for chunk in chunks(compiler.compile(sample), size):
+                        spool.write((json.dumps(chunk, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
+                        await asyncio.sleep(0)
+            spool.seek(0)
+        except BaseException:
+            spool.close()
+            raise
 
-        def records():
-            for plan in plans:
-                for chunk in chunks(plan, size):
-                    yield json.dumps(chunk, ensure_ascii=False, allow_nan=False) + "\n"
+        async def close_export():
+            spool.close()
+
+        async def records():
+            try:
+                while block := spool.read(64 * 1024):
+                    yield block
+                    await asyncio.sleep(0)
+            finally:
+                spool.close()
 
         return StreamingResponse(
-            records(),
-            media_type="application/x-ndjson",
-            headers={
-                "Content-Disposition": 'attachment; filename="kidra-token-chunks.jsonl"'
-            },
+            records(), media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="kidra-token-chunks.jsonl"'},
+            background=BackgroundTask(close_export),
         )
 
     @app.put("/api/config")
     async def config(request: Request):
         editable()
         data = await body(request)
+        revision = state["revision"]
         candidate = validate_config(data.get("config"))
         # A blank UI key preserves an existing in-memory key; explicit clear_key clears it.
         old = {e["id"]: e for e in state["config"]["endpoints"]}
@@ -395,8 +406,7 @@ def create_app(compiler: Compiler, dataset: Path, client=None):
                 and old[endpoint["id"]].get("api_key")
             ):
                 endpoint["api_key"] = old[endpoint["id"]]["api_key"]
-        state["config"] = candidate
-        state["revision"] += 1
+        state.set_config(candidate, revision)
         return {"ok": True}
 
     @app.post("/api/run")

@@ -1,11 +1,12 @@
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 
 from tokenizers import Tokenizer
 
 from .compiler import Compiler, chunks
-from .dataset import parse_import
+from .storage import DatasetStore
 
 
 def main():
@@ -22,7 +23,7 @@ def main():
         "--dataset",
         type=Path,
         required=True,
-        help="Project .kidra-dataset file; created if missing and saved to on every save",
+        help="SQLite project file; created if missing; each edit commits immediately",
     )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
@@ -33,6 +34,8 @@ def main():
     parser.add_argument("--chunk-ticks", type=int, default=64)
     args = parser.parse_args()
     try:
+        if args.chunk_ticks < 1:
+            parser.error("--chunk-ticks must be positive")
         compiler = Compiler(
             Tokenizer.from_file(str(args.tokenizer)), args.bos, args.eos, args.noop
         )
@@ -40,10 +43,7 @@ def main():
             if not args.dataset.exists():
                 parser.error(f"--dataset not found: {args.dataset}")
 
-            samples, _ = parse_import(
-                args.dataset.name, args.dataset.read_text("utf-8")
-            )
-            plans = [compiler.compile(s) for s in samples]
+            store = DatasetStore(args.dataset)
 
             import os
             from tempfile import NamedTemporaryFile
@@ -55,16 +55,19 @@ def main():
                     mode="w", encoding="utf-8", dir=args.export.parent, delete=False
                 ) as stream:
                     temp = stream.name
-                    for plan in plans:
-                        for chunk in chunks(plan, args.chunk_ticks):
-                            stream.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+                    count = 0
+                    with store.read_samples() as samples:
+                        for sample in samples:
+                            for chunk in chunks(compiler.compile(sample), args.chunk_ticks):
+                                stream.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+                            count += 1
                     stream.flush()
                     os.fsync(stream.fileno())
                 os.replace(temp, args.export)
             finally:
                 if temp and os.path.exists(temp):
                     os.unlink(temp)
-            print(f"Exported {len(plans)} samples to {args.export}")
+            print(f"Exported {count} samples to {args.export}")
             return
 
         import uvicorn
@@ -78,7 +81,7 @@ def main():
             port=args.port,
             log_level="warning",
         )
-    except (ValueError, OSError) as e:
+    except (ValueError, OSError, sqlite3.Error) as e:
         parser.exit(1, f"Trajectory Remix: {e}\n")
 
 
