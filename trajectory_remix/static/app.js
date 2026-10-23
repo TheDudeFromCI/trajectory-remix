@@ -3,8 +3,10 @@ const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
 const AUTOSAVE_ENABLED_KEY = "trajectory-remix.autosave-enabled";
 const AUTOSAVE_MINUTES_KEY = "trajectory-remix.autosave-minutes";
+const SHOW_HEADERS_KEY = "trajectory-remix.show-window-headers";
 const SAMPLE_PAGE_SIZE = 100;
-let sampleOffset = 0, searchTimer;
+let sampleOffset = 0,
+  searchTimer;
 let state,
   selected = -1,
   sample = null,
@@ -28,6 +30,7 @@ let configDraft,
   autoCompileDelayMs = loadAutoCompileDelay(),
   autosaveEnabled = loadAutosaveEnabled(),
   autosaveMinutes = loadAutosaveMinutes(),
+  showWindowHeaders = loadShowWindowHeaders(),
   pollBusy = false,
   compileBusy = false,
   sampleRevision = null;
@@ -112,6 +115,13 @@ function loadAutosaveEnabled() {
     return localStorage.getItem(AUTOSAVE_ENABLED_KEY) !== "false";
   } catch {
     return true;
+  }
+}
+function loadShowWindowHeaders() {
+  try {
+    return localStorage.getItem(SHOW_HEADERS_KEY) === "true";
+  } catch {
+    return false;
   }
 }
 function loadAutosaveMinutes() {
@@ -201,22 +211,29 @@ async function refresh(initial = false) {
   pollBusy = true;
   try {
     const params = new URLSearchParams({
-      offset: String(sampleOffset), limit: String(SAMPLE_PAGE_SIZE),
+      offset: String(sampleOffset),
+      limit: String(SAMPLE_PAGE_SIZE),
       query: $("sample-search").value,
     });
     if (sample?.id) params.set("selected_id", sample.id);
     const next = await json("state?" + params);
     if (next.total > 0 && sampleOffset >= next.total) {
-      sampleOffset = Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
+      sampleOffset =
+        Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
     }
-    const changed = !state || next.revision !== state.revision || next.offset !== state.offset || next.query !== state.query;
+    const changed =
+      !state ||
+      next.revision !== state.revision ||
+      next.offset !== state.offset ||
+      next.query !== state.query;
     if (Number.isInteger(next.status.last_saved_revision))
       savedRevision = next.status.last_saved_revision;
     else if (savedRevision === null) savedRevision = next.revision;
     state = next;
     renderStatus();
     if (changed || initial) renderSamples();
-    if (initial && state.samples.length) await selectSample(state.samples[0].index, true);
+    if (initial && state.samples.length)
+      await selectSample(state.samples[0].index, true);
     if (
       !initial &&
       sample &&
@@ -224,9 +241,11 @@ async function refresh(initial = false) {
       !compileBusy &&
       !hasPendingChanges()
     ) {
-      const current = state.samples.find((s) => s.id === sample.id) ||
+      const current =
+        state.samples.find((s) => s.id === sample.id) ||
         (Number.isInteger(next.selected_index) && next.selected_index >= 0
-          ? { index: next.selected_index } : null);
+          ? { index: next.selected_index }
+          : null);
       if (current) await selectSample(current.index, true);
       else {
         selected = -1;
@@ -235,7 +254,10 @@ async function refresh(initial = false) {
         renderReplay();
       }
     }
-    if (selected >= (state.sample_count ?? state.samples.length) && !hasPendingChanges()) {
+    if (
+      selected >= (state.sample_count ?? state.samples.length) &&
+      !hasPendingChanges()
+    ) {
       selected = -1;
       sample = null;
       plan = null;
@@ -312,28 +334,27 @@ function renderSamples() {
   $("sample-page-prev").disabled = sampleOffset === 0;
   $("sample-page-next").disabled = sampleOffset + SAMPLE_PAGE_SIZE >= total;
   $("sample-list").replaceChildren(
-    ...state.samples
-      .map((s) => {
-        const b = button(
+    ...state.samples.map((s) => {
+      const b = button(
+        "",
+        action(() => selectSample(s.index)),
+      );
+      b.className = "sample-item" + (s.index === selected ? " active" : "");
+      const title = node("strong");
+      title.append(
+        node("span", "item-num", String(s.index + 1).padStart(3, "0")),
+        document.createTextNode(s.id),
+      );
+      b.append(
+        title,
+        node(
+          "small",
           "",
-          action(() => selectSample(s.index)),
-        );
-        b.className = "sample-item" + (s.index === selected ? " active" : "");
-        const title = node("strong");
-        title.append(
-          node("span", "item-num", String(s.index + 1).padStart(3, "0")),
-          document.createTextNode(s.id),
-        );
-        b.append(
-          title,
-          node(
-            "small",
-            "",
-            `${s.events} events${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
-          ),
-        );
-        return b;
-      }),
+          `${s.events} events${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
+        ),
+      );
+      return b;
+    }),
   );
 }
 async function selectSample(index, force = false) {
@@ -475,10 +496,16 @@ function renderReplay() {
     head.append(
       dot,
       node("strong", "", w.id),
-      node("small", "", `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`),
+      node(
+        "small",
+        "",
+        `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`,
+      ),
     );
     const data = currentFrame?.windows?.[w.id];
-    const content = data?.text || "";
+    let content = data?.text || "";
+    if (!showWindowHeaders)
+      content = content.replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
     card.append(
       head,
       windowContent(content || (unopened ? "Not opened yet." : "No content.")),
@@ -552,7 +579,14 @@ function renderSandbox() {
     );
     $("sandbox-calls").append(row);
   }
-  for (const name of ["files", "memory", "notes", "skills", "artifacts", "conversations"]) {
+  for (const name of [
+    "files",
+    "memory",
+    "notes",
+    "skills",
+    "artifacts",
+    "conversations",
+  ]) {
     const group = node("details", "sandbox-store");
     group.open = name === "files";
     const entries = Object.entries(sandbox[name]);
@@ -750,14 +784,20 @@ function readMetadata() {
   return metadata;
 }
 function showMetadataNames(metadata) {
-  $("agent-name").value = typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
-  $("user-name").value = typeof metadata?.user_name === "string" ? metadata.user_name : "";
+  $("agent-name").value =
+    typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
+  $("user-name").value =
+    typeof metadata?.user_name === "string" ? metadata.user_name : "";
 }
 function loadMetadata(trajectory) {
   $("trajectory-uuid").value = trajectory?.uuid || "";
   $("metadata-fields").disabled = !trajectory;
   $("metadata-json").setCustomValidity("");
-  $("metadata-json").value = JSON.stringify(trajectory?.metadata ?? {}, null, 2);
+  $("metadata-json").value = JSON.stringify(
+    trajectory?.metadata ?? {},
+    null,
+    2,
+  );
   showMetadataNames(trajectory?.metadata);
   $("metadata-status").textContent = trajectory
     ? "Defaults to Kidra and User when left blank."
@@ -850,45 +890,70 @@ function renderEvents() {
       at.title = "Absolute tick or anchor expression";
       head.append(
         at,
-        select(["open", "append", "generate", "tool-call", "invisible-tool-call"], e.op, (v) => {
-          e.op = v;
-          if (v === "open" || v === "tool-call" || v === "invisible-tool-call") {
-            delete e.content;
-            delete e.segments;
-            delete e.loss;
-            delete e.delivery;
-            delete e["tokens-per-tick"];
-            delete e.source;
-            if (v === "tool-call" || v === "invisible-tool-call") {
-              e.tool ??= "file_list";
-              e.arguments ??= {};
-              e["duration-ticks"] ??= 0;
+        select(
+          ["open", "append", "generate", "tool-call", "invisible-tool-call"],
+          e.op,
+          (v) => {
+            e.op = v;
+            if (
+              v === "open" ||
+              v === "tool-call" ||
+              v === "invisible-tool-call"
+            ) {
+              delete e.content;
+              delete e.segments;
+              delete e.loss;
+              delete e.delivery;
+              delete e["tokens-per-tick"];
+              delete e.source;
+              if (v === "tool-call" || v === "invisible-tool-call") {
+                e.tool ??= "file_list";
+                e.arguments ??= {};
+                e["duration-ticks"] ??= 0;
+              }
+            } else {
+              if (!e.segments) e.content ??= "";
+              e.loss ??= { mask: "auto" };
+              if (v === "append") e.source ??= "tool";
             }
-          } else {
-            if (!e.segments) e.content ??= "";
-            e.loss ??= { mask: "auto" };
-            if (v === "append") e.source ??= "tool";
-          }
-          if (v === "invisible-tool-call") {
-            for (const key of ["window", "window-type", "request-id", "caused-by", "outcome"])
-              delete e[key];
-            if (!["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance"].includes(e.tool)) {
-              e.tool = "file_write";
-              e.arguments = {path: "/example.txt", content: ""};
+            if (v === "invisible-tool-call") {
+              for (const key of [
+                "window",
+                "window-type",
+                "request-id",
+                "caused-by",
+                "outcome",
+              ])
+                delete e[key];
+              if (
+                ![
+                  "file_write",
+                  "file_patch",
+                  "file_delete",
+                  "memory_save",
+                  "note_save",
+                  "note_delete",
+                  "skill_save",
+                  "time_advance",
+                ].includes(e.tool)
+              ) {
+                e.tool = "file_write";
+                e.arguments = { path: "/example.txt", content: "" };
+              }
+            } else e.window ||= "new-window";
+            if (v !== "tool-call" && v !== "invisible-tool-call") {
+              for (const key of [
+                "tool",
+                "arguments",
+                "duration-ticks",
+                "outcome",
+              ])
+                delete e[key];
             }
-          } else e.window ||= "new-window";
-          if (v !== "tool-call" && v !== "invisible-tool-call") {
-            for (const key of [
-              "tool",
-              "arguments",
-              "duration-ticks",
-              "outcome",
-            ])
-              delete e[key];
-          }
-          update();
-          renderEvents();
-        }),
+            update();
+            renderEvents();
+          },
+        ),
       );
       const win = input(e.window || "", (v) => {
         e.window = v;
@@ -962,8 +1027,22 @@ function renderEvents() {
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
         const invisible = e.op === "invisible-tool-call";
-        const schemas = (state.tools || []).map((s) => s.function).filter((s) =>
-          !invisible || ["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance"].includes(s.name));
+        const schemas = (state.tools || [])
+          .map((s) => s.function)
+          .filter(
+            (s) =>
+              !invisible ||
+              [
+                "file_write",
+                "file_patch",
+                "file_delete",
+                "memory_save",
+                "note_save",
+                "note_delete",
+                "skill_save",
+                "time_advance",
+              ].includes(s.name),
+          );
         options.append(
           field(
             "Tool",
@@ -972,11 +1051,14 @@ function renderEvents() {
               e.tool,
               (value) => {
                 e.tool = value;
-                const parameters = schemas.find((s) => s.name === value).parameters;
+                const parameters = schemas.find(
+                  (s) => s.name === value,
+                ).parameters;
                 e.arguments = Object.fromEntries(
                   parameters.required.map((key) => [
                     key,
-                    parameters.properties[key].enum?.[0] ?? (parameters.properties[key].type === "number" ? 0 : ""),
+                    parameters.properties[key].enum?.[0] ??
+                      (parameters.properties[key].type === "number" ? 0 : ""),
                   ]),
                 );
                 delete e.outcome;
@@ -997,38 +1079,58 @@ function renderEvents() {
         duration.min = "0";
         duration.step = "1";
         options.append(field("Duration (ticks)", duration));
-        if (!invisible) options.append(
-          field(
-            "Request delivery",
-            select(["instant", "stream"], e.delivery || "instant", (value) => {
-              e.delivery = value;
-              update();
-            }),
-          ),
-          field(
-            "Custom request text",
-            checkbox("content" in e || "segments" in e, (value) => {
-              if (value) e.content = "";
-              else {
-                delete e.content;
-                delete e.segments;
-              }
-              update();
-              renderEvents();
-            }),
-          ),
-        );
+        if (!invisible)
+          options.append(
+            field(
+              "Request delivery",
+              select(
+                ["instant", "stream"],
+                e.delivery || "instant",
+                (value) => {
+                  e.delivery = value;
+                  update();
+                },
+              ),
+            ),
+            field(
+              "Custom request text",
+              checkbox("content" in e || "segments" in e, (value) => {
+                if (value) e.content = "";
+                else {
+                  delete e.content;
+                  delete e.segments;
+                }
+                update();
+                renderEvents();
+              }),
+            ),
+          );
         if (invisible) {
-          options.append(field("External source", input(e.source || "external", (value) => {
-            e.source = value;
-            update();
-          })));
-          card.append(node("p", "segmented-note", "External sandbox activity. No model tokens or windows are created."));
+          options.append(
+            field(
+              "External source",
+              input(e.source || "external", (value) => {
+                e.source = value;
+                update();
+              }),
+            ),
+          );
+          card.append(
+            node(
+              "p",
+              "segmented-note",
+              "External sandbox activity. No model tokens or windows are created.",
+            ),
+          );
         }
         card.append(options);
         if (e.segments) {
           card.append(
-            node("div", "segmented-note", "Edit request segments and loss masks in Source JSON."),
+            node(
+              "div",
+              "segmented-note",
+              "Edit request segments and loss masks in Source JSON.",
+            ),
           );
         } else if ("content" in e) {
           const area = node("textarea");
@@ -1040,7 +1142,10 @@ function renderEvents() {
             update();
           };
           card.append(
-            field("Request text (anchors and NOOPs supported for streams)", area),
+            field(
+              "Request text (anchors and NOOPs supported for streams)",
+              area,
+            ),
           );
         }
         for (const key of e.tool === "subagent"
@@ -1094,7 +1199,9 @@ function renderEvents() {
           const markers = node(
             "div",
             "event-marker",
-            (e.content?.match(/\{(?:N_TICKS?|WINDOW)[^}]*\}/g) || []).join(" · "),
+            (e.content?.match(/\{(?:N_TICKS?|WINDOW)[^}]*\}/g) || []).join(
+              " · ",
+            ),
           );
           card.append(markers);
         }
@@ -1172,7 +1279,8 @@ function sampleFromEvents() {
   return {
     ...sample,
     ...(sample && ("metadata" in sample || $("metadata-json").value !== "{}")
-      ? { metadata: readMetadata() } : {}),
+      ? { metadata: readMetadata() }
+      : {}),
     id: $("sample-id").value,
     defaults: {
       ...sample.defaults,
@@ -1627,7 +1735,10 @@ async function saveConfig() {
 $("sample-search").oninput = () => {
   clearTimeout(searchTimer);
   sampleOffset = 0;
-  searchTimer = setTimeout(action(() => refresh()), 200);
+  searchTimer = setTimeout(
+    action(() => refresh()),
+    200,
+  );
 };
 $("sample-page-prev").onclick = action(async () => {
   sampleOffset = Math.max(0, sampleOffset - SAMPLE_PAGE_SIZE);
@@ -1650,7 +1761,10 @@ $("file-input").onchange = action(async (e) => {
   e.target.value = "";
   await refresh();
   if (state.samples.length)
-    await selectSample(Math.max(0, (state.sample_count ?? state.samples.length) - 1), true);
+    await selectSample(
+      Math.max(0, (state.sample_count ?? state.samples.length) - 1),
+      true,
+    );
   toast("Samples imported.");
 });
 $("new-sample").onclick = action(async () => {
@@ -1669,8 +1783,10 @@ $("sample-json").oninput = () => {
   setDirty();
 };
 $("metadata-json").oninput = updateMetadata;
-$("agent-name").oninput = () => updateMetadataName("agent_name", $("agent-name").value);
-$("user-name").oninput = () => updateMetadataName("user_name", $("user-name").value);
+$("agent-name").oninput = () =>
+  updateMetadataName("agent_name", $("agent-name").value);
+$("user-name").oninput = () =>
+  updateMetadataName("user_name", $("user-name").value);
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
 $("add-event").onclick = () => {
@@ -1703,10 +1819,15 @@ $("add-tool-call").onclick = () => {
 };
 $("add-invisible-call").onclick = () => {
   if (!sample) return;
-  eventDraft.push({key: String(tick), event: {
-    op: "invisible-tool-call", tool: "file_write",
-    arguments: {path: "/example.txt", content: ""}, source: "external",
-  }});
+  eventDraft.push({
+    key: String(tick),
+    event: {
+      op: "invisible-tool-call",
+      tool: "file_write",
+      arguments: { path: "/example.txt", content: "" },
+      source: "external",
+    },
+  });
   setDirty();
   renderEvents();
 };
@@ -1723,7 +1844,10 @@ $("duplicate").onclick = action(async () => {
 $("delete-sample").onclick = action(async () => {
   if (selected < 0) return;
   if (!confirm("Delete this sample from the dataset?")) return;
-  await json(`samples/${selected}?expected_revision=${sampleRevision}`, "DELETE");
+  await json(
+    `samples/${selected}?expected_revision=${sampleRevision}`,
+    "DELETE",
+  );
   selected = -1;
   sample = null;
   plan = null;
@@ -1809,6 +1933,7 @@ $("preferences-button").onclick = () => {
   $("autosave-enabled").checked = autosaveEnabled;
   $("autosave-minutes").value = String(autosaveMinutes);
   $("autosave-minutes").disabled = !autosaveEnabled;
+  $("show-window-headers").checked = showWindowHeaders;
   $("preferences-dialog").showModal();
 };
 $("autosave-enabled").onchange = () => {
@@ -1843,6 +1968,9 @@ $("preferences-form").onsubmit = action(async (event) => {
   autoCompileDelayMs = delayMs;
   autosaveEnabled = autosaveEnabledValue;
   autosaveMinutes = nextAutosaveMinutes;
+  showWindowHeaders = $("show-window-headers").checked;
+  localStorage.setItem(SHOW_HEADERS_KEY, String(showWindowHeaders));
+  renderReplay();
   scheduleAutosave();
   if (compileTimer !== null) scheduleCompile();
   $("preferences-dialog").close();
