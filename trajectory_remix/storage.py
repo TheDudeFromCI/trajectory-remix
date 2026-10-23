@@ -10,7 +10,7 @@ import copy
 import json
 import sqlite3
 from collections.abc import MutableSequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 from .dataset import public_config
@@ -27,48 +27,88 @@ def encode(value):
 
 
 class DatasetStore:
-    def __init__(self, path: Path, config=None):
+    SCHEMA_VERSION = 2
+
+    def __init__(self, path: Path):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if self.path.exists() and self.path.stat().st_size:
-            with self.path.open("rb") as stream:
-                if stream.read(16) != b"SQLite format 3\0":
-                    raise ValueError(
-                        "Legacy JSON dataset: start with a new SQLite --dataset file "
-                        "and import the JSON file in the dashboard"
-                    )
+        if not self.path.is_file():
+            raise ValueError(f"Project does not exist: {self.path}; run 'trajectory-remix init --dataset PATH --tokenizer FILE' first")
+        with self.path.open("rb") as stream:
+            if stream.read(16) != b"SQLite format 3\0":
+                raise ValueError("Not an initialized SQLite project; initialize a new project and import legacy JSON through the dashboard")
         with self.connect() as db:
+            try:
+                row = db.execute("SELECT version FROM project WHERE singleton=1").fetchone()
+            except sqlite3.DatabaseError as error:
+                raise ValueError("Not an initialized Trajectory Remix project") from error
+            if row is None or row[0] != self.SCHEMA_VERSION:
+                raise ValueError("Unsupported project schema; initialize a new project with its tokenizer and import trajectories")
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS project (
-                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
-                    version INTEGER NOT NULL,
-                    revision INTEGER NOT NULL DEFAULT 0,
-                    sample_revision INTEGER NOT NULL DEFAULT 0,
-                    sample_count INTEGER NOT NULL DEFAULT 0,
-                    config TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS samples (
-                    position INTEGER PRIMARY KEY,
-                    sample_id TEXT UNIQUE,
-                    source TEXT NOT NULL,
-                    attributes TEXT NOT NULL,
-                    events INTEGER NOT NULL,
-                    tags TEXT NOT NULL,
-                    search TEXT NOT NULL
-                );
-            """)
-            db.execute(
-                "INSERT OR IGNORE INTO project(singleton, version, config) VALUES(1,1,?)",
-                (encode(public_config(config or {})),),
-            )
-            if db.execute("SELECT version FROM project").fetchone()[0] != 1:
-                raise ValueError("Unsupported SQLite dataset schema version")
         self.samples = SQLiteSamples(self)
+
+    @classmethod
+    def initialize(cls, path: Path, compiler, config=None):
+        """Create a new project with a fixed tokenizer; never overwrite a file."""
+        from .llm import default_config
+
+        path = Path(path)
+        tokenizer = compiler.tokenizer.to_str()
+        special_tokens = encode(compiler.special)
+        config = encode(public_config(default_config() if config is None else config))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Reserve exclusively before SQLite opens the file. A failed init removes
+        # only the file this invocation created, never an existing project.
+        with path.open("xb"):
+            pass
+        try:
+            with closing(sqlite3.connect(path)) as db:
+                with db:
+                    db.executescript("""
+                        BEGIN IMMEDIATE;
+                        CREATE TABLE project (
+                            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                            version INTEGER NOT NULL,
+                            revision INTEGER NOT NULL DEFAULT 0,
+                            sample_revision INTEGER NOT NULL DEFAULT 0,
+                            sample_count INTEGER NOT NULL DEFAULT 0,
+                            config TEXT NOT NULL,
+                            tokenizer TEXT NOT NULL,
+                            special_tokens TEXT NOT NULL
+                        );
+                        CREATE TABLE samples (
+                            position INTEGER PRIMARY KEY,
+                            sample_id TEXT UNIQUE,
+                            source TEXT NOT NULL,
+                            attributes TEXT NOT NULL,
+                            events INTEGER NOT NULL,
+                            tags TEXT NOT NULL,
+                            search TEXT NOT NULL
+                        );
+                    """)
+                    db.execute(
+                        "INSERT INTO project(singleton,version,config,tokenizer,special_tokens) VALUES(1,?,?,?,?)",
+                        (cls.SCHEMA_VERSION, config, tokenizer, special_tokens),
+                    )
+            return cls(path)
+        except BaseException:
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                Path(str(path) + suffix).unlink(missing_ok=True)
+            raise
+
+    def load_compiler(self):
+        from tokenizers import Tokenizer
+        from .compiler import Compiler
+
+        with self.connect() as db:
+            tokenizer, special = db.execute("SELECT tokenizer,special_tokens FROM project WHERE singleton=1").fetchone()
+        try:
+            return Compiler(Tokenizer.from_str(tokenizer), **json.loads(special))
+        except Exception as error:
+            raise ValueError(f"Invalid project tokenizer: {error}") from error
 
     @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=30)
+        db = sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True, timeout=30)
         try:
             db.execute("PRAGMA busy_timeout=30000")
             db.execute("PRAGMA cache_size=-4096")

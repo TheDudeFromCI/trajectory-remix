@@ -11,7 +11,8 @@ cd trajectory-remix
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[test]'
-python -m trajectory_remix --tokenizer /path/to/tokenizer.json
+python -m trajectory_remix init --dataset project.sqlite --tokenizer /path/to/tokenizer.json
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 Open **http://127.0.0.1:8765** in your browser. Windows activation:
@@ -21,23 +22,28 @@ A small ASCII character tokenizer and reactive tool sample are included for a
 reproducible first run:
 
 ```bash
-python -m trajectory_remix \
+python -m trajectory_remix init \
   --tokenizer examples/demo-tokenizer.json \
   --dataset demo.sqlite
+python -m trajectory_remix --dataset demo.sqlite
 ```
 
-`--dataset` is required: the file is created if missing and is the only save
-target. It is a SQLite database; each accepted edit commits immediately.
+`--dataset` is required. Run `init` once to create the SQLite project and embed
+its tokenizer and special-token spellings. Initialization refuses existing files.
+Normal startup only opens an existing initialized project; it never creates one.
+Each accepted edit commits immediately to that project.
 Use File > Import to add `examples/reactive-sample.json`.
 
 Use your actual training tokenizer for real datasets. The demo tokenizer is only
-a fixture. The Hugging Face `tokenizers` library loads the tokenizer locally;
-no tokenizer is uploaded or downloaded. Padding and truncation are disabled
-when compiling trajectories. Required special tokens must each already map to
+a fixture. Initialization reads the tokenizer locally and stores its complete
+JSON in the project. Startup and export load that embedded tokenizer; no original
+tokenizer file or tokenizer command-line options are needed or accepted.
+To use a different tokenizer, initialize a separate project and import trajectories.
+Padding and truncation are disabled when compiling trajectories. Required special tokens must each already map to
 one dedicated ID. They are never silently added or renumbered.
 
 ```bash
-python -m trajectory_remix --tokenizer tokenizer.json \
+python -m trajectory_remix init --dataset custom.sqlite --tokenizer tokenizer.json \
   --bos '<s>' --eos '</s>' --noop '<|noop|>'
 ```
 
@@ -112,6 +118,9 @@ use the same automatic apply, save and Undo/Redo workflow as event edits.
 Leaving a name blank omits that property; the default names are Kidra and User.
 
 Dataset files are SQLite databases, conventionally named `project.sqlite`.
+The `project` row contains configuration, schema/revision counters, tokenizer JSON
+and special-token spellings (`bos`, `eos`, `noop`). The tokenizer is fixed at init;
+configuration edits and trajectory imports do not change it.
 Trajectories are stored as individual JSON records in rows, with indexed unique
 IDs and separate listing metadata. The server fetches trajectories on demand;
 it does not load or copy the whole dataset. The sidebar searches in SQLite and
@@ -125,7 +134,8 @@ WAL databases can have companion `-wal` and `-shm` files. Use SQLite's backup AP
 or stop all writers before copying a database.
 
 Existing `.json`, `.jsonl`, and JSON `.kidra-dataset` files can still be imported.
-To use an old project, start with a new SQLite `--dataset` path, then use
+To use an old project, initialize a new SQLite project with the correct tokenizer,
+start that project, then use
 **File → Import**. Legacy JSON files are never overwritten at startup.
 Bulk replacement imports clear session undo history so the old dataset does not
 have to be loaded into RAM. Token exports remain JSONL and process one trajectory
@@ -134,14 +144,13 @@ a partial export.
 
 API keys are excluded. Datasets preserve prompts, task order, endpoint URLs/model
 names, generation settings, sample metadata, tags and loss controls. The tokenizer
-is an explicit startup input and is not embedded; token exports contain its
-SHA-256 fingerprint. Marker timings change with tokenizer tokenization.
+is embedded at initialization; token exports contain its SHA-256 fingerprint.
+Marker timings change with tokenizer tokenization.
 
 Reload a saved dataset at startup:
 
 ```bash
-python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset project.sqlite
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 ## Replay contract
@@ -251,7 +260,7 @@ timeout, and optional API-key environment variable or session-only key.
 ```bash
 export REMIX_GENERATOR_KEY='your-key'
 export REMIX_VALIDATOR_KEY='your-key'
-python -m trajectory_remix --tokenizer tokenizer.json
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 Environment variables are read by the backend only. A blank key field preserves
@@ -477,8 +486,7 @@ the usual checkpoint), and `GET /api/samples/{index}/sandbox/{tick}`.
 ## Headless export and tests
 
 ```bash
-python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset samples.sqlite --export token-chunks.jsonl --chunk-ticks 64
+python -m trajectory_remix --dataset samples.sqlite --export token-chunks.jsonl --chunk-ticks 64
 python -m pytest -q
 ```
 

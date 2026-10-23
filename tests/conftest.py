@@ -7,6 +7,7 @@ from tokenizers import Tokenizer
 
 from trajectory_remix.compiler import Compiler
 from trajectory_remix.server import create_app
+from trajectory_remix.storage import DatasetStore
 
 
 @pytest.fixture
@@ -30,7 +31,8 @@ def sample():
 
 @pytest.fixture
 async def studio(compiler, tmp_path, sample):
-    app = create_app(compiler, tmp_path / "project.kidra-dataset")
+    DatasetStore.initialize(tmp_path / "project.kidra-dataset", compiler)
+    app = create_app(tmp_path / "project.kidra-dataset")
     store = app.state.dataset.store
     store.replace([copy.deepcopy(sample)], 0)
     with store.connect() as db:

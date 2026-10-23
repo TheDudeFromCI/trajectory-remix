@@ -8,9 +8,9 @@ if [ ! -x .venv/bin/python ]; then
     exit 1
 fi
 
-# Defaults to the demo tokenizer; pass your own args to override.
+# Opens the initialized demo project by default; pass init or other args explicitly.
 if [ "$#" -eq 0 ]; then
-    set -- --tokenizer examples/demo-tokenizer.json --dataset demo.kidra-dataset
+    set -- --dataset demo.sqlite
 fi
 
 exec .venv/bin/python -m trajectory_remix "$@"

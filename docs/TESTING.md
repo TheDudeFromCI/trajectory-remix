@@ -31,7 +31,10 @@
 - SQLite tests cover concurrent writers, stale edits, rollback, snapshot reads,
   JSON/JSONL imports, and atomic CLI export. A 100,005-trajectory test forbids
   full dataset iteration and checks bounded Python allocations during startup,
-  polling, single edits, batches and checkpoints.
+  polling, single edits, batches and checkpoints. Project initialization tests
+  verify embedded tokenizer/special-token round trips, launching after deleting
+  the tokenizer source file, refusing reinitialization and launch-time tokenizer
+  overrides, and rejecting missing databases without creating files.
 - Window header/reference checks cover initialization order, loss masks, same-tick
   visibility, closure, implicit/repeated tool calls, native tokenizer IDs, stable
   numeric slots, multi-digit references, anchors, segment masks, literal tool

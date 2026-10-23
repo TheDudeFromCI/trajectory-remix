@@ -21,7 +21,8 @@ from trajectory_remix.server import create_app
 
 
 async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tmp_path):
-    app = create_app(compiler, tmp_path / "project.kidra-dataset")
+    DatasetStore.initialize(tmp_path / "project.kidra-dataset", compiler)
+    app = create_app(tmp_path / "project.kidra-dataset")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://testserver"
     ) as client:
@@ -212,20 +213,19 @@ async def test_bridge_does_not_retry_ambiguous_mutation_failures():
     assert len(attempts) == 1
 
 
-async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path):
+async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compiler):
     root = Path(__file__).resolve().parents[1]
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
     dataset = tmp_path / "stdio.kidra-dataset"
+    DatasetStore.initialize(dataset, compiler)
     with (tmp_path / "dashboard.log").open("w") as log:
         dashboard = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
             "trajectory_remix",
-            "--tokenizer",
-            "examples/demo-tokenizer.json",
             "--dataset",
             str(dataset),
             "--port",

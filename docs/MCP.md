@@ -11,9 +11,10 @@ Install the optional MCP dependency in the dashboard's virtual environment:
 
 ```bash
 python -m pip install -e '.[mcp]'
-python -m trajectory_remix \
+python -m trajectory_remix init \
   --tokenizer examples/demo-tokenizer.json \
   --dataset project.sqlite
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 Configure your MCP client to launch the bridge. Use absolute paths appropriate

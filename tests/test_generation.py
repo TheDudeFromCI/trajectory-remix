@@ -17,8 +17,8 @@ from trajectory_remix.runner import Runner
 from trajectory_remix.tools import Sandbox
 
 
-def make_state(path, config, samples=()):
-    store = DatasetStore(path, config)
+def make_state(path, config, compiler, samples=()):
+    store = DatasetStore.initialize(path, compiler, config)
     if samples:
         store.replace(samples, 0)
     return DatasetState(store, config)
@@ -131,7 +131,7 @@ async def test_regeneration_uses_validator_feedback_and_checkpoints(compiler, tm
             '{"valid":true,"feedback":[]}',
         ]
     )
-    state = make_state(tmp_path / "auto.kidra-dataset", c)
+    state = make_state(tmp_path / "auto.kidra-dataset", c, compiler)
     runner = Runner(state, compiler, tmp_path / "auto.kidra-dataset", fake)
     runner.start(single=True)
     await runner.job
@@ -171,7 +171,7 @@ async def test_crash_limits_and_skip(compiler, tmp_path):
         regenerations=0,
     )
     fake = FakeClient([ValueError("crashed")] * 4)
-    state = make_state(tmp_path / "a", c)
+    state = make_state(tmp_path / "a", c, compiler)
     runner = Runner(state, compiler, tmp_path / "a", fake)
     runner.start()
     await runner.job
@@ -197,7 +197,7 @@ async def test_cancellation_destroys_sandbox(compiler, tmp_path, monkeypatch):
             await asyncio.Event().wait()
 
     c = minimal_config()
-    state = make_state(tmp_path / "a", c)
+    state = make_state(tmp_path / "a", c, compiler)
     r = Runner(state, compiler, tmp_path / "a", Blocked())
     r.start()
     await asyncio.wait_for(entered.wait(), 2)
@@ -209,7 +209,7 @@ async def test_cancellation_destroys_sandbox(compiler, tmp_path, monkeypatch):
 async def test_run_task_on_seed(compiler, sample, tmp_path):
     c = minimal_config()
     c["automatic"]["validate"] = False
-    state = make_state(tmp_path / "a", c, [sample])
+    state = make_state(tmp_path / "a", c, compiler, [sample])
     r = Runner(
         state, compiler, tmp_path / "a", FakeClient(["A generated user request."])
     )
@@ -457,7 +457,7 @@ async def test_pause_on_failure_and_resume(compiler, tmp_path):
         regenerations=0,
         max_consecutive_failures=3,
     )
-    state = make_state(tmp_path / "checkpoint", c)
+    state = make_state(tmp_path / "checkpoint", c, compiler)
     runner = Runner(
         state,
         compiler,
@@ -481,7 +481,7 @@ async def test_multiple_acceptances_flush_below_autosave_threshold(compiler, tmp
     c["automatic"].update(
         validate=False, max_samples=2, autosave_every=5, regenerations=0
     )
-    state = make_state(tmp_path / "checkpoint", c)
+    state = make_state(tmp_path / "checkpoint", c, compiler)
     r = Runner(
         state, compiler, tmp_path / "checkpoint", FakeClient(["First.", "Second."])
     )

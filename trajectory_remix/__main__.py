@@ -1,6 +1,7 @@
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from tokenizers import Tokenizer
@@ -9,41 +10,49 @@ from .compiler import Compiler, chunks
 from .storage import DatasetStore
 
 
-def main():
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(
         description="Trajectory Remix — local Kidra dataset studio"
     )
-    parser.add_argument(
-        "--tokenizer", type=Path, required=True, help="Hugging Face tokenizer.json"
-    )
-    parser.add_argument("--bos", default="<|bos|>")
-    parser.add_argument("--eos", default="<|eos|>")
-    parser.add_argument("--noop", default="<|noop|>")
+    parser.epilog = "Initialize once: trajectory-remix init --dataset project.sqlite --tokenizer tokenizer.json"
+    initializing = bool(argv) and argv[0] == "init"
+    if initializing:
+        parser.prog += " init"
+        parser.add_argument("--tokenizer", type=Path, required=True, help="Hugging Face tokenizer.json to embed in the new project")
+        parser.add_argument("--bos", default="<|bos|>")
+        parser.add_argument("--eos", default="<|eos|>")
+        parser.add_argument("--noop", default="<|noop|>")
     parser.add_argument(
         "--dataset",
         type=Path,
         required=True,
-        help="SQLite project file; created if missing; each edit commits immediately",
+        help="New SQLite project file" if initializing else "Existing initialized SQLite project file",
     )
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument(
-        "--export",
-        type=Path,
-        help="Compile --dataset to chunked JSONL without starting the dashboard",
-    )
-    parser.add_argument("--chunk-ticks", type=int, default=64)
-    args = parser.parse_args()
+    if not initializing:
+        parser.add_argument("--port", type=int, default=8765)
+        parser.add_argument(
+            "--export",
+            type=Path,
+            help="Compile --dataset to chunked JSONL without starting the dashboard",
+        )
+        parser.add_argument("--chunk-ticks", type=int, default=64)
+    args = parser.parse_args(argv[1:] if initializing else argv)
     try:
+        if initializing:
+            try:
+                tokenizer = Tokenizer.from_file(str(args.tokenizer))
+            except Exception as error:
+                raise ValueError(f"Could not load tokenizer: {error}") from error
+            compiler = Compiler(tokenizer, args.bos, args.eos, args.noop)
+            DatasetStore.initialize(args.dataset, compiler)
+            print(f"Initialized {args.dataset} with tokenizer {compiler.fingerprint}")
+            return
         if args.chunk_ticks < 1:
             parser.error("--chunk-ticks must be positive")
-        compiler = Compiler(
-            Tokenizer.from_file(str(args.tokenizer)), args.bos, args.eos, args.noop
-        )
+        store = DatasetStore(args.dataset)
         if args.export:
-            if not args.dataset.exists():
-                parser.error(f"--dataset not found: {args.dataset}")
-
-            store = DatasetStore(args.dataset)
+            compiler = store.load_compiler()
 
             import os
             from tempfile import NamedTemporaryFile
@@ -76,7 +85,7 @@ def main():
 
         print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
         uvicorn.run(
-            create_app(compiler, args.dataset),
+            create_app(args.dataset),
             host="127.0.0.1",
             port=args.port,
             log_level="warning",

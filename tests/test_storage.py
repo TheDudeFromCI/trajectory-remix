@@ -13,9 +13,9 @@ from trajectory_remix.server import create_app
 from trajectory_remix.storage import DatasetStore, SQLiteSamples, StorageConflict
 
 
-def test_concurrent_writers_preserve_entries_and_reject_stale_edits(tmp_path):
+def test_concurrent_writers_preserve_entries_and_reject_stale_edits(tmp_path, compiler):
     path = tmp_path / "project.sqlite"
-    store = DatasetStore(path, default_config())
+    store = DatasetStore.initialize(path, compiler)
 
     def write_batch(writer):
         other = DatasetStore(path)
@@ -39,8 +39,8 @@ def test_concurrent_writers_preserve_entries_and_reject_stale_edits(tmp_path):
     assert store.samples[0]["id"] != "stale"
 
 
-def test_transactions_rollback_and_snapshot_reads_allow_writes(tmp_path):
-    store = DatasetStore(tmp_path / "project.sqlite", default_config())
+def test_transactions_rollback_and_snapshot_reads_allow_writes(tmp_path, compiler):
+    store = DatasetStore.initialize(tmp_path / "project.sqlite", compiler)
     store.replace([{"id": "a"}, {"id": "b"}], 0)
     revision = store.info()[0]
     with pytest.raises(ValueError, match="Duplicate"):
@@ -57,8 +57,8 @@ def test_transactions_rollback_and_snapshot_reads_allow_writes(tmp_path):
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
-def test_sparse_middle_inserts_rebalance_without_changing_order(tmp_path):
-    store = DatasetStore(tmp_path / "project.sqlite", default_config())
+def test_sparse_middle_inserts_rebalance_without_changing_order(tmp_path, compiler):
+    store = DatasetStore.initialize(tmp_path / "project.sqlite", compiler)
     store.replace([{"id": "first"}, {"id": "last"}], 0)
     for number in range(70):
         store.samples.insert(1, {"id": f"middle-{number}"})
@@ -67,7 +67,7 @@ def test_sparse_middle_inserts_rebalance_without_changing_order(tmp_path):
 
 async def test_large_dataset_stays_lazy_during_startup_polling_and_edits(compiler, tmp_path, monkeypatch):
     path = tmp_path / "large.sqlite"
-    store = DatasetStore(path, default_config())
+    store = DatasetStore.initialize(path, compiler)
     count = 100_005
     with store.transaction() as db:
         db.execute("""
@@ -88,7 +88,7 @@ async def test_large_dataset_stays_lazy_during_startup_polling_and_edits(compile
     monkeypatch.setattr(SQLiteSamples, "__iter__", forbid_full_scan)
     tracemalloc.start()
     try:
-        app = create_app(compiler, path)
+        app = create_app(path)
         assert isinstance(app.state.dataset["samples"], SQLiteSamples)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app), base_url="http://testserver",
@@ -123,7 +123,8 @@ async def test_large_dataset_stays_lazy_during_startup_polling_and_edits(compile
 
 async def test_json_imports_commit_without_checkpoint_and_preserve_keys_policy(compiler, tmp_path):
     path = tmp_path / "project.sqlite"
-    app = create_app(compiler, path)
+    DatasetStore.initialize(path, compiler)
+    app = create_app(path)
     config = default_config()
     config["endpoints"][0]["api_key"] = "do-not-persist"
     async with httpx.AsyncClient(
@@ -144,17 +145,18 @@ async def test_json_imports_commit_without_checkpoint_and_preserve_keys_policy(c
         assert failed.status_code == 422
         assert app.state.dataset["revision"] == revision
         assert len(app.state.dataset["samples"]) == 3
-    restarted = create_app(compiler, path)
+    restarted = create_app(path)
     assert len(restarted.state.dataset["samples"]) == 3
     assert "do-not-persist" not in DatasetStore(path).info()[3]
+    assert DatasetStore(path).load_compiler().fingerprint == compiler.fingerprint
     assert path.read_bytes().startswith(b"SQLite format 3\0")
 
 
 def test_cli_streams_export_and_preserves_output_on_failure(compiler, sample, tmp_path):
     path, output = tmp_path / "project.sqlite", tmp_path / "chunks.jsonl"
-    store = DatasetStore(path, default_config())
+    store = DatasetStore.initialize(path, compiler)
     store.replace([sample], 0)
-    command = [sys.executable, "-m", "trajectory_remix", "--tokenizer", "examples/demo-tokenizer.json", "--dataset", str(path), "--export", str(output)]
+    command = [sys.executable, "-m", "trajectory_remix", "--dataset", str(path), "--export", str(output)]
     result = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert json.loads(output.read_text().splitlines()[0])["sample_id"] == sample["id"]

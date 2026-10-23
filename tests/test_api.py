@@ -11,7 +11,8 @@ from trajectory_remix.server import create_app
 
 @pytest.fixture
 async def client(compiler, tmp_path):
-    app = create_app(compiler, tmp_path / "project.kidra-dataset")
+    DatasetStore.initialize(tmp_path / "project.kidra-dataset", compiler)
+    app = create_app(tmp_path / "project.kidra-dataset")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app),
         base_url="http://testserver",

@@ -18,14 +18,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .authoring import CommandError, TrajectoryCommands
-from .compiler import CompileError, Compiler, chunks
+from .compiler import CompileError, chunks
 from .dataset import (
     new_sample,
     parse_import,
     public_config,
     reject_constant,
 )
-from .llm import TAGS, SampleBuilder, default_config, validate_config
+from .llm import TAGS, SampleBuilder, validate_config
 from .runner import Runner
 from .tools import SCHEMAS
 from .storage import DatasetState, DatasetStore, StorageConflict
@@ -33,8 +33,9 @@ from .storage import DatasetState, DatasetStore, StorageConflict
 MAX_BODY = 40_000_000
 
 
-def create_app(compiler: Compiler, dataset: Path, client=None):
-    store = DatasetStore(dataset, default_config())
+def create_app(dataset: Path, client=None):
+    store = DatasetStore(dataset)
+    compiler = store.load_compiler()
     config = validate_config(json.loads(store.info()[3]))
     state = DatasetState(store, config)
     runner = Runner(state, compiler, dataset, client)
