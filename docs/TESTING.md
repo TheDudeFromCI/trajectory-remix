@@ -28,11 +28,21 @@
   generation error feedback and undoable MCP recording. DOM checks cover the
   sidebar metadata editor, nested-property preservation, Source JSON sync,
   metadata Undo/Redo, invalid metadata JSON and selecting the chat tool.
-- CLI export succeeds on the included reactive sample.
+- SQLite tests cover concurrent writers, stale edits, rollback, snapshot reads,
+  JSON/JSONL imports, and atomic CLI export. A 100,005-trajectory test forbids
+  full dataset iteration and checks bounded Python allocations during startup,
+  polling, single edits, batches and checkpoints. Project initialization tests
+  verify embedded tokenizer/special-token round trips, launching after deleting
+  the tokenizer source file, refusing reinitialization and launch-time tokenizer
+  overrides, and rejecting missing databases without creating files.
 - Window header/reference checks cover initialization order, loss masks, same-tick
   visibility, closure, implicit/repeated tool calls, native tokenizer IDs, stable
   numeric slots, multi-digit references, anchors, segment masks, literal tool
   data, unknown markers, export round trips, task layouts and undoable renames.
+- UUID/metadata checks cover immutable identity, duplicate UUID rejection, seeded
+  slot allocation and implicit-window budgets, typed key filters, tag membership,
+  grouped counts, pagination without source reads, transactional projections,
+  content hashes, undo/redo, cascading deletion and rollback.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an

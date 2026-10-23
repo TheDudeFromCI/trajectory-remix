@@ -3,6 +3,8 @@ const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
 const AUTOSAVE_ENABLED_KEY = "trajectory-remix.autosave-enabled";
 const AUTOSAVE_MINUTES_KEY = "trajectory-remix.autosave-minutes";
+const SAMPLE_PAGE_SIZE = 100;
+let sampleOffset = 0, searchTimer;
 let state,
   selected = -1,
   sample = null,
@@ -198,15 +200,23 @@ async function refresh(initial = false) {
   if (pollBusy) return;
   pollBusy = true;
   try {
-    const next = await json("state");
-    const changed = !state || next.revision !== state.revision;
+    const params = new URLSearchParams({
+      offset: String(sampleOffset), limit: String(SAMPLE_PAGE_SIZE),
+      query: $("sample-search").value,
+    });
+    if (sample?.id) params.set("selected_id", sample.id);
+    const next = await json("state?" + params);
+    if (next.total > 0 && sampleOffset >= next.total) {
+      sampleOffset = Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
+    }
+    const changed = !state || next.revision !== state.revision || next.offset !== state.offset || next.query !== state.query;
     if (Number.isInteger(next.status.last_saved_revision))
       savedRevision = next.status.last_saved_revision;
     else if (savedRevision === null) savedRevision = next.revision;
     state = next;
     renderStatus();
     if (changed || initial) renderSamples();
-    if (initial && state.samples.length) await selectSample(0, true);
+    if (initial && state.samples.length) await selectSample(state.samples[0].index, true);
     if (
       !initial &&
       sample &&
@@ -214,7 +224,9 @@ async function refresh(initial = false) {
       !compileBusy &&
       !hasPendingChanges()
     ) {
-      const current = state.samples.find((s) => s.id === sample.id);
+      const current = state.samples.find((s) => s.id === sample.id) ||
+        (Number.isInteger(next.selected_index) && next.selected_index >= 0
+          ? { index: next.selected_index } : null);
       if (current) await selectSample(current.index, true);
       else {
         selected = -1;
@@ -223,20 +235,20 @@ async function refresh(initial = false) {
         renderReplay();
       }
     }
-    if (selected >= state.samples.length && !hasPendingChanges()) {
+    if (selected >= (state.sample_count ?? state.samples.length) && !hasPendingChanges()) {
       selected = -1;
       sample = null;
       plan = null;
       renderReplay();
     }
     if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
-      await selectSample(state.samples.length - 1, true);
+      await selectSample(state.samples[state.samples.length - 1].index, true);
   } finally {
     pollBusy = false;
   }
 }
 function renderStatus() {
-  $("sample-count").textContent = state.samples.length;
+  $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
   $("run-status").textContent = s.running
     ? s.paused
@@ -293,14 +305,14 @@ function renderHistoryActions() {
   }
 }
 function renderSamples() {
-  const filter = $("sample-search").value.toLowerCase();
+  const total = state.total ?? state.samples.length;
+  $("sample-page-label").textContent = total
+    ? `${(state.offset || 0) + 1}–${Math.min((state.offset || 0) + SAMPLE_PAGE_SIZE, total)} of ${total}`
+    : "0 results";
+  $("sample-page-prev").disabled = sampleOffset === 0;
+  $("sample-page-next").disabled = sampleOffset + SAMPLE_PAGE_SIZE >= total;
   $("sample-list").replaceChildren(
     ...state.samples
-      .filter(
-        (s) =>
-          s.id.toLowerCase().includes(filter) ||
-          (s.tags || []).some((t) => t.includes(filter)),
-      )
       .map((s) => {
         const b = button(
           "",
@@ -338,6 +350,8 @@ async function selectSample(index, force = false) {
   sample = await response.json();
   sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
+  if (!$("sample-search").value)
+    sampleOffset = Math.floor(index / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
   setDirty(false);
   $("sample-json").value = JSON.stringify(sample, null, 2);
   loadMetadata(sample);
@@ -740,6 +754,7 @@ function showMetadataNames(metadata) {
   $("user-name").value = typeof metadata?.user_name === "string" ? metadata.user_name : "";
 }
 function loadMetadata(trajectory) {
+  $("trajectory-uuid").value = trajectory?.uuid || "";
   $("metadata-fields").disabled = !trajectory;
   $("metadata-json").setCustomValidity("");
   $("metadata-json").value = JSON.stringify(trajectory?.metadata ?? {}, null, 2);
@@ -1592,7 +1607,19 @@ async function saveConfig() {
   await refresh();
   toast("Configuration saved.");
 }
-$("sample-search").oninput = renderSamples;
+$("sample-search").oninput = () => {
+  clearTimeout(searchTimer);
+  sampleOffset = 0;
+  searchTimer = setTimeout(action(() => refresh()), 200);
+};
+$("sample-page-prev").onclick = action(async () => {
+  sampleOffset = Math.max(0, sampleOffset - SAMPLE_PAGE_SIZE);
+  await refresh();
+});
+$("sample-page-next").onclick = action(async () => {
+  sampleOffset += SAMPLE_PAGE_SIZE;
+  await refresh();
+});
 $("import-button").onclick = () => $("file-input").click();
 $("file-input").onchange = action(async (e) => {
   if (hasPendingChanges()) await compileSample(true);
@@ -1606,7 +1633,7 @@ $("file-input").onchange = action(async (e) => {
   e.target.value = "";
   await refresh();
   if (state.samples.length)
-    await selectSample(Math.max(0, state.samples.length - 1), true);
+    await selectSample(Math.max(0, (state.sample_count ?? state.samples.length) - 1), true);
   toast("Samples imported.");
 });
 $("new-sample").onclick = action(async () => {
@@ -1661,6 +1688,7 @@ $("duplicate").onclick = action(async () => {
   if (!sample) return;
   if (hasPendingChanges()) await compileSample(true);
   const copy = structuredClone(sample);
+  delete copy.uuid;
   copy.id = (copy.id || "sample") + "-copy-" + Date.now().toString(36);
   const r = await json("samples", "POST", { sample: copy });
   await refresh();
@@ -1669,7 +1697,7 @@ $("duplicate").onclick = action(async () => {
 $("delete-sample").onclick = action(async () => {
   if (selected < 0) return;
   if (!confirm("Delete this sample from the dataset?")) return;
-  await json("samples/" + selected, "DELETE");
+  await json(`samples/${selected}?expected_revision=${sampleRevision}`, "DELETE");
   selected = -1;
   sample = null;
   plan = null;

@@ -110,7 +110,7 @@ def test_headers_use_native_tokenizer_ids_without_mutating_tokenizer(compiler, s
     compiler.tokenizer.add_special_tokens(["<|cxt|>", "<|/cxt|>"])
     from trajectory_remix.compiler import Compiler
 
-    compiler = Compiler(compiler.tokenizer)
+    compiler = Compiler(compiler.tokenizer, slot_policy="declaration-v1")
     original = compiler.tokenizer.to_str()
     plan = compiler.compile(sample)
     ids = [r["token_id"] for r in plan["rows"] if r["window"] == "a" and r["op"] == "header"]

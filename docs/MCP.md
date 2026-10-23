@@ -11,9 +11,10 @@ Install the optional MCP dependency in the dashboard's virtual environment:
 
 ```bash
 python -m pip install -e '.[mcp]'
-python -m trajectory_remix \
+python -m trajectory_remix init \
   --tokenizer examples/demo-tokenizer.json \
-  --dataset project.kidra-dataset
+  --dataset project.sqlite
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 Configure your MCP client to launch the bridge. Use absolute paths appropriate
@@ -49,11 +50,13 @@ paths, shell execution, or provider configuration.
 ## Tools
 
 All responses are available both as JSON text and MCP `structuredContent`.
-Edits return `sample_id`, the new dataset `revision`, and `saved: false`.
+Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry runs return `saved: false`).
 
 | Tool | Purpose |
 | --- | --- |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
+| `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
+| `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
 | `list_trajectories` | Search IDs/metadata and paginate trajectory attributes. |
 | `get_trajectory` | Read complete source JSON, including invalid drafts. |
 | `create_trajectory` | Create from full JSON, an empty draft, or `template: "demo"`. |
@@ -91,7 +94,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: false`.
 | `record_tool_interaction` | Record an earlier actual interaction without executing it again. |
 | `reset_tool_session` | Clear a workbench and restore its initial clock/budget. |
 | `delete_tool_session` | Destroy a workbench's RAM state and log. |
-| `save_dataset` | Atomically save the session to the dashboard's configured dataset file. |
+| `save_dataset` | Report a checkpoint; applied source edits already commit to SQLite. |
 
 Tools include JSON input schemas, read-only/destructive annotations, strict type
 validation, and rejection of unknown argument names. Errors set MCP `isError`
@@ -112,7 +115,7 @@ only), `position`, `expected_revision`, `delivery` (`instant` or `stream`),
 `content` or `segments` (custom request text), and `loss` (request supervision).
 Compilation must succeed before one
 undoable source edit commits. It is also available inside `apply_batch`. Save
-with `save_dataset` as with other edits.
+immediately, as with other edits.
 
 ```json
 {
@@ -178,8 +181,8 @@ state. Generated LLM tool interactions automatically use executable events.
   before validation can pass. Supply full `sample` JSON to import a trajectory,
   or use `template: "demo"` for a compilable example.
 - Generation must be stopped before editing. Read tools remain available during
-  generation. Changes remain in memory until `save_dataset` or a dashboard save
-  (generation checkpoints also save the shared session).
+  generation. Source edits commit immediately to SQLite. `save_dataset` reports
+  a checkpoint and never loads or rewrites all trajectories.
 - The browser reloads a clean selected sample on the next 1.5-second poll.
   If it has pending edits, a conflicting save is rejected and its draft stays
   visible. Copy any text you need before selecting the sample again to reload it.
@@ -372,10 +375,9 @@ History retains up to 50 actions / 32 MB of serialized history entries in RAM.
 Old or oversized actions may be evicted, with a notice in `get_edit_history`.
 History resets on restart and is not written to datasets. Configuration changes,
 credentials, saves, and virtual-tool session state are excluded. Undo/redo must
-wait until generation is stopped; undoing a generation changes the session but
-does not rewrite an earlier checkpoint until the next save. Untracked source
-changes cannot be overwritten by undo/redo. Use `save_dataset` to persist a
-restored state.
+wait until generation is stopped; each undo/redo commits immediately to SQLite.
+External sample changes invalidate local history, so undo cannot overwrite another
+writer. Bulk replacement imports clear history to keep memory bounded.
 
 ## Simulated Remix tool sessions
 
@@ -486,3 +488,24 @@ and pending-browser-draft conflicts. Semantic providers are mocked in tests.
 Tests also cover batch rollback and final-state validation, JSON Patch roundtrips,
 history across browser/generation/MCP edits, sandbox isolation, call budgets,
 literal marker content, recording, cancellation and in-flight revision conflicts.
+
+## Querying metadata and project constraints
+
+`get_session` includes `max_window_slots` and `slot_policy`. The slot budget is
+fixed during project initialization. All authoring paths reject a trajectory
+that declares too many distinct windows, including implicit tool windows.
+The immutable trajectory `uuid` seeds `uuid-hash-v1` allocation; `id` is an
+editable unique label. UUID changes are rejected; duplicates receive new UUIDs.
+
+`query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
+(`all`/`any`), `offset`, and `limit`. Scalar filter operators are
+`eq/ne/lt/lte/gt/gte/exists`. Keys are literal top-level metadata keys, except
+reserved `counts.events`, `counts.windows`, `counts.tags`. Missing properties
+do not match comparisons; JSON null is distinct from an absent property and
+booleans are distinct from numbers. Results include UUID, content hash, metadata,
+tags and cached counts, with no replay payloads.
+
+`get_metadata_counts` takes the same filters/tags, plus `key` (default `tags`)
+and `limit`. It returns bounded value/count groups and total matching trajectories.
+Tag groups deduplicate repeated tags within each trajectory. Objects/arrays remain
+stored metadata but are not grouped as scalar values.

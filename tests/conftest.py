@@ -7,14 +7,18 @@ from tokenizers import Tokenizer
 
 from trajectory_remix.compiler import Compiler
 from trajectory_remix.server import create_app
+from trajectory_remix.storage import DatasetStore
 
 
 @pytest.fixture
 def compiler():
+    # Historical replay fixtures retain the original policy; UUID allocation and
+    # project limits are exercised independently in test_slot_limits.py.
     return Compiler(
         Tokenizer.from_file(
             str(Path(__file__).parents[1] / "examples/demo-tokenizer.json")
-        )
+        ),
+        slot_policy="declaration-v1",
     )
 
 
@@ -30,8 +34,12 @@ def sample():
 
 @pytest.fixture
 async def studio(compiler, tmp_path, sample):
-    app = create_app(compiler, tmp_path / "project.kidra-dataset")
-    app.state.dataset["samples"].append(copy.deepcopy(sample))
+    DatasetStore.initialize(tmp_path / "project.kidra-dataset", compiler)
+    app = create_app(tmp_path / "project.kidra-dataset")
+    store = app.state.dataset.store
+    store.replace([copy.deepcopy(sample)], 0)
+    with store.connect() as db:
+        db.execute("UPDATE project SET revision=0,sample_revision=0")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app),
         base_url="http://testserver",

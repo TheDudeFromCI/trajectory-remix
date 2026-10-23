@@ -11,7 +11,8 @@ cd trajectory-remix
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[test]'
-python -m trajectory_remix --tokenizer /path/to/tokenizer.json
+python -m trajectory_remix init --dataset project.sqlite --tokenizer /path/to/tokenizer.json
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 Open **http://127.0.0.1:8765** in your browser. Windows activation:
@@ -21,22 +22,30 @@ A small ASCII character tokenizer and reactive tool sample are included for a
 reproducible first run:
 
 ```bash
-python -m trajectory_remix \
+python -m trajectory_remix init \
   --tokenizer examples/demo-tokenizer.json \
-  --dataset demo.kidra-dataset
+  --dataset demo.sqlite --max-window-slots 16
+python -m trajectory_remix --dataset demo.sqlite
 ```
 
-`--dataset` is required: the file is created if missing and is the only save
-target. Use File > Import to add `examples/reactive-sample.json`.
+`--dataset` is required. Run `init` once to create the SQLite project and embed
+its tokenizer and special-token spellings. Initialization refuses existing files.
+Normal startup only opens an existing initialized project; it never creates one.
+Each accepted edit commits immediately to that project. `init --max-window-slots N`
+fixes the maximum number of distinct windows (including implicit tool windows)
+per trajectory. Omit it for an unlimited window count. Startup cannot override it.
+Use File > Import to add `examples/reactive-sample.json`.
 
 Use your actual training tokenizer for real datasets. The demo tokenizer is only
-a fixture. The Hugging Face `tokenizers` library loads the tokenizer locally;
-no tokenizer is uploaded or downloaded. Padding and truncation are disabled
-when compiling trajectories. Required special tokens must each already map to
+a fixture. Initialization reads the tokenizer locally and stores its complete
+JSON in the project. Startup and export load that embedded tokenizer; no original
+tokenizer file or tokenizer command-line options are needed or accepted.
+To use a different tokenizer, initialize a separate project and import trajectories.
+Padding and truncation are disabled when compiling trajectories. Required special tokens must each already map to
 one dedicated ID. They are never silently added or renumbered.
 
 ```bash
-python -m trajectory_remix --tokenizer tokenizer.json \
+python -m trajectory_remix init --dataset custom.sqlite --tokenizer tokenizer.json \
   --bos '<s>' --eos '</s>' --noop '<|noop|>'
 ```
 
@@ -52,12 +61,13 @@ connect an MCP client to the stdio command:
 python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
 ```
 
-The bridge exposes 37 tools for trajectory creation, full JSON inspection,
+The bridge exposes 39 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
 dashboard session. Edits appear in the dashboard on its next refresh; pending
-browser edits are protected by revision checks. Use `save_dataset` to persist.
+browser edits are protected by revision checks. Edits commit immediately;
+`save_dataset` reports a checkpoint.
 
 **Edit → Undo / Redo** also restores source edits made through MCP, the dashboard
 or generation. Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl/Cmd+Y) invoke dataset history
@@ -96,8 +106,8 @@ examples, validation options and limits.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
-6. **Save** (Ctrl+S) writes the server's `--dataset` project file. Generation
-   also saves every configured N accepted samples and on stop.
+6. **Save** (Ctrl+S) applies pending browser edits and reports a checkpoint.
+   Applied edits and accepted generated trajectories already commit to SQLite.
 7. **Export tokens** exports the selected sample or whole dataset as chunked
    token JSONL. Every selected sample must compile before export begins.
 
@@ -109,27 +119,88 @@ Unrelated metadata is preserved. These edits synchronize with Source JSON and
 use the same automatic apply, save and Undo/Redo workflow as event edits.
 Leaving a name blank omits that property; the default names are Kidra and User.
 
-Dataset files are UTF-8 JSON, not executable archives:
+Dataset files are SQLite databases, conventionally named `project.sqlite`.
+The `project` row contains configuration, schema/revision counters, tokenizer JSON
+and special-token spellings (`bos`, `eos`, `noop`), the window-slot limit and a
+versioned allocation policy. The tokenizer is fixed at init;
+configuration edits and trajectory imports do not change it.
+Trajectories are stored as individual JSON records in rows, with indexed unique
+UUID primary keys and separate listing metadata. The editable `id` remains a
+unique label; `uuid` is immutable, survives edits/undo/imports, and seeds slot
+allocation. Duplicating a trajectory creates a new UUID. Legacy imports without
+UUIDs derive one deterministically from their ID (or allocate one for unnamed
+drafts). The server fetches trajectories on demand;
+it does not load or copy the whole dataset. The sidebar searches in SQLite and
+shows 100 results per page. Undo history and compiled previews are bounded.
 
-```json
-{
-  "format": "trajectory-remix/kidra-dataset/1",
-  "samples": [],
-  "config": {"endpoints": [], "tasks": []}
-}
-```
+Writes use WAL mode, a 30-second busy timeout and transactions. Multiple server
+processes can share a local database: revisions detect competing edits, and
+unique constraints prevent duplicate IDs. SQLite serializes writers while
+readers use consistent snapshots. Keep the database on a local filesystem;
+WAL databases can have companion `-wal` and `-shm` files. Use SQLite's backup API
+or stop all writers before copying a database.
+
+Existing `.json`, `.jsonl`, and JSON `.kidra-dataset` files can still be imported.
+To use an old project, initialize a new SQLite project with the correct tokenizer,
+start that project, then use
+**File → Import**. Legacy JSON files are never overwritten at startup.
+Bulk replacement imports clear session undo history so the old dataset does not
+have to be loaded into RAM. Token exports remain JSONL and process one trajectory
+at a time, spooling to disk before download so invalid trajectories cannot cause
+a partial export.
 
 API keys are excluded. Datasets preserve prompts, task order, endpoint URLs/model
 names, generation settings, sample metadata, tags and loss controls. The tokenizer
-is an explicit startup input and is not embedded; token exports contain its
-SHA-256 fingerprint. Marker timings change with tokenizer tokenization.
+is embedded at initialization; token exports contain its SHA-256 fingerprint.
+Marker timings change with tokenizer tokenization.
 
 Reload a saved dataset at startup:
 
 ```bash
-python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset project.kidra-dataset
+python -m trajectory_remix --dataset project.sqlite
 ```
+
+## Metadata queries
+
+`trajectory_metadata` has one row keyed by the trajectory UUID. It stores metadata
+properties as structured JSON, a dedicated tag list, and cached event/window/tag
+counts. `metadata_tags` indexes distinct tag membership. Arbitrary metadata keys
+remain flexible; adding a new key does not alter the database schema. Numeric
+counts are JSON numbers, not strings. Objects and arrays are preserved.
+
+Every trajectory also has a canonical `content_hash` for invalidating future
+statistics caches per UUID. Source, hash, metadata projection and tag index update
+in the same transaction, including undo/redo. Deletion cascades to metadata/tags.
+
+`POST /api/metadata/query` (MCP `query_trajectories`) supports typed scalar filters,
+tag membership, and pagination without fetching replay payloads:
+
+```json
+{
+  "filters": [
+    {"key": "quality", "op": "gte", "value": 0.8},
+    {"key": "counts.windows", "op": "lte", "value": 16}
+  ],
+  "tags": ["reviewed"],
+  "tag_mode": "all",
+  "offset": 0,
+  "limit": 100
+}
+```
+
+Filters support `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `exists`. Keys are literal
+metadata property names; reserved `counts.events`, `counts.windows`, `counts.tags`
+address indexed counters. Missing keys do not match comparisons; explicit JSON
+null matches `eq: null`. Booleans remain distinct from numbers. Filters combine
+with AND; `tag_mode` accepts `all` or `any`.
+
+`POST /api/metadata/counts` (MCP `get_metadata_counts`) groups matching trajectories
+by a scalar metadata key, cached counter, or `tags`, with a bounded number of
+value/count groups. Each trajectory counts once per distinct tag. For example,
+`{"key":"domain","tags":["reviewed"]}` gives reviewed trajectory counts by domain.
+Tag/counter lookups have indexes; arbitrary property filters currently scan the
+small metadata JSON projection in SQL. Add field-specific indexes when the
+actual statistics/query workload is known.
 
 ## Replay contract
 
@@ -202,12 +273,15 @@ contract; it is not an audit of the current ProjectKidra repository.
   malformed markers and references to undeclared windows are errors. References
   may target a later declaration or an implicit tool window. Tool arguments and
   actual sandbox observations remain literal data.
-- Slots are allocated from zero in first-declaration order (`open` or `tool-call`),
-  using the compiler's numeric-then-symbolic replay-key order and event list
-  order. Reordering JSON object keys does not change the mapping. The mapping
-  is per trajectory and is exported as `window_slots` and each window's `slot`;
-  changing declarations can change slot numbers, so use markers in source.
-  Slots are not reused and no fixed 15-window limit is imposed.
+- New projects use `uuid-hash-v1`: a SHA-256 stream seeded by the immutable
+  trajectory UUID assigns unique slots within the project's configured slot space.
+  Allocations are independent of process randomness, metadata and label edits.
+  Canonical numeric-then-symbolic replay keys and list order determine window
+  declaration order. References, headers and token exports share the mapping.
+  Slots are not reused. Exceeding `max_window_slots` rejects creation/import,
+  edits, generation and export, including implicit tool windows. With an unlimited
+  budget the slot space is the number of declared windows, so adding windows can
+  change mappings; use named markers in source.
 - Headers appear in replay, task context and token exports. The tokenizer is
   never modified: context delimiters use existing dedicated tokens when present,
   otherwise ordinary tokenizer-native text tokens. Header metadata escapes
@@ -226,7 +300,8 @@ contract; it is not an audit of the current ProjectKidra repository.
 
 Defaults: at most 100,000 ticks and 500,000 expanded rows per compiled sample.
 Interactive previews are limited to 50,000 rows. Imports are limited to 32 MB per
-file and requests to 40 MB. Very large datasets should be split into batches.
+file and requests to 40 MB. Large imports should be split into batches; the SQLite dataset itself has no
+100,000-trajectory limit.
 
 ## LLM tasks and endpoint configuration
 
@@ -237,7 +312,7 @@ timeout, and optional API-key environment variable or session-only key.
 ```bash
 export REMIX_GENERATOR_KEY='your-key'
 export REMIX_VALIDATOR_KEY='your-key'
-python -m trajectory_remix --tokenizer tokenizer.json
+python -m trajectory_remix --dataset project.sqlite
 ```
 
 Environment variables are read by the backend only. A blank key field preserves
@@ -306,7 +381,8 @@ fails rather than passing optimistically.
 - `max_samples`: accepted new samples; zero means unlimited.
 - `max_attempts`: candidate attempts; zero means unlimited. An attempt may run
   `regenerations + 1` complete task pipelines.
-- `autosave_every`: accepted samples between atomic disk checkpoints.
+- `autosave_every`: accepted samples between checkpoint progress reports; every
+  accepted sample commits immediately.
 - `delay_seconds`: delay between candidate attempts (minimum 0.1 seconds).
 - `max_consecutive_failures`: hard stop threshold, even with skip/pause chosen.
 - `failure_action`: stop immediately, pause after a failed attempt, or skip to
@@ -317,7 +393,7 @@ fails rather than passing optimistically.
 - `validate`: run enabled LLM validators before accepting a candidate.
 
 Accepted samples enter the dataset immediately. A stop cancels the in-flight HTTP
-request, discards the incomplete candidate and flushes accepted changes. Pause
+request and discards the incomplete candidate. Accepted changes are already durable. Pause
 finishes the in-flight request and blocks at the next pipeline/attempt boundary;
 it is not a provider-side pause. Generator state/quotas are per candidate, and
 credentials are not included in retained datasets. Generation locks dataset
@@ -462,8 +538,7 @@ the usual checkpoint), and `GET /api/samples/{index}/sandbox/{tick}`.
 ## Headless export and tests
 
 ```bash
-python -m trajectory_remix --tokenizer tokenizer.json \
-  --dataset samples.kidra-dataset --export token-chunks.jsonl --chunk-ticks 64
+python -m trajectory_remix --dataset samples.sqlite --export token-chunks.jsonl --chunk-ticks 64
 python -m pytest -q
 ```
 
@@ -488,7 +563,8 @@ cancellation and failure limits. `docs/EXPORT.md` describes the training adapter
 |---|---|
 | `compiler.py` | Schema, anchors, timing, lifecycle, token rows, masks, exact attention predicate. |
 | `training.py` | Export reader, reference query/attention batching, optional PyTorch conversion. |
-| `dataset.py` | Import normalization, dataset shape, atomic persistence, key removal. |
+| `dataset.py` | JSON import normalization, trajectory defaults and key removal. |
+| `storage.py` | SQLite storage, lazy reads, paginated metadata and sparse edits. |
 | `llm.py` | Config/task defaults, prompt organization, bounded HTTP, generation, validators. |
 | `tools.py` | Isolated RAM capability sandbox and tool schemas. |
 | `sandbox_replay.py` | Tool scheduling, recorded outcomes and historical sandbox deltas. |

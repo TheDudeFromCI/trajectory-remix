@@ -4,13 +4,17 @@ Run npm install --prefix tests first. These are DOM tests, not visual browser QA
 """
 
 import socket
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
 from pathlib import Path
+
+from tokenizers import Tokenizer
+from trajectory_remix.compiler import Compiler
+from trajectory_remix.storage import DatasetStore
+from trajectory_remix.dataset import parse_import
 
 root = Path(__file__).resolve().parents[1]
 with socket.socket() as sock:
@@ -19,15 +23,14 @@ with socket.socket() as sock:
 base = f"http://127.0.0.1:{port}"
 with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
     dataset = Path(temp) / "project.kidra-dataset"
-    shutil.copy(root / "examples/reactive-sample.json", dataset)
+    initial, _ = parse_import("sample.json", (root / "examples/reactive-sample.json").read_text())
+    DatasetStore.initialize(dataset, Compiler(Tokenizer.from_file(str(root / "examples/demo-tokenizer.json")))).replace(initial, 0)
     server = subprocess.Popen(
         [
             sys.executable,
             "-u",
             "-m",
             "trajectory_remix",
-            "--tokenizer",
-            "examples/demo-tokenizer.json",
             "--dataset",
             str(dataset),
             "--port",

@@ -458,6 +458,7 @@ class SampleBuilder:
                 "synthetic_clock": config.get("clock", {}),
             },
         }
+        self.sample["uuid"] = self.sample["id"]
         self.next_tick = 0
         self.serial = 0
 

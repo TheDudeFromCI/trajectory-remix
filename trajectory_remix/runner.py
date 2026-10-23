@@ -5,8 +5,7 @@ import copy
 from collections import deque
 from datetime import UTC, datetime
 
-from .changes import SampleHistory
-from .dataset import atomic_save, snapshot
+from .changes import SQLiteHistory
 from .llm import SampleBuilder
 
 
@@ -14,7 +13,7 @@ class Runner:
     def __init__(self, state, compiler, save_path, client=None):
         self.state, self.compiler, self.save_path = state, compiler, save_path
         self.client = client
-        self.history = SampleHistory(state)
+        self.history = SQLiteHistory(state)
         self.job = None
         self.save_lock = asyncio.Lock()
         self.resume_event = asyncio.Event()
@@ -36,12 +35,12 @@ class Runner:
 
     async def save(self):
         async with self.save_lock:
-            data = snapshot(copy.deepcopy(self.state["samples"]), self.state["config"])
+            # Source edits are durable at commit. A checkpoint never rewrites
+            # trajectories or copies the dataset into memory.
             revision = self.state["revision"]
-            await asyncio.to_thread(atomic_save, self.save_path, data)
             self.status["last_saved"] = datetime.now(UTC).isoformat()
             self.status["last_saved_revision"] = revision
-            self.log(f"Saved {len(data['samples'])} samples to {self.save_path.name}")
+            self.log(f"Checkpointed {len(self.state['samples'])} samples in {self.save_path.name}")
             return revision
 
     def start(self, single=False, task_ids=None, seed_index=None, validate=None):
@@ -50,6 +49,7 @@ class Runner:
         config = copy.deepcopy(self.state["config"])
         if validate is not None:
             config["automatic"]["validate"] = bool(validate)
+        seed_revision = self.state["revision"]
         seed = (
             copy.deepcopy(self.state["samples"][seed_index])
             if seed_index is not None
@@ -65,7 +65,7 @@ class Runner:
         )
         self.resume_event.set()
         self.job = asyncio.create_task(
-            self.run(config, single, task_ids, seed, seed_index)
+            self.run(config, single, task_ids, seed, seed_index, seed_revision)
         )
 
     async def stop(self):
@@ -85,7 +85,7 @@ class Runner:
         self.resume_event.set()
         self.status["paused"] = False
 
-    async def run(self, config, single, task_ids, seed=None, seed_index=None):
+    async def run(self, config, single, task_ids, seed=None, seed_index=None, seed_revision=None):
         options = config.get("automatic", {})
         max_samples = 1 if single else options.get("max_samples", 10)
         max_attempts = options.get("max_attempts", 30)
@@ -135,6 +135,8 @@ class Runner:
                         )
                 if accepted is not None:
                     updated = self.state["samples"].copy()
+                    if seed_index is not None:
+                        updated.revision = seed_revision
                     if seed_index is None:
                         updated.append(accepted)
                     else:

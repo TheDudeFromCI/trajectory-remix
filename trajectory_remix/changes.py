@@ -122,7 +122,7 @@ class SampleHistory:
         self.max_entries, self.max_bytes = max_entries, max_bytes
         self.undo_stack, self.redo_stack = [], []
         self.serial = 0
-        self.tip = fingerprint(state["samples"])
+        self.tip = fingerprint(state["samples"]) if max_entries else None
         self.notice = None
 
     def commit(self, samples, label):
@@ -215,3 +215,73 @@ class SampleHistory:
         self.state["revision"] += 1
         self.tip = fingerprint(current)
         return {"revision": self.state["revision"], "actions": restored, "saved": False}
+
+
+class SQLiteHistory(SampleHistory):
+    """Bounded history of touched rows, with cross-process revision protection."""
+
+    def __init__(self, state, max_entries=50, max_bytes=32_000_000):
+        self.state = state
+        self.store = state.store
+        self.max_entries, self.max_bytes = max_entries, max_bytes
+        self.undo_stack, self.redo_stack = [], []
+        self.serial = 0
+        self.tip = self.store.info()[1]
+        self.notice = None
+
+    def commit(self, samples, label, config=None):
+        from .storage import SampleDraft
+
+        if not isinstance(samples, SampleDraft) or samples.base is not self.store.samples:
+            raise TypeError("SQLite history requires a sparse sample draft")
+        before = self.store.info()[1]
+        forward, inverse = samples.operations, samples.inverse
+        revision = self.store.write(forward, samples.revision, config)
+        if before != self.tip:
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self.notice = "History reset after an external sample change"
+        self.redo_stack.clear()
+        if forward:
+            self.serial += 1
+            entry = {
+                "id": self.serial, "label": label,
+                "time": datetime.now(UTC).isoformat(), "revision": revision,
+                "forward": copy.deepcopy(forward), "inverse": copy.deepcopy(inverse),
+            }
+            entry["bytes"] = len(json.dumps(entry, ensure_ascii=False).encode())
+            self.undo_stack.append(entry)
+            while len(self.undo_stack) > self.max_entries or self.bytes_used() > self.max_bytes:
+                self.undo_stack.pop(0)
+                self.notice = "Old edits were evicted to keep history within its limits"
+        self.tip = revision
+        return revision
+
+    def view(self, include_changes=False):
+        sample_revision = self.store.info()[1]
+        if sample_revision != self.tip:
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self.notice = "History reset after an external sample change"
+            self.tip = sample_revision
+        return super().view(include_changes)
+
+    def restore(self, direction, steps):
+        from .storage import StorageConflict
+
+        source, destination = (self.undo_stack, self.redo_stack) if direction == "undo" else (self.redo_stack, self.undo_stack)
+        revision, sample_revision, _, _ = self.store.info()
+        if sample_revision != self.tip:
+            raise HistoryError("Samples changed outside edit history; undo/redo cannot overwrite them")
+        if steps > len(source):
+            raise HistoryError(f"Only {len(source)} {direction} actions are available", "not_found")
+        entries = list(reversed(source[-steps:]))
+        operations = [op for entry in entries for op in entry["inverse" if direction == "undo" else "forward"]]
+        try:
+            revision = self.store.write(operations, revision)
+        except StorageConflict as error:
+            raise HistoryError(str(error)) from error
+        destination.extend(entries)
+        del source[-steps:]
+        self.tip = revision
+        return {"revision": revision, "actions": [e["id"] for e in entries], "saved": True}

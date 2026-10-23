@@ -1,3 +1,4 @@
+from trajectory_remix.storage import DatasetStore
 import asyncio
 import copy
 import json
@@ -34,6 +35,7 @@ async def test_chat_session_uses_recording_target_and_is_undoable(studio, compil
     sample = studio[0].state.dataset["samples"][0]
     sample["replay"]["0"].append({"op": "open", "window": "chat"})
     sample["metadata"] = {"agent_name": "Nova"}
+    studio[0].state.dataset["samples"][0] = sample
     before = copy.deepcopy(sample)
     recorded = await tool(studio, "chat", {"content": "Hello {N_TICK:9}"}, record_sample_id="test")
     assert recorded["interaction"]["outcome"]["ok"]
@@ -111,7 +113,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     assert studio[0].state.dataset["revision"] == 0
     assert not (await call(studio, "get_edit_history"))["can_undo"]
     await call(studio, "save_dataset")
-    assert "in RAM only" not in (tmp_path / "project.kidra-dataset").read_text()
+    assert b"in RAM only" not in (tmp_path / "project.kidra-dataset").read_bytes()
     old_sandbox = studio[0].state.tool_sessions.get("tools").sandbox
     reset = await call(studio, "reset_tool_session", session_id="tools")
     assert (

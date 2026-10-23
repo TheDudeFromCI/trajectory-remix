@@ -16,7 +16,7 @@ let holdNextCompile = false,
 w.fetch = async (path, options) => {
   requests.push({ path, options });
   const response = await fetch(new URL(path, base), options);
-  if (path === "/api/state") completedStateReads++;
+  if (path.startsWith("/api/state?")) completedStateReads++;
   if (path === "/api/compile" && holdNextCompile) {
     holdNextCompile = false;
     await new Promise((resolve) => (releaseCompile = resolve));
@@ -69,8 +69,8 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
-assert.match($("window-grid").textContent, /<\|cxt\|>Window: 2↵\nPurpose: reasoning<\|\/cxt\|>/);
-assert.match($("window-grid").textContent, /slot 2/);
+assert.match($("window-grid").textContent, /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/);
+assert.match($("window-grid").textContent, /slot \d+/);
 assert.equal($("sample-title"), null);
 assert.equal(w.document.querySelector(".tabbar"), null);
 assert.equal($("replay-view").querySelector("#dirty-indicator") !== null, true);
@@ -84,6 +84,8 @@ assert.equal($("timeline").closest("main"), w.document.querySelector("main"));
 assert.equal(w.document.title, "Trajectory Remix");
 assert.equal($("metadata-panel").closest(".sidebar"), w.document.querySelector(".sidebar"));
 assert.equal($("metadata-fields").disabled, false);
+assert.equal($("trajectory-uuid").readOnly, true);
+assert.equal($("trajectory-uuid").value, JSON.parse($("sample-json").value).uuid);
 const initialMetadata = JSON.parse($("metadata-json").value);
 $("agent-name").value = "Nova";
 $("agent-name").oninput();
@@ -494,11 +496,40 @@ chatArgs.oninput();
 await click("file-save");
 jump(0);
 await waitFor(() => /<\|msg\|>Nova: Hi, Sam!<\|\/msg\|>/.test($("window-grid").textContent));
+// Listings are paged in SQLite, and search reaches trajectories beyond page one.
+const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
+  id: `sqlite-page-${index}`,
+  replay: { "0": [{ op: "open", window: "a" }] },
+  metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
+}));
+const imported = await fetch(base + "/api/import", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+  },
+  body: JSON.stringify({ files: [{ name: "pages.json", text: JSON.stringify(pagedSamples) }] }),
+});
+assert.equal(imported.status, 200, await imported.clone().text());
+$("sample-search").value = "sqlite-page-";
+$("sample-search").oninput();
+await waitFor(() => $("sample-page-label").textContent === "1–100 of 205");
+assert.equal($("sample-list").children.length, 100);
+await click("sample-page-next");
+await waitFor(() => $("sample-page-label").textContent === "101–200 of 205");
+assert.equal($("sample-list").children.length, 100);
+assert.equal($("sample-page-prev").disabled, false);
+$("sample-search").value = "sqlite-last";
+$("sample-search").oninput();
+await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
+assert.equal($("sample-list").children.length, 1);
+await $("sample-list").firstElementChild.onclick();
+assert.equal(JSON.parse($("sample-json").value).id, "sqlite-page-204");
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 73,
+    checks: 82,
     errors,
   }),
 );
