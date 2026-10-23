@@ -12,9 +12,9 @@ import inspect
 import json
 import re
 import uuid
-from pathlib import Path
 from collections import OrderedDict
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Annotated, Literal, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
@@ -23,7 +23,9 @@ from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import KEY, CompileError
 from .dataset import new_sample, prepare_sample
 from .llm import SampleBuilder
-from .metadata import MetadataFilter, query as query_metadata, counts as metadata_counts
+from .metadata import MetadataFilter
+from .metadata import counts as metadata_counts
+from .metadata import query as query_metadata
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import (
@@ -188,7 +190,9 @@ class TrajectoryCommands:
             )
 
     def _commit(self, sample, index=None, validate=False):
-        sample = prepare_sample(sample, self.state["samples"][index] if index is not None else None)
+        sample = prepare_sample(
+            sample, self.state["samples"][index] if index is not None else None
+        )
         self.compiler.slots_for(sample)
         ident = sample.get("id")
         if not isinstance(ident, str) or not ident:
@@ -198,7 +202,10 @@ class TrajectoryCommands:
             found = samples.find(ident)
             duplicate = found is not None and found[0] != index
         else:
-            duplicate = any(i != index and other.get("id") == ident for i, other in enumerate(samples))
+            duplicate = any(
+                i != index and other.get("id") == ident
+                for i, other in enumerate(samples)
+            )
         if duplicate:
             raise CommandError(f"Duplicate sample ID: {ident}", "conflict")
         # Reject non-JSON values before changing the live session.
@@ -213,7 +220,11 @@ class TrajectoryCommands:
         else:
             updated[index] = sample
         revision = self.history.commit(updated, f"{self.action.get()}: {ident}")
-        return {"sample_id": ident, "revision": revision, "saved": hasattr(self.state, "store")}
+        return {
+            "sample_id": ident,
+            "revision": revision,
+            "saved": hasattr(self.state, "store"),
+        }
 
     def _draft(self, sample_id, expected_revision):
         self._editable(expected_revision)
@@ -301,7 +312,9 @@ class TrajectoryCommands:
         """List trajectories with metadata; filter by ID or metadata text and paginate."""
         if isinstance(self.state["samples"], SQLiteSamples):
             revision = self.state["revision"]
-            total, trajectories = self.state["samples"].store.listing(query, offset, limit)
+            total, trajectories = self.state["samples"].store.listing(
+                query, offset, limit
+            )
             return {"revision": revision, "total": total, "trajectories": trajectories}
         samples = [
             s
@@ -323,8 +336,12 @@ class TrajectoryCommands:
 
     @command()
     def query_trajectories(
-        self, filters: list[MetadataFilter] | None = None, tags: list[str] | None = None,
-        tag_mode: Literal["all", "any"] = "all", offset: Nonnegative = 0, limit: PageSize = 100,
+        self,
+        filters: list[MetadataFilter] | None = None,
+        tags: list[str] | None = None,
+        tag_mode: Literal["all", "any"] = "all",
+        offset: Nonnegative = 0,
+        limit: PageSize = 100,
     ):
         """Query scalar metadata keys, tag membership and cached counts without reading replay.
 
@@ -337,8 +354,12 @@ class TrajectoryCommands:
 
     @command()
     def get_metadata_counts(
-        self, key: str = "tags", filters: list[MetadataFilter] | None = None,
-        tags: list[str] | None = None, tag_mode: Literal["all", "any"] = "all", limit: PageSize = 100,
+        self,
+        key: str = "tags",
+        filters: list[MetadataFilter] | None = None,
+        tags: list[str] | None = None,
+        tag_mode: Literal["all", "any"] = "all",
+        limit: PageSize = 100,
     ):
         """Group matching trajectories by a scalar metadata key, tags, or counts.* field.
 
@@ -406,7 +427,12 @@ class TrajectoryCommands:
         validate: bool = False,
         expected_revision: Revision = None,
     ):
-        """Replace the complete source JSON. validate=True rejects invalid changes atomically."""
+        """Replace the complete source JSON. validate=True rejects invalid changes atomically.
+
+        This operation is intended only for large-scale or structural edits where incremental
+        changes are impractical. In most cases, incremental edits using create_event, create_tool_call,
+        and apply_batch are preferred.
+        """
         index, _ = self._draft(sample_id, expected_revision)
         return self._commit(copy.deepcopy(sample), index, validate)
 
@@ -712,7 +738,9 @@ class TrajectoryCommands:
         reference = re.compile(r"(?<!\\)\{WINDOW:" + re.escape(window) + r"\}")
         for event in events:
             parts = [event] + (
-                event.get("segments", []) if isinstance(event.get("segments"), list) else []
+                event.get("segments", [])
+                if isinstance(event.get("segments"), list)
+                else []
             )
             for part in parts:
                 if isinstance(part, dict):
@@ -901,8 +929,11 @@ class TrajectoryCommands:
         self._editable(expected_revision)
         before = self.state["samples"]
         working = {
-            "samples": before.copy() if isinstance(before, SQLiteSamples) else copy.deepcopy(before),
-            "config": self.state["config"], "revision": self.state["revision"],
+            "samples": before.copy()
+            if isinstance(before, SQLiteSamples)
+            else copy.deepcopy(before),
+            "config": self.state["config"],
+            "revision": self.state["revision"],
         }
         if isinstance(working["samples"], SampleDraft):
             working["samples"].revision = self.edit_revision.get()
@@ -938,7 +969,11 @@ class TrajectoryCommands:
                 originals = {s["id"]: s for s in before if isinstance(s.get("id"), str)}
                 for sample in after:
                     ident = sample.get("id")
-                    unchanged = json_equal(sample, originals.get(ident)) if isinstance(ident, str) else any(json_equal(sample, old) for old in before)
+                    unchanged = (
+                        json_equal(sample, originals.get(ident))
+                        if isinstance(ident, str)
+                        else any(json_equal(sample, old) for old in before)
+                    )
                     if not unchanged:
                         self.compiler.compile(sample)
             changes = json_changes(before, after)
@@ -1110,7 +1145,11 @@ class TrajectoryCommands:
                 ),
                 delivery=delivery,
             )
-        for key, value in (("content", content), ("segments", segments), ("loss", loss)):
+        for key, value in (
+            ("content", content),
+            ("segments", segments),
+            ("loss", loss),
+        ):
             if value is not None:
                 event[key] = value
         if outcome is not None:
@@ -1239,7 +1278,9 @@ class TrajectoryCommands:
             _, sample = self._find(record_sample_id)
             if name == "chat":
                 windows = (
-                    self.compiler.compile(sample)["windows"] if sample.get("replay") else []
+                    self.compiler.compile(sample)["windows"]
+                    if sample.get("replay")
+                    else []
                 )
                 context = chat_context(windows, sample.get("metadata"))
             recorder = lambda entry: self._record_interaction(
@@ -1279,7 +1320,9 @@ class TrajectoryCommands:
             call_window,
             tool_request(
                 entry["name"], entry["arguments"], self.compiler.special.values()
-            ).replace("{N_TICK", "\\u007bN_TICK").replace("{WINDOW", "\\u007bWINDOW"),
+            )
+            .replace("{N_TICK", "\\u007bN_TICK")
+            .replace("{WINDOW", "\\u007bWINDOW"),
             close=False,
             request_id=request_id,
         )
@@ -1287,7 +1330,9 @@ class TrajectoryCommands:
             result_window,
             tool_message(
                 "tool_result", entry["outcome"], self.compiler.special.values()
-            ).replace("{N_TICK", "\\u007bN_TICK").replace("{WINDOW", "\\u007bWINDOW"),
+            )
+            .replace("{N_TICK", "\\u007bN_TICK")
+            .replace("{WINDOW", "\\u007bWINDOW"),
             op="append",
             source="tool",
             close=False,
@@ -1301,8 +1346,11 @@ class TrajectoryCommands:
             builder.add_stream(
                 "chat",
                 tool_text(
-                    entry["outcome"]["result"]["content"], self.compiler.special.values()
-                ).replace("{N_TICK", "\\{N_TICK").replace("{WINDOW", "\\{WINDOW"),
+                    entry["outcome"]["result"]["content"],
+                    self.compiler.special.values(),
+                )
+                .replace("{N_TICK", "\\{N_TICK")
+                .replace("{WINDOW", "\\{WINDOW"),
                 op="append",
                 source="tool",
                 loss={"mask": "exclude"},

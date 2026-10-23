@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 from tokenizers import Tokenizer
 
-from .tools import tool_message, tool_request, tool_text
 from .dataset import trajectory_uuid
+from .tools import tool_message, tool_request, tool_text
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")
@@ -30,7 +30,12 @@ def window_names(sample):
     if not isinstance(replay, dict):
         return []
     names = {}
-    for key in sorted(replay, key=lambda k: (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))):
+    for key in sorted(
+        replay,
+        key=lambda k: (
+            (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))
+        ),
+    ):
         group = replay[key]
         if isinstance(group, list):
             for event in group:
@@ -73,10 +78,18 @@ class Encoded:
 
 class Compiler:
     def __init__(
-        self, tokenizer: Tokenizer, bos="<|bos|>", eos="<|eos|>", noop="<|noop|>",
-        *, max_window_slots=None, slot_policy="uuid-hash-v1",
+        self,
+        tokenizer: Tokenizer,
+        bos="<|bos|>",
+        eos="<|eos|>",
+        noop="<|noop|>",
+        *,
+        max_window_slots=None,
+        slot_policy="uuid-hash-v1",
     ):
-        if max_window_slots is not None and (type(max_window_slots) is not int or max_window_slots < 1):
+        if max_window_slots is not None and (
+            type(max_window_slots) is not int or max_window_slots < 1
+        ):
             raise ValueError("max_window_slots must be a positive integer or null")
         if slot_policy not in ("uuid-hash-v1", "declaration-v1"):
             raise ValueError("Unsupported window slot allocation policy")
@@ -99,9 +112,14 @@ class Compiler:
 
     def slots_for(self, sample):
         names = window_names(sample)
-        capacity = self.max_window_slots if self.max_window_slots is not None else len(names)
+        capacity = (
+            self.max_window_slots if self.max_window_slots is not None else len(names)
+        )
         if len(names) > capacity:
-            raise CompileError(f"Trajectory uses {len(names)} window slots; project limit is {capacity}", "replay")
+            raise CompileError(
+                f"Trajectory uses {len(names)} window slots; project limit is {capacity}",
+                "replay",
+            )
         if self.slot_policy == "declaration-v1":
             return dict(zip(names, range(len(names))))
         # Partial Fisher-Yates with a versioned SHA-256 stream. It allocates only
@@ -163,7 +181,9 @@ class Compiler:
                             "Invalid window marker; expected {WINDOW:window_id}", path
                         )
                     if window_slots is None or match[1] not in window_slots:
-                        raise CompileError(f"Unknown window reference {match[1]!r}", path)
+                        raise CompileError(
+                            f"Unknown window reference {match[1]!r}", path
+                        )
                     visible += str(window_slots[match[1]])
                     i = match.end()
                 elif raw.startswith("{N_TICK", i):
@@ -336,7 +356,9 @@ class Compiler:
                     )
                     item["content_op"] = content_event["op"]
                     item["encoded"] = self.encode(
-                        content_event, path, noop_weight,
+                        content_event,
+                        path,
+                        noop_weight,
                         literal=literal,
                         window_slots=window_slots,
                     )
@@ -432,7 +454,11 @@ class Compiler:
             else:
                 expanded.append(
                     {
-                        "event": {"op": "open", "window": window, "window-type": "tool"},
+                        "event": {
+                            "op": "open",
+                            "window": window,
+                            "window-type": "tool",
+                        },
                         "key": "0",
                         "tick": 0,
                         "path": f"tool-windows[{window}].open",
@@ -515,7 +541,9 @@ class Compiler:
                             self.window_header(
                                 window_slots[event["window"]],
                                 event.get("window-type", "document"),
-                            ) if window_headers else ""
+                            )
+                            if window_headers
+                            else ""
                         ),
                     },
                     item["path"] + ".header",
@@ -657,7 +685,8 @@ class Compiler:
                 # Tool messages are external input in B and may arrive while the
                 # model emits its next chat token in D (including EOS).
                 distinct = {
-                    x["item"]["order"]: x["item"] for x in group
+                    x["item"]["order"]: x["item"]
+                    for x in group
                     if not x["item"].get("synthetic_chat")
                 }
                 if len(distinct) > 1 and not all(
@@ -691,8 +720,15 @@ class Compiler:
                     # before B/C without consuming ticks or moving content anchors.
                     for tid in item["header"].ids:
                         row(
-                            tick, "A", wid, tid, 0, True, "header",
-                            item["path"] + ".header", input_rank,
+                            tick,
+                            "A",
+                            wid,
+                            tid,
+                            0,
+                            True,
+                            "header",
+                            item["path"] + ".header",
+                            input_rank,
                         )
                         input_rank += 1
                 if phase == "D" and delivery["token_id"] == self.ids["eos"]:
