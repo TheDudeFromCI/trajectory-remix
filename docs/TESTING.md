@@ -4,6 +4,12 @@
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic
   edits, revision conflicts, patches, metadata, diagnostics and timeline inspection.
+- Streamable HTTP checks cover direct POST initialization, initialized notifications,
+  tool discovery/calls, session and protocol headers, deletion, malformed requests,
+  HTTP methods, CORS preflight/exposed session headers and explicit origin/Host
+  restrictions without weakening dashboard token checks. A real network test uses
+  the official SDK, verifies HTTP and stdio share edits, and holds GET/SSE open
+  while POST remains operational. The dashboard also works without the MCP extra.
 - DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
@@ -27,6 +33,16 @@
   streamed delivery, rates, masks, final-token anchors, dependent execution order,
   duplicate/cyclic markers and collision-free, undoable anchor allocation. DOM
   checks exercise result delivery and persistence of the post-result anchor toggle.
+- Persistent sandbox tests cover invisible mutations without token/window/export
+  changes, history beyond the token horizon, author diagnostics for hidden failures,
+  authored follow-up message retention, isolated conversations, restored generation,
+  dispatch-time resume checks, pinned artifacts, stale writes, quotas, task
+  dependencies and runtime status without future answers. MCP and DOM tests
+  cover external event authoring, undo/redo, persistence and historical scrubbing.
+  Synthetic subagent tests reject malformed replies before dispatch, preserve
+  failed identities for clarification, and forbid nested provider calls. The
+  bundled Skill.md is available through MCP and its worked call sequence is
+  tested for parallel timing, follow-ups, external writes and masked observations.
 - Chat checks cover message framing, metadata speaker names, missing/closed
   windows, completion-time lifecycle, literal arguments, exported loss masks,
   generation error feedback and undoable MCP recording. DOM checks cover the

@@ -14,6 +14,7 @@ import re
 import uuid
 from collections import OrderedDict
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Annotated, Literal, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
@@ -21,11 +22,18 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import ANCHOR, KEY, CompileError
 from .dataset import new_sample, prepare_sample
-from .llm import LLMClient, SampleBuilder
-from .metadata import MetadataFilter, query as query_metadata, counts as metadata_counts
+from .llm import SampleBuilder
+from .metadata import MetadataFilter
+from .metadata import counts as metadata_counts
+from .metadata import query as query_metadata
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
-from .tools import ToolError, chat_context, tool_message, tool_request, tool_text
+from .tools import (
+    chat_context,
+    tool_message,
+    tool_request,
+    tool_text,
+)
 
 Nonnegative = Annotated[int, Field(ge=0)]
 PageSize = Annotated[int, Field(ge=1, le=5000)]
@@ -182,7 +190,9 @@ class TrajectoryCommands:
             )
 
     def _commit(self, sample, index=None, validate=False):
-        sample = prepare_sample(sample, self.state["samples"][index] if index is not None else None)
+        sample = prepare_sample(
+            sample, self.state["samples"][index] if index is not None else None
+        )
         self.compiler.slots_for(sample)
         ident = sample.get("id")
         if not isinstance(ident, str) or not ident:
@@ -192,7 +202,10 @@ class TrajectoryCommands:
             found = samples.find(ident)
             duplicate = found is not None and found[0] != index
         else:
-            duplicate = any(i != index and other.get("id") == ident for i, other in enumerate(samples))
+            duplicate = any(
+                i != index and other.get("id") == ident
+                for i, other in enumerate(samples)
+            )
         if duplicate:
             raise CommandError(f"Duplicate sample ID: {ident}", "conflict")
         # Reject non-JSON values before changing the live session.
@@ -207,7 +220,11 @@ class TrajectoryCommands:
         else:
             updated[index] = sample
         revision = self.history.commit(updated, f"{self.action.get()}: {ident}")
-        return {"sample_id": ident, "revision": revision, "saved": hasattr(self.state, "store")}
+        return {
+            "sample_id": ident,
+            "revision": revision,
+            "saved": hasattr(self.state, "store"),
+        }
 
     def _draft(self, sample_id, expected_revision):
         self._editable(expected_revision)
@@ -282,13 +299,22 @@ class TrajectoryCommands:
         }
 
     @command()
+    def get_authoring_guide(self):
+        """Read Skill.md: synthetic parallel authoring, available tools, timing, masks and review."""
+        return {
+            "content": Path(__file__).with_name("Skill.md").read_text(encoding="utf-8")
+        }
+
+    @command()
     def list_trajectories(
         self, query: str = "", offset: Nonnegative = 0, limit: PageSize = 50
     ):
         """List trajectories with metadata; filter by ID or metadata text and paginate."""
         if isinstance(self.state["samples"], SQLiteSamples):
             revision = self.state["revision"]
-            total, trajectories = self.state["samples"].store.listing(query, offset, limit)
+            total, trajectories = self.state["samples"].store.listing(
+                query, offset, limit
+            )
             return {"revision": revision, "total": total, "trajectories": trajectories}
         samples = [
             s
@@ -310,8 +336,12 @@ class TrajectoryCommands:
 
     @command()
     def query_trajectories(
-        self, filters: list[MetadataFilter] | None = None, tags: list[str] | None = None,
-        tag_mode: Literal["all", "any"] = "all", offset: Nonnegative = 0, limit: PageSize = 100,
+        self,
+        filters: list[MetadataFilter] | None = None,
+        tags: list[str] | None = None,
+        tag_mode: Literal["all", "any"] = "all",
+        offset: Nonnegative = 0,
+        limit: PageSize = 100,
     ):
         """Query scalar metadata keys, tag membership and cached counts without reading replay.
 
@@ -324,8 +354,12 @@ class TrajectoryCommands:
 
     @command()
     def get_metadata_counts(
-        self, key: str = "tags", filters: list[MetadataFilter] | None = None,
-        tags: list[str] | None = None, tag_mode: Literal["all", "any"] = "all", limit: PageSize = 100,
+        self,
+        key: str = "tags",
+        filters: list[MetadataFilter] | None = None,
+        tags: list[str] | None = None,
+        tag_mode: Literal["all", "any"] = "all",
+        limit: PageSize = 100,
     ):
         """Group matching trajectories by a scalar metadata key, tags, or counts.* field.
 
@@ -393,7 +427,12 @@ class TrajectoryCommands:
         validate: bool = False,
         expected_revision: Revision = None,
     ):
-        """Replace the complete source JSON. validate=True rejects invalid changes atomically."""
+        """Replace the complete source JSON. validate=True rejects invalid changes atomically.
+
+        This operation is intended only for large-scale or structural edits where incremental
+        changes are impractical. In most cases, incremental edits using create_event, create_tool_call,
+        and apply_batch are preferred.
+        """
         index, _ = self._draft(sample_id, expected_revision)
         return self._commit(copy.deepcopy(sample), index, validate)
 
@@ -494,7 +533,7 @@ class TrajectoryCommands:
         validate: bool = False,
         expected_revision: Revision = None,
     ):
-        """Insert an open, append, generate or tool-call event at a numeric or anchor tick key.
+        """Insert an open, append, generate, tool-call or invisible-tool-call event at a numeric or anchor tick key.
 
         position defaults to the end of the tick array. Close via generated EOS.
         """
@@ -699,7 +738,9 @@ class TrajectoryCommands:
         reference = re.compile(r"(?<!\\)\{WINDOW:" + re.escape(window) + r"\}")
         for event in events:
             parts = [event] + (
-                event.get("segments", []) if isinstance(event.get("segments"), list) else []
+                event.get("segments", [])
+                if isinstance(event.get("segments"), list)
+                else []
             )
             for part in parts:
                 if isinstance(part, dict):
@@ -888,8 +929,11 @@ class TrajectoryCommands:
         self._editable(expected_revision)
         before = self.state["samples"]
         working = {
-            "samples": before.copy() if isinstance(before, SQLiteSamples) else copy.deepcopy(before),
-            "config": self.state["config"], "revision": self.state["revision"],
+            "samples": before.copy()
+            if isinstance(before, SQLiteSamples)
+            else copy.deepcopy(before),
+            "config": self.state["config"],
+            "revision": self.state["revision"],
         }
         if isinstance(working["samples"], SampleDraft):
             working["samples"].revision = self.edit_revision.get()
@@ -925,7 +969,11 @@ class TrajectoryCommands:
                 originals = {s["id"]: s for s in before if isinstance(s.get("id"), str)}
                 for sample in after:
                     ident = sample.get("id")
-                    unchanged = json_equal(sample, originals.get(ident)) if isinstance(ident, str) else any(json_equal(sample, old) for old in before)
+                    unchanged = (
+                        json_equal(sample, originals.get(ident))
+                        if isinstance(ident, str)
+                        else any(json_equal(sample, old) for old in before)
+                    )
                     if not unchanged:
                         self.compiler.compile(sample)
             changes = json_changes(before, after)
@@ -1033,8 +1081,8 @@ class TrajectoryCommands:
     def list_simulated_tools(self, session_id: str | None = None):
         """Discover the real Remix simulated-tool schemas, including clock, RAM files, memories, notes and skills.
 
-        Dispatch with call_simulated_tool. subagent is available only when a session
-        explicitly selects a configured endpoint. Even read calls advance the clock.
+        Dispatch with call_simulated_tool. Subagents require author-supplied outcomes;
+        no real subagents or code are executed. Even reads advance the synthetic clock.
         """
         return self.tool_sessions.definitions(session_id)
 
@@ -1056,6 +1104,8 @@ class TrajectoryCommands:
         loss: dict | None = None,
         auto_anchor: bool = False,
         tokens_per_tick: Annotated[int, Field(ge=1)] = 1,
+        invisible: bool = False,
+        source: str | None = None,
     ):
         """Schedule an executable synthetic tool event and compile before committing one undoable edit.
 
@@ -1067,20 +1117,46 @@ class TrajectoryCommands:
         or segments replace the canonical <tool> request and support anchors/NOOPs.
         Sandbox changes at dispatch + duration_ticks. Only subagent requires a
         recorded outcome; replay never contacts an endpoint. Save with save_dataset.
+        invisible=True schedules external sandbox activity with no model tokens/window,
+        call-budget use or implicit clock advance. source optionally identifies its actor.
+        Hidden failures are compile diagnostics; only deterministic mutations are allowed.
         """
         index, sample = self._draft(sample_id, expected_revision)
         event = {
-            "op": "tool-call",
+            "op": "invisible-tool-call" if invisible else "tool-call",
             "tool": tool,
             "arguments": arguments,
-            "window": (
-                window if window is not None else f"tool-result-{uuid.uuid4().hex[:12]}"
-            ),
             "duration-ticks": duration_ticks,
-            "delivery": delivery,
-            "tokens-per-tick": tokens_per_tick,
         }
-        for key, value in (("content", content), ("segments", segments), ("loss", loss)):
+        if invisible:
+            if (
+                any(v is not None for v in (window, content, segments, loss, outcome))
+                or delivery != "instant"
+                or auto_anchor or tokens_per_tick != 1
+            ):
+                raise CommandError(
+                    "Invisible calls cannot have windows, model content, outcomes or streamed delivery"
+                )
+            if source is not None:
+                event["source"] = source
+        else:
+            if source is not None:
+                raise CommandError("source is only supported for invisible calls")
+            event.update(
+                window=(
+                    window
+                    if window is not None
+                    else f"tool-result-{uuid.uuid4().hex[:12]}"
+                ),
+                delivery=delivery,
+            )
+        if not invisible:
+            event["tokens-per-tick"] = tokens_per_tick
+        for key, value in (
+            ("content", content),
+            ("segments", segments),
+            ("loss", loss),
+        ):
             if value is not None:
                 event[key] = value
         if outcome is not None:
@@ -1134,14 +1210,14 @@ class TrajectoryCommands:
         ) = None,
         max_calls: Annotated[int, Field(ge=1, le=256)] | None = None,
         max_bytes: Annotated[int, Field(ge=128, le=2_000_000)] = 2_000_000,
-        subagent_endpoint: str | None = None,
     ):
         """Create an isolated simulated-tool workbench (up to eight sessions).
 
         Defaults use the configured synthetic clock and call budget. Sessions are RAM-only,
         separate from generation sandboxes, and excluded from saves/source edit history.
-        subagent_endpoint optionally enables bounded text-only requests to that configured
-        endpoint; no parent RAM state or trajectory context is sent to it.
+        Subagent replies are supplied by the author, never requested from a provider.
+        Subagents retain history; resume uses the returned conversationId. Only explicitly
+        referenced artifact versions are shared; other parent RAM/trajectory context is excluded.
         """
         clock = self.state["config"].get("clock", {})
         options = {
@@ -1162,53 +1238,7 @@ class TrajectoryCommands:
             ),
             "max_bytes": max_bytes,
         }
-        if subagent_endpoint is not None:
-            if not any(
-                e["id"] == subagent_endpoint for e in self.state["config"]["endpoints"]
-            ):
-                raise CommandError(
-                    "Configured subagent endpoint not found", "not_found"
-                )
-
-            async def broker(task, depth):
-                endpoint = next(
-                    (
-                        e
-                        for e in self.state["config"]["endpoints"]
-                        if e["id"] == subagent_endpoint
-                    ),
-                    None,
-                )
-                if endpoint is None:
-                    raise ToolError("Configured subagent endpoint no longer exists")
-                try:
-                    message = await (self.client or LLMClient()).complete(
-                        copy.deepcopy(endpoint),
-                        [
-                            {
-                                "role": "system",
-                                "content": "Complete this delegated task. No tools or parent workspace are available.",
-                            },
-                            {"role": "user", "content": task},
-                        ],
-                        tools=None,
-                    )
-                except Exception as error:
-                    raise ToolError("Configured subagent request failed") from error
-                text = message.get("content") if isinstance(message, dict) else None
-                if (
-                    not isinstance(text, str)
-                    or not text.strip()
-                    or len(text) > 200_000
-                    or message.get("tool_calls")
-                ):
-                    raise ToolError(
-                        "Subagent must return nonempty text of at most 200,000 characters without tool calls"
-                    )
-                return text
-
-            options["broker"] = broker
-        return self.tool_sessions.create(session_id, options, subagent_endpoint)
+        return self.tool_sessions.create(session_id, options)
 
     @command()
     def list_tool_sessions(self):
@@ -1232,7 +1262,7 @@ class TrajectoryCommands:
         """
         return self.tool_sessions.inspect(session_id, include_state, include_log)
 
-    @command(write=True, destructive=True, open_world=True)
+    @command(write=True, destructive=True)
     async def call_simulated_tool(
         self,
         session_id: str,
@@ -1240,6 +1270,7 @@ class TrajectoryCommands:
         arguments: dict,
         record_sample_id: str | None = None,
         expected_revision: Revision = None,
+        outcome: dict | None = None,
     ):
         """Execute a simulated Remix tool in a session, preserving its real outcome and state.
 
@@ -1248,8 +1279,10 @@ class TrajectoryCommands:
         record_sample_id also appends the actual call/result in one tick-0 tool window
         as one undoable source edit.
         Recording requires a compilable sample (or empty draft) and stopped generation.
-        A rejected recording leaves the virtual state/log unchanged. Configured subagent
-        requests can contact an LLM; their external request cannot be rolled back.
+        A rejected recording leaves virtual state/log unchanged. For subagent, supply
+        outcome={ok:true,result:{response:"authored reply",conversationId:"optional-id"}}
+        or an authored failure. This is author-only data, separate from model arguments.
+        No simulated tool contacts a provider, launches an agent or executes code.
         """
         if expected_revision is not None and record_sample_id is None:
             raise CommandError(
@@ -1262,14 +1295,16 @@ class TrajectoryCommands:
             _, sample = self._find(record_sample_id)
             if name == "chat":
                 windows = (
-                    self.compiler.compile(sample)["windows"] if sample.get("replay") else []
+                    self.compiler.compile(sample)["windows"]
+                    if sample.get("replay")
+                    else []
                 )
                 context = chat_context(windows, sample.get("metadata"))
             recorder = lambda entry: self._record_interaction(
                 record_sample_id, entry, expected_revision
             )
         return await self.tool_sessions.call(
-            session_id, name, arguments, recorder, context
+            session_id, name, arguments, recorder, context, outcome
         )
 
     def _record_interaction(self, sample_id, entry, expected_revision):
@@ -1302,7 +1337,9 @@ class TrajectoryCommands:
             call_window,
             tool_request(
                 entry["name"], entry["arguments"], self.compiler.special.values()
-            ).replace("{N_TICK", "\\u007bN_TICK").replace("{WINDOW", "\\u007bWINDOW"),
+            )
+            .replace("{N_TICK", "\\u007bN_TICK")
+            .replace("{WINDOW", "\\u007bWINDOW"),
             close=False,
             request_id=request_id,
         )
@@ -1310,7 +1347,9 @@ class TrajectoryCommands:
             result_window,
             tool_message(
                 "tool_result", entry["outcome"], self.compiler.special.values()
-            ).replace("{N_TICK", "\\u007bN_TICK").replace("{WINDOW", "\\u007bWINDOW"),
+            )
+            .replace("{N_TICK", "\\u007bN_TICK")
+            .replace("{WINDOW", "\\u007bWINDOW"),
             op="append",
             source="tool",
             close=False,
@@ -1324,8 +1363,11 @@ class TrajectoryCommands:
             builder.add_stream(
                 "chat",
                 tool_text(
-                    entry["outcome"]["result"]["content"], self.compiler.special.values()
-                ).replace("{N_TICK", "\\{N_TICK").replace("{WINDOW", "\\{WINDOW"),
+                    entry["outcome"]["result"]["content"],
+                    self.compiler.special.values(),
+                )
+                .replace("{N_TICK", "\\{N_TICK")
+                .replace("{WINDOW", "\\{WINDOW"),
                 op="append",
                 source="tool",
                 loss={"mask": "exclude"},

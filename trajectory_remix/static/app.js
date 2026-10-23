@@ -536,7 +536,7 @@ function renderSandbox() {
       node(
         "summary",
         "",
-        `${call.tool} · ${call.status} · ticks ${call.start}–${call.end}`,
+        `${call.invisible ? "External · " : ""}${call.tool} · ${call.status} · ticks ${call.start}–${call.end}`,
       ),
     );
     row.append(
@@ -552,7 +552,7 @@ function renderSandbox() {
     );
     $("sandbox-calls").append(row);
   }
-  for (const name of ["files", "memory", "notes", "skills"]) {
+  for (const name of ["files", "memory", "notes", "skills", "artifacts", "conversations"]) {
     const group = node("details", "sandbox-store");
     group.open = name === "files";
     const entries = Object.entries(sandbox[name]);
@@ -850,16 +850,16 @@ function renderEvents() {
       at.title = "Absolute tick or anchor expression";
       head.append(
         at,
-        select(["open", "append", "generate", "tool-call"], e.op, (v) => {
+        select(["open", "append", "generate", "tool-call", "invisible-tool-call"], e.op, (v) => {
           e.op = v;
-          if (v === "open" || v === "tool-call") {
+          if (v === "open" || v === "tool-call" || v === "invisible-tool-call") {
             delete e.content;
             delete e.segments;
             delete e.loss;
             delete e.delivery;
             delete e["tokens-per-tick"];
             delete e.source;
-            if (v === "tool-call") {
+            if (v === "tool-call" || v === "invisible-tool-call") {
               e.tool ??= "file_list";
               e.arguments ??= {};
               e["duration-ticks"] ??= 0;
@@ -869,7 +869,15 @@ function renderEvents() {
             e.loss ??= { mask: "auto" };
             if (v === "append") e.source ??= "tool";
           }
-          if (v !== "tool-call") {
+          if (v === "invisible-tool-call") {
+            for (const key of ["window", "window-type", "request-id", "caused-by", "outcome", "result-anchor"])
+              delete e[key];
+            if (!["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance"].includes(e.tool)) {
+              e.tool = "file_write";
+              e.arguments = {path: "/example.txt", content: ""};
+            }
+          } else e.window ||= "new-window";
+          if (v !== "tool-call" && v !== "invisible-tool-call") {
             for (const key of [
               "tool",
               "arguments",
@@ -883,11 +891,12 @@ function renderEvents() {
           renderEvents();
         }),
       );
-      const win = input(e.window, (v) => {
+      const win = input(e.window || "", (v) => {
         e.window = v;
         update();
       });
       win.className = "event-window";
+      win.hidden = e.op === "invisible-tool-call";
       win.placeholder = e.op === "tool-call" ? "Tool window ID" : "Window ID";
       head.append(
         win,
@@ -951,9 +960,11 @@ function renderEvents() {
           ),
         );
         card.append(options);
-      } else if (e.op === "tool-call") {
+      } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
-        const schemas = (state.tools || []).map((s) => s.function);
+        const invisible = e.op === "invisible-tool-call";
+        const schemas = (state.tools || []).map((s) => s.function).filter((s) =>
+          !invisible || ["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance"].includes(s.name));
         options.append(
           field(
             "Tool",
@@ -962,12 +973,11 @@ function renderEvents() {
               e.tool,
               (value) => {
                 e.tool = value;
+                const parameters = schemas.find((s) => s.name === value).parameters;
                 e.arguments = Object.fromEntries(
-                  Object.entries(
-                    schemas.find((s) => s.name === value).parameters.properties,
-                  ).map(([key, spec]) => [
+                  parameters.required.map((key) => [
                     key,
-                    spec.enum?.[0] ?? (spec.type === "number" ? 0 : ""),
+                    parameters.properties[key].enum?.[0] ?? (parameters.properties[key].type === "number" ? 0 : ""),
                   ]),
                 );
                 delete e.outcome;
@@ -988,7 +998,7 @@ function renderEvents() {
         duration.min = "0";
         duration.step = "1";
         options.append(field("Duration (ticks)", duration));
-        options.append(
+        if (!invisible) options.append(
           field(
             "Result delivery",
             select(["instant", "stream"], e.delivery || "instant", (value) => {
@@ -1032,6 +1042,13 @@ function renderEvents() {
           rate.min = "1";
           rate.step = "1";
           options.append(field("Result tokens per tick", rate));
+        }
+        if (invisible) {
+          options.append(field("External source", input(e.source || "external", (value) => {
+            e.source = value;
+            update();
+          })));
+          card.append(node("p", "segmented-note", "External sandbox activity. No model tokens or windows are created."));
         }
         card.append(options);
         if ("result-anchor" in e) {
@@ -1709,6 +1726,15 @@ $("add-tool-call").onclick = () => {
       "duration-ticks": 0,
     },
   });
+  setDirty();
+  renderEvents();
+};
+$("add-invisible-call").onclick = () => {
+  if (!sample) return;
+  eventDraft.push({key: String(tick), event: {
+    op: "invisible-tool-call", tool: "file_write",
+    arguments: {path: "/example.txt", content: ""}, source: "external",
+  }});
   setDirty();
   renderEvents();
 };

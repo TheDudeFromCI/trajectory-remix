@@ -3,9 +3,9 @@ import copy
 import json
 
 
-async def call(studio, name, **arguments):
+async def call(studio, command, **arguments):
     response = await studio[1].post(
-        "/api/mcp/call", json={"name": name, "arguments": arguments}
+        "/api/mcp/call", json={"name": command, "arguments": arguments}
     )
     assert response.status_code == 200, response.text
     return response.json()
@@ -172,3 +172,107 @@ async def test_auto_anchor_avoids_existing_and_new_request_markers_and_is_undoab
     assert "{N_TICK:10}+1" not in studio[0].state.dataset["samples"][0]["replay"]
     await call(studio, "redo_edits")
     assert studio[0].state.dataset["samples"][0]["replay"]["{N_TICK:10}+1"][0]["result-anchor"] == 11
+
+
+async def test_invisible_mcp_edits_are_atomic_undoable_and_saved(studio, tmp_path):
+    before = copy.deepcopy(studio[0].state.dataset["samples"][0])
+    scheduled = await call(
+        studio,
+        "create_tool_call",
+        sample_id="test",
+        tick="100",
+        tool="file_write",
+        arguments={"path": "subagent.py", "content": "provided by coder"},
+        invisible=True,
+        source="coder",
+        expected_revision=0,
+    )
+    assert scheduled["tool_call"]["invisible"] is True
+    assert "window" not in scheduled["tool_call"]
+    assert (await call(studio, "get_sandbox_state", sample_id="test", tick=99))[
+        "sandbox"
+    ]["files"] == {}
+    assert (await call(studio, "get_sandbox_state", sample_id="test", tick=100))[
+        "sandbox"
+    ]["files"] == {"/subagent.py": "provided by coder"}
+    current = await call(studio, "get_trajectory", sample_id="test")
+    revision = current["revision"]
+    rejected = await studio[1].post(
+        "/api/mcp/call",
+        json={
+            "name": "create_tool_call",
+            "arguments": {
+                "sample_id": "test",
+                "tick": "101",
+                "tool": "file_delete",
+                "arguments": {"path": "missing"},
+                "invisible": True,
+            },
+        },
+    )
+    assert rejected.status_code == 422
+    assert (await call(studio, "get_trajectory", sample_id="test")) == current
+    rejected = await studio[1].post(
+        "/api/mcp/call",
+        json={
+            "name": "create_tool_call",
+            "arguments": {
+                "sample_id": "test",
+                "tick": "101",
+                "tool": "file_write",
+                "arguments": {"path": "x", "content": "no"},
+                "invisible": True,
+                "window": "hidden",
+            },
+        },
+    )
+    assert rejected.status_code == 422
+    await call(studio, "undo_edits", expected_revision=revision)
+    assert (await call(studio, "get_trajectory", sample_id="test"))["sample"] == before
+    await call(studio, "redo_edits")
+    saved = DatasetStore(tmp_path / "project.kidra-dataset").samples[0]
+    assert saved["replay"]["100"][0] == {
+        "op": "invisible-tool-call",
+        "tool": "file_write",
+        "source": "coder",
+        "arguments": {"path": "subagent.py", "content": "provided by coder"},
+        "duration-ticks": 0,
+    }
+
+
+async def test_workbench_resumes_authored_history_without_a_provider(studio):
+    class Forbidden:
+        async def complete(self, *args, **kwargs):
+            pytest.fail("Synthetic subagents must not contact a provider")
+
+    studio[0].state.commands.client = Forbidden()
+    await call(studio, "create_tool_session", session_id="persistent")
+
+    async def delegate(arguments, response):
+        return await call(
+            studio,
+            "call_simulated_tool",
+            session_id="persistent",
+            name="subagent",
+            arguments=arguments,
+            outcome={"ok": True, "result": {"response": response}},
+        )
+
+    initial = await delegate({"task": "Implement"}, "I used a state machine.")
+    cid = initial["interaction"]["outcome"]["result"]["conversationId"]
+    followup = await delegate(
+        {"task": "Explain edge cases", "resume": cid}, "It handles quoted separators."
+    )
+    assert followup["interaction"]["outcome"]["result"]["conversationId"] == cid
+    inspected = await call(studio, "get_tool_session", session_id="persistent")
+    assert inspected["counts"]["conversations"] == 1
+    assert inspected["state"]["conversations"][cid]["messages"] == [
+        {"role": "user", "content": "Implement"},
+        {"role": "assistant", "content": "I used a state machine."},
+        {"role": "user", "content": "Explain edge cases"},
+        {"role": "assistant", "content": "It handles quoted separators."},
+    ]
+    await call(studio, "reset_tool_session", session_id="persistent")
+    assert not (await delegate({"task": "old identity", "resume": cid}, "Should fail"))[
+        "interaction"
+    ]["outcome"]["ok"]

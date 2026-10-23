@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 from tokenizers import Tokenizer
 
-from .tools import tool_message, tool_request, tool_text
 from .dataset import trajectory_uuid
+from .tools import tool_message, tool_request, tool_text
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")
@@ -30,7 +30,12 @@ def window_names(sample):
     if not isinstance(replay, dict):
         return []
     names = {}
-    for key in sorted(replay, key=lambda k: (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))):
+    for key in sorted(
+        replay,
+        key=lambda k: (
+            (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))
+        ),
+    ):
         group = replay[key]
         if isinstance(group, list):
             for event in group:
@@ -73,10 +78,18 @@ class Encoded:
 
 class Compiler:
     def __init__(
-        self, tokenizer: Tokenizer, bos="<|bos|>", eos="<|eos|>", noop="<|noop|>",
-        *, max_window_slots=None, slot_policy="uuid-hash-v1",
+        self,
+        tokenizer: Tokenizer,
+        bos="<|bos|>",
+        eos="<|eos|>",
+        noop="<|noop|>",
+        *,
+        max_window_slots=None,
+        slot_policy="uuid-hash-v1",
     ):
-        if max_window_slots is not None and (type(max_window_slots) is not int or max_window_slots < 1):
+        if max_window_slots is not None and (
+            type(max_window_slots) is not int or max_window_slots < 1
+        ):
             raise ValueError("max_window_slots must be a positive integer or null")
         if slot_policy not in ("uuid-hash-v1", "declaration-v1"):
             raise ValueError("Unsupported window slot allocation policy")
@@ -99,9 +112,14 @@ class Compiler:
 
     def slots_for(self, sample):
         names = window_names(sample)
-        capacity = self.max_window_slots if self.max_window_slots is not None else len(names)
+        capacity = (
+            self.max_window_slots if self.max_window_slots is not None else len(names)
+        )
         if len(names) > capacity:
-            raise CompileError(f"Trajectory uses {len(names)} window slots; project limit is {capacity}", "replay")
+            raise CompileError(
+                f"Trajectory uses {len(names)} window slots; project limit is {capacity}",
+                "replay",
+            )
         if self.slot_policy == "declaration-v1":
             return dict(zip(names, range(len(names))))
         # Partial Fisher-Yates with a versioned SHA-256 stream. It allocates only
@@ -163,7 +181,9 @@ class Compiler:
                             "Invalid window marker; expected {WINDOW:window_id}", path
                         )
                     if window_slots is None or match[1] not in window_slots:
-                        raise CompileError(f"Unknown window reference {match[1]!r}", path)
+                        raise CompileError(
+                            f"Unknown window reference {match[1]!r}", path
+                        )
                     visible += str(window_slots[match[1]])
                     i = match.end()
                 elif raw.startswith("{N_TICK", i):
@@ -269,16 +289,19 @@ class Compiler:
                     "append",
                     "generate",
                     "tool-call",
+                    "invisible-tool-call",
                 ):
                     raise CompileError(
-                        "Allowed operations: open, append, generate, tool-call; close via generated EOS",
+                        "Allowed operations: open, append, generate, tool-call, invisible-tool-call; close via generated EOS",
                         path,
                     )
                 for field in ("window-type", "request-id", "caused-by"):
                     if field in event and not isinstance(event[field], str):
                         raise CompileError(f"{field} must be a string", path)
                 window = event.get("window")
-                if not isinstance(window, str) or not window or len(window) > 128:
+                if event["op"] != "invisible-tool-call" and (
+                    not isinstance(window, str) or not window or len(window) > 128
+                ):
                     raise CompileError(
                         "window must be a nonempty string of at most 128 characters",
                         path,
@@ -289,8 +312,11 @@ class Compiler:
                     "path": path,
                     "order": len(prepared),
                 }
-                if event["op"] == "tool-call":
+                if event["op"] in ("tool-call", "invisible-tool-call"):
                     validate_call(event, path)
+                if event["op"] == "invisible-tool-call":
+                    prepared.append(item)
+                    continue
                 if event["op"] != "open":
                     content_event = event
                     literal = False
@@ -329,7 +355,9 @@ class Compiler:
                     )
                     item["content_op"] = content_event["op"]
                     item["encoded"] = self.encode(
-                        content_event, path, noop_weight,
+                        content_event,
+                        path,
+                        noop_weight,
                         literal=literal,
                         window_slots=window_slots,
                     )
@@ -458,7 +486,9 @@ class Compiler:
             captures[str(aid)] = capture(owner, n, owner["tick"])
         calls_by_path = {call["path"]: call for call in tool_calls}
         expanded = []
-        tool_windows = {call["window"] for call in tool_calls}
+        tool_windows = {
+            call["window"] for call in tool_calls if not call.get("invisible")
+        }
         explicit_opens = {
             item["event"]["window"]: item
             for item in prepared
@@ -475,13 +505,19 @@ class Compiler:
             else:
                 expanded.append(
                     {
-                        "event": {"op": "open", "window": window, "window-type": "tool"},
+                        "event": {
+                            "op": "open",
+                            "window": window,
+                            "window-type": "tool",
+                        },
                         "key": "0",
                         "tick": 0,
                         "path": f"tool-windows[{window}].open",
                     }
                 )
         for item in prepared:
+            if item["event"]["op"] == "invisible-tool-call":
+                continue
             if item["event"]["op"] != "tool-call":
                 expanded.append(item)
                 continue
@@ -547,7 +583,9 @@ class Compiler:
                             self.window_header(
                                 window_slots[event["window"]],
                                 event.get("window-type", "document"),
-                            ) if window_headers else ""
+                            )
+                            if window_headers
+                            else ""
                         ),
                     },
                     item["path"] + ".header",
@@ -608,9 +646,11 @@ class Compiler:
                     ),
                 }
             )
-        if not scheduled:
+        if not scheduled and not tool_calls:
             raise CompileError("Trajectory contains no executable events")
-        max_tick = max(scheduled)
+        # External activity extends inspection history without extending model NOOPs.
+        visible_end = max(scheduled, default=0)
+        max_tick = max([visible_end, *(c["end"] for c in tool_calls)])
         rows, windows, live, positions = [], {}, set(), defaultdict(int)
 
         def row(tick, phase, window, tid, w, durable, op, path, rank=0):
@@ -639,7 +679,7 @@ class Compiler:
         openers = {
             p["event"]["window"]: p for p in prepared if p["event"]["op"] == "open"
         }
-        for tick in range(max_tick + 1):
+        for tick in range(visible_end + 1):
             items = sorted(
                 scheduled[tick],
                 key=lambda x: (
@@ -687,7 +727,8 @@ class Compiler:
                 # Tool messages are external input in B and may arrive while the
                 # model emits its next chat token in D (including EOS).
                 distinct = {
-                    x["item"]["order"]: x["item"] for x in group
+                    x["item"]["order"]: x["item"]
+                    for x in group
                     if not x["item"].get("synthetic_chat")
                     and not (x.get("empty") and x["item"].get("synthetic_request"))
                 }
@@ -722,8 +763,15 @@ class Compiler:
                     # before B/C without consuming ticks or moving content anchors.
                     for tid in item["header"].ids:
                         row(
-                            tick, "A", wid, tid, 0, True, "header",
-                            item["path"] + ".header", input_rank,
+                            tick,
+                            "A",
+                            wid,
+                            tid,
+                            0,
+                            True,
+                            "header",
+                            item["path"] + ".header",
+                            input_rank,
                         )
                         input_rank += 1
                 if phase == "D" and delivery["token_id"] == self.ids["eos"]:
@@ -758,6 +806,7 @@ class Compiler:
             "tokenizer_sha256": self.fingerprint,
             "special_tokens": self.ids,
             "max_tick": max_tick,
+            "token_max_tick": visible_end,
             "windows": list(windows.values()),
             "window_slots": window_slots,
             "anchors": captures,
@@ -824,8 +873,9 @@ def visible_to(query: dict, key: dict, windows: list[dict]) -> bool:
 def chunks(plan: dict, ticks_per_chunk=64):
     integer(ticks_per_chunk, "ticks_per_chunk", 1)
     rows = plan["rows"]
+    token_end = plan.get("token_max_tick", plan["max_tick"])
     cursor = 0
-    for start in range(0, plan["max_tick"] + 1, ticks_per_chunk):
+    for start in range(0, token_end + 1, ticks_per_chunk):
         begin = cursor
         while cursor < len(rows) and rows[cursor]["tick"] < start + ticks_per_chunk:
             cursor += 1
@@ -839,11 +889,11 @@ def chunks(plan: dict, ticks_per_chunk=64):
             "tokenizer_sha256": plan["tokenizer_sha256"],
             "special_tokens": plan["special_tokens"],
             "chunk_index": start // ticks_per_chunk,
-            "chunk_count": plan["max_tick"] // ticks_per_chunk + 1,
+            "chunk_count": token_end // ticks_per_chunk + 1,
             "sample_row_count": len(rows),
             "tick_start": start,
-            "tick_end": min(start + ticks_per_chunk - 1, plan["max_tick"]),
-            "requires_prefix_through_row": chosen[0]["index"] - 1 if chosen else -1,
+            "tick_end": min(start + ticks_per_chunk - 1, token_end),
+            "requires_prefix_through_row": begin - 1,
             "windows": plan["windows"],
             "window_slots": plan["window_slots"],
             "rows": chosen,

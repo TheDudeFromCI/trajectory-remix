@@ -31,7 +31,16 @@ def main(argv=None):
         help="New SQLite project file" if initializing else "Existing initialized SQLite project file",
     )
     if not initializing:
+        from .mcp_server import browser_origin
+
         parser.add_argument("--port", type=int, default=8765)
+        parser.add_argument(
+            "--mcp-allow-origin",
+            action="append",
+            type=browser_origin,
+            default=[],
+            help="Allow an exact browser origin to use /mcp; repeat for multiple UIs",
+        )
         parser.add_argument(
             "--export",
             type=Path,
@@ -86,7 +95,7 @@ def main(argv=None):
 
         print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
         uvicorn.run(
-            create_app(args.dataset),
+            create_app(args.dataset, mcp_allowed_origins=args.mcp_allow_origin),
             host="127.0.0.1",
             port=args.port,
             log_level="warning",

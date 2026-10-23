@@ -2,15 +2,42 @@
 
 import copy
 import json
+import heapq
 
 from .compiler import MAX_TICKS, CompileError, integer
-from .tools import Sandbox, ToolError
+from .tools import STORES, Sandbox, ToolError, tool_failure, validate_subagent_outcome
 
-STORES = ("files", "memory", "notes", "skills")
 MAX_TOOL_CALLS = 256
+EXTERNAL_TOOLS = {
+    "file_write",
+    "file_patch",
+    "file_delete",
+    "memory_save",
+    "note_save",
+    "note_delete",
+    "skill_save",
+    "time_advance",
+}
 
 
 def validate_call(event, path):
+    if event["op"] == "invisible-tool-call":
+        if set(event) - {"op", "tool", "arguments", "duration-ticks", "source"}:
+            raise CompileError(
+                "Invisible calls accept only tool, arguments, duration-ticks and source; no window or model content",
+                path,
+            )
+        if (
+            not isinstance(event.get("tool"), str)
+            or event["tool"] not in EXTERNAL_TOOLS
+        ):
+            raise CompileError(
+                "Invisible calls require an allowlisted sandbox mutation", path
+            )
+        if "source" in event and (
+            not isinstance(event["source"], str) or not event["source"]
+        ):
+            raise CompileError("Invisible source must be a nonempty string", path)
     if not isinstance(event.get("tool"), str) or not event["tool"]:
         raise CompileError("tool-call requires a tool name", path)
     if not isinstance(event.get("arguments"), dict):
@@ -20,20 +47,10 @@ def validate_call(event, path):
         outcome = event["outcome"]
         if event["tool"] != "subagent":
             raise CompileError("Only subagent accepts a recorded outcome", path)
-        if not isinstance(outcome, dict) or type(outcome.get("ok")) is not bool:
-            raise CompileError("Recorded outcome requires an ok boolean", path)
-        if outcome["ok"]:
-            result = outcome.get("result")
-            if not isinstance(result, dict) or not isinstance(
-                result.get("response"), str
-            ):
-                raise CompileError(
-                    "Subagent outcome requires result.response text", path
-                )
-        elif not isinstance(outcome.get("error"), str):
-            raise CompileError("Failed outcome requires error text", path)
-        if len(json.dumps(outcome).encode()) > 200_000:
-            raise CompileError("Recorded outcome exceeds 200,000 bytes", path)
+        try:
+            validate_subagent_outcome(outcome)
+        except ToolError as error:
+            raise CompileError(str(error), path) from error
     elif event["tool"] == "subagent":
         raise CompileError("Subagent replay requires a recorded outcome", path)
 
@@ -44,15 +61,14 @@ def chat_context_at(items, tick, order, eos_id, metadata):
     closed = False
     for item in items:
         event = item["event"]
-        if event["window"] != "chat":
+        if event.get("window") != "chat":
             continue
         if event["op"] == "tool-call":
-            # Tool windows are implicitly open even for unresolved future calls.
+            # Implicit tool windows exist even before their schedule resolves.
             opened = True
             continue
         start = item["tick"]
         if start is None:
-            # These events depend on a result that has not completed yet.
             continue
         if event["op"] == "open":
             if start < tick or (start == tick and item["order"] < order):
@@ -83,63 +99,117 @@ def compile_sandbox(items, sample, eos_id, resolve_items, finish_result):
     initial = sandbox.snapshot()
     calls, changes = [], []
     try:
-        pending = [item for item in items if item["event"]["op"] == "tool-call"]
-        if len(pending) > MAX_TOOL_CALLS:
+        unresolved = [item for item in items if item["event"]["op"] in (
+            "tool-call", "invisible-tool-call"
+        )]
+        if len(unresolved) > MAX_TOOL_CALLS:
             raise CompileError(f"Tool event limit exceeded ({MAX_TOOL_CALLS})")
-        # Resolve result-dependent calls as completions become available. Choosing
-        # the earliest available completion preserves sandbox ordering even when
-        # streamed result lengths depend on earlier writes or failures.
+        by_path = {item["path"]: item for item in unresolved}
+        actions, pending = [], {}
         previous = initial
-        while pending:
+        # Resolve new calls after each action: result-dependent calls can dispatch
+        # before other scheduled completions. Subagent starts still expose running
+        # conversations and check resume identities at dispatch.
+        while unresolved or actions:
             resolve_items()
-            ready = []
-            for item in pending:
+            waiting = []
+            for item in unresolved:
                 if item["tick"] is None:
+                    waiting.append(item)
                     continue
                 event = item["event"]
-                start = item["tick"] + len(item["encoded"].ids)
+                invisible = event["op"] == "invisible-tool-call"
+                start = item["tick"] + (0 if invisible else len(item["encoded"].ids))
                 end = start + event.get("duration-ticks", 0)
                 if end >= MAX_TICKS:
                     raise CompileError("Tool completion exceeds tick limit", item["path"])
-                ready.append((item, start, end))
-            if not ready:
-                raise CompileError("Cyclic anchor dependency", pending[0]["path"])
-            item, start, end = min(ready, key=lambda entry: (entry[2], entry[0]["order"]))
-            pending.remove(item)
+                call = {
+                    "path": item["path"],
+                    **(
+                        {"invisible": True, "source": event.get("source", "external")}
+                        if invisible else {"window": event["window"]}
+                    ),
+                    "tool": event["tool"],
+                    "arguments": copy.deepcopy(event["arguments"]),
+                    "request_start": item["tick"],
+                    "start": start,
+                    "end": end,
+                    "order": item["order"],
+                    **({"request-id": event["request-id"]} if "request-id" in event else {}),
+                }
+                calls.append(call)
+                heapq.heappush(actions, (end, call["order"], 1, call))
+                if call["tool"] == "subagent":
+                    heapq.heappush(actions, (start, call["order"], 0, call))
+            unresolved = waiting
+            if not actions:
+                raise CompileError("Cyclic anchor dependency", unresolved[0]["path"])
+            tick, _, phase, call = heapq.heappop(actions)
+            item = by_path[call["path"]]
             event = item["event"]
-            call = {
-                "path": item["path"],
-                "window": event["window"],
-                "tool": event["tool"],
-                "arguments": copy.deepcopy(event["arguments"]),
-                "request_start": item["tick"],
-                "start": start,
-                "end": end,
-                "order": item["order"],
-                **({"request-id": event["request-id"]} if "request-id" in event else {}),
-            }
             try:
                 if call["tool"] == "subagent":
-                    sandbox.start_call(call["tool"], call["arguments"])
-                    outcome = copy.deepcopy(event["outcome"])
+                    if phase == 0:
+                        result = event["outcome"].get("result")
+                        recorded_id = (
+                            result.get(
+                                "conversationId", event["outcome"].get("conversationId")
+                            )
+                            if isinstance(result, dict)
+                            else event["outcome"].get("conversationId")
+                        )
+                        pending[call["path"]] = sandbox.begin_subagent(
+                            call["arguments"], recorded_id
+                        )
+                    else:
+                        sandbox.start_call(call["tool"], call["arguments"])
+                        cid = pending[call["path"]]
+                        if isinstance(cid, ToolError):
+                            raise cid
+                        outcome = copy.deepcopy(event["outcome"])
+                        result = sandbox.finish_subagent(cid, outcome)
+                        if outcome["ok"]:
+                            outcome["result"] = result
                 else:
                     context = (
                         chat_context_at(
                             items, call["end"], call["order"], eos_id, metadata
                         )
-                        if call["tool"] == "chat" else {}
+                        if call["tool"] == "chat"
+                        else {}
                     )
                     outcome = {
                         "ok": True,
-                        "result": sandbox.call_sync(
-                            call["tool"], call["arguments"], **context
-                        ),
+                        "result": None,
                     }
+                    if call.get("invisible"):
+                        sandbox.check_args(call["tool"], call["arguments"])
+                        outcome["result"] = sandbox.execute_sync(
+                            call["tool"], call["arguments"]
+                        )
+                    else:
+                        outcome["result"] = sandbox.call_sync(
+                            call["tool"], call["arguments"], **context
+                        )
             except (ToolError, ValueError, OverflowError) as error:
-                outcome = {"ok": False, "error": str(error)}
-            call["outcome"] = outcome
-            finish_result(item, call)
-            calls.append(call)
+                if phase == 0:
+                    pending[call["path"]] = ToolError(str(error))
+                elif call["tool"] == "subagent" and isinstance(
+                    pending.get(call["path"]), str
+                ):
+                    cid = pending[call["path"]]
+                    sandbox.conversations[cid]["status"] = "failed"
+                    error = ToolError(str(error), cid)
+                if call.get("invisible"):
+                    # A hidden failure has no model observation; diagnose it for the author.
+                    raise CompileError(
+                        f"Invisible tool failed: {error}", call["path"]
+                    ) from error
+                outcome = tool_failure(error)
+            if phase == 1:
+                call["outcome"] = outcome
+                if not call.get("invisible"):
+                    finish_result(item, call)
             current = sandbox.snapshot()
             patch = {"clock": current["clock"], "calls": current["calls"]}
             for name in STORES:
@@ -152,7 +222,7 @@ def compile_sandbox(items, sample, eos_id, resolve_items, finish_result):
                     },
                     "delete": [k for k in before if k not in after],
                 }
-            changes.append({"tick": call["end"], "patch": patch})
+            changes.append({"tick": tick, "patch": patch})
             previous = current
         calls.sort(key=lambda call: call["order"])
         for call in calls:

@@ -1,0 +1,315 @@
+{
+  "schema-version": "1.0",
+  "id": "persistent-agents",
+  "tick-policy": "external-first",
+  "metadata": {
+    "tags": [
+      "coordination",
+      "authored-fixture"
+    ],
+    "agent_name": "Kidra",
+    "description": "Recorded fixture; specialist responses and external file activity are authored, not live execution evidence."
+  },
+  "replay": {
+    "0": [
+      {
+        "op": "open",
+        "window": "chat"
+      },
+      {
+        "op": "append",
+        "window": "chat",
+        "source": "user",
+        "content": "User: Please implement a double function and have a second specialist review it.\n"
+      },
+      {
+        "op": "tool-call",
+        "window": "task-code",
+        "tool": "note_save",
+        "arguments": {
+          "key": "code",
+          "text": "Implement double",
+          "status": "doing",
+          "owner": "coder",
+          "acceptance_criteria": [
+            "Multiply a numeric value by two"
+          ]
+        },
+        "result-anchor": 1
+      },
+      {
+        "op": "tool-call",
+        "window": "task-review",
+        "tool": "note_save",
+        "arguments": {
+          "key": "review",
+          "text": "Review the implementation",
+          "status": "todo",
+          "owner": "reviewer",
+          "depends_on": [
+            "code"
+          ]
+        },
+        "result-anchor": 2
+      }
+    ],
+    "{N_TICK:1}+1": [
+      {
+        "op": "tool-call",
+        "window": "coder-call",
+        "tool": "subagent",
+        "arguments": {
+          "task": "Implement /math.py with double(value). Keep your response concise."
+        },
+        "duration-ticks": 200,
+        "outcome": {
+          "ok": true,
+          "result": {
+            "conversationId": "coder",
+            "response": "Implemented /math.py; ready for review."
+          }
+        },
+        "result-anchor": 3,
+        "content": "<tool>{\"tool\": \"subagent\", \"args\": {\"task\": \"Implement /math.py with double(value). Keep your response concise.\"}}</tool>{N_TICK:20}"
+      }
+    ],
+    "{N_TICK:20}+2": [
+      {
+        "op": "tool-call",
+        "window": "initial-status",
+        "tool": "runtime_status",
+        "arguments": {}
+      },
+      {
+        "op": "tool-call",
+        "window": "initial-message",
+        "tool": "chat",
+        "arguments": {
+          "content": "The coder is running. Review is planned after the implementation is available."
+        }
+      }
+    ],
+    "{N_TICK:3}+1": [
+      {
+        "op": "invisible-tool-call",
+        "tool": "file_write",
+        "source": "coder",
+        "arguments": {
+          "path": "/math.py",
+          "content": "def double(value):\n    return value * 2\n"
+        }
+      },
+      {
+        "op": "tool-call",
+        "window": "code-done",
+        "tool": "note_save",
+        "arguments": {
+          "key": "code",
+          "text": "Implementation available",
+          "status": "done"
+        },
+        "result-anchor": 4
+      }
+    ],
+    "{N_TICK:4}+1": [
+      {
+        "op": "tool-call",
+        "window": "source-version",
+        "tool": "file_stat",
+        "arguments": {
+          "path": "/math.py"
+        },
+        "result-anchor": 5
+      }
+    ],
+    "{N_TICK:5}+1": [
+      {
+        "op": "tool-call",
+        "window": "reviewer-call",
+        "tool": "subagent",
+        "arguments": {
+          "task": "Review the referenced source for the numeric doubling requirement. Do not claim tests were executed.",
+          "artifacts": [
+            {
+              "path": "/math.py",
+              "version": "sha256:e77335c804a116a2e8a7445a96ea133bd60d7bbe5361606d933bcb5509392962"
+            }
+          ]
+        },
+        "duration-ticks": 400,
+        "outcome": {
+          "ok": true,
+          "result": {
+            "conversationId": "reviewer",
+            "response": "The supplied source multiplies value by two. I reviewed the source; I did not execute tests."
+          }
+        },
+        "result-anchor": 6,
+        "content": "<tool>{\"tool\": \"subagent\", \"args\": {\"task\": \"Review the referenced source for the numeric doubling requirement. Do not claim tests were executed.\", \"artifacts\": [{\"path\": \"/math.py\", \"version\": \"sha256:e77335c804a116a2e8a7445a96ea133bd60d7bbe5361606d933bcb5509392962\"}]}}</tool>{N_TICK:21}"
+      },
+      {
+        "op": "tool-call",
+        "window": "review-doing",
+        "tool": "note_save",
+        "arguments": {
+          "key": "review",
+          "text": "Source review underway",
+          "status": "doing"
+        },
+        "result-anchor": 7
+      }
+    ],
+    "{N_TICK:5}+2": [
+      {
+        "op": "tool-call",
+        "window": "coder-followup",
+        "tool": "subagent",
+        "arguments": {
+          "task": "What input types does your implementation support?",
+          "resume": "coder"
+        },
+        "duration-ticks": 2,
+        "outcome": {
+          "ok": true,
+          "result": {
+            "conversationId": "coder",
+            "response": "It uses Python multiplication semantics; callers should supply numeric values for this requirement."
+          }
+        },
+        "result-anchor": 8
+      }
+    ],
+    "{N_TICK:21}+2": [
+      {
+        "op": "tool-call",
+        "window": "review-status",
+        "tool": "runtime_status",
+        "arguments": {}
+      },
+      {
+        "op": "tool-call",
+        "window": "review-message",
+        "tool": "chat",
+        "arguments": {
+          "content": "The coder clarified input behavior. The reviewer is still examining the pinned source version."
+        },
+        "result-anchor": 9
+      }
+    ],
+    "{N_TICK:6}+1": [
+      {
+        "op": "tool-call",
+        "window": "review-done",
+        "tool": "note_save",
+        "arguments": {
+          "key": "review",
+          "text": "Source review complete; no test execution claimed",
+          "status": "done"
+        },
+        "result-anchor": 10
+      }
+    ],
+    "{N_TICK:10}+1": [
+      {
+        "op": "tool-call",
+        "window": "final-status",
+        "tool": "runtime_status",
+        "arguments": {},
+        "result-anchor": 11
+      }
+    ],
+    "{N_TICK:11}+1": [
+      {
+        "op": "tool-call",
+        "window": "final-message",
+        "tool": "chat",
+        "arguments": {
+          "content": "Implementation and source review are complete. These recorded responses do not include executed test evidence."
+        },
+        "result-anchor": 12
+      }
+    ],
+    "{N_TICK:12}+1": [
+      {
+        "op": "generate",
+        "window": "chat",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "task-code",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "task-review",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "coder-call",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "initial-status",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "initial-message",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "code-done",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "source-version",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "reviewer-call",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "review-doing",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "coder-followup",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "review-status",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "review-message",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "review-done",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "final-status",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "final-message",
+        "content": "<|eos|>"
+      }
+    ]
+  }
+}

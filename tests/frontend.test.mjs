@@ -526,6 +526,28 @@ chatArgs.oninput();
 await click("file-save");
 jump(lastPlan.tool_calls.find((call) => call.tool === "chat").end);
 await waitFor(() => /<\|msg\|>Nova: Hi, Sam!<\|\/msg\|>/.test($("window-grid").textContent));
+// External activity mutates the sandbox without creating a model window.
+const windowCountBeforeExternal = w.document.querySelectorAll(".window-card").length;
+await click("add-invisible-call");
+const externalCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+assert.equal(externalCard.querySelector(".event-window").hidden, true);
+assert.equal(externalCard.querySelector(".event-header select").value, "invisible-tool-call");
+assert.equal(externalCard.querySelectorAll(".event-options select").length, 1);
+const externalTick = externalCard.querySelector(".event-header input");
+externalTick.value = "1000";
+externalTick.oninput();
+const externalArgs = externalCard.querySelector('textarea[aria-label="arguments JSON"]');
+externalArgs.value = JSON.stringify({path: "external.py", content: "external implementation"});
+externalArgs.oninput();
+await click("file-save");
+jump(999);
+await waitFor(() => /Sandbox · tick 999/.test($("sandbox-title").textContent));
+await waitFor(() => !/external.py/.test($("sandbox-state").textContent));
+jump(1000);
+await waitFor(() => /external implementation/.test($("sandbox-state").textContent));
+assert.equal(w.document.querySelectorAll(".window-card").length, windowCountBeforeExternal);
+assert.doesNotMatch($("window-grid").textContent, /external implementation/);
+assert.match($("sandbox-calls").textContent, /External · file_write · completed/);
 // Listings are paged in SQLite, and search reaches trajectories beyond page one.
 const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
   id: `sqlite-page-${index}`,

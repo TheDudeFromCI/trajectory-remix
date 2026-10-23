@@ -376,40 +376,100 @@ async def test_tool_generation_preserves_literal_data_and_seed_state(compiler, s
     }
 
 
-async def test_generated_subagent_records_duration_and_replays_offline(
-    compiler, monkeypatch
-):
+async def test_generation_never_launches_real_subagents(compiler):
     config = minimal_config()
     config["tasks"] = [config["tasks"][1]]
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def complete(self, endpoint, messages, tools=None):
+            self.calls += 1
+            assert tools is not None
+            assert "subagent" not in {t["function"]["name"] for t in tools}
+            if self.calls == 1:
+                # Even an unsolicited delegation must not cause a nested provider call.
+                return {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "child",
+                            "type": "function",
+                            "function": {
+                                "name": "subagent",
+                                "arguments": json.dumps({"task": "Inspect"}),
+                            },
+                        }
+                    ],
+                }
+            failure = json.loads(messages[-1]["content"])
+            assert not failure["ok"] and "authored outcome" in failure["error"]
+            return {"content": "Use an authored synthetic reply."}
+
+    client = Client()
+    generated = await SampleBuilder(compiler, config, client).generate()
+    assert client.calls == 2
+    plan = compiler.compile(generated)
+    assert not plan["tool_calls"][0]["outcome"]["ok"]
+    cid = plan["tool_calls"][0]["outcome"]["conversationId"]
+    assert (
+        compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"][cid][
+            "status"
+        ]
+        == "failed"
+    )
+
+
+async def test_generation_inspects_authored_seeded_conversation(compiler, sample):
+    config = minimal_config()
+    config["tasks"] = [config["tasks"][1]]
+    sample["replay"]["1"] = [
+        {
+            "op": "tool-call",
+            "tool": "subagent",
+            "window": "coder-window",
+            "arguments": {"task": "Implement parser"},
+            "outcome": {
+                "ok": True,
+                "result": {
+                    "conversationId": "coder",
+                    "response": "I used a state machine.",
+                },
+            },
+        }
+    ]
     fake = FakeClient(
         [
             {
                 "content": None,
                 "tool_calls": [
                     {
-                        "id": "child",
+                        "id": "inspect",
                         "type": "function",
                         "function": {
-                            "name": "subagent",
-                            "arguments": json.dumps({"task": "Inspect"}),
+                            "name": "subagent_get",
+                            "arguments": json.dumps({"conversationId": "coder"}),
                         },
                     }
                 ],
             },
-            "Child answer.",
-            "Integrated the answer.",
+            "Reviewed the authored conversation.",
         ]
     )
-    readings = iter([10, 13.75])
-    monkeypatch.setattr("trajectory_remix.llm.monotonic", lambda: next(readings))
-    generated = await SampleBuilder(compiler, config, fake).generate()
+    generated = await SampleBuilder(compiler, config, fake).generate(seed=sample)
+    observed = json.loads(
+        next(m["content"] for m in fake.messages[1] if m["role"] == "tool")
+    )
+    assert observed["result"]["messages"] == [
+        {"role": "user", "content": "Implement parser"},
+        {"role": "assistant", "content": "I used a state machine."},
+    ]
     plan = compiler.compile(generated)
-    call = plan["tool_calls"][0]
-    assert call["end"] - call["start"] == 3
-    assert call["outcome"] == {"ok": True, "result": {"response": "Child answer."}}
     assert (
-        compiler.frame(plan, call["start"])["sandbox"]["tool_calls"][0]["status"]
-        == "running"
+        compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"]["coder"][
+            "status"
+        ]
+        == "ready"
     )
 
 

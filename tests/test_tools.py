@@ -65,11 +65,20 @@ async def test_quotas():
         await s.call("file_list", {})
 
 
-async def test_subagent_broker_and_depth():
-    async def broker(prompt, depth):
-        return f"{prompt}:{depth}"
-
-    s = Sandbox(broker=broker)
-    assert await s.call("subagent", {"task": "inspect"}) == {"response": "inspect:1"}
-    with pytest.raises(ToolError, match="depth"):
-        await Sandbox(broker=broker, depth=2).call("subagent", {"task": "inspect"})
+async def test_subagent_uses_only_authored_replies():
+    sandbox = Sandbox()
+    result = await sandbox.call(
+        "subagent",
+        {"task": "inspect"},
+        subagent_outcome={"ok": True, "result": {"response": "Authored inspection"}},
+    )
+    assert result == {
+        "conversationId": "conversation-1",
+        "response": "Authored inspection",
+    }
+    with pytest.raises(ToolError, match="authored outcome") as error:
+        await sandbox.call(
+            "subagent", {"task": "Explain", "resume": result["conversationId"]}
+        )
+    assert error.value.conversation_id == result["conversationId"]
+    assert sandbox.conversations[result["conversationId"]]["status"] == "failed"
