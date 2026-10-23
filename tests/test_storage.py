@@ -47,10 +47,10 @@ def test_transactions_rollback_and_snapshot_reads_allow_writes(tmp_path, compile
         store.replace([{"id": "duplicate"}, {"id": "duplicate"}], revision)
     assert store.info()[0] == revision
     with store.read_samples() as records:
-        assert next(records) == {"id": "a"}
+        assert next(records)["id"] == "a"
         other = DatasetStore(store.path)
         other.samples.append({"id": "c"})
-        assert list(records) == [{"id": "b"}]
+        assert [s["id"] for s in records] == ["b"]
     assert len(store.samples) == 3
     with store.connect() as db:
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -74,12 +74,13 @@ async def test_large_dataset_stays_lazy_during_startup_polling_and_edits(compile
             WITH RECURSIVE numbers(n) AS (
                 VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n < ?
             )
-            INSERT INTO samples
-            SELECT n*4294967296, 's-'||n,
-                json_object('id', 's-'||n, 'replay', json('{}'), 'payload', printf('%0100d',n)),
-                json_object('id', 's-'||n), 0, '[]', 's-'||n
+            INSERT INTO samples(uuid,position,sample_id,source,attributes,content_hash)
+            SELECT printf('%08x-0000-4000-8000-%012x',n,n), n*4294967296, 's-'||n,
+                json_object('id', 's-'||n, 'uuid', printf('%08x-0000-4000-8000-%012x',n,n), 'replay', json('{}'), 'payload', printf('%0100d',n)),
+                json_object('id', 's-'||n, 'uuid', printf('%08x-0000-4000-8000-%012x',n,n)), 'fixture'
             FROM numbers
         """, (count,))
+        db.execute("INSERT INTO trajectory_metadata SELECT uuid,NULL,'[]',0,0,0,sample_id FROM samples")
         db.execute("UPDATE project SET sample_count=?", (count,))
 
     def forbid_full_scan(self):

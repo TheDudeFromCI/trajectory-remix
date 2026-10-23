@@ -58,7 +58,7 @@ def test_reinitializing_never_replaces_project_or_tokenizer(tmp_path, compiler):
         main(["init", "--dataset", str(project), "--tokenizer", "examples/demo-tokenizer.json", "--bos", "<|eos|>", "--eos", "<|bos|>"])
     assert error.value.code == 1
     assert project.read_bytes() == initial
-    assert store.samples[0] == {"id": "keep-me"}
+    assert store.samples[0]["id"] == "keep-me"
     assert store.load_compiler().special == compiler.special
 
 

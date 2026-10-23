@@ -152,6 +152,8 @@ def create_app(dataset: Path, client=None):
         return {
             "samples": samples,
             "sample_count": len(store.samples),
+            "max_window_slots": compiler.max_window_slots,
+            "slot_policy": compiler.slot_policy,
             "total": total,
             "offset": offset,
             "limit": limit,
@@ -177,6 +179,14 @@ def create_app(dataset: Path, client=None):
         return JSONResponse(
             sample_at(index), headers={"X-Remix-Revision": str(revision)}
         )
+
+    @app.post("/api/metadata/query")
+    async def metadata_query(request: Request):
+        return await commands.call("query_trajectories", await body(request))
+
+    @app.post("/api/metadata/counts")
+    async def metadata_counts(request: Request):
+        return await commands.call("get_metadata_counts", await body(request))
 
     @app.get("/api/mcp/tools")
     async def mcp_tools():

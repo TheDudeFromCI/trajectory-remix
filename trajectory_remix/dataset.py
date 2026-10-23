@@ -11,10 +11,43 @@ def reject_constant(value):
     raise ValueError(f"Nonstandard JSON constant: {value}")
 
 
+def trajectory_uuid(sample):
+    """Legacy labels receive a stable UUID; persisted sources always include it."""
+    supplied = sample.get("uuid")
+    if supplied is not None:
+        try:
+            return str(uuid.UUID(supplied))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError("Trajectory uuid must be a valid UUID") from error
+    ident = sample.get("id")
+    if isinstance(ident, str) and ident:
+        try:
+            return str(uuid.UUID(ident))
+        except ValueError:
+            return str(uuid.uuid5(uuid.NAMESPACE_URL, "trajectory-remix:" + ident))
+    return str(uuid.uuid4())
+
+
+def prepare_sample(sample, existing=None):
+    if not isinstance(sample, dict):
+        raise ValueError("sample must be an object")
+    sample = copy.deepcopy(sample)
+    if existing is not None:
+        original = trajectory_uuid(existing)
+        if "uuid" in sample and sample["uuid"] != original:
+            raise ValueError("Trajectory UUID is immutable")
+        sample["uuid"] = original
+    else:
+        sample["uuid"] = trajectory_uuid(sample)
+    return sample
+
+
 def new_sample():
+    ident = str(uuid.uuid4())
     return {
         "schema-version": "1.0",
-        "id": str(uuid.uuid4()),
+        "id": ident,
+        "uuid": ident,
         "tick-policy": "external-first",
         "defaults": {"implicit-noop-loss-weight": 0.1},
         "replay": {

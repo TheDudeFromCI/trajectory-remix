@@ -7,13 +7,14 @@ individual trajectories; it is never used as an in-memory project database.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sqlite3
 from collections.abc import MutableSequence
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from .dataset import public_config
+from .dataset import prepare_sample, public_config
 
 GAP = 1 << 32
 
@@ -27,7 +28,7 @@ def encode(value):
 
 
 class DatasetStore:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -38,12 +39,13 @@ class DatasetStore:
                 raise ValueError("Not an initialized SQLite project; initialize a new project and import legacy JSON through the dashboard")
         with self.connect() as db:
             try:
-                row = db.execute("SELECT version FROM project WHERE singleton=1").fetchone()
+                row = db.execute("SELECT version,max_window_slots,slot_policy FROM project WHERE singleton=1").fetchone()
             except sqlite3.DatabaseError as error:
                 raise ValueError("Not an initialized Trajectory Remix project") from error
             if row is None or row[0] != self.SCHEMA_VERSION:
                 raise ValueError("Unsupported project schema; initialize a new project with its tokenizer and import trajectories")
             db.execute("PRAGMA journal_mode=WAL")
+        self.max_window_slots, self.slot_policy = row[1], row[2]
         self.samples = SQLiteSamples(self)
 
     @classmethod
@@ -73,21 +75,44 @@ class DatasetStore:
                             sample_count INTEGER NOT NULL DEFAULT 0,
                             config TEXT NOT NULL,
                             tokenizer TEXT NOT NULL,
-                            special_tokens TEXT NOT NULL
+                            special_tokens TEXT NOT NULL,
+                            max_window_slots INTEGER CHECK(max_window_slots IS NULL OR max_window_slots > 0),
+                            slot_policy TEXT NOT NULL
                         );
                         CREATE TABLE samples (
-                            position INTEGER PRIMARY KEY,
+                            uuid TEXT PRIMARY KEY NOT NULL,
+                            position INTEGER UNIQUE NOT NULL,
                             sample_id TEXT UNIQUE,
-                            source TEXT NOT NULL,
+                            source TEXT NOT NULL CHECK(json_valid(source)),
                             attributes TEXT NOT NULL,
-                            events INTEGER NOT NULL,
-                            tags TEXT NOT NULL,
+                            content_hash TEXT NOT NULL,
+                            CHECK(json_type(source,'$.uuid') IS 'text' AND json_extract(source,'$.uuid') = uuid)
+                        );
+                        CREATE TRIGGER immutable_trajectory_uuid
+                        BEFORE UPDATE OF uuid ON samples WHEN NEW.uuid != OLD.uuid
+                        BEGIN SELECT RAISE(ABORT, 'Trajectory UUID is immutable'); END;
+                        CREATE TABLE trajectory_metadata (
+                            trajectory_uuid TEXT PRIMARY KEY NOT NULL REFERENCES samples(uuid) ON DELETE CASCADE,
+                            properties TEXT CHECK(properties IS NULL OR json_valid(properties)),
+                            tags TEXT NOT NULL CHECK(json_valid(tags) AND json_type(tags)='array'),
+                            event_count INTEGER NOT NULL,
+                            window_count INTEGER NOT NULL,
+                            tag_count INTEGER NOT NULL,
                             search TEXT NOT NULL
                         );
+                        CREATE INDEX metadata_event_count ON trajectory_metadata(event_count,trajectory_uuid);
+                        CREATE INDEX metadata_window_count ON trajectory_metadata(window_count,trajectory_uuid);
+                        CREATE INDEX metadata_tag_count ON trajectory_metadata(tag_count,trajectory_uuid);
+                        CREATE TABLE metadata_tags (
+                            trajectory_uuid TEXT NOT NULL REFERENCES trajectory_metadata(trajectory_uuid) ON DELETE CASCADE,
+                            tag TEXT NOT NULL,
+                            PRIMARY KEY(trajectory_uuid,tag)
+                        );
+                        CREATE INDEX metadata_tag_lookup ON metadata_tags(tag,trajectory_uuid);
                     """)
                     db.execute(
-                        "INSERT INTO project(singleton,version,config,tokenizer,special_tokens) VALUES(1,?,?,?,?)",
-                        (cls.SCHEMA_VERSION, config, tokenizer, special_tokens),
+                        "INSERT INTO project(singleton,version,config,tokenizer,special_tokens,max_window_slots,slot_policy) VALUES(1,?,?,?,?,?,?)",
+                        (cls.SCHEMA_VERSION, config, tokenizer, special_tokens, compiler.max_window_slots, compiler.slot_policy),
                     )
             return cls(path)
         except BaseException:
@@ -102,7 +127,7 @@ class DatasetStore:
         with self.connect() as db:
             tokenizer, special = db.execute("SELECT tokenizer,special_tokens FROM project WHERE singleton=1").fetchone()
         try:
-            return Compiler(Tokenizer.from_str(tokenizer), **json.loads(special))
+            return Compiler(Tokenizer.from_str(tokenizer), **json.loads(special), max_window_slots=self.max_window_slots, slot_policy=self.slot_policy)
         except Exception as error:
             raise ValueError(f"Invalid project tokenizer: {error}") from error
 
@@ -110,6 +135,7 @@ class DatasetStore:
     def connect(self):
         db = sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True, timeout=30)
         try:
+            db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA busy_timeout=30000")
             db.execute("PRAGMA cache_size=-4096")
             db.execute("PRAGMA temp_store=FILE")
@@ -137,24 +163,42 @@ class DatasetStore:
             try:
                 yield db
             except sqlite3.IntegrityError as error:
-                raise ValueError("Duplicate sample IDs; rename duplicates before importing") from error
+                raise ValueError(f"Duplicate trajectory ID or UUID: {error}" if "UNIQUE constraint" in str(error) else str(error)) from error
+
+    def normalize(self, sample, existing=None):
+        from .compiler import CompileError, window_names
+
+        sample = prepare_sample(sample, existing)
+        count = len(window_names(sample))
+        if self.max_window_slots is not None and count > self.max_window_slots:
+            raise CompileError(f"Trajectory uses {count} window slots; project limit is {self.max_window_slots}", "replay")
+        return sample
 
     @staticmethod
     def row(sample):
-        if not isinstance(sample, dict):
-            raise ValueError("sample must be an object")
-        attributes = {k: v for k, v in sample.items() if k != "replay"}
+        attributes = {k: v for k, v in sample.items() if k not in ("replay", "metadata")}
+        digest = hashlib.sha256(json.dumps(sample, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
+        ident = sample.get("id")
+        return (sample["uuid"], ident if isinstance(ident, str) else None, encode(sample), encode(attributes), digest)
+
+    @staticmethod
+    def update_metadata(db, sample):
+        from .compiler import window_names
+
         replay, metadata = sample.get("replay"), sample.get("metadata")
         events = sum(len(v) for v in replay.values() if isinstance(v, list)) if isinstance(replay, dict) else 0
         tags = metadata.get("tags", []) if isinstance(metadata, dict) else []
-        if not isinstance(tags, list):
-            tags = []
-        ident = sample.get("id")
-        return (
-            ident if isinstance(ident, str) else None,
-            encode(sample), encode(attributes), events, encode(tags),
-            (str(ident or "") + encode(metadata or {})).casefold(),
-        )
+        tags = list(dict.fromkeys(t for t in tags if isinstance(t, str))) if isinstance(tags, list) else []
+        properties = encode(metadata) if "metadata" in sample else None
+        db.execute("""
+            INSERT INTO trajectory_metadata VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(trajectory_uuid) DO UPDATE SET
+                properties=excluded.properties,tags=excluded.tags,
+                event_count=excluded.event_count,window_count=excluded.window_count,
+                tag_count=excluded.tag_count,search=excluded.search
+        """, (sample["uuid"], properties, encode(tags), events, len(window_names(sample)), len(tags), (str(sample.get("id", "")) + encode(metadata)).casefold()))
+        db.execute("DELETE FROM metadata_tags WHERE trajectory_uuid=?", (sample["uuid"],))
+        db.executemany("INSERT INTO metadata_tags VALUES(?,?)", [(sample["uuid"], tag) for tag in tags])
 
     @staticmethod
     def position(db, index):
@@ -164,6 +208,7 @@ class DatasetStore:
         return row[0]
 
     def insert(self, db, index, sample):
+        sample = self.normalize(sample)
         count = db.execute("SELECT sample_count FROM project").fetchone()[0]
         if not 0 <= index <= count:
             raise IndexError("Sample not found")
@@ -179,7 +224,8 @@ class DatasetStore:
             db.execute("DROP TABLE ordering")
             left = self.position(db, index - 1) if index else 0
             right = self.position(db, index) if index < count else left + 2 * GAP
-        db.execute("INSERT INTO samples VALUES(?,?,?,?,?,?,?)", ((left + right) // 2, *self.row(sample)))
+        db.execute("INSERT INTO samples(uuid,sample_id,source,attributes,content_hash,position) VALUES(?,?,?,?,?,?)", (*self.row(sample), (left + right) // 2))
+        self.update_metadata(db, sample)
         db.execute("UPDATE project SET sample_count=sample_count+1")
 
     def apply(self, db, operations):
@@ -191,7 +237,11 @@ class DatasetStore:
                 db.execute("DELETE FROM samples WHERE position=?", (self.position(db, index),))
                 db.execute("UPDATE project SET sample_count=sample_count-1")
             elif op["op"] == "replace":
-                db.execute("UPDATE samples SET sample_id=?,source=?,attributes=?,events=?,tags=?,search=? WHERE position=?", (*self.row(op["value"]), self.position(db, index)))
+                position = self.position(db, index)
+                existing = json.loads(db.execute("SELECT source FROM samples WHERE position=?", (position,)).fetchone()[0])
+                sample = self.normalize(op["value"], existing)
+                db.execute("UPDATE samples SET sample_id=?,source=?,attributes=?,content_hash=? WHERE position=?", (*self.row(sample)[1:], position))
+                self.update_metadata(db, sample)
             else:
                 raise ValueError("Unsupported storage operation")
 
@@ -219,19 +269,23 @@ class DatasetStore:
             return db.execute("SELECT revision FROM project").fetchone()[0]
 
     def listing(self, query="", offset=0, limit=100, dashboard=False):
-        clause, args = ("WHERE instr(search, ?) > 0", [query.casefold()]) if query else ("", [])
+        clause, args = ("WHERE instr(m.search, ?) > 0", [query.casefold()]) if query else ("", [])
         with self.connect() as db:
             db.execute("BEGIN")
-            total = db.execute(f"SELECT count(*) FROM samples {clause}", args).fetchone()[0] if query else db.execute("SELECT sample_count FROM project").fetchone()[0]
-            attributes_column = "NULL" if dashboard else "attributes"
-            rows = db.execute(f"SELECT position,sample_id,{attributes_column},events,tags FROM samples {clause} ORDER BY position LIMIT ? OFFSET ?", [*args, limit, offset])
+            total = db.execute(f"SELECT count(*) FROM trajectory_metadata m {clause}", args).fetchone()[0] if query else db.execute("SELECT sample_count FROM project").fetchone()[0]
+            attributes_column = "NULL" if dashboard else "s.attributes"
+            properties_column = "NULL" if dashboard else "m.properties"
+            rows = db.execute(f"SELECT s.position,s.sample_id,{attributes_column},m.event_count,m.tags,{properties_column},s.uuid FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid {clause} ORDER BY s.position LIMIT ? OFFSET ?", [*args, limit, offset])
             result = []
-            for position, ident, attributes, events, tags in rows:
+            for position, ident, attributes, events, tags, properties, ident_uuid in rows:
                 if dashboard:
                     index = db.execute("SELECT count(*) FROM samples WHERE position < ?", (position,)).fetchone()[0] if query else offset + len(result)
-                    result.append({"index": index, "id": ident if ident is not None else "untitled", "events": events, "tags": json.loads(tags)})
+                    result.append({"index": index, "id": ident if ident is not None else "untitled", "uuid": ident_uuid, "events": events, "tags": json.loads(tags)})
                 else:
-                    result.append(json.loads(attributes))
+                    item = json.loads(attributes)
+                    if properties is not None:
+                        item["metadata"] = json.loads(properties)
+                    result.append(item)
             return total, result
 
     @contextmanager
@@ -365,6 +419,7 @@ class SampleDraft(MutableSequence):
 
     def __setitem__(self, index, sample):
         before = self[index]
+        sample = self.base.store.normalize(sample, before)
         if index < 0:
             index += self.length
         self._record({"op": "replace", "path": f"/{index}", "value": sample}, {"op": "replace", "path": f"/{index}", "value": before})
@@ -377,6 +432,7 @@ class SampleDraft(MutableSequence):
         self.length -= 1
 
     def insert(self, index, sample):
+        sample = self.base.store.normalize(sample)
         index = max(0, min(index, self.length))
         self._record({"op": "add", "path": f"/{index}", "value": sample}, {"op": "remove", "path": f"/{index}"})
         self.length += 1

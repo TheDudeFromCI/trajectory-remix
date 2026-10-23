@@ -39,6 +39,10 @@
   visibility, closure, implicit/repeated tool calls, native tokenizer IDs, stable
   numeric slots, multi-digit references, anchors, segment masks, literal tool
   data, unknown markers, export round trips, task layouts and undoable renames.
+- UUID/metadata checks cover immutable identity, duplicate UUID rejection, seeded
+  slot allocation and implicit-window budgets, typed key filters, tag membership,
+  grouped counts, pagination without source reads, transactional projections,
+  content hashes, undo/redo, cascading deletion and rollback.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an

@@ -24,14 +24,16 @@ reproducible first run:
 ```bash
 python -m trajectory_remix init \
   --tokenizer examples/demo-tokenizer.json \
-  --dataset demo.sqlite
+  --dataset demo.sqlite --max-window-slots 16
 python -m trajectory_remix --dataset demo.sqlite
 ```
 
 `--dataset` is required. Run `init` once to create the SQLite project and embed
 its tokenizer and special-token spellings. Initialization refuses existing files.
 Normal startup only opens an existing initialized project; it never creates one.
-Each accepted edit commits immediately to that project.
+Each accepted edit commits immediately to that project. `init --max-window-slots N`
+fixes the maximum number of distinct windows (including implicit tool windows)
+per trajectory. Omit it for an unlimited window count. Startup cannot override it.
 Use File > Import to add `examples/reactive-sample.json`.
 
 Use your actual training tokenizer for real datasets. The demo tokenizer is only
@@ -59,7 +61,7 @@ connect an MCP client to the stdio command:
 python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
 ```
 
-The bridge exposes 37 tools for trajectory creation, full JSON inspection,
+The bridge exposes 39 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
@@ -119,10 +121,15 @@ Leaving a name blank omits that property; the default names are Kidra and User.
 
 Dataset files are SQLite databases, conventionally named `project.sqlite`.
 The `project` row contains configuration, schema/revision counters, tokenizer JSON
-and special-token spellings (`bos`, `eos`, `noop`). The tokenizer is fixed at init;
+and special-token spellings (`bos`, `eos`, `noop`), the window-slot limit and a
+versioned allocation policy. The tokenizer is fixed at init;
 configuration edits and trajectory imports do not change it.
 Trajectories are stored as individual JSON records in rows, with indexed unique
-IDs and separate listing metadata. The server fetches trajectories on demand;
+UUID primary keys and separate listing metadata. The editable `id` remains a
+unique label; `uuid` is immutable, survives edits/undo/imports, and seeds slot
+allocation. Duplicating a trajectory creates a new UUID. Legacy imports without
+UUIDs derive one deterministically from their ID (or allocate one for unnamed
+drafts). The server fetches trajectories on demand;
 it does not load or copy the whole dataset. The sidebar searches in SQLite and
 shows 100 results per page. Undo history and compiled previews are bounded.
 
@@ -152,6 +159,48 @@ Reload a saved dataset at startup:
 ```bash
 python -m trajectory_remix --dataset project.sqlite
 ```
+
+## Metadata queries
+
+`trajectory_metadata` has one row keyed by the trajectory UUID. It stores metadata
+properties as structured JSON, a dedicated tag list, and cached event/window/tag
+counts. `metadata_tags` indexes distinct tag membership. Arbitrary metadata keys
+remain flexible; adding a new key does not alter the database schema. Numeric
+counts are JSON numbers, not strings. Objects and arrays are preserved.
+
+Every trajectory also has a canonical `content_hash` for invalidating future
+statistics caches per UUID. Source, hash, metadata projection and tag index update
+in the same transaction, including undo/redo. Deletion cascades to metadata/tags.
+
+`POST /api/metadata/query` (MCP `query_trajectories`) supports typed scalar filters,
+tag membership, and pagination without fetching replay payloads:
+
+```json
+{
+  "filters": [
+    {"key": "quality", "op": "gte", "value": 0.8},
+    {"key": "counts.windows", "op": "lte", "value": 16}
+  ],
+  "tags": ["reviewed"],
+  "tag_mode": "all",
+  "offset": 0,
+  "limit": 100
+}
+```
+
+Filters support `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `exists`. Keys are literal
+metadata property names; reserved `counts.events`, `counts.windows`, `counts.tags`
+address indexed counters. Missing keys do not match comparisons; explicit JSON
+null matches `eq: null`. Booleans remain distinct from numbers. Filters combine
+with AND; `tag_mode` accepts `all` or `any`.
+
+`POST /api/metadata/counts` (MCP `get_metadata_counts`) groups matching trajectories
+by a scalar metadata key, cached counter, or `tags`, with a bounded number of
+value/count groups. Each trajectory counts once per distinct tag. For example,
+`{"key":"domain","tags":["reviewed"]}` gives reviewed trajectory counts by domain.
+Tag/counter lookups have indexes; arbitrary property filters currently scan the
+small metadata JSON projection in SQL. Add field-specific indexes when the
+actual statistics/query workload is known.
 
 ## Replay contract
 
@@ -224,12 +273,15 @@ contract; it is not an audit of the current ProjectKidra repository.
   malformed markers and references to undeclared windows are errors. References
   may target a later declaration or an implicit tool window. Tool arguments and
   actual sandbox observations remain literal data.
-- Slots are allocated from zero in first-declaration order (`open` or `tool-call`),
-  using the compiler's numeric-then-symbolic replay-key order and event list
-  order. Reordering JSON object keys does not change the mapping. The mapping
-  is per trajectory and is exported as `window_slots` and each window's `slot`;
-  changing declarations can change slot numbers, so use markers in source.
-  Slots are not reused and no fixed 15-window limit is imposed.
+- New projects use `uuid-hash-v1`: a SHA-256 stream seeded by the immutable
+  trajectory UUID assigns unique slots within the project's configured slot space.
+  Allocations are independent of process randomness, metadata and label edits.
+  Canonical numeric-then-symbolic replay keys and list order determine window
+  declaration order. References, headers and token exports share the mapping.
+  Slots are not reused. Exceeding `max_window_slots` rejects creation/import,
+  edits, generation and export, including implicit tool windows. With an unlimited
+  budget the slot space is the number of declared windows, so adding windows can
+  change mappings; use named markers in source.
 - Headers appear in replay, task context and token exports. The tokenizer is
   never modified: context delimiters use existing dedicated tokens when present,
   otherwise ordinary tokenizer-native text tokens. Header metadata escapes

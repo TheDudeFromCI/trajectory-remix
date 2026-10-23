@@ -754,6 +754,7 @@ function showMetadataNames(metadata) {
   $("user-name").value = typeof metadata?.user_name === "string" ? metadata.user_name : "";
 }
 function loadMetadata(trajectory) {
+  $("trajectory-uuid").value = trajectory?.uuid || "";
   $("metadata-fields").disabled = !trajectory;
   $("metadata-json").setCustomValidity("");
   $("metadata-json").value = JSON.stringify(trajectory?.metadata ?? {}, null, 2);
@@ -1687,6 +1688,7 @@ $("duplicate").onclick = action(async () => {
   if (!sample) return;
   if (hasPendingChanges()) await compileSample(true);
   const copy = structuredClone(sample);
+  delete copy.uuid;
   copy.id = (copy.id || "sample") + "-copy-" + Date.now().toString(36);
   const r = await json("samples", "POST", { sample: copy });
   await refresh();

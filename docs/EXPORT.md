@@ -10,6 +10,8 @@ tokens: a tick may contain many external tokens and multiple window targets.
 | Field | Meaning |
 |---|---|
 | `format` | `kidra-token-chunk/1` |
+| `trajectory_uuid` | Immutable trajectory key and slot allocation seed. |
+| `slot_policy`, `max_window_slots` | Allocation policy version and project slot budget. |
 | `sample_id`, `chunk_index` | Stable trajectory and ordered chunk number. |
 | `chunk_count`, `sample_row_count` | Completeness checks, including missing final chunks. |
 | `tokenizer_sha256`, `special_tokens` | Exact tokenizer identity and native BOS/EOS/NOOP IDs. |
@@ -41,8 +43,9 @@ Headers consume no ticks, but increase context length and shift local positions.
 
 Authored `{WINDOW:id}` markers resolve before tokenization, so their numeric
 replacement determines token counts, loss segment boundaries and anchor timing.
-Slots follow first declarations in canonical replay-key/list order, independent
-of resolved ticks. Implicit tool windows may be listed first in `windows` while
+Slots use the project allocation policy and immutable trajectory UUID.
+`uuid-hash-v1` assigns slots reproducibly from a SHA-256 stream, visiting windows
+in canonical replay-key/list order, independent of resolved ticks. Implicit tool windows may be listed first in `windows` while
 having a later slot; consumers must use `slot` rather than the array index.
 The reference adapter falls back to array indices for older exports without slots.
 

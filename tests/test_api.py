@@ -156,4 +156,6 @@ async def test_malformed_sample_remains_editable(client):
     assert (await client.post("/api/samples", json={"sample": s})).status_code == 200
     assert (await client.get("/api/state")).status_code == 200
     assert (await client.post("/api/compile", json={"sample": s})).status_code == 422
-    assert (await client.get("/api/samples/0")).json() == s
+    restored = (await client.get("/api/samples/0")).json()
+    assert restored.pop("uuid")
+    assert restored == s

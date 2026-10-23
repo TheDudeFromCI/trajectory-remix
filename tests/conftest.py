@@ -12,10 +12,13 @@ from trajectory_remix.storage import DatasetStore
 
 @pytest.fixture
 def compiler():
+    # Historical replay fixtures retain the original policy; UUID allocation and
+    # project limits are exercised independently in test_slot_limits.py.
     return Compiler(
         Tokenizer.from_file(
             str(Path(__file__).parents[1] / "examples/demo-tokenizer.json")
-        )
+        ),
+        slot_policy="declaration-v1",
     )
 
 

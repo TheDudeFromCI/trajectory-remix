@@ -23,6 +23,7 @@ def main(argv=None):
         parser.add_argument("--bos", default="<|bos|>")
         parser.add_argument("--eos", default="<|eos|>")
         parser.add_argument("--noop", default="<|noop|>")
+        parser.add_argument("--max-window-slots", type=int, help="Maximum distinct windows per trajectory; unlimited if omitted")
     parser.add_argument(
         "--dataset",
         type=Path,
@@ -44,7 +45,7 @@ def main(argv=None):
                 tokenizer = Tokenizer.from_file(str(args.tokenizer))
             except Exception as error:
                 raise ValueError(f"Could not load tokenizer: {error}") from error
-            compiler = Compiler(tokenizer, args.bos, args.eos, args.noop)
+            compiler = Compiler(tokenizer, args.bos, args.eos, args.noop, max_window_slots=args.max_window_slots)
             DatasetStore.initialize(args.dataset, compiler)
             print(f"Initialized {args.dataset} with tokenizer {compiler.fingerprint}")
             return

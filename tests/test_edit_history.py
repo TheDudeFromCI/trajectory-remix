@@ -204,7 +204,7 @@ async def test_history_restores_browser_edits_deletes_imports_and_preserves_conf
 ):
     client = studio[1]
     original = copy.deepcopy(studio[0].state.dataset["samples"])
-    await client.post("/api/samples", json={"sample": {**original[0], "id": "browser"}})
+    await client.post("/api/samples", json={"sample": {**{k: v for k, v in original[0].items() if k != "uuid"}, "id": "browser"}})
     await client.put(
         "/api/samples/0",
         json={"sample": {**original[0], "metadata": {"title": "browser edit"}}},
@@ -216,7 +216,7 @@ async def test_history_restores_browser_edits_deletes_imports_and_preserves_conf
             "files": [
                 {
                     "name": "sample.json",
-                    "text": json.dumps({**original[0], "id": "imported"}),
+                    "text": json.dumps({**{k: v for k, v in original[0].items() if k != "uuid"}, "id": "imported"}),
                 }
             ]
         },

@@ -55,6 +55,8 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 | Tool | Purpose |
 | --- | --- |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
+| `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
+| `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
 | `list_trajectories` | Search IDs/metadata and paginate trajectory attributes. |
 | `get_trajectory` | Read complete source JSON, including invalid drafts. |
 | `create_trajectory` | Create from full JSON, an empty draft, or `template: "demo"`. |
@@ -486,3 +488,24 @@ and pending-browser-draft conflicts. Semantic providers are mocked in tests.
 Tests also cover batch rollback and final-state validation, JSON Patch roundtrips,
 history across browser/generation/MCP edits, sandbox isolation, call budgets,
 literal marker content, recording, cancellation and in-flight revision conflicts.
+
+## Querying metadata and project constraints
+
+`get_session` includes `max_window_slots` and `slot_policy`. The slot budget is
+fixed during project initialization. All authoring paths reject a trajectory
+that declares too many distinct windows, including implicit tool windows.
+The immutable trajectory `uuid` seeds `uuid-hash-v1` allocation; `id` is an
+editable unique label. UUID changes are rejected; duplicates receive new UUIDs.
+
+`query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
+(`all`/`any`), `offset`, and `limit`. Scalar filter operators are
+`eq/ne/lt/lte/gt/gte/exists`. Keys are literal top-level metadata keys, except
+reserved `counts.events`, `counts.windows`, `counts.tags`. Missing properties
+do not match comparisons; JSON null is distinct from an absent property and
+booleans are distinct from numbers. Results include UUID, content hash, metadata,
+tags and cached counts, with no replay payloads.
+
+`get_metadata_counts` takes the same filters/tags, plus `key` (default `tags`)
+and `limit`. It returns bounded value/count groups and total matching trajectories.
+Tag groups deduplicate repeated tags within each trajectory. Objects/arrays remain
+stored metadata but are not grouped as scalar values.

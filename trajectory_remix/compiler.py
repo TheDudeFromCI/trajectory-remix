@@ -16,12 +16,29 @@ from dataclasses import dataclass
 from tokenizers import Tokenizer
 
 from .tools import tool_message, tool_request, tool_text
+from .dataset import trajectory_uuid
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")
 KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
 MAX_TICKS = 100_000
 MAX_ROWS = 500_000
+
+
+def window_names(sample):
+    replay = sample.get("replay")
+    if not isinstance(replay, dict):
+        return []
+    names = {}
+    for key in sorted(replay, key=lambda k: (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))):
+        group = replay[key]
+        if isinstance(group, list):
+            for event in group:
+                if isinstance(event, dict) and event.get("op") in ("open", "tool-call"):
+                    name = event.get("window")
+                    if isinstance(name, str):
+                        names.setdefault(name, None)
+    return list(names)
 
 
 class CompileError(ValueError):
@@ -56,8 +73,14 @@ class Encoded:
 
 class Compiler:
     def __init__(
-        self, tokenizer: Tokenizer, bos="<|bos|>", eos="<|eos|>", noop="<|noop|>"
+        self, tokenizer: Tokenizer, bos="<|bos|>", eos="<|eos|>", noop="<|noop|>",
+        *, max_window_slots=None, slot_policy="uuid-hash-v1",
     ):
+        if max_window_slots is not None and (type(max_window_slots) is not int or max_window_slots < 1):
+            raise ValueError("max_window_slots must be a positive integer or null")
+        if slot_policy not in ("uuid-hash-v1", "declaration-v1"):
+            raise ValueError("Unsupported window slot allocation policy")
+        self.max_window_slots, self.slot_policy = max_window_slots, slot_policy
         self.tokenizer = tokenizer
         tokenizer.no_truncation()
         tokenizer.no_padding()
@@ -73,6 +96,24 @@ class Compiler:
         if len(set(self.ids.values())) != 3:
             raise ValueError("BOS, EOS and NOOP must have distinct IDs")
         self.fingerprint = hashlib.sha256(tokenizer.to_str().encode()).hexdigest()
+
+    def slots_for(self, sample):
+        names = window_names(sample)
+        capacity = self.max_window_slots if self.max_window_slots is not None else len(names)
+        if len(names) > capacity:
+            raise CompileError(f"Trajectory uses {len(names)} window slots; project limit is {capacity}", "replay")
+        if self.slot_policy == "declaration-v1":
+            return dict(zip(names, range(len(names))))
+        # Partial Fisher-Yates with a versioned SHA-256 stream. It allocates only
+        # O(window count) memory even when the configured slot space is large.
+        seed = trajectory_uuid(sample).encode("ascii")
+        swaps, result = {}, {}
+        for index, name in enumerate(names):
+            digest = hashlib.sha256(seed + index.to_bytes(8, "big")).digest()
+            chosen = index + int.from_bytes(digest, "big") % (capacity - index)
+            result[name] = swaps.get(chosen, chosen)
+            swaps[chosen] = swaps.get(index, index)
+        return result
 
     def window_header(self, slot, purpose):
         """Frame literal metadata without letting it introduce header/control tokens."""
@@ -205,25 +246,13 @@ class Compiler:
             )
         prepared, owners = [], {}
         # Assign slots before tokenization: reference widths can affect anchors.
-        # First declaration in canonical replay-key/list order wins, independent
-        # of JSON object insertion order and resolved (possibly symbolic) ticks.
         keys = sorted(
             replay,
             key=lambda k: (
                 (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))
             ),
         )
-        window_slots = {}
-        for key in keys:
-            group = replay[key]
-            if isinstance(group, list):
-                for event in group:
-                    if isinstance(event, dict) and event.get("op") in (
-                        "open", "tool-call"
-                    ):
-                        window = event.get("window")
-                        if isinstance(window, str) and window not in window_slots:
-                            window_slots[window] = len(window_slots)
+        window_slots = self.slots_for(sample)
         # Stable tie-breaking independent of JSON object insertion order.
         for key in keys:
             if not isinstance(key, str) or not KEY.fullmatch(key):
@@ -680,6 +709,9 @@ class Compiler:
         ]
         return {
             "sample_id": sample["id"],
+            "trajectory_uuid": trajectory_uuid(sample),
+            "max_window_slots": self.max_window_slots,
+            "slot_policy": self.slot_policy,
             "tokenizer_sha256": self.fingerprint,
             "special_tokens": self.ids,
             "max_tick": max_tick,
@@ -758,6 +790,9 @@ def chunks(plan: dict, ticks_per_chunk=64):
         yield {
             "format": "kidra-token-chunk/1",
             "sample_id": plan["sample_id"],
+            "trajectory_uuid": plan["trajectory_uuid"],
+            "max_window_slots": plan["max_window_slots"],
+            "slot_policy": plan["slot_policy"],
             "tokenizer_sha256": plan["tokenizer_sha256"],
             "special_tokens": plan["special_tokens"],
             "chunk_index": start // ticks_per_chunk,

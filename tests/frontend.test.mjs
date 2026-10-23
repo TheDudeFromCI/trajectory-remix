@@ -69,8 +69,8 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
-assert.match($("window-grid").textContent, /<\|cxt\|>Window: 2↵\nPurpose: reasoning<\|\/cxt\|>/);
-assert.match($("window-grid").textContent, /slot 2/);
+assert.match($("window-grid").textContent, /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/);
+assert.match($("window-grid").textContent, /slot \d+/);
 assert.equal($("sample-title"), null);
 assert.equal(w.document.querySelector(".tabbar"), null);
 assert.equal($("replay-view").querySelector("#dirty-indicator") !== null, true);
@@ -84,6 +84,8 @@ assert.equal($("timeline").closest("main"), w.document.querySelector("main"));
 assert.equal(w.document.title, "Trajectory Remix");
 assert.equal($("metadata-panel").closest(".sidebar"), w.document.querySelector(".sidebar"));
 assert.equal($("metadata-fields").disabled, false);
+assert.equal($("trajectory-uuid").readOnly, true);
+assert.equal($("trajectory-uuid").value, JSON.parse($("sample-json").value).uuid);
 const initialMetadata = JSON.parse($("metadata-json").value);
 $("agent-name").value = "Nova";
 $("agent-name").oninput();
@@ -527,7 +529,7 @@ assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 80,
+    checks: 82,
     errors,
   }),
 );

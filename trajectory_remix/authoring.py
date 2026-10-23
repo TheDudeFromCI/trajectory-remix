@@ -20,8 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import KEY, CompileError
-from .dataset import new_sample
+from .dataset import new_sample, prepare_sample
 from .llm import LLMClient, SampleBuilder
+from .metadata import MetadataFilter, query as query_metadata, counts as metadata_counts
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import ToolError, chat_context, tool_message, tool_request, tool_text
@@ -181,6 +182,8 @@ class TrajectoryCommands:
             )
 
     def _commit(self, sample, index=None, validate=False):
+        sample = prepare_sample(sample, self.state["samples"][index] if index is not None else None)
+        self.compiler.slots_for(sample)
         ident = sample.get("id")
         if not isinstance(ident, str) or not ident:
             raise CommandError("A nonempty sample id is required")
@@ -271,6 +274,8 @@ class TrajectoryCommands:
         return {
             "revision": self.state["revision"],
             "sample_count": len(self.state["samples"]),
+            "max_window_slots": self.compiler.max_window_slots,
+            "slot_policy": self.compiler.slot_policy,
             "status": self.runner.status,
             "tokenizer_sha256": self.compiler.fingerprint,
             "special_tokens": self.compiler.special,
@@ -302,6 +307,32 @@ class TrajectoryCommands:
                 for s in samples[offset : offset + limit]
             ],
         }
+
+    @command()
+    def query_trajectories(
+        self, filters: list[MetadataFilter] | None = None, tags: list[str] | None = None,
+        tag_mode: Literal["all", "any"] = "all", offset: Nonnegative = 0, limit: PageSize = 100,
+    ):
+        """Query scalar metadata keys, tag membership and cached counts without reading replay.
+
+        Filters use {key, op, value}; op is eq/ne/lt/lte/gt/gte/exists. Reserved
+        counts.events, counts.windows and counts.tags address cached integer columns.
+        Keys otherwise address literal top-level metadata properties, including punctuation.
+        All filters combine with AND. Tags support all/any. Results include UUID and content hash.
+        """
+        return query_metadata(self.state.store, filters, tags, tag_mode, offset, limit)
+
+    @command()
+    def get_metadata_counts(
+        self, key: str = "tags", filters: list[MetadataFilter] | None = None,
+        tags: list[str] | None = None, tag_mode: Literal["all", "any"] = "all", limit: PageSize = 100,
+    ):
+        """Group matching trajectories by a scalar metadata key, tags, or counts.* field.
+
+        Returns bounded value/count groups and total matching trajectories. Tag groups
+        count each trajectory once per distinct tag. Nested objects/arrays are omitted.
+        """
+        return metadata_counts(self.state.store, key, filters, tags, tag_mode, limit)
 
     @command()
     def get_trajectory(self, sample_id: str):
@@ -351,6 +382,7 @@ class TrajectoryCommands:
         """Deep-copy a trajectory and all metadata under a fresh unique ID."""
         _, sample = self._draft(sample_id, expected_revision)
         sample["id"] = new_sample_id if new_sample_id is not None else str(uuid.uuid4())
+        sample.pop("uuid", None)
         return self._commit(sample)
 
     @command(write=True, destructive=True)
@@ -400,7 +432,7 @@ class TrajectoryCommands:
         """Merge-patch top-level attributes (RFC 7396); null deletes and arrays replace.
 
         Example: {"metadata":{"tags":["reviewed"]},"defaults":{"implicit-noop-loss-weight":0.2}}.
-        replay cannot be changed here. Renaming id requires a unique nonempty value.
+        replay cannot be changed here. id is a unique editable label; uuid is immutable.
         """
         index, sample = self._draft(sample_id, expected_revision)
         if "replay" in patch:
@@ -936,6 +968,8 @@ class TrajectoryCommands:
         if ignore_id:
             before.pop("id", None)
             after.pop("id", None)
+            before.pop("uuid", None)
+            after.pop("uuid", None)
         changes = json_changes(before, after)
         result = {
             "revision": self.state["revision"],
