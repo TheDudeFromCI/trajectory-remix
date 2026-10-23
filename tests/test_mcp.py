@@ -286,7 +286,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     )
                     assert not scheduled.isError, scheduled
                     old = await session.call_tool(
-                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 175}
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": scheduled.structuredContent["tool_call"]["start"]}
                     )
                     assert old.structuredContent["sandbox"]["files"] == {}
                     assert (
@@ -294,7 +294,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                         == "running"
                     )
                     current = await session.call_tool(
-                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 200}
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": scheduled.structuredContent["tool_call"]["end"]}
                     )
                     assert current.structuredContent["sandbox"]["files"] == {
                         "/mcp.txt": "saved"

@@ -875,6 +875,7 @@ function renderEvents() {
               "arguments",
               "duration-ticks",
               "outcome",
+              "result-anchor",
             ])
               delete e[key];
           }
@@ -989,10 +990,11 @@ function renderEvents() {
         options.append(field("Duration (ticks)", duration));
         options.append(
           field(
-            "Request delivery",
+            "Result delivery",
             select(["instant", "stream"], e.delivery || "instant", (value) => {
               e.delivery = value;
               update();
+              renderEvents();
             }),
           ),
           field(
@@ -1007,8 +1009,34 @@ function renderEvents() {
               renderEvents();
             }),
           ),
+          field(
+            "Auto-generate post-result anchor",
+            checkbox("result-anchor" in e, (value) => {
+              if (value) {
+                const ids = [...JSON.stringify(eventDraft).matchAll(/\{N_TICK:(\d+)\}/g)]
+                  .map((match) => Number(match[1]));
+                ids.push(...eventDraft.map(({ event }) => event["result-anchor"])
+                  .filter(Number.isInteger));
+                e["result-anchor"] = Math.max(0, ...ids) + 1;
+              } else delete e["result-anchor"];
+              update();
+              renderEvents();
+            }),
+          ),
         );
+        if (e.delivery === "stream") {
+          const rate = input(e["tokens-per-tick"] ?? 1, (value) => {
+            e["tokens-per-tick"] = value;
+            update();
+          }, "number");
+          rate.min = "1";
+          rate.step = "1";
+          options.append(field("Result tokens per tick", rate));
+        }
         card.append(options);
+        if ("result-anchor" in e) {
+          card.append(node("small", "hint", `Result complete: {N_TICK:${e["result-anchor"]}}`));
+        }
         if (e.segments) {
           card.append(
             node("div", "segmented-note", "Edit request segments and loss masks in Source JSON."),
@@ -1023,7 +1051,7 @@ function renderEvents() {
             update();
           };
           card.append(
-            field("Request text (anchors and NOOPs supported for streams)", area),
+            field("Request text (anchors and NOOPs supported)", area),
           );
         }
         for (const key of e.tool === "subagent"
@@ -1050,7 +1078,7 @@ function renderEvents() {
           node(
             "small",
             "hint",
-            "Tool windows are open from tick 0. Request and result share the window. Streamed requests emit one token per tick; execution begins on the following tick. Duration counts execution ticks.",
+            "Tool windows are open from tick 0. Requests always stream one token per tick; execution begins on the following tick. Duration counts execution ticks. Result delivery is independent. A post-result anchor marks when the full result has arrived.",
           ),
         );
       } else {

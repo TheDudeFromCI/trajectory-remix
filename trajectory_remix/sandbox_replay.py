@@ -46,11 +46,15 @@ def chat_context_at(items, tick, order, eos_id, metadata):
         event = item["event"]
         if event["window"] != "chat":
             continue
-        start = item["tick"]
         if event["op"] == "tool-call":
-            # Tool windows are implicitly open from tick zero.
+            # Tool windows are implicitly open even for unresolved future calls.
             opened = True
-        elif event["op"] == "open":
+            continue
+        start = item["tick"]
+        if start is None:
+            # These events depend on a result that has not completed yet.
+            continue
+        if event["op"] == "open":
             if start < tick or (start == tick and item["order"] < order):
                 opened = True
         elif event["op"] == "generate" and eos_id in item["encoded"].ids:
@@ -65,7 +69,7 @@ def chat_context_at(items, tick, order, eos_id, metadata):
     }
 
 
-def compile_sandbox(items, sample, eos_id):
+def compile_sandbox(items, sample, eos_id, resolve_items, finish_result):
     metadata = sample.get("metadata", {})
     clock = metadata.get("synthetic_clock", {}) if isinstance(metadata, dict) else {}
     if not isinstance(clock, dict) or set(clock) - {"seed", "seconds_per_call"}:
@@ -79,40 +83,41 @@ def compile_sandbox(items, sample, eos_id):
     initial = sandbox.snapshot()
     calls, changes = [], []
     try:
-        for item in items:
-            event = item["event"]
-            if event["op"] != "tool-call":
-                continue
-            start = item["tick"] + (
-                len(item["encoded"].ids) if not item["instant"] else 0
-            )
-            end = start + event.get("duration-ticks", 0)
-            if end >= MAX_TICKS:
-                raise CompileError("Tool completion exceeds tick limit", item["path"])
-            calls.append(
-                {
-                    "path": item["path"],
-                    "window": event["window"],
-                    "tool": event["tool"],
-                    "arguments": copy.deepcopy(event["arguments"]),
-                    "request_start": item["tick"],
-                    "start": start,
-                    "end": end,
-                    "order": item["order"],
-                    **(
-                        {"request-id": event["request-id"]}
-                        if "request-id" in event
-                        else {}
-                    ),
-                }
-            )
-        if len(calls) > MAX_TOOL_CALLS:
+        pending = [item for item in items if item["event"]["op"] == "tool-call"]
+        if len(pending) > MAX_TOOL_CALLS:
             raise CompileError(f"Tool event limit exceeded ({MAX_TOOL_CALLS})")
-        events = {item["path"]: item["event"] for item in items}
-        # Calls are atomic at completion. Equal completions follow replay list order.
+        # Resolve result-dependent calls as completions become available. Choosing
+        # the earliest available completion preserves sandbox ordering even when
+        # streamed result lengths depend on earlier writes or failures.
         previous = initial
-        for call in sorted(calls, key=lambda c: (c["end"], c["order"])):
-            event = events[call["path"]]
+        while pending:
+            resolve_items()
+            ready = []
+            for item in pending:
+                if item["tick"] is None:
+                    continue
+                event = item["event"]
+                start = item["tick"] + len(item["encoded"].ids)
+                end = start + event.get("duration-ticks", 0)
+                if end >= MAX_TICKS:
+                    raise CompileError("Tool completion exceeds tick limit", item["path"])
+                ready.append((item, start, end))
+            if not ready:
+                raise CompileError("Cyclic anchor dependency", pending[0]["path"])
+            item, start, end = min(ready, key=lambda entry: (entry[2], entry[0]["order"]))
+            pending.remove(item)
+            event = item["event"]
+            call = {
+                "path": item["path"],
+                "window": event["window"],
+                "tool": event["tool"],
+                "arguments": copy.deepcopy(event["arguments"]),
+                "request_start": item["tick"],
+                "start": start,
+                "end": end,
+                "order": item["order"],
+                **({"request-id": event["request-id"]} if "request-id" in event else {}),
+            }
             try:
                 if call["tool"] == "subagent":
                     sandbox.start_call(call["tool"], call["arguments"])
@@ -133,6 +138,8 @@ def compile_sandbox(items, sample, eos_id):
             except (ToolError, ValueError, OverflowError) as error:
                 outcome = {"ok": False, "error": str(error)}
             call["outcome"] = outcome
+            finish_result(item, call)
+            calls.append(call)
             current = sandbox.snapshot()
             patch = {"clock": current["clock"], "calls": current["calls"]}
             for name in STORES:
@@ -147,6 +154,7 @@ def compile_sandbox(items, sample, eos_id):
                 }
             changes.append({"tick": call["end"], "patch": patch})
             previous = current
+        calls.sort(key=lambda call: call["order"])
         for call in calls:
             del call["order"]
         return {"initial": initial, "changes": changes}, calls

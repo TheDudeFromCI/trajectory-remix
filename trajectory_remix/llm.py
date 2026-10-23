@@ -608,7 +608,7 @@ class SampleBuilder:
                     "window": f"tool-result-{suffix}",
                     "tool": function.get("name"),
                     "arguments": args,
-                    "delivery": "stream",
+                    "delivery": "instant",
                     "duration-ticks": int(monotonic() - started),
                     "request-id": call["id"],
                 }

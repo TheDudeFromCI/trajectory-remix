@@ -23,6 +23,10 @@
   clock in another window, and verify the resumed request can attend to its
   result without seeing the pending write outcome. They also cover tick-0 BOS,
   reusable tool windows, request anchors, segment losses and dispatch timing.
+  Requests always generate one token per tick; result checks cover instant and
+  streamed delivery, rates, masks, final-token anchors, dependent execution order,
+  duplicate/cyclic markers and collision-free, undoable anchor allocation. DOM
+  checks exercise result delivery and persistence of the post-result anchor toggle.
 - Chat checks cover message framing, metadata speaker names, missing/closed
   windows, completion-time lifecycle, literal arguments, exported loss masks,
   generation error feedback and undoable MCP recording. DOM checks cover the

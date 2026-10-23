@@ -75,7 +75,7 @@ def test_tool_windows_receive_one_header_at_zero_across_calls(compiler, sample, 
         sample["replay"]["0"].append({"op": "open", "window": "7", "window-type": "tool"})
     sample["replay"]["1"] = [{
         "op": "tool-call", "window": "7", "tool": "time_now", "arguments": {},
-        "delivery": "stream", "content": "go{N_TICK:1}",
+        "delivery": "instant", "content": "go{N_TICK:1}",
     }]
     sample["replay"]["4"] = [{
         "op": "tool-call", "window": "7", "tool": "file_list", "arguments": {},
