@@ -535,7 +535,7 @@ the selected tick's `sandbox` state without future results.
 | Tools | Behavior |
 |---|---|
 | `chat` | Takes `{"content":"Hello!"}` and appends `<\|msg\|>Kidra: Hello!<\|/msg\|>\n` to the window named `chat` at completion. Uses `metadata.agent_name` when specified. Returns an error observation if `chat` is missing or closed; it never opens that window automatically. |
-| `time_now`, `time_advance` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
+| `time_now`, `time_advance`, `time_set` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
 | `file_write/read/list/delete`, `file_stat`, `file_patch` | Virtual UTF-8 files with immutable SHA-256 versions and optional stale-write protection; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
 | `memory_save/search` | Local lexical-overlap retrieval with top-8 results. RAG store is isolated; no embeddings service required. |
 | `note_save/list/delete` | Tasks/notes with todo, doing, blocked, done status, owners, dependencies, blockers and acceptance criteria. |

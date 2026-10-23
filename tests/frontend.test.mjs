@@ -548,6 +548,28 @@ await waitFor(() => /external implementation/.test($("sandbox-state").textConten
 assert.equal(w.document.querySelectorAll(".window-card").length, windowCountBeforeExternal);
 assert.doesNotMatch($("window-grid").textContent, /external implementation/);
 assert.match($("sandbox-calls").textContent, /External · file_write · completed/);
+// time_set initializes nullable arguments and is available for external mutations.
+await click("add-tool-call");
+let setCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const setSelect = setCard.querySelector(".event-options select");
+setSelect.value = "time_set";
+setSelect.onchange();
+setCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const nullTime = {year: null, month: null, day: null, hour: null, minute: null, second: null, timezone: null};
+assert.deepEqual(JSON.parse(setCard.querySelector('textarea[aria-label="arguments JSON"]').value), nullTime);
+await click("file-save");
+const setCall = lastPlan.tool_calls.find((call) => call.tool === "time_set");
+assert.equal(setCall.outcome.ok, true);
+jump(setCall.end);
+await waitFor(() => $("sandbox-state").textContent.includes(setCall.outcome.result.timestamp));
+const setOperation = setCard.querySelector(".event-header select");
+setOperation.value = "invisible-tool-call";
+setOperation.onchange();
+setCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+assert.equal(setCard.querySelector(".event-options select").value, "time_set");
+assert.equal(setCard.querySelector(".event-window").hidden, true);
+await click("file-save");
+assert.equal(lastPlan.tool_calls.find((call) => call.tool === "time_set").invisible, true);
 // Listings are paged in SQLite, and search reaches trajectories beyond page one.
 const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
   id: `sqlite-page-${index}`,

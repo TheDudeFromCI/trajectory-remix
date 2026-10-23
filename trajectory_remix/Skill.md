@@ -94,8 +94,8 @@ A window begins with the project's configured BOS/header framing, and its
 lifetime ends with Kidra's generated EOS. Merely finishing a message, delivering
 a tool result or leaving a window idle does **not** close it. Active windows do
 not need to produce useful text on every tick; NOOP expresses intentional idle
-behavior. Separate logical ticks from the synthetic clock used by `time_now` and
-`time_advance`.
+behavior. Separate logical ticks from the synthetic clock used by `time_now`,
+`time_advance` and `time_set`.
 
 Conceptual replay (tokens shown as placeholders, not literal tokenizer output):
 
@@ -275,7 +275,7 @@ consistent. To teach explicit waiting, add a segment such as
 configured NOOP spelling. Do not invent a wait/cancel/background-job
 tool: those tools are not implemented. Status comes from scheduled conversations.
 
-Ticks measure token scheduling, not real seconds. `time_now` and `time_advance`
+Ticks measure token scheduling, not real seconds. `time_now`, `time_advance` and `time_set`
 use a separate synthetic clock. Automatic increments are per dispatched tool
 call; an author-side inspection does not advance time. Write status messages
 that match the observable scenario rather than claiming wall-clock runtimes.
@@ -305,7 +305,7 @@ to inject information into Kidra's visible context: schedule a visible reply or
 file read if Kidra needs to observe the change.
 
 Allowed invisible tools are `file_write`, `file_patch`, `file_delete`,
-`memory_save`, `note_save`, `note_delete`, `skill_save` and `time_advance`.
+`memory_save`, `note_save`, `note_delete`, `skill_save`, `time_advance` and `time_set`.
 Do not attach `window`, `outcome`, `content`, `segments`, delivery or loss settings
 to an invisible source event. Use `arguments.content` for a file body.
 `duration_ticks` delays its commit; `source` attributes its external actor.
@@ -321,13 +321,14 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. All 22 tools are local
+Always confirm current schemas with `list_simulated_tools`. All 23 tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chat`                                            | `content`; append a framed message from `metadata.agent_name` (default Kidra) to the open `chat` window.                                                           |
 | `time_now`                                        | No arguments; read the synthetic timestamp.                                                                                                                        |
+| `time_set` | All seven fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `timezone`; use `null` for seeded random values. Sets the synthetic clock exactly. Timezone accepts IANA names, UTC or ±HH:MM. See [clock rules](../docs/SANDBOX.md#setting-synthetic-time). |
 | `time_advance`                                    | Nonnegative `seconds`; advance synthetic time without sleeping.                                                                                                    |
 | `file_write`                                      | `path`, `content`; save virtual UTF-8 text and return its version; optional `expected_version` prevents stale writes.                                              |
 | `file_read`                                       | `path`; read current content, or historical content with optional `version`.                                                                                       |
