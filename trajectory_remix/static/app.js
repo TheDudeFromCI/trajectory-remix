@@ -768,10 +768,34 @@ function validEventShape() {
 function loadEvents() {
   if (!sample) return;
   eventDraft = [];
+  eventGroups = [];
+  selectedEvents.clear();
   for (const [key, events] of Object.entries(sample.replay || {})) {
     if (!Array.isArray(events)) continue;
     events.forEach((e) => eventDraft.push({ key, event: structuredClone(e) }));
   }
+  const saved = sample.metadata?.event_groups;
+  const savedColors = sample.metadata?.window_colors;
+  windowColors =
+    savedColors &&
+    typeof savedColors === "object" &&
+    !Array.isArray(savedColors)
+      ? { ...savedColors }
+      : {};
+  if (Array.isArray(sample.metadata?.collapsed_events))
+    for (const k of sample.metadata.collapsed_events)
+      if (eventDraft[k]) collapsedEvents.add(eventDraft[k]);
+  if (Array.isArray(saved))
+    for (const g of saved) {
+      if (!g || typeof g.id !== "string") continue;
+      eventGroups.push({
+        id: g.id,
+        name: String(g.name ?? ""),
+        collapsed: !!g.collapsed,
+      });
+      for (const k of Array.isArray(g.events) ? g.events : [])
+        if (eventDraft[k] && !eventDraft[k].group) eventDraft[k].group = g.id;
+    }
   $("sample-id").value = sample.id || "";
   $("noop-weight").value =
     sample.defaults?.["implicit-noop-loss-weight"] ?? 0.1;
@@ -876,33 +900,263 @@ function checkbox(value, onChange) {
   return n;
 }
 const collapsedEvents = new WeakSet();
+// Window id -> color, kept so event borders match even before a compile.
+let windowColors = {};
+// Groups are editor-only; they are not saved into the sample.
+let eventGroups = [];
+const selectedEvents = new Set();
+let dragItems = [];
+let dragGroup = null;
+function insertMoved(moving, groupId, after) {
+  const idx = eventDraft.flatMap((it, k) => (it.group === groupId ? [k] : []));
+  const at = !idx.length
+    ? eventDraft.length
+    : after
+      ? idx[idx.length - 1] + 1
+      : idx[0];
+  eventDraft.splice(at, 0, ...moving);
+}
+function normalizeGroups() {
+  const out = [],
+    done = new Set();
+  for (const item of eventDraft) {
+    if (!item.group) out.push(item);
+    else if (!done.has(item.group)) {
+      done.add(item.group);
+      out.push(...eventDraft.filter((it) => it.group === item.group));
+    }
+  }
+  eventDraft = out;
+}
+function takeDragged() {
+  const moving = eventDraft.filter((it) => dragItems.includes(it));
+  eventDraft = eventDraft.filter((it) => !dragItems.includes(it));
+  return moving;
+}
+function dropOnEvent(target, after) {
+  if (dragItems.includes(target)) return;
+  const moving = takeDragged();
+  if (dragGroup) {
+    if (target.group) insertMoved(moving, target.group, after);
+    else
+      eventDraft.splice(
+        eventDraft.indexOf(target) + (after ? 1 : 0),
+        0,
+        ...moving,
+      );
+    return finishDrop();
+  }
+  moving.forEach((it) => (it.group = target.group));
+  eventDraft.splice(eventDraft.indexOf(target) + (after ? 1 : 0), 0, ...moving);
+  finishDrop();
+}
+function dropGroupOnGroup(group, after) {
+  if (group === dragGroup) return;
+  const moving = takeDragged();
+  insertMoved(moving, group.id, after);
+  finishDrop();
+}
+function dropOnGroup(group) {
+  const moving = takeDragged();
+  moving.forEach((it) => (it.group = group.id));
+  let at = eventDraft.length;
+  for (let k = eventDraft.length - 1; k >= 0; k--)
+    if (eventDraft[k].group === group.id) {
+      at = k + 1;
+      break;
+    }
+  eventDraft.splice(at, 0, ...moving);
+  group.collapsed = false;
+  finishDrop();
+}
+function dropOnRoot() {
+  const moving = takeDragged();
+  if (!dragGroup) moving.forEach((it) => delete it.group);
+  eventDraft.push(...moving);
+  finishDrop();
+}
+function finishDrop() {
+  dragItems = [];
+  dragGroup = null;
+  selectedEvents.clear();
+  setDirty();
+  renderEvents();
+}
+function clearDropMarks() {
+  document
+    .querySelectorAll(".drop-before, .drop-after, .drop-into")
+    .forEach((n) =>
+      n.classList.remove("drop-before", "drop-after", "drop-into"),
+    );
+}
+function allowDrop(el, onDrop, mark) {
+  el.addEventListener("dragover", (ev) => {
+    if (!dragItems.length) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    clearDropMarks();
+    const cls = mark(ev);
+    if (cls) el.classList.add(cls);
+  });
+  el.addEventListener("drop", (ev) => {
+    if (!dragItems.length) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    clearDropMarks();
+    onDrop(ev);
+  });
+}
+function renderGroup(group, cards) {
+  const members = eventDraft.filter((it) => it.group === group.id);
+  const box = node(
+    "div",
+    "event-group" + (group.collapsed ? " collapsed" : ""),
+  );
+  const head = node("div", "event-group-header");
+  const toggle = button(
+    group.collapsed ? "▸" : "▾",
+    () => {
+      group.collapsed = !group.collapsed;
+      setDirty();
+      renderEvents();
+    },
+    "event-toggle",
+  );
+  toggle.title = group.collapsed ? "Expand group" : "Collapse group";
+  const name = input(group.name, (v) => {
+    group.name = v;
+    setDirty();
+  });
+  name.placeholder = "Group name";
+  const grip = node("span", "event-grip", "⠇");
+  grip.draggable = true;
+  grip.title = "Drag to move group";
+  grip.ondragstart = (ev) => {
+    dragGroup = group;
+    dragItems = [...members];
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", "");
+    ev.dataTransfer.setDragImage(box, 0, 0);
+  };
+  grip.ondragend = () => {
+    dragGroup = null;
+    dragItems = [];
+    clearDropMarks();
+  };
+  head.append(
+    toggle,
+    grip,
+    name,
+    node(
+      "small",
+      "",
+      `${members.length} event${members.length === 1 ? "" : "s"}`,
+    ),
+    button(
+      "Ungroup",
+      () => {
+        members.forEach((it) => delete it.group);
+        eventGroups = eventGroups.filter((g) => g !== group);
+        setDirty();
+        renderEvents();
+      },
+      "event-delete",
+    ),
+  );
+  box.append(head);
+  if (!group.collapsed) {
+    const body = node("div", "event-group-body");
+    if (!members.length)
+      body.append(node("small", "event-group-empty", "Drag events here"));
+    members.forEach((it) => body.append(cards.get(it)));
+    box.append(body);
+  }
+  allowDrop(
+    box,
+    (ev) =>
+      dragGroup
+        ? dropGroupOnGroup(group, isLowerHalf(ev, box))
+        : dropOnGroup(group),
+    (ev) =>
+      dragGroup
+        ? isLowerHalf(ev, box)
+          ? "drop-after"
+          : "drop-before"
+        : "drop-into",
+  );
+  return box;
+}
 function renderEvents() {
-  $("event-list").replaceChildren(
-    ...eventDraft.map((item, i) => {
+  normalizeGroups();
+  plan?.windows.forEach(
+    (w, i) => (windowColors[w.id] = colors[i % colors.length]),
+  );
+  const cards = new Map();
+  eventDraft.forEach((item, i) => cards.set(item, buildEventCard(item, i)));
+  const out = [],
+    shown = new Set();
+  for (const item of eventDraft) {
+    const group = eventGroups.find((g) => g.id === item.group);
+    if (!group) out.push(cards.get(item));
+    else if (!shown.has(group)) {
+      shown.add(group);
+      out.push(renderGroup(group, cards));
+    }
+  }
+  for (const g of eventGroups)
+    if (!shown.has(g)) out.push(renderGroup(g, cards));
+  $("event-list").replaceChildren(...out);
+}
+function buildEventCard(item, i) {
+  {
+    {
       const e = item.event,
         card = node("div", "event-card"),
         head = node("div", "event-header");
       const update = () => setDirty();
-      const winIndex = plan
-        ? plan.windows.findIndex((w) => w.id === e.window)
-        : -1;
-      if (winIndex >= 0)
-        card.style.borderColor = colors[winIndex % colors.length];
+      const winColor = windowColors[e.window];
+      if (winColor) card.style.borderLeftColor = winColor;
       const collapsed = collapsedEvents.has(item);
       const toggle = button(
         collapsed ? "▸" : "▾",
         () => {
           if (collapsed) collapsedEvents.delete(item);
           else collapsedEvents.add(item);
+          setDirty();
           renderEvents();
         },
         "event-toggle",
       );
       toggle.title = collapsed ? "Expand event" : "Collapse event";
+      const grip = node("span", "event-grip", "⠇");
+      grip.draggable = true;
+      grip.title = "Drag to move; click to select";
+      card.classList.toggle("selected", selectedEvents.has(item));
+      grip.onclick = () => {
+        if (selectedEvents.has(item)) selectedEvents.delete(item);
+        else selectedEvents.add(item);
+        card.classList.toggle("selected", selectedEvents.has(item));
+      };
+      grip.ondragstart = (ev) => {
+        dragItems = selectedEvents.has(item) ? [...selectedEvents] : [item];
+        ev.dataTransfer.effectAllowed = "move";
+        ev.dataTransfer.setData("text/plain", "");
+        ev.dataTransfer.setDragImage(card, 0, 0);
+      };
+      grip.ondragend = () => {
+        dragItems = [];
+        clearDropMarks();
+      };
+      allowDrop(
+        card,
+        (ev) => dropOnEvent(item, isLowerHalf(ev, card)),
+        (ev) => (isLowerHalf(ev, card) ? "drop-after" : "drop-before"),
+      );
       if (collapsed) {
         card.classList.add("collapsed");
         head.append(
           toggle,
+          grip,
           node(
             "small",
             "event-summary",
@@ -912,7 +1166,7 @@ function renderEvents() {
         card.append(head);
         return card;
       }
-      head.append(toggle);
+      head.append(toggle, grip);
       const at = input(item.key, (v) => {
         item.key = v;
         update();
@@ -994,29 +1248,10 @@ function renderEvents() {
       win.placeholder = e.op === "tool-call" ? "Tool window ID" : "Window ID";
       head.append(
         win,
-        button("↑", () => {
-          if (i) {
-            [eventDraft[i - 1], eventDraft[i]] = [
-              eventDraft[i],
-              eventDraft[i - 1],
-            ];
-            update();
-            renderEvents();
-          }
-        }),
-        button("↓", () => {
-          if (i < eventDraft.length - 1) {
-            [eventDraft[i + 1], eventDraft[i]] = [
-              eventDraft[i],
-              eventDraft[i + 1],
-            ];
-            update();
-            renderEvents();
-          }
-        }),
         button(
           "Remove",
           () => {
+            selectedEvents.delete(item);
             eventDraft.splice(i, 1);
             update();
             renderEvents();
@@ -1028,6 +1263,7 @@ function renderEvents() {
           () => {
             eventDraft.splice(i + 1, 0, {
               key: item.key,
+              group: item.group,
               event: {
                 op: "generate",
                 window: "new-window",
@@ -1300,17 +1536,48 @@ function renderEvents() {
         card.append(options);
       }
       return card;
-    }),
-  );
+    }
+  }
+}
+function isLowerHalf(ev, el) {
+  const r = el.getBoundingClientRect();
+  return ev.clientY > r.top + r.height / 2;
 }
 function sampleFromEvents() {
-  const replay = {};
-  for (const item of eventDraft) (replay[item.key] ??= []).push(item.event);
+  const replay = {},
+    byKey = {};
+  for (const item of eventDraft) {
+    (replay[item.key] ??= []).push(item.event);
+    (byKey[item.key] ??= []).push(item);
+  }
+  // Group members are saved as indices in replay iteration order, matching loadEvents.
+  const ordered = Object.keys(replay).flatMap((k) => byKey[k]);
+  let metadata = readMetadata();
+  {
+    delete metadata.collapsed_events;
+    delete metadata.window_colors;
+    const collapsedIdx = ordered.flatMap((it, k) =>
+      collapsedEvents.has(it) ? [k] : [],
+    );
+    if (collapsedIdx.length) metadata.collapsed_events = collapsedIdx;
+    const used = Object.fromEntries(
+      ordered
+        .filter((it) => windowColors[it.event.window])
+        .map((it) => [it.event.window, windowColors[it.event.window]]),
+    );
+    if (Object.keys(used).length) metadata.window_colors = used;
+    delete metadata.event_groups;
+    if (eventGroups.length)
+      metadata.event_groups = eventGroups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        collapsed: g.collapsed,
+        events: ordered.flatMap((it, k) => (it.group === g.id ? [k] : [])),
+      }));
+  }
   return {
     ...sample,
-    ...(sample && ("metadata" in sample || $("metadata-json").value !== "{}")
-      ? { metadata: readMetadata() }
-      : {}),
+    metadata,
     id: $("sample-id").value,
     defaults: {
       ...sample.defaults,
@@ -1819,6 +2086,20 @@ $("user-name").oninput = () =>
   updateMetadataName("user_name", $("user-name").value);
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
+allowDrop(
+  $("event-list"),
+  () => dropOnRoot(),
+  () => "",
+);
+$("add-group").onclick = () => {
+  eventGroups.push({
+    id: `g${Date.now().toString(36)}${eventGroups.length}`,
+    name: "Group",
+    collapsed: false,
+  });
+  setDirty();
+  renderEvents();
+};
 $("add-event").onclick = () => {
   eventDraft.push({
     key: String(plan ? plan.max_tick + 1 : 0),

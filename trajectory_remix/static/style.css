@@ -822,6 +822,7 @@ h2 {
 }
 .event-card {
   border: 1px solid var(--border);
+  border-left-width: 3px;
   border-radius: 8px;
   background: var(--panel);
   padding: 7px;
@@ -856,6 +857,45 @@ h2 {
 .event-header .event-add-below {
   border-color: var(--accent);
   color: var(--accent);
+}
+.event-grip {
+  cursor: grab;
+  color: var(--muted);
+  padding: 0 4px;
+  user-select: none;
+}
+.event-card.selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.event-group {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  margin-bottom: 6px;
+}
+.event-group-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.event-group-header .event-delete {
+  margin-left: auto;
+}
+.event-group-body {
+  margin-top: 6px;
+  padding-left: 14px;
+}
+.event-group-empty {
+  color: var(--muted);
+}
+.drop-before {
+  box-shadow: 0 -3px 0 var(--accent);
+}
+.drop-after {
+  box-shadow: 0 3px 0 var(--accent);
+}
+.drop-into {
+  border-color: var(--accent);
 }
 .event-card textarea {
   width: 100%;
