@@ -1191,37 +1191,39 @@ function buildEventCard(item, i) {
       win.className = "event-window";
       win.hidden = e.op === "invisible-tool-call";
       win.placeholder = e.op === "tool-call" ? "Tool window ID" : "Window ID";
-      head.append(
-        win,
-        button(
-          "Remove",
-          () => {
-            selectedEvents.delete(item);
-            eventDraft.splice(i, 1);
-            update();
-            renderEvents();
-          },
-          "danger-text event-delete",
-        ),
-        button(
-          "+ Add Event Below",
-          () => {
-            eventDraft.splice(i + 1, 0, {
-              key: item.key,
-              group: item.group,
-              event: {
-                op: "generate",
-                window: "new-window",
-                content: "",
-                loss: { mask: "auto", weight: 1 },
-              },
-            });
-            update();
-            renderEvents();
-          },
-          "event-add-below",
-        ),
+      const removeButton = button(
+        "X",
+        () => {
+          selectedEvents.delete(item);
+          eventDraft.splice(i, 1);
+          update();
+          renderEvents();
+        },
+        "danger-text event-delete",
       );
+      removeButton.title = "Remove event";
+      removeButton.setAttribute("aria-label", "Remove event");
+      const addBelowButton = button(
+        "+",
+        () => {
+          eventDraft.splice(i + 1, 0, {
+            key: item.key,
+            group: item.group,
+            event: {
+              op: "generate",
+              window: "new-window",
+              content: "",
+              loss: { mask: "auto", weight: 1 },
+            },
+          });
+          update();
+          renderEvents();
+        },
+        "event-add-below",
+      );
+      addBelowButton.title = "Add event below";
+      addBelowButton.setAttribute("aria-label", "Add event below");
+      head.append(win, removeButton, addBelowButton);
       card.append(head);
       if (e.op === "open") {
         const options = node("div", "event-options");

@@ -162,6 +162,12 @@ assert(eventCount >= 10);
 assert.equal($("replay-view").hidden, false);
 const firstEvent = w.document.querySelector(".event-card");
 const firstEventKey = firstEvent.querySelector(".event-header input").value;
+assert.equal(firstEvent.querySelector(".event-delete").textContent, "X");
+assert.equal(
+  firstEvent.querySelector(".event-delete").getAttribute("aria-label"),
+  "Remove event",
+);
+assert.equal(firstEvent.querySelector(".event-add-below").textContent, "+");
 await firstEvent.querySelector(".event-add-below").onclick();
 const eventCards = w.document.querySelectorAll(".event-card");
 assert.equal(eventCards.length, eventCount + 1);

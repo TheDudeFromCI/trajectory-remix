@@ -821,10 +821,13 @@ h2 {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
-.event-header input {
+.event-header input,
+.event-header select {
   width: 145px;
+  min-width: 0;
 }
 .event-header .event-toggle {
   padding: 0 6px;
@@ -838,13 +841,21 @@ h2 {
 }
 .event-header .event-window {
   flex: 1;
-  min-width: 100px;
+  min-width: 0;
+}
+.event-header button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .event-header .event-delete {
   margin-left: auto;
 }
+.event-header .event-delete,
 .event-header .event-add-below {
-  border-color: var(--accent);
+  font-weight: 700;
+}
+.event-header .event-add-below {
+  border: none;
   color: var(--accent);
 }
 .event-grip {
