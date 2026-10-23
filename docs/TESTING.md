@@ -43,6 +43,12 @@
   failed identities for clarification, and forbid nested provider calls. The
   bundled Skill.md is available through MCP and its worked call sequence is
   tested for parallel timing, follow-ups, external writes and masked observations.
+  Short guide checks execute the published JSON calls with current revisions and
+  configured EOS tokens: first-trajectory closure and anchors, local text/timing
+  repairs, concurrent specialist execution without future replies, and invisible
+  file setup followed by a visible read. Guide retrieval defaults to a short
+  starting page; explicit topics and the full-reference option use the same MCP
+  handler and reject unknown topics.
 - Chat checks cover message framing, metadata speaker names, missing/closed
   windows, completion-time lifecycle, literal arguments, exported loss masks,
   generation error feedback and undoable MCP recording. DOM checks cover the

@@ -104,7 +104,9 @@ This is a capability interpreter over JSON state. It has no real workers,
 provider-backed subagents, code execution or background job scheduler. Authors
 represent concurrent work through timestamps and durations and publish external
 changes using invisible calls. See [Skill.md](../trajectory_remix/Skill.md), also
-available through MCP's `get_authoring_guide`, for the complete authoring workflow.
+available through MCP's `get_authoring_guide(topic="reference")`, for the complete
+authoring workflow. For a short file-setup exercise, request `topic="sandbox"`
+or read [Sandbox setup](../trajectory_remix/guides/sandbox.md).
 
 Synthetic time still advances per tool call independently of logical token ticks.
 Compiler validation enforces structure, temporal conversation availability,

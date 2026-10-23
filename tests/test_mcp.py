@@ -55,8 +55,12 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 guide = await session.call_tool("get_authoring_guide", {})
                 assert (
                     not guide.isError
-                    and "Synthetic tool inventory" in guide.structuredContent["content"]
+                    and "Start here: one lesson at a time" in guide.structuredContent["content"]
                 )
+                parallel = await session.call_tool("get_authoring_guide", {"topic": "parallel"})
+                assert not parallel.isError and "Verify overlap" in parallel.structuredContent["content"]
+                reference = await session.call_tool("get_authoring_guide", {"topic": "reference"})
+                assert not reference.isError and "Synthetic tool inventory" in reference.structuredContent["content"]
                 assert tools["delete_event"].annotations.destructiveHint
                 assert (
                     tools["create_tool_call"].inputSchema["properties"]["invisible"][
@@ -317,11 +321,12 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     assert current.structuredContent["sandbox"]["files"] == {
                         "/mcp.txt": "saved"
                     }
+                    external_tick = scheduled.structuredContent["tool_call"]["end"] + 1
                     external = await session.call_tool(
                         "create_tool_call",
                         {
                             "sample_id": "stdio-test",
-                            "tick": "201",
+                            "tick": str(external_tick),
                             "tool": "file_write",
                             "arguments": {
                                 "path": "external.txt",
@@ -334,7 +339,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     assert not external.isError, external
                     assert external.structuredContent["tool_call"]["invisible"]
                     state = await session.call_tool(
-                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 201}
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": external_tick}
                     )
                     assert (
                         state.structuredContent["sandbox"]["files"]["/external.txt"]
@@ -350,7 +355,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     == "tool-call"
                 )
                 assert (
-                    DatasetStore(dataset).samples[0]["replay"]["201"][0]["op"]
+                    DatasetStore(dataset).samples[0]["replay"][str(external_tick)][0]["op"]
                     == "invisible-tool-call"
                 )
         finally:

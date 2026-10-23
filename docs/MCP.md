@@ -6,9 +6,29 @@ running dashboard's command handlers, dataset, tokenizer, generation loop and
 saves. The stdio bridge connects through the dashboard's guarded local API;
 HTTP requests use the same in-process dataset owner.
 
-Read [Skill.md](../trajectory_remix/Skill.md) for the parallel authoring workflow,
-or retrieve it with `get_authoring_guide`. All sandbox tools are synthetic;
+Start with the [short agent guides](../trajectory_remix/guides/start.md), also
+available through `get_authoring_guide`. All sandbox tools are synthetic;
 authors write specialist replies without running real subagents or code.
+
+## Learn one task at a time
+
+`get_authoring_guide()` returns a short starting page. Request one `topic` for
+the next task; it does not concatenate the lessons or load the entire manual:
+
+| Topic | Walkthrough |
+| --- | --- |
+| `first` | [Create a tiny trajectory; learn start ticks, token streams and closure](../trajectory_remix/guides/first.md) |
+| `parallel` | [Overlap independent specialist work and anchor dependent follow-ups](../trajectory_remix/guides/parallel.md) |
+| `edit` | [Repair wording and timing with targeted event edits](../trajectory_remix/guides/edit.md) |
+| `sandbox` | [Seed trajectory files and verify visible reads](../trajectory_remix/guides/sandbox.md) |
+| `tools` | [Choose a small starter tool set and defer advanced tools](../trajectory_remix/guides/tools.md) |
+| `reference` | [Complete Skill.md manual](../trajectory_remix/Skill.md) |
+
+Existing callers that need the full manual must now pass `topic: "reference"`;
+the response still contains `content`. Both transports support the same topics.
+Tool pruning is a client/agent configuration recommendation, not a server-side
+restriction. Batching, full-source replacement and ephemeral workbench execution
+remain available for advanced workflows.
 
 ## Setup
 
@@ -158,7 +178,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 
 | Tool | Purpose |
 | --- | --- |
-| `get_authoring_guide` | Read the bundled Skill.md with parallel authoring, synthetic tools and curation guidance. |
+| `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns the complete Skill.md. |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
 | `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
 | `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
