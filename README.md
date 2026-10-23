@@ -8,11 +8,9 @@ The dashboard is served only on `127.0.0.1`.
 
 ```bash
 cd trajectory-remix
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[test]'
-python -m trajectory_remix init --dataset project.sqlite --tokenizer /path/to/tokenizer.json
-python -m trajectory_remix --dataset project.sqlite
+./scripts/install.sh
+./scripts/run.sh init --dataset project.trajectories --tokenizer /path/to/tokenizer.json
+./scripts/run.sh --dataset project.trajectories
 ```
 
 Open **http://127.0.0.1:8765** in your browser. Windows activation:
