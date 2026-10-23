@@ -8,8 +8,14 @@ import json
 import uuid
 from dataclasses import dataclass, field
 
-from .tools import SCHEMAS, Sandbox, ToolError
-
+from .tools import (
+    SCHEMAS,
+    STORES,
+    Sandbox,
+    ToolError,
+    tool_failure,
+    validate_subagent_outcome,
+)
 
 class ToolSessionError(ValueError):
     def __init__(self, message, code="invalid_arguments"):
@@ -21,7 +27,6 @@ class ToolSessionError(ValueError):
 class ToolSession:
     sandbox: Sandbox
     options: dict
-    endpoint_id: str | None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     interactions: list = field(default_factory=list)
 
@@ -36,7 +41,7 @@ class ToolSessions:
             raise ToolSessionError(f"Tool session not found: {session_id}", "not_found")
         return self.sessions[session_id]
 
-    def create(self, session_id, options, endpoint_id=None):
+    def create(self, session_id, options):
         session_id = session_id if session_id is not None else str(uuid.uuid4())
         if not session_id or len(session_id) > 128:
             raise ToolSessionError("session_id must have 1..128 characters")
@@ -47,7 +52,7 @@ class ToolSessions:
                 "Tool session limit reached; delete an unused session", "quota_exceeded"
             )
         sandbox = Sandbox(**options)
-        self.sessions[session_id] = ToolSession(sandbox, options.copy(), endpoint_id)
+        self.sessions[session_id] = ToolSession(sandbox, options.copy())
         return self.inspect(session_id, include_state=False, include_log=False)
 
     def inspect(self, session_id, include_state=True, include_log=True):
@@ -56,7 +61,6 @@ class ToolSessions:
         result = {
             "session_id": session_id,
             "busy": session.lock.locked(),
-            "endpoint_id": session.endpoint_id,
             "clock": sandbox.clock.isoformat(),
             "seconds_per_call": sandbox.step,
             "calls": sandbox.calls,
@@ -65,14 +69,9 @@ class ToolSessions:
             "max_bytes": sandbox.max_bytes,
             "bytes_used": sum(
                 len(json.dumps(s).encode())
-                for s in (sandbox.files, sandbox.memory, sandbox.notes, sandbox.skills)
+                for s in (getattr(sandbox, name) for name in STORES)
             ),
-            "counts": {
-                "files": len(sandbox.files),
-                "memory": len(sandbox.memory),
-                "notes": len(sandbox.notes),
-                "skills": len(sandbox.skills),
-            },
+            "counts": {name: len(getattr(sandbox, name)) for name in STORES},
             "interaction_count": len(session.interactions),
             "max_log_bytes": self.max_log_bytes,
             "log_bytes": sum(
@@ -82,24 +81,20 @@ class ToolSessions:
         }
         if include_state:
             result["state"] = copy.deepcopy(
-                {
-                    "files": sandbox.files,
-                    "memory": sandbox.memory,
-                    "notes": sandbox.notes,
-                    "skills": sandbox.skills,
-                }
+                {name: getattr(sandbox, name) for name in STORES}
             )
         if include_log:
             result["interactions"] = copy.deepcopy(session.interactions)
         return result
 
     def definitions(self, session_id=None):
-        session = self.get(session_id) if session_id is not None else None
+        if session_id is not None:
+            self.get(session_id)
         definitions = copy.deepcopy(SCHEMAS)
         for definition in definitions:
-            definition["available"] = definition["function"][
-                "name"
-            ] != "subagent" or bool(session and session.sandbox.broker)
+            definition["available"] = True
+            if definition["function"]["name"] == "subagent":
+                definition["requires_authored_outcome"] = True
         return {
             "tools": definitions,
             "requires_session": True,
@@ -135,12 +130,18 @@ class ToolSessions:
             )
         return copy.deepcopy(entry)
 
-    async def call(self, session_id, name, arguments, recorder=None, context=None):
+    async def call(
+        self, session_id, name, arguments, recorder=None, context=None, outcome=None
+    ):
         session = self.get(session_id)
         if session.lock.locked():
             raise ToolSessionError("Tool session has an in-flight call", "busy")
         try:
             session.sandbox.check_args(name, arguments)
+            if outcome is not None:
+                if name != "subagent":
+                    raise ToolError("Only subagent accepts an authored outcome")
+                validate_subagent_outcome(outcome)
         except ToolError as error:
             raise ToolSessionError(str(error)) from error
         if session.sandbox.calls >= session.sandbox.max_calls:
@@ -151,10 +152,12 @@ class ToolSessions:
             candidate = copy.deepcopy(session.sandbox)
             try:
                 try:
-                    result = await candidate.call(name, arguments, **(context or {}))
+                    result = await candidate.call(
+                        name, arguments, subagent_outcome=outcome, **(context or {})
+                    )
                     outcome = {"ok": True, "result": result}
                 except (ToolError, ValueError, OverflowError) as error:
-                    outcome = {"ok": False, "error": str(error)}
+                    outcome = tool_failure(error)
                 entry = {
                     "id": uuid.uuid4().hex,
                     "name": name,

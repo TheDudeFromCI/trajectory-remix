@@ -13,7 +13,12 @@ import httpx
 
 from .compiler import KEY
 from .dataset import reject_constant
-from .tools import SCHEMAS, Sandbox, chat_context
+from .tools import (
+    SCHEMAS,
+    Sandbox,
+    chat_context,
+    tool_failure,
+)
 
 TAGS = [
     "competent",
@@ -514,7 +519,7 @@ class SampleBuilder:
             self.add_stream(window, self.compiler.special["eos"], start="auto")
         return plan
 
-    async def task(self, task, sandbox, feedback="", depth=0):
+    async def task(self, task, sandbox, feedback=""):
         endpoint = self.endpoints[task["endpoint"]]
         visibility = dict(task)
         if self.sample["replay"]:
@@ -542,7 +547,13 @@ class SampleBuilder:
             windows = []
         messages = assemble(windows, task, self.config.get("tags", []), feedback)
         self.log(f"Task {task['id']} → {endpoint['id']} / {endpoint['model']}")
-        schemas = SCHEMAS if task.get("tools") else None
+        # Synthetic delegation is authored through MCP/source outcomes, never a
+        # nested provider request from the generated coordinator.
+        schemas = (
+            [s for s in SCHEMAS if s["function"]["name"] != "subagent"]
+            if task.get("tools")
+            else None
+        )
         for turn in range(self.config.get("max_tool_rounds", 12) + 1):
             message = await self.client.complete(endpoint, messages, schemas)
             calls = message.get("tool_calls") or []
@@ -602,7 +613,7 @@ class SampleBuilder:
                     result = await sandbox.call(function.get("name"), args, **context)
                     outcome = {"ok": True, "result": result}
                 except (ValueError, KeyError, OverflowError) as e:
-                    outcome = {"ok": False, "error": str(e)}
+                    outcome = tool_failure(e)
                 event = {
                     "op": "tool-call",
                     "window": f"tool-result-{suffix}",
@@ -671,27 +682,6 @@ class SampleBuilder:
             self.next_tick = self.compiler.compile(self.sample)["max_tick"] + 1
             self.serial = len([e for v in self.sample["replay"].values() for e in v])
 
-        async def broker(prompt, depth):
-            # Separate sandbox and restricted task. No access to parent's RAM state.
-            child = Sandbox(
-                **self.config.get("clock", {}),
-                depth=depth,
-                max_calls=min(8, self.config.get("max_tool_calls", 64)),
-            )
-            endpoint = self._subagent_endpoint
-            child_task = {
-                "id": f"subagent-{depth}",
-                "endpoint": endpoint,
-                "prompt": prompt,
-                "visible": [],
-                "layout": "messages",
-                "tools": False,
-            }
-            try:
-                return await self.task(child_task, child, depth=depth)
-            finally:
-                child.close()
-
         metadata = self.sample.get("metadata", {})
         sandbox = Sandbox(
             **(
@@ -699,7 +689,6 @@ class SampleBuilder:
                 if isinstance(metadata, dict)
                 else {}
             ),
-            broker=broker,
             max_calls=self.config.get("max_tool_calls", 64),
         )
         try:
@@ -718,7 +707,6 @@ class SampleBuilder:
             if not tasks:
                 raise ValueError("No enabled generation tasks selected")
             for task in tasks:
-                self._subagent_endpoint = task["endpoint"]
                 content = await self.task(task, sandbox, feedback)
                 self.add_stream(
                     task["window"],

@@ -6,7 +6,7 @@ import hashlib
 import json
 import secrets
 from collections import OrderedDict
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryFile
 
@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.routing import Route
 
 from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, chunks
@@ -27,13 +28,14 @@ from .dataset import (
 )
 from .llm import TAGS, SampleBuilder, validate_config
 from .runner import Runner
+from .mcp_server import StreamableHTTP
 from .tools import SCHEMAS
 from .storage import DatasetState, DatasetStore, StorageConflict
 
 MAX_BODY = 40_000_000
 
 
-def create_app(dataset: Path, client=None):
+def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
     store = DatasetStore(dataset)
     compiler = store.load_compiler()
     config = validate_config(json.loads(store.info()[3]))
@@ -45,13 +47,16 @@ def create_app(dataset: Path, client=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        try:
-            yield
-        finally:
+        async with AsyncExitStack() as stack:
+            if mcp_http.manager is not None:
+                await stack.enter_async_context(mcp_http.manager.run())
             try:
-                await runner.stop()
+                yield
             finally:
-                commands.tool_sessions.close()
+                try:
+                    await runner.stop()
+                finally:
+                    commands.tool_sessions.close()
 
     app = FastAPI(title="Trajectory Remix", lifespan=lifespan)
     app.state.dataset = state
@@ -61,6 +66,10 @@ def create_app(dataset: Path, client=None):
     commands = TrajectoryCommands(state, compiler, runner, client)
     app.state.commands = commands
     app.state.tool_sessions = commands.tool_sessions
+    mcp_http = StreamableHTTP(commands, mcp_allowed_origins)
+    app.routes.append(
+        Route("/mcp", mcp_http, methods=["GET", "POST", "DELETE", "OPTIONS"])
+    )
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],

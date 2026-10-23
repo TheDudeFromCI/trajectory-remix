@@ -8,11 +8,9 @@ The dashboard is served only on `127.0.0.1`.
 
 ```bash
 cd trajectory-remix
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[test]'
-python -m trajectory_remix init --dataset project.sqlite --tokenizer /path/to/tokenizer.json
-python -m trajectory_remix --dataset project.sqlite
+./scripts/install.sh
+./scripts/run.sh init --dataset project.trajectories --tokenizer /path/to/tokenizer.json
+./scripts/run.sh --dataset project.trajectories
 ```
 
 Open **http://127.0.0.1:8765** in your browser. Windows activation:
@@ -52,16 +50,54 @@ python -m trajectory_remix init --dataset custom.sqlite --tokenizer tokenizer.js
 The process owns the dataset session. Closing the browser does not stop an active
 generation job. Stop the job in the dashboard or terminate the server.
 
-## MCP support
+## Connect an MCP client
 
-Install `python -m pip install -e '.[mcp]'`, start the dashboard normally, then
-connect an MCP client to the stdio command:
+Install the MCP extra in your virtual environment and keep the dashboard running
+with your initialized project:
 
 ```bash
-python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
+python -m pip install -e '.[mcp]'
+python -m trajectory_remix --dataset project.sqlite
 ```
 
-The bridge exposes 39 tools for trajectory creation, full JSON inspection,
+For **Streamable HTTP**, including llama.cpp Web UI, connect to
+**`http://127.0.0.1:8765/mcp`** (the root URL serves the dashboard). The HTTP
+endpoint is available when the MCP extra is installed; restart after installation.
+For a browser UI on port 8123, explicitly allow its origin when starting Remix:
+
+```bash
+python -m trajectory_remix --dataset project.sqlite \
+  --mcp-allow-origin http://127.0.0.1:8123
+```
+
+In llama.cpp, select `streamable_http` and use the full `/mcp` URL. Its
+`--ui-mcp-proxy` may remain enabled. If you browse via `localhost`, allow
+`http://localhost:8123` instead, or repeat the flag to allow both origins.
+See the [HTTP connection and curl checks](docs/MCP.md#streamable-http-and-llamacpp-web-ui).
+
+For **stdio** clients, add this server configuration, replacing the Python path
+with the absolute path to your virtual environment:
+
+```json
+{
+  "mcpServers": {
+    "trajectory-remix": {
+      "command": "/absolute/path/trajectory-remix/.venv/bin/python",
+      "args": [
+        "-m", "trajectory_remix.mcp_server",
+        "--url", "http://127.0.0.1:8765"
+      ]
+    }
+  }
+}
+```
+
+On Windows, use `.venv/Scripts/python.exe`. Match `--url` to the dashboard's port
+if you changed it. The client launches the stdio bridge; its `--url` points to
+the dashboard root, while Streamable HTTP clients use `/mcp`. Call `get_session` and
+`get_authoring_guide` to check the connection and read the authoring workflow.
+
+Both transports expose the same 42 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
@@ -413,6 +449,14 @@ calls. Scrubbing backward restores earlier state. Editing or removing a call
 recomputes subsequent state and results; importing old tool-result text alone
 does not execute a tool or reconstruct its state.
 
+**+ External activity** adds `invisible-tool-call` events that change the sandbox
+at a chosen tick without model tokens, windows or agent call-budget use. Use them
+for files created by a user or subagent. Persistent `subagent` calls return a
+`conversationId`; pass it as `resume` on follow-ups. Versioned artifacts, task
+dependencies and conversation/status inspection support coordinated work.
+See [sandbox coordination](docs/SANDBOX.md) and the
+[persistent-agent fixture](examples/persistent-agents.json) for examples and limits.
+
 Schedule calls in Events or Source JSON, using numeric ticks or existing anchor
 expressions:
 
@@ -466,8 +510,8 @@ existing sample restores its sandbox before extending it. Clock settings are
 stored in `metadata.synthetic_clock` (`seed`, `seconds_per_call`). Preview and
 export replay deterministic tools locally. A `subagent` event requires its
 recorded `outcome`, for example
-`{"ok":true,"result":{"response":"Recorded answer"}}` or
-`{"ok":false,"error":"Failure reason"}`; replay never repeats an LLM request.
+`{"ok":true,"result":{"conversationId":"coder","response":"Recorded answer"}}` or
+`{"ok":false,"error":"Failure reason"}`; replies are authored and never call an LLM.
 Other tools compute their outcomes and reject recorded overrides. Compiled
 previews expose `tool_calls` and a bounded delta history; frame responses include
 the selected tick's `sandbox` state without future results.
@@ -476,11 +520,12 @@ the selected tick's `sandbox` state without future results.
 |---|---|
 | `chat` | Takes `{"content":"Hello!"}` and appends `<\|msg\|>Kidra: Hello!<\|/msg\|>\n` to the window named `chat` at completion. Uses `metadata.agent_name` when specified. Returns an error observation if `chat` is missing or closed; it never opens that window automatically. |
 | `time_now`, `time_advance` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
-| `file_write/read/list/delete` | Virtual UTF-8 files inside a RAM dictionary; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
+| `file_write/read/list/delete`, `file_stat`, `file_patch` | Virtual UTF-8 files with immutable SHA-256 versions and optional stale-write protection; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
 | `memory_save/search` | Local lexical-overlap retrieval with top-8 results. RAG store is isolated; no embeddings service required. |
-| `note_save/list/delete` | Tasks/notes with todo, doing, done status. |
+| `note_save/list/delete` | Tasks/notes with todo, doing, blocked, done status, owners, dependencies, blockers and acceptance criteria. |
 | `skill_save/load/list` | Skill texts stored and retrieved within the sample only; not executed. |
-| `subagent` | One attached-LLM task in a fresh child sandbox; no parent memory or host access. Child tool calling is disabled. |
+| `subagent` | Authored synthetic conversation with retained history; follow up using `resume`. Only explicitly referenced artifact versions are shared. No provider calls occur. |
+| `subagent_list/get/close`, `runtime_status` | Inspect retained conversations and task progress; close conversations to prevent further resumes. |
 
 For example, a trajectory with `"metadata":{"agent_name":"Nova","user_name":"Alex"}`
 can send a message with these replay events:
@@ -503,18 +548,14 @@ round budgets, with at most 256 replay tool events per sample. Inputs and tool n
 errors. Results are actual simulation outcomes, not fabricated claims of real
 host actions. Live sandbox objects are destroyed in `finally` blocks on success,
 failure and cancellation; recorded replay events reconstruct their historical
-state for inspection. The subagent's outbound capability is the already configured LLM
-broker, not general network access.
+state for inspection. All sandbox tools, including subagents, are synthetic.
+Authors supply subagent replies; Remix does not execute code or launch agents.
+External execution logs must be curated into appropriately masked observations
+and invisible state changes before becoming training samples.
 
-This is a **capability sandbox for fixed simulated tools**, not a process-level
-sandbox for arbitrary third-party code. Adding Python/shell/plugin execution
-would require a separate hardened execution service. Docker provides namespaces
-and resource isolation but shares the host kernel; default containers alone
-are not a sufficient hostile-code boundary. Such an extension should use an
-unprivileged/rootless runtime, no Docker socket/host mounts, no network, read-only
-root filesystem, dropped capabilities, seccomp, resource limits and, where
-needed, stronger isolation such as a microVM. None of that is needed to run the
-included simulation interpreter.
+For the complete parallel authoring workflow, read [Skill.md](trajectory_remix/Skill.md)
+or call `get_authoring_guide` through MCP. It covers synthetic histories, scoped
+artifacts, parallel timing, masks, markers, TODOs and review.
 
 The HTTP service also enforces a random per-process session token on API calls,
 trusted local Host values, same-origin checks and a content security policy.
@@ -523,7 +564,7 @@ It is a local single-user tool, not a multi-user/public hosting service.
 The existing MCP bridge also exposes `create_tool_call(sample_id, tick, tool,
 arguments, duration_ticks=0, window=null, outcome=null, position=null,
 expected_revision=null, delivery="instant", content=null, segments=null,
-loss=null)` and `get_sandbox_state(sample_id, tick,
+loss=null, invisible=false, source=null)` and `get_sandbox_state(sample_id, tick,
 include_calls=true)`. Discover schemas with `list_simulated_tools`. Scheduled
 calls compile before committing one undoable edit, support `apply_batch` and
 revision guards, and save with `save_dataset`. Both commands operate on the
@@ -584,4 +625,4 @@ logical token ticks. Executable tool-call results commit instantly at completion
 ordinary append events can stream manually authored observations with inline
 anchors when authoring reactive trajectories.
 
-Primary API/security references: [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/en/api/tokenizer), [Docker Engine security](https://docs.docker.com/engine/security/).
+Primary API/security references: [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/en/api/tokenizer).

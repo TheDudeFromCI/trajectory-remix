@@ -1,0 +1,233 @@
+{
+  "schema-version": "1.0",
+  "id": "persistent-agents",
+  "tick-policy": "external-first",
+  "metadata": {
+    "tags": [
+      "coordination",
+      "authored-fixture"
+    ],
+    "agent_name": "Kidra",
+    "description": "Recorded fixture; specialist responses and external file activity are authored, not live execution evidence."
+  },
+  "replay": {
+    "0": [
+      {
+        "op": "open",
+        "window": "chat"
+      },
+      {
+        "op": "append",
+        "window": "chat",
+        "source": "user",
+        "content": "User: Please implement a double function and have a second specialist review it.\n"
+      },
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "note_save",
+        "arguments": {
+          "key": "code",
+          "text": "Implement double",
+          "status": "doing",
+          "owner": "coder",
+          "acceptance_criteria": [
+            "Multiply a numeric value by two"
+          ]
+        }
+      },
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "note_save",
+        "arguments": {
+          "key": "review",
+          "text": "Review the implementation",
+          "status": "todo",
+          "owner": "reviewer",
+          "depends_on": [
+            "code"
+          ]
+        }
+      }
+    ],
+    "1": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "subagent",
+        "arguments": {
+          "task": "Implement /math.py with double(value). Keep your response concise."
+        },
+        "duration-ticks": 4,
+        "outcome": {
+          "ok": true,
+          "result": {
+            "conversationId": "coder",
+            "response": "Implemented /math.py; ready for review."
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "runtime_status",
+        "arguments": {}
+      }
+    ],
+    "3": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "chat",
+        "arguments": {
+          "content": "The coder is running. Review is planned after the implementation is available."
+        }
+      }
+    ],
+    "5": [
+      {
+        "op": "invisible-tool-call",
+        "tool": "file_write",
+        "source": "coder",
+        "arguments": {
+          "path": "/math.py",
+          "content": "def double(value):\n    return value * 2\n"
+        }
+      },
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "note_save",
+        "arguments": {
+          "key": "code",
+          "text": "Implementation available",
+          "status": "done"
+        }
+      }
+    ],
+    "6": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "file_stat",
+        "arguments": {
+          "path": "/math.py"
+        }
+      }
+    ],
+    "7": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "subagent",
+        "arguments": {
+          "task": "Review the referenced source for the numeric doubling requirement. Do not claim tests were executed.",
+          "artifacts": [
+            {
+              "path": "/math.py",
+              "version": "sha256:e77335c804a116a2e8a7445a96ea133bd60d7bbe5361606d933bcb5509392962"
+            }
+          ]
+        },
+        "duration-ticks": 4,
+        "outcome": {
+          "ok": true,
+          "result": {
+            "conversationId": "reviewer",
+            "response": "The supplied source multiplies value by two. I reviewed the source; I did not execute tests."
+          }
+        }
+      },
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "note_save",
+        "arguments": {
+          "key": "review",
+          "text": "Source review underway",
+          "status": "doing"
+        }
+      }
+    ],
+    "8": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "subagent",
+        "arguments": {
+          "task": "What input types does your implementation support?",
+          "resume": "coder"
+        },
+        "duration-ticks": 2,
+        "outcome": {
+          "ok": true,
+          "result": {
+            "conversationId": "coder",
+            "response": "It uses Python multiplication semantics; callers should supply numeric values for this requirement."
+          }
+        }
+      }
+    ],
+    "9": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "runtime_status",
+        "arguments": {}
+      }
+    ],
+    "10": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "chat",
+        "arguments": {
+          "content": "The coder clarified input behavior. The reviewer is still examining the pinned source version."
+        }
+      }
+    ],
+    "12": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "note_save",
+        "arguments": {
+          "key": "review",
+          "text": "Source review complete; no test execution claimed",
+          "status": "done"
+        }
+      },
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "runtime_status",
+        "arguments": {}
+      }
+    ],
+    "13": [
+      {
+        "op": "tool-call",
+        "window": "tools",
+        "tool": "chat",
+        "arguments": {
+          "content": "Implementation and source review are complete. These recorded responses do not include executed test evidence."
+        }
+      }
+    ],
+    "14": [
+      {
+        "op": "generate",
+        "window": "chat",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "tools",
+        "content": "<|eos|>"
+      }
+    ]
+  }
+}

@@ -43,9 +43,27 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert initialized.serverInfo.name == "trajectory-remix"
                 catalog = await session.list_tools()
                 tools = {tool.name: tool for tool in catalog.tools}
-                assert len(tools) == 39
+                assert {
+                    "get_authoring_guide",
+                    "create_tool_call",
+                    "get_sandbox_state",
+                    "create_tool_session",
+                    "apply_batch",
+                    "query_trajectories",
+                } <= set(tools)
                 assert tools["get_trajectory"].annotations.readOnlyHint
+                guide = await session.call_tool("get_authoring_guide", {})
+                assert (
+                    not guide.isError
+                    and "Synthetic tool inventory" in guide.structuredContent["content"]
+                )
                 assert tools["delete_event"].annotations.destructiveHint
+                assert (
+                    tools["create_tool_call"].inputSchema["properties"]["invisible"][
+                        "type"
+                    ]
+                    == "boolean"
+                )
                 for tool in tools.values():
                     Draft202012Validator.check_schema(tool.inputSchema)
                     assert tool.inputSchema["additionalProperties"] is False
@@ -299,17 +317,41 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     assert current.structuredContent["sandbox"]["files"] == {
                         "/mcp.txt": "saved"
                     }
+                    external = await session.call_tool(
+                        "create_tool_call",
+                        {
+                            "sample_id": "stdio-test",
+                            "tick": "201",
+                            "tool": "file_write",
+                            "arguments": {
+                                "path": "external.txt",
+                                "content": "from user",
+                            },
+                            "invisible": True,
+                            "source": "user",
+                        },
+                    )
+                    assert not external.isError, external
+                    assert external.structuredContent["tool_call"]["invisible"]
+                    state = await session.call_tool(
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 201}
+                    )
+                    assert (
+                        state.structuredContent["sandbox"]["files"]["/external.txt"]
+                        == "from user"
+                    )
+                    assert state.structuredContent["sandbox"]["calls"] == 1
                     assert (
                         await session.call_tool("save_dataset", {})
                     ).structuredContent["saved"]
+                assert DatasetStore(dataset).samples[0]["id"] == "stdio-test"
                 assert (
-                    DatasetStore(dataset).samples[0]["id"] == "stdio-test"
+                    DatasetStore(dataset).samples[0]["replay"]["150"][0]["op"]
+                    == "tool-call"
                 )
                 assert (
-                    DatasetStore(dataset).samples[0]["replay"]["150"][0][
-                        "op"
-                    ]
-                    == "tool-call"
+                    DatasetStore(dataset).samples[0]["replay"]["201"][0]["op"]
+                    == "invisible-tool-call"
                 )
         finally:
             dashboard.terminate()
