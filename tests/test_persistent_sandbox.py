@@ -18,6 +18,7 @@ def agent(task, cid, response="answer", resume=None, duration=0, **extra):
         "op": "tool-call",
         "tool": "subagent",
         "window": cid,
+        "content": "x",  # Keep lifecycle tests independent of request tokenization.
         "arguments": {"task": task, **({"resume": resume} if resume else {}), **extra},
         "duration-ticks": duration,
         "outcome": {
@@ -67,7 +68,8 @@ def test_external_writes_share_completion_order_and_can_use_anchors(compiler, sa
                     "tool": "file_read",
                     "arguments": {"path": "x"},
                     "window": "read",
-                    "duration-ticks": 3,
+                    "duration-ticks": 2,
+                    "content": "x",
                 },
             ],
         }
@@ -242,9 +244,10 @@ def test_replay_persistent_lifecycle_and_runtime_status_never_show_future_answer
                     "tool": "runtime_status",
                     "arguments": {},
                     "window": "status",
+                    "content": "x",
                 }
             ],
-            "7": [
+            "8": [
                 agent("Clarify", "coder", "second result", resume="coder", duration=3)
             ],
         }
@@ -260,7 +263,7 @@ def test_replay_persistent_lifecycle_and_runtime_status_never_show_future_answer
     assert status["subagents"] == [
         {"conversationId": "coder", "status": "running", "turns": 0}
     ]
-    final = compiler.frame(plan, 10)["sandbox"]
+    final = compiler.frame(plan, 12)["sandbox"]
     assert final["conversations"]["coder"]["status"] == "ready"
     assert [m["content"] for m in final["conversations"]["coder"]["messages"]] == [
         "Implement",
@@ -270,7 +273,7 @@ def test_replay_persistent_lifecycle_and_runtime_status_never_show_future_answer
     ]
     # Replaying backwards must restore the prior ready state.
     assert (
-        len(compiler.frame(plan, 6)["sandbox"]["conversations"]["coder"]["messages"])
+        len(compiler.frame(plan, 7)["sandbox"]["conversations"]["coder"]["messages"])
         == 2
     )
 
@@ -313,7 +316,7 @@ def test_legacy_outcomes_get_stable_ids_and_recorded_failures_can_be_resumed(
                     "outcome": {"ok": False, "error": "provider failed"},
                 }
             ],
-            "3": [agent("recover", "conversation-1", resume="conversation-1")],
+            "4": [agent("recover", "conversation-1", resume="conversation-1")],
         }
     )
     plan = compiler.compile(sample)
@@ -321,11 +324,11 @@ def test_legacy_outcomes_get_stable_ids_and_recorded_failures_can_be_resumed(
         plan["tool_calls"][0]["outcome"]["result"]["conversationId"] == "conversation-1"
     )
     assert (
-        compiler.frame(plan, 2)["sandbox"]["conversations"]["conversation-1"]["status"]
+        compiler.frame(plan, 3)["sandbox"]["conversations"]["conversation-1"]["status"]
         == "failed"
     )
     assert (
-        compiler.frame(plan, 3)["sandbox"]["conversations"]["conversation-1"]["status"]
+        compiler.frame(plan, 5)["sandbox"]["conversations"]["conversation-1"]["status"]
         == "ready"
     )
 

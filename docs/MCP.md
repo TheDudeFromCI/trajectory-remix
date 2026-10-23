@@ -217,7 +217,10 @@ It accepts `sample_id`, string `tick` (numeric or anchor expression), `tool`, an
 an `arguments` object. Optional fields are `duration_ticks` (default 0), `window`
 (tool window ID; generated when omitted), `outcome` (recorded subagent
 only), `position`, `expected_revision`, `delivery` (`instant` or `stream`),
-`content` or `segments` (custom request text), and `loss` (request supervision).
+`content` or `segments` (custom request text), `loss` (request supervision),
+`tokens_per_tick` (streamed result rate, default 1), and `auto_anchor` (default
+false; allocate an unused post-result anchor ID and persist it as `result-anchor`).
+
 Set `invisible: true` for external sandbox activity and optionally supply `source`
 (for example `"user"` or `"coder"`). This creates `op: "invisible-tool-call"` in
 source. Invisible calls accept deterministic mutations only, without a `window`,
@@ -245,15 +248,19 @@ immediately, as with other edits.
 }
 ```
 
-The tool window exists from tick 0. The default instant `<tool>` request appends
-at tick 150; changes and masked `<tool_result>` content commit atomically in the
-same window at tick 175. Before completion the old sandbox state remains visible.
-With `delivery: "stream"`, the request emits one model token per tick starting
-at `tick`; execution starts on the next tick after its final token, and duration
-is measured from that dispatch. Custom `content`/`segments` can include anchors
+The tool window exists from tick 0. The `<tool>` request always emits one model
+token per tick starting at `tick`; execution starts on the next tick after its
+final token, and duration is measured from that dispatch. Before completion the
+old sandbox state remains visible. `delivery` controls `<tool_result>`: `instant`
+inserts the entire masked result at execution completion; `stream` delivers it
+from that tick at `tokens_per_tick`. Sandbox changes remain atomic at completion.
+Custom `content`/`segments` can include anchors
 and NOOPs to pause a request while a parallel call returns, then resume with its
 result. Omitted text produces a canonical request from `tool` and `arguments`;
 those structured fields always determine execution. Result text is always masked.
+With `auto_anchor: true`, the returned `tool_call.result_anchor` identifies a
+phase-B anchor at `tool_call.result_end`, the final result token's tick. Use
+`{N_TICK:id}+1` to schedule follow-up calls or close the same tool window.
 Multiple calls can share an open tool window. Equal completions use stable
 replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
 tool failures become `{ok:false,error:...}` observations. Only `subagent` accepts
@@ -263,7 +270,7 @@ a recorded `outcome`; compilation and inspection never repeat an LLM request.
 and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
 `artifacts`, `conversations`, `calls` and started `tool_calls`. Invisible calls
 are marked `invisible: true` and include `source` in this author-facing history.
-Each call has resolved `request_start`, execution
+Each visible call has resolved `request_start`, `result_end`, execution
 `start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
 composing and running calls omit their future outcome. The output limit is 4 MB;
 use `include_calls=false` to omit call logs when inspecting a large state.

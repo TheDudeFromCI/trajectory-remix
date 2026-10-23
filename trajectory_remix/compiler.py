@@ -323,11 +323,9 @@ class Compiler:
                     if event["op"] == "tool-call":
                         content_event = {
                             **event,
-                            "op": (
-                                "generate"
-                                if event.get("delivery", "instant") == "stream"
-                                else "append"
-                            ),
+                            "op": "generate",
+                            "delivery": "stream",
+                            "tokens-per-tick": 1,
                         }
                         if "content" not in event and "segments" not in event:
                             content_event["content"] = tool_request(
@@ -343,13 +341,14 @@ class Compiler:
                     ) not in ("instant", "stream"):
                         raise CompileError("delivery must be instant or stream", path)
                     if content_event["op"] == "generate" and (
-                        event.get("delivery", "stream") != "stream"
-                        or event.get("tokens-per-tick", 1) != 1
+                        content_event.get("delivery", "stream") != "stream"
+                        or content_event.get("tokens-per-tick", 1) != 1
                     ):
                         raise CompileError(
                             "Generated streams emit exactly one token per tick", path
                         )
-                    item["rate"] = integer(event.get("tokens-per-tick", 1), path, 1)
+                    integer(event.get("tokens-per-tick", 1), path, 1)
+                    item["rate"] = content_event.get("tokens-per-tick", 1)
                     item["instant"] = (
                         content_event["op"] == "append"
                         and event.get("delivery", "instant") == "instant"
@@ -372,8 +371,34 @@ class Compiler:
                         if aid in owners:
                             raise CompileError(f"Duplicate anchor {aid}", path)
                         owners[aid] = (item, boundary)
+                    if event["op"] == "tool-call" and "result-anchor" in event:
+                        aid = integer(event["result-anchor"], path)
+                        if aid in owners:
+                            raise CompileError(f"Duplicate anchor {aid}", path)
+                        owners[aid] = (item, None)
                 prepared.append(item)
         resolving, resolved, captures = set(), {}, {}
+
+        def capture(owner, boundary, start):
+            if start is None:
+                return None
+            if boundary is None:
+                if "result_end" not in owner:
+                    return None
+                tick, phase = owner["result_end"], "B"
+            else:
+                offset = (
+                    0 if owner["instant"] or boundary == 0
+                    else (boundary - 1) // owner["rate"]
+                )
+                tick = start + offset
+                phase = "B" if owner["content_op"] == "append" else "D"
+            return {
+                "tick": tick,
+                "window": owner["event"]["window"],
+                "path": owner["path"],
+                "phase": phase,
+            }
 
         def solve(item):
             ident = item["order"]
@@ -391,48 +416,74 @@ class Compiler:
                 if aid not in owners:
                     raise CompileError(f"Undefined anchor {aid}", item["path"])
                 owner, n = owners[aid]
-                start = solve(owner)
-                offset = 0 if owner["instant"] or n == 0 else (n - 1) // owner["rate"]
-                captured = start + offset
-                captures[str(aid)] = {
-                    "tick": captured,
-                    "window": owner["event"]["window"],
-                    "path": owner["path"],
-                    "phase": "B" if owner["content_op"] == "append" else "D",
-                }
-                if delta == 0 and owner["content_op"] == "generate" and n > 0:
+                captured = capture(owner, n, solve(owner))
+                if captured is None:
+                    resolving.remove(ident)
+                    return None
+                phase = captured["phase"]
+                if delta == 0 and phase == "D" and n > 0:
                     raise CompileError(
                         f"Anchor {aid} captures a phase-D output; dependent event must start at +1 or later",
                         item["path"],
                     )
                 if (
                     delta == 0
-                    and n > 0
-                    and owner["content_op"] == "append"
+                    and (n is None or n > 0)
+                    and phase == "B"
                     and item.get("content_op") != "generate"
                 ):
                     raise CompileError(
                         f"Anchor {aid} is captured in phase B; open/append dependents must start at +1 or later",
                         item["path"],
                     )
-                tick = captured + delta
+                tick = captured["tick"] + delta
             if tick >= MAX_TICKS:
                 raise CompileError(f"Tick limit exceeded ({MAX_TICKS})", item["path"])
             resolving.remove(ident)
             resolved[ident] = tick
             return tick
 
-        for item in prepared:
-            item["tick"] = solve(item)
-        for aid, (owner, n) in owners.items():
-            offset = 0 if owner["instant"] or n == 0 else (n - 1) // owner["rate"]
-            captures[str(aid)] = {
-                "tick": owner["tick"] + offset,
-                "window": owner["event"]["window"],
-                "path": owner["path"],
-                "phase": "B" if owner["content_op"] == "append" else "D",
+        def resolve_items():
+            for item in prepared:
+                item["tick"] = solve(item)
+
+        def finish_result(item, call):
+            result = {
+                "op": "append",
+                "window": call["window"],
+                "source": "tool",
+                "delivery": item["event"].get("delivery", "instant"),
+                "content": tool_message(
+                    "tool_result", call["outcome"], self.special.values()
+                ),
+                "loss": {"mask": "exclude"},
             }
-        sandbox, tool_calls = compile_sandbox(prepared, sample, self.ids["eos"])
+            item["result_event"] = result
+            item["result_encoded"] = self.encode(
+                result, item["path"], noop_weight, literal=True
+            )
+            rate = item["event"].get("tokens-per-tick", 1)
+            offset = (
+                (len(item["result_encoded"].ids) - 1) // rate
+                if result["delivery"] == "stream" and item["result_encoded"].ids
+                else 0
+            )
+            item["result_end"] = call["end"] + offset
+            if item["result_end"] >= MAX_TICKS:
+                raise CompileError("Expanded stream exceeds tick limit", item["path"] + ".result")
+            call["result_end"] = item["result_end"]
+            if "result-anchor" in item["event"]:
+                call["result_anchor"] = item["event"]["result-anchor"]
+
+        resolve_items()
+        sandbox, tool_calls = compile_sandbox(
+            prepared, sample, self.ids["eos"], resolve_items, finish_result
+        )
+        resolve_items()
+        if any(item["tick"] is None for item in prepared):
+            raise CompileError("Cyclic anchor dependency")
+        for aid, (owner, n) in owners.items():
+            captures[str(aid)] = capture(owner, n, owner["tick"])
         calls_by_path = {call["path"]: call for call in tool_calls}
         expanded = []
         tool_windows = {
@@ -473,32 +524,23 @@ class Compiler:
             call = calls_by_path[item["path"]]
             # Requests and results share a window that has existed since tick zero.
             # Only allowlisted sandbox operations run; request text remains data.
-            result = {
-                "op": "append",
-                "window": call["window"],
-                "source": "tool",
-                "content": tool_message(
-                    "tool_result", call["outcome"], self.special.values()
-                ),
-                "loss": {"mask": "exclude"},
-            }
+            result = item["result_event"]
             expanded.extend(
                 [
                     {
                         **item,
                         "event": item["request_event"],
                         "path": item["path"] + ".request",
+                        "synthetic_request": True,
                     },
                     {
                         **item,
                         "event": result,
                         "tick": call["end"],
                         "path": item["path"] + ".result",
-                        "instant": True,
-                        "rate": 1,
-                        "encoded": self.encode(
-                            result, item["path"], noop_weight, literal=True
-                        ),
+                        "instant": result["delivery"] == "instant",
+                        "rate": item["event"].get("tokens-per-tick", 1),
+                        "encoded": item["result_encoded"],
                     },
                 ]
             )
@@ -688,6 +730,7 @@ class Compiler:
                     x["item"]["order"]: x["item"]
                     for x in group
                     if not x["item"].get("synthetic_chat")
+                    and not (x.get("empty") and x["item"].get("synthetic_request"))
                 }
                 if len(distinct) > 1 and not all(
                     p["event"]["op"] == "append" and p["instant"]

@@ -131,12 +131,12 @@ The intended tool workflow is **request and observation in the same tool window*
 
 In Remix, author visible tool interactions with `create_tool_call` so request,
 result, timing and loss masks are compiled together. Do **not** add a duplicate
-manual result event. `delivery: "stream"` models the request being generated one
-token per tick and starts execution after its final request token. The default
-`delivery: "instant"` is a compact **authoring shortcut** that places the full
-request at one tick; it should not be confused with the underlying one-token-per-
-window generation model. The outcome remains an external observation in either
-case. Specialist `conversationId` values track retained subagent conversations;
+manual result event. Requests always generate one token per tick, and execution
+starts after the final request token. `delivery` controls the result: `"instant"`
+(the default) inserts it at completion; `"stream"` delivers it at `tokens_per_tick`
+(default 1). The outcome remains a masked external observation in either case.
+Use `auto_anchor: true` to capture the final result token for follow-up scheduling.
+Specialist `conversationId` values track retained subagent conversations;
 they are not window IDs. A resumed specialist turn can use the same conversation
 ID without requiring the same window name.
 
@@ -196,7 +196,8 @@ These are author-side `create_tool_call` arguments for one specialist turn:
   "tool": "subagent",
   "window": "coder-call",
   "arguments": { "task": "Implement /math.py with double(value)." },
-  "duration_ticks": 8,
+  "duration_ticks": 200,
+  "auto_anchor": true,
   "outcome": {
     "ok": true,
     "result": {
@@ -220,7 +221,7 @@ For example, after the first turn completes:
 ```json
 {
   "sample_id": "parallel-example",
-  "tick": "20",
+  "tick": "{N_TICK:1}+2",
   "tool": "subagent",
   "window": "coder-call",
   "arguments": {
@@ -251,20 +252,20 @@ assistant output. Read the history and write a coherent next reply yourself.
 
 ## Make work parallel without creating real workers
 
-Overlap synthetic call execution intervals using timestamps and durations. For
-example, start coder at tick 10 for 8 ticks and docs at tick 11 for 12 ticks, in
-separate tool windows. At tick 12, `runtime_status` can report both conversations
-running. A coordinator `chat` call at tick 13 can accurately describe that status.
-At tick 20 the coder is available for the follow-up above, while docs is still
-running. Schedule a reviewer after the required artifact becomes available.
+Overlap synthetic call execution intervals using timestamps and durations. Start
+coder and docs requests in separate windows, inspect their returned execution
+`start`/`end` ticks, then schedule `runtime_status` to finish while both are running.
+Allow enough execution time for the status request to finish composing. A later
+coordinator `chat` call can describe that observation. Schedule a reviewer after
+the required artifact becomes available.
 
-`delivery: "instant"` (the default) places the full request at the requested tick;
-`duration_ticks` starts there. This is useful for compact timing sketches.
-With `delivery: "stream"`, Kidra writes one request token per tick. Execution
-starts on the tick after the final request token; duration starts at dispatch,
-not at the first request token. Inspect the returned `tool_call.start` and `end`
-before scheduling dependent work. Use streamed requests for samples intended to
-teach interleaving during request composition. Different windows can compose in
+Requests always stream; `delivery` selects instant or streamed results.
+Execution starts on the tick after the final request token; `duration_ticks`
+starts at dispatch. Inspect `tool_call.start`, `end`, and `result_end` before
+scheduling dependent work. The first worked call allocates result anchor 1 in a
+fresh sample; use its returned `result_anchor` ID when other markers already exist.
+The follow-up begins at `{N_TICK:1}+2`, after its entire result has arrived.
+Different windows can compose in
 parallel; two emitting streams cannot occupy the same window at the same tick.
 
 For custom streamed requests, `content` or `segments` controls the request text;
@@ -281,12 +282,12 @@ that match the observable scenario rather than claiming wall-clock runtimes.
 
 ## Publish external activity invisibly
 
-For the coder's completion above, publish its file at tick 18 with:
+After the coder's result above, publish its file using its result anchor:
 
 ```json
 {
   "sample_id": "parallel-example",
-  "tick": "18",
+  "tick": "{N_TICK:1}+1",
   "tool": "file_write",
   "arguments": {
     "path": "/math.py",
