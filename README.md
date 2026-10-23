@@ -52,14 +52,37 @@ python -m trajectory_remix init --dataset custom.sqlite --tokenizer tokenizer.js
 The process owns the dataset session. Closing the browser does not stop an active
 generation job. Stop the job in the dashboard or terminate the server.
 
-## MCP support
+## Connect an MCP client
 
-Install `python -m pip install -e '.[mcp]'`, start the dashboard normally, then
-connect an MCP client to the stdio command:
+Install the MCP extra in your virtual environment and keep the dashboard running
+with your initialized project:
 
 ```bash
-python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
+python -m pip install -e '.[mcp]'
+python -m trajectory_remix --dataset project.sqlite
 ```
+
+Add this server to your MCP client's configuration, replacing the Python path
+with the absolute path to your virtual environment:
+
+```json
+{
+  "mcpServers": {
+    "trajectory-remix": {
+      "command": "/absolute/path/trajectory-remix/.venv/bin/python",
+      "args": [
+        "-m", "trajectory_remix.mcp_server",
+        "--url", "http://127.0.0.1:8765"
+      ]
+    }
+  }
+}
+```
+
+On Windows, use `.venv/Scripts/python.exe`. Match `--url` to the dashboard's port
+if you changed it. The client launches the stdio bridge; the URL points to the
+dashboard, not an HTTP MCP endpoint. Once connected, call `get_session` and
+`get_authoring_guide` to check the connection and read the authoring workflow.
 
 The bridge exposes 42 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
