@@ -282,11 +282,14 @@ header {
   display: grid;
   gap: 6px;
 }
-.metadata-panel label, .metadata-panel summary, #metadata-status {
+.metadata-panel label,
+.metadata-panel summary,
+#metadata-status {
   font-size: 11px;
   color: var(--muted);
 }
-.metadata-panel input, .metadata-panel textarea {
+.metadata-panel input,
+.metadata-panel textarea {
   width: 100%;
   min-width: 0;
 }
@@ -833,6 +836,16 @@ h2 {
 .event-header input {
   width: 145px;
 }
+.event-header .event-toggle {
+  padding: 0 6px;
+  border: none;
+  background: none;
+}
+.event-card.collapsed .event-summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .event-header .event-window {
   flex: 1;
   min-width: 100px;
@@ -1116,5 +1129,15 @@ dialog::backdrop {
   }
 }
 
-.sample-pagination { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px; font-size: 11px; }
-.sample-pagination button { padding: 5px 8px; font-size: 11px; }
+.sample-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px;
+  font-size: 11px;
+}
+.sample-pagination button {
+  padding: 5px 8px;
+  font-size: 11px;
+}

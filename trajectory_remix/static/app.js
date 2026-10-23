@@ -875,6 +875,7 @@ function checkbox(value, onChange) {
   n.onchange = () => onChange(n.checked);
   return n;
 }
+const collapsedEvents = new WeakSet();
 function renderEvents() {
   $("event-list").replaceChildren(
     ...eventDraft.map((item, i) => {
@@ -882,7 +883,36 @@ function renderEvents() {
         card = node("div", "event-card"),
         head = node("div", "event-header");
       const update = () => setDirty();
-      head.append(node("small", "", String(i + 1).padStart(2, "0")));
+      const winIndex = plan
+        ? plan.windows.findIndex((w) => w.id === e.window)
+        : -1;
+      if (winIndex >= 0)
+        card.style.borderColor = colors[winIndex % colors.length];
+      const collapsed = collapsedEvents.has(item);
+      const toggle = button(
+        collapsed ? "▸" : "▾",
+        () => {
+          if (collapsed) collapsedEvents.delete(item);
+          else collapsedEvents.add(item);
+          renderEvents();
+        },
+        "event-toggle",
+      );
+      toggle.title = collapsed ? "Expand event" : "Collapse event";
+      if (collapsed) {
+        card.classList.add("collapsed");
+        head.append(
+          toggle,
+          node(
+            "small",
+            "event-summary",
+            `${item.key} · ${e.op}${e.window ? " · " + e.window : ""}`,
+          ),
+        );
+        card.append(head);
+        return card;
+      }
+      head.append(toggle);
       const at = input(item.key, (v) => {
         item.key = v;
         update();
