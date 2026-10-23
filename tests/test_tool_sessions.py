@@ -64,7 +64,12 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     definitions = (await call(studio, "list_simulated_tools", session_id="tools"))[
         "tools"
     ]
-    assert len(definitions) == 16
+    assert {d["function"]["name"] for d in definitions} >= {
+        "subagent",
+        "subagent_get",
+        "runtime_status",
+        "file_patch",
+    }
     assert not next(d for d in definitions if d["function"]["name"] == "subagent")[
         "available"
     ]
@@ -74,7 +79,10 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     )
     assert wrote["interaction"]["outcome"] == {
         "ok": True,
-        "result": {"saved": file_path},
+        "result": {
+            "saved": file_path,
+            "version": wrote["interaction"]["outcome"]["result"]["version"],
+        },
     }
     assert not (tmp_path / "must-stay-virtual.txt").exists()
     assert (await tool(studio, "file_read", {"path": file_path}))["interaction"][
@@ -126,7 +134,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
 
 async def test_failures_and_quotas_preserve_dispatcher_semantics(studio):
     await call(
-        studio, "create_tool_session", session_id="tools", max_calls=3, max_bytes=128
+        studio, "create_tool_session", session_id="tools", max_calls=3, max_bytes=512
     )
     before = await call(studio, "get_tool_session", session_id="tools")
     for name, arguments in [("shell", {"command": "id"}), ("file_list", {"path": "/"})]:
@@ -148,8 +156,9 @@ async def test_failures_and_quotas_preserve_dispatcher_semantics(studio):
         not failed["interaction"]["outcome"]["ok"]
         and failed["interaction"]["call_number"] == 1
     )
-    await tool(studio, "file_write", {"path": "small", "content": "x" * 60})
-    too_large = await tool(studio, "memory_save", {"key": "memory", "text": "x" * 60})
+    wrote = await tool(studio, "file_write", {"path": "small", "content": "x" * 60})
+    assert wrote["interaction"]["outcome"]["ok"]
+    too_large = await tool(studio, "memory_save", {"key": "memory", "text": "x" * 400})
     assert not too_large["interaction"]["outcome"]["ok"]
     assert (await call(studio, "get_tool_session", session_id="tools"))["calls"] == 3
     response = await studio[1].post(
@@ -353,7 +362,8 @@ async def test_optional_subagent_is_bounded_and_receives_no_parent_state(studio)
     )
     result = await tool(studio, "subagent", {"task": "inspect this task"})
     assert result["interaction"]["outcome"]["result"] == {
-        "response": "delegated result"
+        "response": "delegated result",
+        "conversationId": result["interaction"]["outcome"]["result"]["conversationId"],
     }
     assert "private virtual state" not in json.dumps(messages)
     assert messages[-1]["content"] == "inspect this task"

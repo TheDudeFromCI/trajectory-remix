@@ -3,9 +3,9 @@ import copy
 import json
 
 
-async def call(studio, name, **arguments):
+async def call(studio, command, **arguments):
     response = await studio[1].post(
-        "/api/mcp/call", json={"name": name, "arguments": arguments}
+        "/api/mcp/call", json={"name": command, "arguments": arguments}
     )
     assert response.status_code == 200, response.text
     return response.json()
@@ -144,3 +144,112 @@ async def test_streamed_call_schema_history_and_shared_window(studio):
     })
     assert rejected.status_code == 422
     assert studio[0].state.dataset == before
+
+
+async def test_invisible_mcp_edits_are_atomic_undoable_and_saved(studio, tmp_path):
+    before = copy.deepcopy(studio[0].state.dataset["samples"][0])
+    scheduled = await call(
+        studio,
+        "create_tool_call",
+        sample_id="test",
+        tick="100",
+        tool="file_write",
+        arguments={"path": "subagent.py", "content": "provided by coder"},
+        invisible=True,
+        source="coder",
+        expected_revision=0,
+    )
+    assert scheduled["tool_call"]["invisible"] is True
+    assert "window" not in scheduled["tool_call"]
+    assert (await call(studio, "get_sandbox_state", sample_id="test", tick=99))[
+        "sandbox"
+    ]["files"] == {}
+    assert (await call(studio, "get_sandbox_state", sample_id="test", tick=100))[
+        "sandbox"
+    ]["files"] == {"/subagent.py": "provided by coder"}
+    current = await call(studio, "get_trajectory", sample_id="test")
+    revision = current["revision"]
+    rejected = await studio[1].post(
+        "/api/mcp/call",
+        json={
+            "name": "create_tool_call",
+            "arguments": {
+                "sample_id": "test",
+                "tick": "101",
+                "tool": "file_delete",
+                "arguments": {"path": "missing"},
+                "invisible": True,
+            },
+        },
+    )
+    assert rejected.status_code == 422
+    assert (await call(studio, "get_trajectory", sample_id="test")) == current
+    rejected = await studio[1].post(
+        "/api/mcp/call",
+        json={
+            "name": "create_tool_call",
+            "arguments": {
+                "sample_id": "test",
+                "tick": "101",
+                "tool": "file_write",
+                "arguments": {"path": "x", "content": "no"},
+                "invisible": True,
+                "window": "hidden",
+            },
+        },
+    )
+    assert rejected.status_code == 422
+    await call(studio, "undo_edits", expected_revision=revision)
+    assert (await call(studio, "get_trajectory", sample_id="test"))["sample"] == before
+    await call(studio, "redo_edits")
+    saved = DatasetStore(tmp_path / "project.kidra-dataset").samples[0]
+    assert saved["replay"]["100"][0] == {
+        "op": "invisible-tool-call",
+        "tool": "file_write",
+        "source": "coder",
+        "arguments": {"path": "subagent.py", "content": "provided by coder"},
+        "duration-ticks": 0,
+    }
+
+
+async def test_workbench_resumes_real_broker_with_prior_answer_and_resets_history(
+    studio,
+):
+    prompts = []
+
+    class Client:
+        async def complete(self, endpoint, messages, tools=None):
+            prompts.append(copy.deepcopy(messages))
+            return {"content": "answer " + str(len(prompts))}
+
+    studio[0].state.commands.client = Client()
+    endpoint = studio[0].state.dataset["config"]["endpoints"][0]["id"]
+    await call(
+        studio,
+        "create_tool_session",
+        session_id="persistent",
+        subagent_endpoint=endpoint,
+    )
+
+    async def delegate(arguments):
+        return await call(
+            studio,
+            "call_simulated_tool",
+            session_id="persistent",
+            name="subagent",
+            arguments=arguments,
+        )
+
+    initial = await delegate({"task": "Implement"})
+    cid = initial["interaction"]["outcome"]["result"]["conversationId"]
+    followup = await delegate({"task": "Explain edge cases", "resume": cid})
+    assert followup["interaction"]["outcome"]["result"]["conversationId"] == cid
+    assert prompts[1][-2] == {"role": "assistant", "content": "answer 1"}
+    assert prompts[1][-1] == {"role": "user", "content": "Explain edge cases"}
+    inspected = await call(studio, "get_tool_session", session_id="persistent")
+    assert inspected["counts"]["conversations"] == 1
+    assert len(inspected["state"]["conversations"][cid]["messages"]) == 4
+    await call(studio, "reset_tool_session", session_id="persistent")
+    assert not (await delegate({"task": "old identity", "resume": cid}))["interaction"][
+        "outcome"
+    ]["ok"]

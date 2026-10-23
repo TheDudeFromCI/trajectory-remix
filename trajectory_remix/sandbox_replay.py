@@ -4,13 +4,39 @@ import copy
 import json
 
 from .compiler import MAX_TICKS, CompileError, integer
-from .tools import Sandbox, ToolError
+from .tools import STORES, Sandbox, ToolError, tool_failure
 
-STORES = ("files", "memory", "notes", "skills")
 MAX_TOOL_CALLS = 256
+EXTERNAL_TOOLS = {
+    "file_write",
+    "file_patch",
+    "file_delete",
+    "memory_save",
+    "note_save",
+    "note_delete",
+    "skill_save",
+    "time_advance",
+}
 
 
 def validate_call(event, path):
+    if event["op"] == "invisible-tool-call":
+        if set(event) - {"op", "tool", "arguments", "duration-ticks", "source"}:
+            raise CompileError(
+                "Invisible calls accept only tool, arguments, duration-ticks and source; no window or model content",
+                path,
+            )
+        if (
+            not isinstance(event.get("tool"), str)
+            or event["tool"] not in EXTERNAL_TOOLS
+        ):
+            raise CompileError(
+                "Invisible calls require an allowlisted sandbox mutation", path
+            )
+        if "source" in event and (
+            not isinstance(event["source"], str) or not event["source"]
+        ):
+            raise CompileError("Invisible source must be a nonempty string", path)
     if not isinstance(event.get("tool"), str) or not event["tool"]:
         raise CompileError("tool-call requires a tool name", path)
     if not isinstance(event.get("arguments"), dict):
@@ -30,8 +56,20 @@ def validate_call(event, path):
                 raise CompileError(
                     "Subagent outcome requires result.response text", path
                 )
+            if "conversationId" in result and (
+                not isinstance(result["conversationId"], str)
+                or not result["conversationId"]
+                or len(result["conversationId"]) > 128
+            ):
+                raise CompileError("Invalid recorded conversationId", path)
         elif not isinstance(outcome.get("error"), str):
             raise CompileError("Failed outcome requires error text", path)
+        if "conversationId" in outcome and (
+            not isinstance(outcome["conversationId"], str)
+            or not outcome["conversationId"]
+            or len(outcome["conversationId"]) > 128
+        ):
+            raise CompileError("Invalid recorded conversationId", path)
         if len(json.dumps(outcome).encode()) > 200_000:
             raise CompileError("Recorded outcome exceeds 200,000 bytes", path)
     elif event["tool"] == "subagent":
@@ -44,7 +82,7 @@ def chat_context_at(items, tick, order, eos_id, metadata):
     closed = False
     for item in items:
         event = item["event"]
-        if event["window"] != "chat":
+        if event.get("window") != "chat":
             continue
         start = item["tick"]
         if event["op"] == "tool-call":
@@ -81,10 +119,11 @@ def compile_sandbox(items, sample, eos_id):
     try:
         for item in items:
             event = item["event"]
-            if event["op"] != "tool-call":
+            if event["op"] not in ("tool-call", "invisible-tool-call"):
                 continue
+            invisible = event["op"] == "invisible-tool-call"
             start = item["tick"] + (
-                len(item["encoded"].ids) if not item["instant"] else 0
+                len(item["encoded"].ids) if not invisible and not item["instant"] else 0
             )
             end = start + event.get("duration-ticks", 0)
             if end >= MAX_TICKS:
@@ -92,7 +131,11 @@ def compile_sandbox(items, sample, eos_id):
             calls.append(
                 {
                     "path": item["path"],
-                    "window": event["window"],
+                    **(
+                        {"invisible": True, "source": event.get("source", "external")}
+                        if invisible
+                        else {"window": event["window"]}
+                    ),
                     "tool": event["tool"],
                     "arguments": copy.deepcopy(event["arguments"]),
                     "request_start": item["tick"],
@@ -109,30 +152,77 @@ def compile_sandbox(items, sample, eos_id):
         if len(calls) > MAX_TOOL_CALLS:
             raise CompileError(f"Tool event limit exceeded ({MAX_TOOL_CALLS})")
         events = {item["path"]: item["event"] for item in items}
-        # Calls are atomic at completion. Equal completions follow replay list order.
+        # Starts expose running conversations; results and mutations commit at completion.
+        # Resumes must refer to a conversation already available at dispatch.
+        actions = [(c["end"], c["order"], 1, c) for c in calls]
+        actions += [
+            (c["start"], c["order"], 0, c) for c in calls if c["tool"] == "subagent"
+        ]
+        pending = {}
         previous = initial
-        for call in sorted(calls, key=lambda c: (c["end"], c["order"])):
+        for tick, _, phase, call in sorted(actions, key=lambda a: a[:3]):
             event = events[call["path"]]
             try:
                 if call["tool"] == "subagent":
-                    sandbox.start_call(call["tool"], call["arguments"])
-                    outcome = copy.deepcopy(event["outcome"])
+                    if phase == 0:
+                        result = event["outcome"].get("result")
+                        recorded_id = (
+                            result.get(
+                                "conversationId", event["outcome"].get("conversationId")
+                            )
+                            if isinstance(result, dict)
+                            else event["outcome"].get("conversationId")
+                        )
+                        pending[call["path"]] = sandbox.begin_subagent(
+                            call["arguments"], recorded_id
+                        )
+                    else:
+                        sandbox.start_call(call["tool"], call["arguments"])
+                        cid = pending[call["path"]]
+                        if isinstance(cid, ToolError):
+                            raise cid
+                        outcome = copy.deepcopy(event["outcome"])
+                        result = sandbox.finish_subagent(cid, outcome)
+                        if outcome["ok"]:
+                            outcome["result"] = result
                 else:
                     context = (
                         chat_context_at(
                             items, call["end"], call["order"], eos_id, metadata
                         )
-                        if call["tool"] == "chat" else {}
+                        if call["tool"] == "chat"
+                        else {}
                     )
                     outcome = {
                         "ok": True,
-                        "result": sandbox.call_sync(
-                            call["tool"], call["arguments"], **context
-                        ),
+                        "result": None,
                     }
+                    if call.get("invisible"):
+                        sandbox.check_args(call["tool"], call["arguments"])
+                        outcome["result"] = sandbox.execute_sync(
+                            call["tool"], call["arguments"]
+                        )
+                    else:
+                        outcome["result"] = sandbox.call_sync(
+                            call["tool"], call["arguments"], **context
+                        )
             except (ToolError, ValueError, OverflowError) as error:
-                outcome = {"ok": False, "error": str(error)}
-            call["outcome"] = outcome
+                if phase == 0:
+                    pending[call["path"]] = ToolError(str(error))
+                elif call["tool"] == "subagent" and isinstance(
+                    pending.get(call["path"]), str
+                ):
+                    cid = pending[call["path"]]
+                    sandbox.conversations[cid]["status"] = "failed"
+                    error = ToolError(str(error), cid)
+                if call.get("invisible"):
+                    # A hidden failure has no model observation; diagnose it for the author.
+                    raise CompileError(
+                        f"Invisible tool failed: {error}", call["path"]
+                    ) from error
+                outcome = tool_failure(error)
+            if phase == 1:
+                call["outcome"] = outcome
             current = sandbox.snapshot()
             patch = {"clock": current["clock"], "calls": current["calls"]}
             for name in STORES:
@@ -145,7 +235,7 @@ def compile_sandbox(items, sample, eos_id):
                     },
                     "delete": [k for k in before if k not in after],
                 }
-            changes.append({"tick": call["end"], "patch": patch})
+            changes.append({"tick": tick, "patch": patch})
             previous = current
         for call in calls:
             del call["order"]

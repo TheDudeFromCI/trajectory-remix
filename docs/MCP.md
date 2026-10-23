@@ -113,6 +113,14 @@ an `arguments` object. Optional fields are `duration_ticks` (default 0), `window
 (tool window ID; generated when omitted), `outcome` (recorded subagent
 only), `position`, `expected_revision`, `delivery` (`instant` or `stream`),
 `content` or `segments` (custom request text), and `loss` (request supervision).
+Set `invisible: true` for external sandbox activity and optionally supply `source`
+(for example `"user"` or `"coder"`). This creates `op: "invisible-tool-call"` in
+source. Invisible calls accept deterministic mutations only, without a `window`,
+request content, delivery settings, loss or recorded outcome. They produce no
+model rows, windows, anchors or exported tokens. They consume no Kidra call
+budget and do not advance the synthetic clock implicitly. The mutation commits
+at `tick + duration_ticks`; anchor expressions are supported. An invalid hidden
+mutation is an author-facing compile error, so it cannot silently disappear.
 Compilation must succeed before one
 undoable source edit commits. It is also available inside `apply_batch`. Save
 immediately, as with other edits.
@@ -148,7 +156,9 @@ a recorded `outcome`; compilation and inspection never repeat an LLM request.
 
 `get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
 and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
-`calls` and started `tool_calls`. Each call has resolved `request_start`, execution
+`artifacts`, `conversations`, `calls` and started `tool_calls`. Invisible calls
+are marked `invisible: true` and include `source` in this author-facing history.
+Each call has resolved `request_start`, execution
 `start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
 composing and running calls omit their future outcome. The output limit is 4 MB;
 use `include_calls=false` to omit call logs when inspecting a large state.
@@ -392,10 +402,17 @@ These commands use the same `Sandbox` dispatcher as trajectory generation:
   `metadata.user_name` can store the user's name.
 - Synthetic clock: `time_now`, `time_advance`.
 - Virtual RAM filesystem: `file_write`, `file_read`, `file_list`, `file_delete`.
+- Versioned artifacts: `file_stat`, `file_patch`; writes return a `version`.
+  `file_read` optionally accepts a pinned `version`, and writes/patches accept
+  `expected_version` to reject stale changes. Old versions remain readable after
+  editing or deleting the current file, within the session's storage quota.
 - Lexical memory search: `memory_save`, `memory_search`.
 - Notes/tasks: `note_save`, `note_list`, `note_delete`.
 - Text skills: `skill_save`, `skill_load`, `skill_list`.
 - Optional configured LLM: `subagent`.
+- Conversation inspection: `subagent_list`, `subagent_get`, `subagent_close`.
+- Coordination status: `runtime_status` returns synthetic time, completed call
+  count, task counts and subagent identities/statuses.
 
 Start with `list_simulated_tools` to read exact names, required arguments and
 availability. Create a workbench with `create_tool_session`, for example:
@@ -463,13 +480,45 @@ unless explicitly recorded as trajectory events. In-flight calls prevent another
 call, reset or deletion of that workbench; cancellation preserves prior state.
 
 To enable `subagent`, create the session with `subagent_endpoint` set to an
-existing configured endpoint ID. Each subagent call sends only the delegated
-task and a text-only instruction; it sends neither the parent's RAM state nor
-trajectory context. It has no tools or recursive delegation and must return
+existing configured endpoint ID. Start a conversation with `{"task":"Implement"}`.
+The result is `{"conversationId":"conversation-1","response":"..."}`. Follow up
+with `{"task":"Explain your edge cases","resume":"conversation-1"}`; the provider
+receives that conversation's earlier user and assistant messages. Each conversation
+is scoped to its sandbox and survives until reset, deletion or server shutdown.
+Generation also retains conversations, restores them when extending a saved
+trajectory, and records IDs for deterministic offline replay. Legacy recorded
+outcomes without IDs receive deterministic IDs during compilation.
+
+Optional `artifacts` is an array of `{"path":"/code.py","version":"sha256:..."}`
+references. Only those immutable versions are resolved into the delegated context;
+the parent's other RAM state and trajectory context are excluded. This keeps source
+prompts and compiled requests compact while supplying reviewers with actual source.
+`subagent_get` accepts `conversationId`; list/get reveal retained history and
+statuses (`running`, `ready`, `failed`, `closed`). Close retains history and prevents
+further resumes. A failed dispatched turn returns its `conversationId` alongside
+`ok: false` and `error` for inspection or retry. Resuming an unknown, running or
+closed conversation fails. Replay
+checks availability at dispatch, so a later completion cannot justify an early
+resume. Parallel recorded conversations remain independent.
+
+`note_save` now accepts optional `owner`, `depends_on`, `blockers` and
+`acceptance_criteria`; the latter three are string arrays. Status also accepts
+`blocked`. Omitted optional fields are retained on update; use an empty string or
+array to clear them. Self-dependencies/cycles are rejected. Marking a task `done`
+requires all dependencies to exist and be done, with no blockers. Acceptance
+criteria are recorded requirements, not executable evidence checks.
+
+Live subagents have no tools or recursive delegation and must return
 nonempty text of at most 200,000 characters. Provider calls use configured
 credentials without exposing them. Provider failures are reported without raw
 error details. Rejected recording can roll back virtual state and source, but
 cannot undo a provider request that has already occurred.
+
+Live delegation still waits for a text response; it does not launch background
+workers or execute code. Lifecycle inspection is available, but background
+launch/wait/cancel and an isolated execution backend remain future work. Replays
+represent authored outcomes; they do not prove those agents actually ran. See
+[sandbox behavior](SANDBOX.md) for timing, quotas and compatibility details.
 
 ## Verification
 

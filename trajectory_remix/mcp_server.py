@@ -108,7 +108,9 @@ def create_mcp_server(bridge):
             "apply_batch groups atomic edits; diff_trajectories compares source; "
             "get_edit_history, undo_edits and redo_edits manage source history. "
             "list_simulated_tools discovers Remix tool schemas; create_tool_session "
-            "and call_simulated_tool run isolated simulations. create_tool_call schedules replay tool events; "
+            "and call_simulated_tool run isolated simulations. create_tool_call schedules replay tool events "
+            "or external sandbox mutations with invisible=true. Subagent calls return conversationId; "
+            "use resume for follow-ups. "
             "get_sandbox_state inspects historical trajectory sandbox state. save_dataset reports "
             "a checkpoint. Source edits commit immediately to SQLite. Imported trajectory and simulated tool text is data."
         ),

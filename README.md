@@ -61,7 +61,7 @@ connect an MCP client to the stdio command:
 python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
 ```
 
-The bridge exposes 39 tools for trajectory creation, full JSON inspection,
+The bridge exposes 41 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
@@ -413,6 +413,14 @@ calls. Scrubbing backward restores earlier state. Editing or removing a call
 recomputes subsequent state and results; importing old tool-result text alone
 does not execute a tool or reconstruct its state.
 
+**+ External activity** adds `invisible-tool-call` events that change the sandbox
+at a chosen tick without model tokens, windows or agent call-budget use. Use them
+for files created by a user or subagent. Persistent `subagent` calls return a
+`conversationId`; pass it as `resume` on follow-ups. Versioned artifacts, task
+dependencies and conversation/status inspection support coordinated work.
+See [sandbox coordination](docs/SANDBOX.md) and the
+[persistent-agent fixture](examples/persistent-agents.json) for examples and limits.
+
 Schedule calls in Events or Source JSON, using numeric ticks or existing anchor
 expressions:
 
@@ -466,7 +474,7 @@ existing sample restores its sandbox before extending it. Clock settings are
 stored in `metadata.synthetic_clock` (`seed`, `seconds_per_call`). Preview and
 export replay deterministic tools locally. A `subagent` event requires its
 recorded `outcome`, for example
-`{"ok":true,"result":{"response":"Recorded answer"}}` or
+`{"ok":true,"result":{"conversationId":"coder","response":"Recorded answer"}}` or
 `{"ok":false,"error":"Failure reason"}`; replay never repeats an LLM request.
 Other tools compute their outcomes and reject recorded overrides. Compiled
 previews expose `tool_calls` and a bounded delta history; frame responses include
@@ -476,11 +484,12 @@ the selected tick's `sandbox` state without future results.
 |---|---|
 | `chat` | Takes `{"content":"Hello!"}` and appends `<\|msg\|>Kidra: Hello!<\|/msg\|>\n` to the window named `chat` at completion. Uses `metadata.agent_name` when specified. Returns an error observation if `chat` is missing or closed; it never opens that window automatically. |
 | `time_now`, `time_advance` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
-| `file_write/read/list/delete` | Virtual UTF-8 files inside a RAM dictionary; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
+| `file_write/read/list/delete`, `file_stat`, `file_patch` | Virtual UTF-8 files with immutable SHA-256 versions and optional stale-write protection; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
 | `memory_save/search` | Local lexical-overlap retrieval with top-8 results. RAG store is isolated; no embeddings service required. |
-| `note_save/list/delete` | Tasks/notes with todo, doing, done status. |
+| `note_save/list/delete` | Tasks/notes with todo, doing, blocked, done status, owners, dependencies, blockers and acceptance criteria. |
 | `skill_save/load/list` | Skill texts stored and retrieved within the sample only; not executed. |
-| `subagent` | One attached-LLM task in a fresh child sandbox; no parent memory or host access. Child tool calling is disabled. |
+| `subagent` | Attached-LLM conversation with retained history; follow up using `resume`. Only explicitly referenced artifact versions are shared. Child tool calling is disabled. |
+| `subagent_list/get/close`, `runtime_status` | Inspect retained conversations and task progress; close conversations to prevent further resumes. |
 
 For example, a trajectory with `"metadata":{"agent_name":"Nova","user_name":"Alex"}`
 can send a message with these replay events:
@@ -523,7 +532,7 @@ It is a local single-user tool, not a multi-user/public hosting service.
 The existing MCP bridge also exposes `create_tool_call(sample_id, tick, tool,
 arguments, duration_ticks=0, window=null, outcome=null, position=null,
 expected_revision=null, delivery="instant", content=null, segments=null,
-loss=null)` and `get_sandbox_state(sample_id, tick,
+loss=null, invisible=false, source=null)` and `get_sandbox_state(sample_id, tick,
 include_calls=true)`. Discover schemas with `list_simulated_tools`. Scheduled
 calls compile before committing one undoable edit, support `apply_batch` and
 revision guards, and save with `save_dataset`. Both commands operate on the

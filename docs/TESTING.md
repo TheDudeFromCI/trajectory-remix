@@ -23,6 +23,12 @@
   clock in another window, and verify the resumed request can attend to its
   result without seeing the pending write outcome. They also cover tick-0 BOS,
   reusable tool windows, request anchors, segment losses and dispatch timing.
+- Persistent sandbox tests cover invisible mutations without token/window/export
+  changes, history beyond the token horizon, author diagnostics for hidden failures,
+  live follow-up message retention, isolated conversations, restored generation,
+  dispatch-time resume checks, pinned artifacts, stale writes, quotas, task
+  dependencies and runtime status without future answers. MCP and DOM tests
+  cover external event authoring, undo/redo, persistence and historical scrubbing.
 - Chat checks cover message framing, metadata speaker names, missing/closed
   windows, completion-time lifecycle, literal arguments, exported loss masks,
   generation error feedback and undoable MCP recording. DOM checks cover the

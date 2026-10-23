@@ -13,7 +13,14 @@ import httpx
 
 from .compiler import KEY
 from .dataset import reject_constant
-from .tools import SCHEMAS, Sandbox, chat_context
+from .tools import (
+    SCHEMAS,
+    SUBAGENT_INSTRUCTION,
+    Sandbox,
+    ToolError,
+    chat_context,
+    tool_failure,
+)
 
 TAGS = [
     "competent",
@@ -602,7 +609,7 @@ class SampleBuilder:
                     result = await sandbox.call(function.get("name"), args, **context)
                     outcome = {"ok": True, "result": result}
                 except (ValueError, KeyError, OverflowError) as e:
-                    outcome = {"ok": False, "error": str(e)}
+                    outcome = tool_failure(e)
                 event = {
                     "op": "tool-call",
                     "window": f"tool-result-{suffix}",
@@ -671,26 +678,18 @@ class SampleBuilder:
             self.next_tick = self.compiler.compile(self.sample)["max_tick"] + 1
             self.serial = len([e for v in self.sample["replay"].values() for e in v])
 
-        async def broker(prompt, depth):
-            # Separate sandbox and restricted task. No access to parent's RAM state.
-            child = Sandbox(
-                **self.config.get("clock", {}),
-                depth=depth,
-                max_calls=min(8, self.config.get("max_tool_calls", 64)),
-            )
-            endpoint = self._subagent_endpoint
-            child_task = {
-                "id": f"subagent-{depth}",
-                "endpoint": endpoint,
-                "prompt": prompt,
-                "visible": [],
-                "layout": "messages",
-                "tools": False,
-            }
+        async def broker(messages, depth):
             try:
-                return await self.task(child_task, child, depth=depth)
-            finally:
-                child.close()
+                message = await self.client.complete(
+                    self.endpoints[self._subagent_endpoint],
+                    [{"role": "system", "content": SUBAGENT_INSTRUCTION}, *messages],
+                    None,
+                )
+            except Exception as error:
+                raise ToolError("Configured subagent request failed") from error
+            if not isinstance(message, dict) or message.get("tool_calls"):
+                raise ToolError("Subagent must return text without tool calls")
+            return message.get("content")
 
         metadata = self.sample.get("metadata", {})
         sandbox = Sandbox(

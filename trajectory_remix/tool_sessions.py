@@ -8,7 +8,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 
-from .tools import SCHEMAS, Sandbox, ToolError
+from .tools import SCHEMAS, STORES, Sandbox, ToolError, tool_failure
 
 
 class ToolSessionError(ValueError):
@@ -65,14 +65,9 @@ class ToolSessions:
             "max_bytes": sandbox.max_bytes,
             "bytes_used": sum(
                 len(json.dumps(s).encode())
-                for s in (sandbox.files, sandbox.memory, sandbox.notes, sandbox.skills)
+                for s in (getattr(sandbox, name) for name in STORES)
             ),
-            "counts": {
-                "files": len(sandbox.files),
-                "memory": len(sandbox.memory),
-                "notes": len(sandbox.notes),
-                "skills": len(sandbox.skills),
-            },
+            "counts": {name: len(getattr(sandbox, name)) for name in STORES},
             "interaction_count": len(session.interactions),
             "max_log_bytes": self.max_log_bytes,
             "log_bytes": sum(
@@ -82,12 +77,7 @@ class ToolSessions:
         }
         if include_state:
             result["state"] = copy.deepcopy(
-                {
-                    "files": sandbox.files,
-                    "memory": sandbox.memory,
-                    "notes": sandbox.notes,
-                    "skills": sandbox.skills,
-                }
+                {name: getattr(sandbox, name) for name in STORES}
             )
         if include_log:
             result["interactions"] = copy.deepcopy(session.interactions)
@@ -154,7 +144,7 @@ class ToolSessions:
                     result = await candidate.call(name, arguments, **(context or {}))
                     outcome = {"ok": True, "result": result}
                 except (ToolError, ValueError, OverflowError) as error:
-                    outcome = {"ok": False, "error": str(error)}
+                    outcome = tool_failure(error)
                 entry = {
                     "id": uuid.uuid4().hex,
                     "name": name,

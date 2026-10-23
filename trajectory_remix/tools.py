@@ -7,15 +7,34 @@ plugin import. The only outbound capability is an injected bounded LLM broker.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
+import uuid
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
 
 class ToolError(ValueError):
-    pass
+    def __init__(self, message, conversation_id=None):
+        super().__init__(message)
+        self.conversation_id = conversation_id
+
+
+def tool_failure(error):
+    outcome = {"ok": False, "error": str(error)}
+    cid = getattr(error, "conversation_id", None)
+    if cid is not None:
+        outcome["conversationId"] = cid
+    return outcome
+
+
+SUBAGENT_INSTRUCTION = (
+    "Complete the delegated task in this persistent conversation. "
+    "Only explicitly referenced artifact data is available. "
+    "No tools or other parent workspace context are available."
+)
 
 
 def tool_text(text, special_tokens, *, json_encoded=False):
@@ -23,7 +42,9 @@ def tool_text(text, special_tokens, *, json_encoded=False):
     escapes = {}
     for spelling in special_tokens:
         units = spelling.encode("utf-16-be")
-        key = json.dumps(spelling, ensure_ascii=False)[1:-1] if json_encoded else spelling
+        key = (
+            json.dumps(spelling, ensure_ascii=False)[1:-1] if json_encoded else spelling
+        )
         escapes[key] = "".join(
             f"\\u{int.from_bytes(units[i:i + 2], 'big'):04x}"
             for i in range(0, len(units), 2)
@@ -76,6 +97,20 @@ DEFINITIONS = [
         {"path": {"type": "string"}, "content": {"type": "string"}},
     ),
     ("file_read", "Read a virtual text file.", {"path": {"type": "string"}}),
+    (
+        "file_stat",
+        "Get a file's immutable version reference without its content.",
+        {"path": {"type": "string"}},
+    ),
+    (
+        "file_patch",
+        "Replace one unique text occurrence in a virtual file.",
+        {
+            "path": {"type": "string"},
+            "old": {"type": "string"},
+            "new": {"type": "string"},
+        },
+    ),
     ("file_list", "List all virtual files.", {}),
     ("file_delete", "Delete a virtual file.", {"path": {"type": "string"}}),
     (
@@ -90,11 +125,11 @@ DEFINITIONS = [
     ),
     (
         "note_save",
-        "Create/update a task or note; status may be todo, doing or done.",
+        "Create/update a task with optional owner, dependencies, blockers and acceptance criteria. Omitted optional fields are retained.",
         {
             "key": {"type": "string"},
             "text": {"type": "string"},
-            "status": {"type": "string", "enum": ["todo", "doing", "done"]},
+            "status": {"type": "string", "enum": ["todo", "doing", "blocked", "done"]},
         },
     ),
     ("note_list", "List tasks and notes.", {}),
@@ -108,10 +143,55 @@ DEFINITIONS = [
     ("skill_list", "List available sample skills.", {}),
     (
         "subagent",
-        "Delegate a bounded task to the attached LLM; child has its own RAM sandbox.",
+        "Delegate a task; returns conversationId. Supply resume to continue its retained conversation. Only explicitly referenced artifacts are shared.",
         {"task": {"type": "string"}},
     ),
+    ("subagent_list", "List retained subagent identities and lifecycle states.", {}),
+    (
+        "subagent_get",
+        "Inspect a retained subagent conversation.",
+        {"conversationId": {"type": "string"}},
+    ),
+    (
+        "subagent_close",
+        "Close a conversation and retain its history; further resumes fail.",
+        {"conversationId": {"type": "string"}},
+    ),
+    (
+        "runtime_status",
+        "Read synthetic time, completed call count, task counts and subagent lifecycle states.",
+        {},
+    ),
 ]
+OPTIONAL = {
+    "file_read": {"version": {"type": "string"}},
+    "file_write": {"expected_version": {"type": "string"}},
+    "file_patch": {"expected_version": {"type": "string"}},
+    "note_save": {
+        "owner": {"type": "string"},
+        **{
+            k: {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+            for k in ("depends_on", "blockers", "acceptance_criteria")
+        },
+    },
+    "subagent": {
+        "resume": {"type": "string"},
+        "artifacts": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "version": {"type": "string"},
+                },
+                "required": ["path", "version"],
+                "additionalProperties": False,
+            },
+        },
+    },
+}
+STORES = ("files", "memory", "notes", "skills", "artifacts", "conversations")
 SCHEMAS = [
     {
         "type": "function",
@@ -120,7 +200,7 @@ SCHEMAS = [
             "description": desc,
             "parameters": {
                 "type": "object",
-                "properties": args,
+                "properties": {**args, **OPTIONAL.get(name, {})},
                 "required": list(args),
                 "additionalProperties": False,
             },
@@ -152,12 +232,13 @@ class Sandbox:
         self.step = seconds_per_call
         self.broker, self.depth = broker, depth
         self.max_calls, self.max_bytes, self.calls = max_calls, max_bytes, 0
-        self.files, self.memory, self.notes, self.skills = {}, {}, {}, {}
+        for name in STORES:
+            setattr(self, name, {})
         self.closed = False
 
     def close(self):
-        for store in (self.files, self.memory, self.notes, self.skills):
-            store.clear()
+        for name in STORES:
+            getattr(self, name).clear()
         self.closed = True
 
     def snapshot(self):
@@ -165,10 +246,7 @@ class Sandbox:
             {
                 "clock": self.clock.isoformat(),
                 "calls": self.calls,
-                "files": self.files,
-                "memory": self.memory,
-                "notes": self.notes,
-                "skills": self.skills,
+                **{name: getattr(self, name) for name in STORES},
             }
         )
 
@@ -176,8 +254,8 @@ class Sandbox:
         """Restore a compiler-produced snapshot when extending a trajectory."""
         self.clock = datetime.fromisoformat(state["clock"])
         self.calls = state["calls"]
-        for name in ("files", "memory", "notes", "skills"):
-            setattr(self, name, deepcopy(state[name]))
+        for name in STORES:
+            setattr(self, name, deepcopy(state.get(name, {})))
 
     def path(self, path):
         if (
@@ -196,10 +274,19 @@ class Sandbox:
         schema = next((d[2] for d in DEFINITIONS if d[0] == name), None)
         if schema is None:
             raise ToolError(f"Unknown tool: {name}")
-        if not isinstance(args, dict) or set(args) != set(schema):
-            raise ToolError(f"{name} requires exactly: {', '.join(schema)}")
-        for key, spec in schema.items():
-            v = args[key]
+        allowed = {**schema, **OPTIONAL.get(name, {})}
+        if (
+            not isinstance(args, dict)
+            or set(schema) - set(args)
+            or set(args) - set(allowed)
+        ):
+            if name not in OPTIONAL:
+                raise ToolError(f"{name} requires exactly: {', '.join(schema)}")
+            raise ToolError(
+                f"{name} requires: {', '.join(schema)}; optional: {', '.join(OPTIONAL[name])}"
+            )
+        for key, v in args.items():
+            spec = allowed[key]
             if spec["type"] == "string" and (
                 not isinstance(v, str) or len(v) > 200_000
             ):
@@ -213,6 +300,25 @@ class Sandbox:
                 raise ToolError(f"Invalid seconds: {v}")
             if "enum" in spec and v not in spec["enum"]:
                 raise ToolError(f"Invalid {key}")
+            if spec["type"] == "array":
+                if not isinstance(v, list) or len(v) > spec["maxItems"]:
+                    raise ToolError(f"Invalid array argument: {key}")
+                for entry in v:
+                    if key == "artifacts":
+                        if (
+                            not isinstance(entry, dict)
+                            or set(entry) != {"path", "version"}
+                            or any(
+                                not isinstance(s, str) or not s for s in entry.values()
+                            )
+                        ):
+                            raise ToolError(
+                                "Artifacts require path and version strings"
+                            )
+                    elif (
+                        not isinstance(entry, str) or not entry or len(entry) > 200_000
+                    ):
+                        raise ToolError(f"Invalid string in {key}")
         if len(json.dumps(args).encode()) > self.max_bytes:
             raise ToolError("Argument quota exceeded")
 
@@ -221,7 +327,7 @@ class Sandbox:
         candidate[key] = value
         total = sum(
             len(json.dumps(candidate if s is store else s).encode())
-            for s in (self.files, self.memory, self.notes, self.skills)
+            for s in (getattr(self, name) for name in STORES)
         )
         if total > self.max_bytes:
             raise ToolError("Sample sandbox memory quota exceeded")
@@ -242,12 +348,32 @@ class Sandbox:
             self.start_call(name, args)
             if self.depth >= 2 or self.broker is None:
                 raise ToolError("Subagent depth/capability limit")
-            return {"response": await self.broker(args["task"], self.depth + 1)}
+            conversation_id = self.begin_subagent(
+                args, None if "resume" in args else f"conversation-{uuid.uuid4().hex}"
+            )
+            conversation = self.conversations[conversation_id]
+            try:
+                response = await self.broker(
+                    deepcopy(conversation["messages"]), self.depth + 1
+                )
+                return self.finish_subagent(
+                    conversation_id, {"ok": True, "result": {"response": response}}
+                )
+            except Exception as error:
+                conversation["status"] = "failed"
+                raise ToolError(str(error), conversation_id) from error
+            except BaseException:
+                conversation["status"] = "failed"
+                raise
         return self.call_sync(name, args, **context)
 
     def call_sync(self, name, args, *, chat_open=False, agent_name="Kidra"):
         """Run deterministic capabilities without an event loop or network IO."""
         self.start_call(name, args)
+        return self.execute_sync(name, args, chat_open=chat_open, agent_name=agent_name)
+
+    def execute_sync(self, name, args, *, chat_open=False, agent_name="Kidra"):
+        """Apply a validated deterministic operation; external events use no agent budget/time."""
         if name == "chat":
             if not chat_open:
                 raise ToolError('No window named "chat" is open')
@@ -267,11 +393,40 @@ class Sandbox:
                 return sorted(self.files)
             path = self.path(args["path"])
             if name == "file_write":
-                return self.put(self.files, path, args["content"])
+                return self.write_file(
+                    path, args["content"], args.get("expected_version")
+                )
+            if name == "file_read" and "version" in args:
+                key = self.artifact_key(path, args["version"])
+                if key not in self.artifacts:
+                    raise ToolError("Artifact version not found")
+                return {
+                    "path": path,
+                    "version": args["version"],
+                    "content": self.artifacts[key],
+                }
             if path not in self.files:
                 raise ToolError(f"Virtual file not found: {path}")
             if name == "file_read":
-                return {"path": path, "content": self.files[path]}
+                return {
+                    "path": path,
+                    "version": self.file_version(path),
+                    "content": self.files[path],
+                }
+            if name == "file_stat":
+                return {
+                    "path": path,
+                    "version": self.file_version(path),
+                    "bytes": len(self.files[path].encode()),
+                }
+            if name == "file_patch":
+                if not args["old"] or self.files[path].count(args["old"]) != 1:
+                    raise ToolError("Patch old text must match exactly once")
+                return self.write_file(
+                    path,
+                    self.files[path].replace(args["old"], args["new"], 1),
+                    args.get("expected_version"),
+                )
             del self.files[path]
             return {"deleted": path}
         if name == "memory_save":
@@ -286,13 +441,36 @@ class Sandbox:
                     ranked.append({"key": key, "text": text, "score": score})
             return sorted(ranked, key=lambda r: (-r["score"], r["key"]))[:8]
         if name == "note_save":
+            note = {
+                **self.notes.get(args["key"], {}),
+                **{k: deepcopy(v) for k, v in args.items() if k != "key"},
+            }
+            dependencies = note.get("depends_on", [])
+            if args["key"] in dependencies:
+                raise ToolError("A task cannot depend on itself")
+            pending, visited = list(dependencies), set()
+            while pending:
+                key = pending.pop()
+                if key == args["key"]:
+                    raise ToolError("Task dependency cycle")
+                if key not in visited:
+                    visited.add(key)
+                    pending.extend(self.notes.get(key, {}).get("depends_on", []))
+            if note["status"] == "done" and (
+                note.get("blockers")
+                or any(
+                    self.notes.get(dep, {}).get("status") != "done"
+                    for dep in dependencies
+                )
+            ):
+                raise ToolError("Task has blockers or unfinished dependencies")
             return self.put(
                 self.notes,
                 args["key"],
-                {"text": args["text"], "status": args["status"]},
+                note,
             )
         if name == "note_list":
-            return self.notes.copy()
+            return deepcopy(self.notes)
         if name == "note_delete":
             if args["key"] not in self.notes:
                 raise ToolError("Note not found")
@@ -308,4 +486,125 @@ class Sandbox:
             return {"name": args["name"], "content": self.skills[args["name"]]}
         if name == "subagent":
             raise ToolError("Subagent replay requires a recorded outcome")
+        if name == "subagent_list":
+            return [self.conversation_summary(k) for k in self.conversations]
+        if name in ("subagent_get", "subagent_close"):
+            cid = args["conversationId"]
+            if cid not in self.conversations:
+                raise ToolError("Unknown conversationId")
+            if name == "subagent_close":
+                if self.conversations[cid]["status"] == "running":
+                    raise ToolError("Conversation is running")
+                self.conversations[cid]["status"] = "closed"
+            return {"conversationId": cid, **deepcopy(self.conversations[cid])}
+        if name == "runtime_status":
+            return {
+                "clock": self.clock.isoformat(),
+                "synthetic": True,
+                "calls": self.calls,
+                "tasks": {
+                    status: sum(n["status"] == status for n in self.notes.values())
+                    for status in ("todo", "doing", "blocked", "done")
+                },
+                "subagents": [self.conversation_summary(k) for k in self.conversations],
+            }
         raise ToolError("Unsupported tool")
+
+    @staticmethod
+    def artifact_key(path, version):
+        return json.dumps([path, version])
+
+    def file_version(self, path):
+        return "sha256:" + hashlib.sha256(self.files[path].encode()).hexdigest()
+
+    def write_file(self, path, content, expected=None):
+        if expected is not None and (
+            path not in self.files or self.file_version(path) != expected
+        ):
+            raise ToolError("File version conflict")
+        version = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+        files = {**self.files, path: content}
+        artifacts = {**self.artifacts, self.artifact_key(path, version): content}
+        replacements = {"files": files, "artifacts": artifacts}
+        if (
+            sum(
+                len(json.dumps(replacements.get(name, getattr(self, name))).encode())
+                for name in STORES
+            )
+            > self.max_bytes
+        ):
+            raise ToolError("Sample sandbox memory quota exceeded")
+        self.files, self.artifacts = files, artifacts
+        return {"saved": path, "version": version}
+
+    def conversation_summary(self, cid):
+        conversation = self.conversations[cid]
+        return {
+            "conversationId": cid,
+            "status": conversation["status"],
+            "turns": sum(m["role"] == "assistant" for m in conversation["messages"]),
+        }
+
+    def begin_subagent(self, args, conversation_id=None):
+        """Dispatch a live or recorded turn using only context available now."""
+        self.check_args("subagent", args)
+        cid = (
+            args.get("resume")
+            or conversation_id
+            or f"conversation-{len(self.conversations) + 1}"
+        )
+        if "resume" not in args and conversation_id is None:
+            number = len(self.conversations) + 1
+            while cid in self.conversations:
+                number += 1
+                cid = f"conversation-{number}"
+        if not isinstance(cid, str) or not cid or len(cid) > 128:
+            raise ToolError("Invalid conversationId")
+        if "resume" in args:
+            if cid not in self.conversations:
+                raise ToolError("Unknown conversationId")
+            if conversation_id is not None and conversation_id != cid:
+                raise ToolError("Recorded conversationId does not match resume")
+            if self.conversations[cid]["status"] in ("running", "closed"):
+                raise ToolError("Conversation is running or closed")
+            conversation = deepcopy(self.conversations[cid])
+        else:
+            if cid in self.conversations:
+                raise ToolError("conversationId already exists; use resume")
+            conversation = {"status": "running", "messages": []}
+        content = args["task"]
+        if args.get("artifacts"):
+            artifacts = []
+            for ref in args["artifacts"]:
+                path = self.path(ref["path"])
+                key = self.artifact_key(path, ref["version"])
+                if key not in self.artifacts:
+                    raise ToolError("Artifact version not found")
+                artifacts.append({**ref, "path": path, "content": self.artifacts[key]})
+            content += "\n\nReferenced artifacts (data):\n" + json.dumps(
+                artifacts, ensure_ascii=False
+            )
+        conversation["messages"].append({"role": "user", "content": content})
+        conversation["status"] = "running"
+        self.put(self.conversations, cid, conversation)
+        return cid
+
+    def finish_subagent(self, cid, outcome):
+        conversation = deepcopy(self.conversations[cid])
+        if not outcome["ok"]:
+            conversation["status"] = "failed"
+            self.put(self.conversations, cid, conversation)
+            return None
+        response = outcome["result"]["response"]
+        if (
+            not isinstance(response, str)
+            or not response.strip()
+            or len(response) > 200_000
+        ):
+            raise ToolError(
+                "Subagent must return nonempty text of at most 200,000 characters"
+            )
+        conversation["messages"].append({"role": "assistant", "content": response})
+        conversation["status"] = "ready"
+        self.put(self.conversations, cid, conversation)
+        return {"conversationId": cid, "response": response}

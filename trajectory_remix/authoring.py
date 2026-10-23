@@ -25,7 +25,14 @@ from .llm import LLMClient, SampleBuilder
 from .metadata import MetadataFilter, query as query_metadata, counts as metadata_counts
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
-from .tools import ToolError, chat_context, tool_message, tool_request, tool_text
+from .tools import (
+    SUBAGENT_INSTRUCTION,
+    ToolError,
+    chat_context,
+    tool_message,
+    tool_request,
+    tool_text,
+)
 
 Nonnegative = Annotated[int, Field(ge=0)]
 PageSize = Annotated[int, Field(ge=1, le=5000)]
@@ -494,7 +501,7 @@ class TrajectoryCommands:
         validate: bool = False,
         expected_revision: Revision = None,
     ):
-        """Insert an open, append, generate or tool-call event at a numeric or anchor tick key.
+        """Insert an open, append, generate, tool-call or invisible-tool-call event at a numeric or anchor tick key.
 
         position defaults to the end of the tick array. Close via generated EOS.
         """
@@ -1054,6 +1061,8 @@ class TrajectoryCommands:
         content: str | None = None,
         segments: list[dict] | None = None,
         loss: dict | None = None,
+        invisible: bool = False,
+        source: str | None = None,
     ):
         """Schedule an executable synthetic tool event and compile before committing one undoable edit.
 
@@ -1063,18 +1072,38 @@ class TrajectoryCommands:
         or segments replace the canonical <tool> request and support anchors/NOOPs.
         Sandbox changes at dispatch + duration_ticks. Only subagent requires a
         recorded outcome; replay never contacts an endpoint. Save with save_dataset.
+        invisible=True schedules external sandbox activity with no model tokens/window,
+        call-budget use or implicit clock advance. source optionally identifies its actor.
+        Hidden failures are compile diagnostics; only deterministic mutations are allowed.
         """
         index, sample = self._draft(sample_id, expected_revision)
         event = {
-            "op": "tool-call",
+            "op": "invisible-tool-call" if invisible else "tool-call",
             "tool": tool,
             "arguments": arguments,
-            "window": (
-                window if window is not None else f"tool-result-{uuid.uuid4().hex[:12]}"
-            ),
             "duration-ticks": duration_ticks,
-            "delivery": delivery,
         }
+        if invisible:
+            if (
+                any(v is not None for v in (window, content, segments, loss, outcome))
+                or delivery != "instant"
+            ):
+                raise CommandError(
+                    "Invisible calls cannot have windows, model content, outcomes or streamed delivery"
+                )
+            if source is not None:
+                event["source"] = source
+        else:
+            if source is not None:
+                raise CommandError("source is only supported for invisible calls")
+            event.update(
+                window=(
+                    window
+                    if window is not None
+                    else f"tool-result-{uuid.uuid4().hex[:12]}"
+                ),
+                delivery=delivery,
+            )
         for key, value in (("content", content), ("segments", segments), ("loss", loss)):
             if value is not None:
                 event[key] = value
@@ -1125,8 +1154,9 @@ class TrajectoryCommands:
 
         Defaults use the configured synthetic clock and call budget. Sessions are RAM-only,
         separate from generation sandboxes, and excluded from saves/source edit history.
-        subagent_endpoint optionally enables bounded text-only requests to that configured
-        endpoint; no parent RAM state or trajectory context is sent to it.
+        subagent_endpoint enables bounded text-only requests to that configured endpoint.
+        Subagents retain history; resume uses the returned conversationId. Only explicitly
+        referenced artifact versions are shared; other parent RAM/trajectory context is excluded.
         """
         clock = self.state["config"].get("clock", {})
         options = {
@@ -1155,7 +1185,7 @@ class TrajectoryCommands:
                     "Configured subagent endpoint not found", "not_found"
                 )
 
-            async def broker(task, depth):
+            async def broker(messages, depth):
                 endpoint = next(
                     (
                         e
@@ -1172,9 +1202,9 @@ class TrajectoryCommands:
                         [
                             {
                                 "role": "system",
-                                "content": "Complete this delegated task. No tools or parent workspace are available.",
+                                "content": SUBAGENT_INSTRUCTION,
                             },
-                            {"role": "user", "content": task},
+                            *messages,
                         ],
                         tools=None,
                     )

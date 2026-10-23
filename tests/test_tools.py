@@ -66,10 +66,13 @@ async def test_quotas():
 
 
 async def test_subagent_broker_and_depth():
-    async def broker(prompt, depth):
-        return f"{prompt}:{depth}"
+
+    async def broker(messages, depth):
+        return f"{messages[-1]['content']}:{depth}"
 
     s = Sandbox(broker=broker)
-    assert await s.call("subagent", {"task": "inspect"}) == {"response": "inspect:1"}
+    result = await s.call("subagent", {"task": "inspect"})
+    assert result["response"] == "inspect:1"
+    assert result["conversationId"].startswith("conversation-")
     with pytest.raises(ToolError, match="depth"):
         await Sandbox(broker=broker, depth=2).call("subagent", {"task": "inspect"})

@@ -406,11 +406,126 @@ async def test_generated_subagent_records_duration_and_replays_offline(
     plan = compiler.compile(generated)
     call = plan["tool_calls"][0]
     assert call["end"] - call["start"] == 3
-    assert call["outcome"] == {"ok": True, "result": {"response": "Child answer."}}
+    assert call["outcome"]["ok"]
+    assert call["outcome"]["result"]["response"] == "Child answer."
+    assert call["outcome"]["result"]["conversationId"].startswith("conversation-")
     assert (
         compiler.frame(plan, call["start"])["sandbox"]["tool_calls"][0]["status"]
         == "running"
     )
+
+
+async def test_generation_resumes_a_seeded_subagent_conversation(compiler, sample):
+    config = minimal_config()
+    config["tasks"] = [config["tasks"][1]]
+    sample["replay"]["1"] = [
+        {
+            "op": "tool-call",
+            "tool": "subagent",
+            "window": "coder-window",
+            "arguments": {"task": "Implement parser"},
+            "outcome": {
+                "ok": True,
+                "result": {
+                    "conversationId": "coder",
+                    "response": "I used a state machine.",
+                },
+            },
+        }
+    ]
+    fake = FakeClient(
+        [
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "followup",
+                        "type": "function",
+                        "function": {
+                            "name": "subagent",
+                            "arguments": json.dumps(
+                                {"task": "Why a state machine?", "resume": "coder"}
+                            ),
+                        },
+                    }
+                ],
+            },
+            "It handles quoted separators.",
+            "Reviewed the explanation.",
+        ]
+    )
+    generated = await SampleBuilder(compiler, config, fake).generate(seed=sample)
+    assert fake.messages[1][-3:] == [
+        {"role": "user", "content": "Implement parser"},
+        {"role": "assistant", "content": "I used a state machine."},
+        {"role": "user", "content": "Why a state machine?"},
+    ]
+    plan = compiler.compile(generated)
+    assert plan["tool_calls"][1]["outcome"] == {
+        "ok": True,
+        "result": {
+            "conversationId": "coder",
+            "response": "It handles quoted separators.",
+        },
+    }
+    assert (
+        len(
+            compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"]["coder"][
+                "messages"
+            ]
+        )
+        == 4
+    )
+
+
+async def test_generated_failed_turn_keeps_its_identity_for_resume_and_offline_replay(
+    compiler,
+):
+    config = minimal_config()
+    config["tasks"] = [config["tasks"][1]]
+
+    class Client:
+        def __init__(self):
+            self.parent_turns = self.child_turns = 0
+            self.cid = None
+
+        async def complete(self, endpoint, messages, tools=None):
+            if tools is None:
+                self.child_turns += 1
+                if self.child_turns == 1:
+                    raise RuntimeError("provider details must stay private")
+                assert messages[-2:] == [
+                    {"role": "user", "content": "Implement"},
+                    {"role": "user", "content": "Try again"},
+                ]
+                return {"content": "Recovered"}
+            self.parent_turns += 1
+            if self.parent_turns == 3:
+                return {"content": "Done"}
+            if self.parent_turns == 2:
+                failed = json.loads(messages[-1]["content"])
+                assert not failed["ok"]
+                self.cid = failed["conversationId"]
+                args = {"task": "Try again", "resume": self.cid}
+            else:
+                args = {"task": "Implement"}
+            return {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"delegate-{self.parent_turns}",
+                        "type": "function",
+                        "function": {"name": "subagent", "arguments": json.dumps(args)},
+                    }
+                ],
+            }
+
+    client = Client()
+    generated = await SampleBuilder(compiler, config, client).generate()
+    plan = compiler.compile(generated)
+    assert plan["tool_calls"][0]["outcome"]["conversationId"] == client.cid
+    assert plan["tool_calls"][1]["outcome"]["result"]["conversationId"] == client.cid
+    assert "provider details" not in json.dumps(generated)
 
 
 async def test_explicit_start_prefix_limits_task_context(compiler, sample):
