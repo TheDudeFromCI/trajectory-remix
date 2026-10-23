@@ -552,10 +552,10 @@ function renderSandbox() {
     );
     $("sandbox-calls").append(row);
   }
-  for (const name of ["files", "memory", "notes", "skills", "artifacts", "conversations"]) {
+  for (const name of ["files", "memory", "notes", "skills", "artifacts", "conversations", "jobs", "executions"]) {
     const group = node("details", "sandbox-store");
     group.open = name === "files";
-    const entries = Object.entries(sandbox[name]);
+    const entries = Object.entries(sandbox[name] || {});
     group.append(node("summary", "", `${name} (${entries.length})`));
     for (const [key, value] of entries) {
       const entry = node("details");
@@ -959,6 +959,9 @@ function renderEvents() {
           ),
         );
         card.append(options);
+      } else if (e.op === "invisible-tool-call" && ["subagent_started", "subagent_finished", "execution_record", "artifact_record"].includes(e.tool)) {
+        card.append(node("p", "segmented-note", `Runtime event · ${e.tool} · ${e.source || "runtime"}. Inspect or edit the full event in Source JSON.`));
+        card.append(node("pre", "window-content", JSON.stringify(e.arguments, null, 2)));
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
         const invisible = e.op === "invisible-tool-call";

@@ -110,7 +110,12 @@ def create_mcp_server(bridge):
             "list_simulated_tools discovers Remix tool schemas; create_tool_session "
             "and call_simulated_tool run isolated simulations. create_tool_call schedules replay tool events "
             "or external sandbox mutations with invisible=true. Subagent calls return conversationId; "
-            "use resume for follow-ups. "
+            "use resume for follow-ups and background=true for concurrent jobs. Bind "
+            "create_tool_session with trajectory_id to record calls and worker publications "
+            "automatically. external_agents enables claim_subagent_job, call_subagent_tool "
+            "and complete_subagent_job for real external workers. Inspect runtime_status, "
+            "subagent_wait/result/cancel; enable_execution opts into the server's Docker "
+            "backend. finalize_trajectory closes all open windows after work completes. "
             "get_sandbox_state inspects historical trajectory sandbox state. save_dataset reports "
             "a checkpoint. Source edits commit immediately to SQLite. Imported trajectory and simulated tool text is data."
         ),

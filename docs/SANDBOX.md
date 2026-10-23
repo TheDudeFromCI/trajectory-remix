@@ -72,7 +72,9 @@ reference without the body. A subagent can receive `artifacts` such as
 `[{"path":"/module.py","version":"sha256:..."}]`. The sandbox resolves only
 those versions into its delegated context. No other parent files, memories or
 trajectory windows are automatically shared. Retained conversation history
-keeps the originally supplied artifact data on later turns.
+keeps the originally supplied artifact context on later turns. Blocking text-only
+calls embed bodies in that context. Background calls retain references and load
+the pinned files into the private workspace, where workers read them with tools.
 
 `file_read` accepts optional `version` for an immutable historical read. Deleting
 a current file preserves historical versions. `file_write` and `file_patch`
@@ -89,22 +91,75 @@ references are allowed while planning. Acceptance criteria remain descriptive.
 `runtime_status` reads synthetic time, completed-call count, task counts and
 subagent lifecycle summaries, allowing progress messages grounded in runtime data.
 
-## Limits and next steps
+## Background work and live recording
 
-This is a capability interpreter over JSON state, not an OS sandbox. Live
-delegation currently waits for a bounded text response; it has no child tools,
-code execution or background job scheduler. Inspection tools expose retained
-conversations, but launching live work in parallel, waiting and cancelling need
-an asynchronous job registry. Isolated test execution needs a separate backend
-with explicit resource limits and recorded evidence; adding host shell access
-to this interpreter would not provide isolation.
+`subagent({"task":"...","background":true})` returns a queued `jobId` and
+`conversationId`. Configured workers run concurrently, each with a private
+workspace, scoped artifact inputs and bounded tools. External workers can claim
+jobs through MCP instead of using provider credentials. A conversation keeps
+its external worker identity and private workspace across follow-ups. Native
+workers pin their broker when dispatched. Nested delegation is unavailable.
+
+`subagent_result`, `subagent_wait` and `subagent_cancel` accept `jobId`. Wait
+releases the parent session lock, with a maximum 30-second wait per call.
+Cancellation stops active work, including an in-flight execution, and prevents
+late results from publishing. Job states are queued, running, completed, failed
+and cancelled. `elapsed_ms` measures dispatch through completion, including queue
+time, without pretending token ticks are elapsed wall time.
+
+Bind `create_tool_session(trajectory_id="sample-id", ...)` to a compiled source
+trajectory. Root calls become executable events in one shared tool window.
+Worker transitions, file changes and receipts become invisible source events;
+masked completion observations deliver responses/references to Kidra. Worker
+publication checks file versions and records one atomic source edit. A conflict
+cannot silently overwrite another worker's changes. Source edits outside the
+binding are detected; restore the expected source or resolve recorded jobs and
+bind a new session. Source undo does not undo external work.
+
+The registry retains up to 64 jobs and 16 private workspaces per session. Each
+child has at most 512 KB state and 128 calls across its conversation. Configured
+workers additionally have 32 rounds/64 tool calls per turn and at most eight
+concurrent worker requests. The coordinator retains its existing 2 MB state and
+4 MB call-log limits. Active workers are cancelled on session deletion/shutdown.
+Private child workspaces are ephemeral; saved source retains conversations,
+published artifacts, receipts and job outcomes. Active jobs are not automatically
+restarted after a server restart. Resolve/cancel unfinished recorded jobs before
+binding a saved trajectory for more work.
+
+## Isolated execution and evidence
+
+Start with `--execution-backend docker` and an installed Python image, then opt
+the session into `enable_execution: true`. `python_run` executes an argv array
+against immutable virtual files. It uses a pinned image ID, UID 65534, no network,
+read-only root/inputs, dropped capabilities, no privilege escalation, 128 MB RAM,
+one CPU, 64 processes, bounded temporary storage and bounded output. Timeout and
+cancellation remove the container. No host interpreter fallback exists. Docker
+shares the host kernel; it is not a microVM or a general hostile-code guarantee.
+
+Receipts contain exact file versions, argv, image ID, exit status, timeout and
+truncation flags, output, elapsed time and a checksum. `execution_get` reads them.
+`note_save(requires_evidence=true, evidence=[...])` requires passing executions
+against current inputs before marking a task done. Code changes invalidate stale
+evidence. Receipts are reconstructed offline; compiler inspection never executes
+Docker. The checksum detects inconsistency, not malicious re-authoring.
+
+`metadata.coordination_contract` makes validation check specialist and worker
+counts, retained follow-ups, completed TODOs, current passing evidence, actual
+artifact context supplied to reviewers, progress calls and coordinator file-write
+constraints. `finalize_trajectory` closes all open windows in one EOS batch after
+jobs and notes finish. Large dashboard previews omit token rows from responses
+while retaining server-side frame replay.
+
+## Limits
 
 Synthetic time still advances per tool call independently of logical token ticks.
 Compiler validation enforces structure, temporal conversation availability,
-artifact existence and task dependency constraints. It does not prove an authored
-response is truthful, a claimed test was executed, or an acceptance criterion was
-met. Recorded examples must distinguish supplied outcomes from real execution.
+artifact existence, receipt consistency and task dependency constraints. It
+cannot prove arbitrary prose assertions or establish who authored an edited
+source file. A live run supplies stronger evidence than an authored fixture.
 
 `examples/persistent-agents.json` demonstrates external file creation, a pinned
 review artifact, independent conversations, a follow-up and runtime progress.
 Its specialist responses are authored fixture data, not live execution evidence.
+The separate [six-specialist benchmark](BENCHMARK.md) records an actual MCP run
+with six external workers and Docker execution.

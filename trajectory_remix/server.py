@@ -33,12 +33,12 @@ from .storage import DatasetState, DatasetStore, StorageConflict
 MAX_BODY = 40_000_000
 
 
-def create_app(dataset: Path, client=None):
+def create_app(dataset: Path, client=None, executor=None):
     store = DatasetStore(dataset)
     compiler = store.load_compiler()
     config = validate_config(json.loads(store.info()[3]))
     state = DatasetState(store, config)
-    runner = Runner(state, compiler, dataset, client)
+    runner = Runner(state, compiler, dataset, client, executor)
     token = secrets.token_urlsafe(32)
     previews = OrderedDict()
     static = Path(__file__).parent / "static"
@@ -51,14 +51,14 @@ def create_app(dataset: Path, client=None):
             try:
                 await runner.stop()
             finally:
-                commands.tool_sessions.close()
+                await commands.tool_sessions.aclose()
 
     app = FastAPI(title="Trajectory Remix", lifespan=lifespan)
     app.state.dataset = state
     app.state.runner = runner
     app.state.history = runner.history
     app.state.csrf = token
-    commands = TrajectoryCommands(state, compiler, runner, client)
+    commands = TrajectoryCommands(state, compiler, runner, client, executor=executor)
     app.state.commands = commands
     app.state.tool_sessions = commands.tool_sessions
     app.add_middleware(
@@ -331,10 +331,6 @@ def create_app(dataset: Path, client=None):
         if sample is None:
             sample = sample_at(data.get("index", -1))
         plan = compiler.compile(sample)
-        if len(plan["rows"]) > 50_000:
-            raise ValueError(
-                "Preview exceeds 50,000 rows; export via CLI or split the trajectory"
-            )
         plan_id = hashlib.sha256(
             json.dumps(sample, sort_keys=True).encode()
         ).hexdigest()[:24]
@@ -342,7 +338,15 @@ def create_app(dataset: Path, client=None):
         previews.move_to_end(plan_id)
         while len(previews) > 6:
             previews.popitem(last=False)
-        return {**plan, "plan_id": plan_id, "frame": compiler.frame(plan, 0)}
+        compact = len(plan["rows"]) > 50_000
+        return {
+            **plan,
+            **({"rows": [], "sandbox": None} if compact else {}),
+            "row_count": len(plan["rows"]),
+            "rows_omitted": compact,
+            "plan_id": plan_id,
+            "frame": compiler.frame(plan, 0),
+        }
 
     @app.get("/api/frame/{plan_id}/{tick}")
     async def frame(plan_id: str, tick: int):

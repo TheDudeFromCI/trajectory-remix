@@ -61,7 +61,7 @@ connect an MCP client to the stdio command:
 python -m trajectory_remix.mcp_server --url http://127.0.0.1:8765
 ```
 
-The bridge exposes 41 tools for trajectory creation, full JSON inspection,
+The bridge exposes 46 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
@@ -299,7 +299,8 @@ contract; it is not an audit of the current ProjectKidra repository.
   Every segment boundary must also be a tokenizer-token boundary.
 
 Defaults: at most 100,000 ticks and 500,000 expanded rows per compiled sample.
-Interactive previews are limited to 50,000 rows. Imports are limited to 32 MB per
+Previews above 50,000 rows use compact responses and server-side frames, so large
+valid trajectories remain replayable. Imports are limited to 32 MB per
 file and requests to 40 MB. Large imports should be split into batches; the SQLite dataset itself has no
 100,000-trajectory limit.
 
@@ -402,10 +403,10 @@ available.
 
 ## Tool sandbox
 
-Built-in tools run as an allowlisted capability interpreter over fresh RAM
-state. Model text is never executed. They cannot access host files, process
-execution, Docker, dynamic modules, URLs, or arbitrary networks. No eval, exec,
-subprocess or filesystem API is exposed through a tool.
+Built-in state tools run as an allowlisted capability interpreter over RAM,
+without host filesystem, shell or general network access. Optional `python_run`
+executes virtual files through a separate Docker backend with no network,
+read-only inputs/root, a non-root user and resource/output limits.
 
 The **Sandbox** panel follows the selected replay tick. Inspect virtual file
 contents, memory, notes, skills, the synthetic clock, and running/completed/failed
@@ -418,6 +419,10 @@ at a chosen tick without model tokens, windows or agent call-budget use. Use the
 for files created by a user or subagent. Persistent `subagent` calls return a
 `conversationId`; pass it as `resume` on follow-ups. Versioned artifacts, task
 dependencies and conversation/status inspection support coordinated work.
+`background: true` launches persistent tool-capable workers. Wait, inspect,
+cancel and retrieve results while other work continues. Bind a workbench with
+`create_tool_session(trajectory_id="sample-id", ...)` to record calls, worker
+artifacts and evidence automatically using one reusable tool window.
 See [sandbox coordination](docs/SANDBOX.md) and the
 [persistent-agent fixture](examples/persistent-agents.json) for examples and limits.
 
@@ -476,6 +481,7 @@ export replay deterministic tools locally. A `subagent` event requires its
 recorded `outcome`, for example
 `{"ok":true,"result":{"conversationId":"coder","response":"Recorded answer"}}` or
 `{"ok":false,"error":"Failure reason"}`; replay never repeats an LLM request.
+`python_run` also requires its actual recorded outcome; replay never reruns code.
 Other tools compute their outcomes and reject recorded overrides. Compiled
 previews expose `tool_calls` and a bounded delta history; frame responses include
 the selected tick's `sandbox` state without future results.
@@ -488,8 +494,9 @@ the selected tick's `sandbox` state without future results.
 | `memory_save/search` | Local lexical-overlap retrieval with top-8 results. RAG store is isolated; no embeddings service required. |
 | `note_save/list/delete` | Tasks/notes with todo, doing, blocked, done status, owners, dependencies, blockers and acceptance criteria. |
 | `skill_save/load/list` | Skill texts stored and retrieved within the sample only; not executed. |
-| `subagent` | Attached-LLM conversation with retained history; follow up using `resume`. Only explicitly referenced artifact versions are shared. Child tool calling is disabled. |
-| `subagent_list/get/close`, `runtime_status` | Inspect retained conversations and task progress; close conversations to prevent further resumes. |
+| `subagent` | Retained conversation; `background: true` enables a private worker workspace with bounded tools. Follow up using `resume`; only explicit artifact versions are shared. |
+| `subagent_list/get/close`, `subagent_wait/result/cancel`, `runtime_status` | Inspect, await, cancel and retrieve background work and task progress. |
+| `python_run`, `execution_get` | Run Python through opt-in Docker execution and inspect receipts with exact input versions, output and exit status. |
 
 For example, a trajectory with `"metadata":{"agent_name":"Nova","user_name":"Alex"}`
 can send a message with these replay events:
@@ -507,7 +514,7 @@ success or error observation. Chat messages are excluded-loss external input,
 visible at the completion tick before same-tick model output. Marker-looking
 argument text stays literal; model control tokens are escaped as data.
 
-2 MB total state and 200k characters per string; configurable bounded call and
+2 MB coordinator state and 200k characters per string; configurable bounded call and
 round budgets, with at most 256 replay tool events per sample. Inputs and tool names are strictly checked; unknown tools return
 errors. Results are actual simulation outcomes, not fabricated claims of real
 host actions. Live sandbox objects are destroyed in `finally` blocks on success,
@@ -515,15 +522,24 @@ failure and cancellation; recorded replay events reconstruct their historical
 state for inspection. The subagent's outbound capability is the already configured LLM
 broker, not general network access.
 
-This is a **capability sandbox for fixed simulated tools**, not a process-level
-sandbox for arbitrary third-party code. Adding Python/shell/plugin execution
-would require a separate hardened execution service. Docker provides namespaces
-and resource isolation but shares the host kernel; default containers alone
-are not a sufficient hostile-code boundary. Such an extension should use an
-unprivileged/rootless runtime, no Docker socket/host mounts, no network, read-only
-root filesystem, dropped capabilities, seccomp, resource limits and, where
-needed, stronger isolation such as a microVM. None of that is needed to run the
-included simulation interpreter.
+Enable isolated execution on the server and then per workbench:
+
+```bash
+docker pull python:3.12-slim
+python -m trajectory_remix --dataset project.sqlite --execution-backend docker
+```
+
+Use `create_tool_session(enable_execution=true, ...)`. Containers run as UID 65534
+with dropped capabilities, no privilege escalation/network, read-only root/inputs,
+and bounded temporary storage, CPU, memory, processes and output. Host credentials
+and the Docker socket are never mounted into workers. Docker shares the host
+kernel; stronger hostile-code isolation needs a different backend. Replay and
+export require neither Docker nor model credentials.
+
+The [six-specialist benchmark](docs/BENCHMARK.md) records six actual workers,
+persistent follow-ups, peer review, progress updates and 36 passing software
+tests executed through the runtime. Its source and validation receipt are saved
+in the repository. `finalize_trajectory` closes all remaining windows in one edit.
 
 The HTTP service also enforces a random per-process session token on API calls,
 trusted local Host values, same-origin checks and a content security policy.

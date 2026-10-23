@@ -1,7 +1,7 @@
 """Capability sandbox: all tool state is JSON data in RAM, isolated per sample.
 
-There is deliberately no Python execution, shell, OS file access, URL fetch, or
-plugin import. The only outbound capability is an injected bounded LLM broker.
+Host files, shell access and arbitrary network requests are never exposed.
+Optional execution uses a separate resource-limited Docker capability.
 """
 
 from __future__ import annotations
@@ -148,6 +148,31 @@ DEFINITIONS = [
     ),
     ("subagent_list", "List retained subagent identities and lifecycle states.", {}),
     (
+        "subagent_wait",
+        "Wait up to timeout_seconds for a background job; returns its current status and retained result.",
+        {"jobId": {"type": "string"}},
+    ),
+    (
+        "subagent_cancel",
+        "Cancel an active background job; late results cannot modify the workspace.",
+        {"jobId": {"type": "string"}},
+    ),
+    (
+        "subagent_result",
+        "Inspect a background job and retrieve its retained result.",
+        {"jobId": {"type": "string"}},
+    ),
+    (
+        "python_run",
+        "Run Python against immutable virtual files in an opt-in Docker sandbox; no network, read-only inputs, bounded CPU/memory/time/output.",
+        {"argv": {"type": "array", "items": {"type": "string"}, "maxItems": 32}},
+    ),
+    (
+        "execution_get",
+        "Retrieve a retained execution receipt, bounded output, exit status and exact input versions.",
+        {"executionId": {"type": "string"}},
+    ),
+    (
         "subagent_get",
         "Inspect a retained subagent conversation.",
         {"conversationId": {"type": "string"}},
@@ -169,13 +194,16 @@ OPTIONAL = {
     "file_patch": {"expected_version": {"type": "string"}},
     "note_save": {
         "owner": {"type": "string"},
+        "requires_evidence": {"type": "boolean"},
         **{
             k: {"type": "array", "items": {"type": "string"}, "maxItems": 64}
-            for k in ("depends_on", "blockers", "acceptance_criteria")
+            for k in ("depends_on", "blockers", "acceptance_criteria", "evidence")
         },
     },
     "subagent": {
         "resume": {"type": "string"},
+        "background": {"type": "boolean"},
+        "role": {"type": "string"},
         "artifacts": {
             "type": "array",
             "maxItems": 32,
@@ -191,7 +219,35 @@ OPTIONAL = {
         },
     },
 }
-STORES = ("files", "memory", "notes", "skills", "artifacts", "conversations")
+OPTIONAL["subagent_wait"] = {"timeout_seconds": {"type": "number", "maximum": 30}}
+OPTIONAL["python_run"] = {
+    "files": OPTIONAL["subagent"]["artifacts"],
+    "timeout_seconds": {"type": "number", "minimum": 1, "maximum": 30},
+}
+INTERNAL = {
+    "subagent_started": {"jobId": {"type": "string"}},
+    "subagent_finished": {
+        "jobId": {"type": "string"},
+        "outcome": {"type": "object"},
+        "elapsed_ms": {"type": "number"},
+    },
+    "execution_record": {"result": {"type": "object"}},
+    "artifact_record": {
+        "path": {"type": "string"},
+        "version": {"type": "string"},
+        "content": {"type": "string"},
+    },
+}
+STORES = (
+    "files",
+    "memory",
+    "notes",
+    "skills",
+    "artifacts",
+    "conversations",
+    "jobs",
+    "executions",
+)
 SCHEMAS = [
     {
         "type": "function",
@@ -211,6 +267,7 @@ SCHEMAS = [
 
 
 class Sandbox:
+
     def __init__(
         self,
         seed="2030-01-01T09:00:00+00:00",
@@ -219,6 +276,8 @@ class Sandbox:
         depth=0,
         max_calls=64,
         max_bytes=2_000_000,
+        executor=None,
+        external_agents=False,
     ):
         self.clock = datetime.fromisoformat(seed)
         if self.clock.tzinfo is None:
@@ -231,6 +290,7 @@ class Sandbox:
             raise ToolError("seconds_per_call must be finite and nonnegative")
         self.step = seconds_per_call
         self.broker, self.depth = broker, depth
+        self.executor, self.external_agents = executor, external_agents
         self.max_calls, self.max_bytes, self.calls = max_calls, max_bytes, 0
         for name in STORES:
             setattr(self, name, {})
@@ -271,7 +331,9 @@ class Sandbox:
         return "/" + str(PurePosixPath(path)).lstrip("/")
 
     def check_args(self, name, args):
-        schema = next((d[2] for d in DEFINITIONS if d[0] == name), None)
+        schema = INTERNAL.get(
+            name, next((d[2] for d in DEFINITIONS if d[0] == name), None)
+        )
         if schema is None:
             raise ToolError(f"Unknown tool: {name}")
         allowed = {**schema, **OPTIONAL.get(name, {})}
@@ -298,13 +360,21 @@ class Sandbox:
                 or v > 31_536_000
             ):
                 raise ToolError(f"Invalid seconds: {v}")
+            if spec["type"] == "number" and (
+                v < spec.get("minimum", 0) or v > spec.get("maximum", 31_536_000)
+            ):
+                raise ToolError(f"Argument outside bounds: {key}")
+            if spec["type"] == "boolean" and type(v) is not bool:
+                raise ToolError(f"Invalid boolean argument: {key}")
+            if spec["type"] == "object" and not isinstance(v, dict):
+                raise ToolError(f"Invalid object argument: {key}")
             if "enum" in spec and v not in spec["enum"]:
                 raise ToolError(f"Invalid {key}")
             if spec["type"] == "array":
                 if not isinstance(v, list) or len(v) > spec["maxItems"]:
                     raise ToolError(f"Invalid array argument: {key}")
                 for entry in v:
-                    if key == "artifacts":
+                    if key in ("artifacts", "files"):
                         if (
                             not isinstance(entry, dict)
                             or set(entry) != {"path", "version"}
@@ -344,10 +414,24 @@ class Sandbox:
         self.clock += timedelta(seconds=self.step)
 
     async def call(self, name, args, **context):
+        if name == "python_run":
+            self.start_call(name, args)
+            if self.executor is None:
+                raise ToolError("Docker execution is not enabled for this session")
+            files = self.execution_files(args.get("files"))
+            result = await self.executor.run(
+                files, args["argv"], args.get("timeout_seconds", 10)
+            )
+            self.record_execution(result)
+            return result
         if name == "subagent":
             self.start_call(name, args)
-            if self.depth >= 2 or self.broker is None:
+            if self.depth >= 2 or (self.broker is None and not self.external_agents):
                 raise ToolError("Subagent depth/capability limit")
+            if args.get("background"):
+                return self.start_job(args)
+            if self.broker is None:
+                raise ToolError("External workers require background=true")
             conversation_id = self.begin_subagent(
                 args, None if "resume" in args else f"conversation-{uuid.uuid4().hex}"
             )
@@ -370,6 +454,10 @@ class Sandbox:
     def call_sync(self, name, args, *, chat_open=False, agent_name="Kidra"):
         """Run deterministic capabilities without an event loop or network IO."""
         self.start_call(name, args)
+        if name in INTERNAL:
+            raise ToolError(
+                "Internal runtime events cannot be dispatched as model tools"
+            )
         return self.execute_sync(name, args, chat_open=chat_open, agent_name=agent_name)
 
     def execute_sync(self, name, args, *, chat_open=False, agent_name="Kidra"):
@@ -464,6 +552,22 @@ class Sandbox:
                 )
             ):
                 raise ToolError("Task has blockers or unfinished dependencies")
+            if note["status"] == "done" and note.get("requires_evidence"):
+                evidence = note.get("evidence", [])
+                if not evidence:
+                    raise ToolError("Task requires execution evidence")
+                for eid in evidence:
+                    run = self.executions.get(eid)
+                    if run is None or run["status"] != "passed":
+                        raise ToolError(
+                            "Task evidence must reference passing executions"
+                        )
+                    if any(
+                        ref["path"] not in self.files
+                        or self.file_version(ref["path"]) != ref["version"]
+                        for ref in run["inputs"]
+                    ):
+                        raise ToolError("Task evidence refers to stale input files")
             return self.put(
                 self.notes,
                 args["key"],
@@ -488,6 +592,42 @@ class Sandbox:
             raise ToolError("Subagent replay requires a recorded outcome")
         if name == "subagent_list":
             return [self.conversation_summary(k) for k in self.conversations]
+        if name in ("subagent_wait", "subagent_result", "subagent_cancel"):
+            jid = args["jobId"]
+            if jid not in self.jobs:
+                raise ToolError("Unknown jobId")
+            if name == "subagent_cancel" and self.jobs[jid]["status"] in (
+                "queued",
+                "running",
+            ):
+                self.jobs[jid]["status"] = "cancelled"
+                self.conversations[self.jobs[jid]["conversationId"]][
+                    "status"
+                ] = "cancelled"
+            return deepcopy(self.jobs[jid])
+        if name == "subagent_started":
+            job = self.jobs.get(args["jobId"])
+            if job is None or job["status"] != "queued":
+                raise ToolError("Job is not queued")
+            job["status"] = "running"
+            return {"jobId": args["jobId"], "status": "running"}
+        if name == "subagent_finished":
+            return self.finish_job(args["jobId"], args["outcome"], args["elapsed_ms"])
+        if name == "execution_record":
+            return self.record_execution(args["result"])
+        if name == "execution_get":
+            if args["executionId"] not in self.executions:
+                raise ToolError("Unknown executionId")
+            return deepcopy(self.executions[args["executionId"]])
+        if name == "artifact_record":
+            version = "sha256:" + hashlib.sha256(args["content"].encode()).hexdigest()
+            if version != args["version"]:
+                raise ToolError("Artifact content does not match its version")
+            return self.put(
+                self.artifacts,
+                self.artifact_key(self.path(args["path"]), version),
+                args["content"],
+            )
         if name in ("subagent_get", "subagent_close"):
             cid = args["conversationId"]
             if cid not in self.conversations:
@@ -507,6 +647,17 @@ class Sandbox:
                     for status in ("todo", "doing", "blocked", "done")
                 },
                 "subagents": [self.conversation_summary(k) for k in self.conversations],
+                "jobs": [
+                    {
+                        k: deepcopy(v)
+                        for k, v in job.items()
+                        if k not in ("arguments", "outcome")
+                    }
+                    for job in self.jobs.values()
+                ],
+                "executions": {
+                    key: value["status"] for key, value in self.executions.items()
+                },
             }
         raise ToolError("Unsupported tool")
 
@@ -543,7 +694,139 @@ class Sandbox:
             "conversationId": cid,
             "status": conversation["status"],
             "turns": sum(m["role"] == "assistant" for m in conversation["messages"]),
+            **({"jobId": conversation["jobId"]} if "jobId" in conversation else {}),
         }
+
+    def execution_files(self, references=None):
+        refs = (
+            references
+            if references is not None
+            else [
+                {"path": path, "version": self.file_version(path)}
+                for path in sorted(self.files)
+            ]
+        )
+        files, seen = [], set()
+        for ref in refs:
+            path = self.path(ref["path"])
+            key = self.artifact_key(path, ref["version"])
+            if key not in self.artifacts or path in seen:
+                raise ToolError("Execution requires unique, existing artifact versions")
+            seen.add(path)
+            files.append(
+                {
+                    "path": path,
+                    "version": ref["version"],
+                    "content": self.artifacts[key],
+                }
+            )
+        if not files:
+            raise ToolError("Execution requires at least one file")
+        return files
+
+    def record_execution(self, result):
+        from .execution import validate_execution
+
+        validate_execution(result, self)
+        eid = result["executionId"]
+        if eid in self.executions and self.executions[eid] != result:
+            raise ToolError("Execution ID cannot be reused with different evidence")
+        self.put(self.executions, eid, deepcopy(result))
+        return deepcopy(result)
+
+    def start_job(self, args, recorded=None):
+        if len(self.jobs) >= 64:
+            raise ToolError("Background job limit reached")
+        recorded = recorded or {}
+        jid = recorded.get("jobId", "job-" + uuid.uuid4().hex)
+        if not isinstance(jid, str) or not jid or len(jid) > 128 or jid in self.jobs:
+            raise ToolError("Invalid or duplicate jobId")
+        previous = self.snapshot()
+        try:
+            cid = self.begin_subagent(
+                args,
+                recorded.get(
+                    "conversationId",
+                    None if "resume" in args else "conversation-" + uuid.uuid4().hex,
+                ),
+            )
+            job = {
+                "jobId": jid,
+                "conversationId": cid,
+                "status": "queued",
+                "arguments": deepcopy(args),
+            }
+            self.put(self.jobs, jid, job)
+            self.conversations[cid]["jobId"] = jid
+        except ToolError:
+            self.restore(previous)
+            raise
+        return {"jobId": jid, "conversationId": cid, "status": "queued"}
+
+    def finish_job(self, jid, outcome, elapsed_ms):
+        job = self.jobs.get(jid)
+        if job is None or job["status"] not in ("queued", "running"):
+            raise ToolError("Job is already terminal or unknown")
+        if not isinstance(outcome, dict) or type(outcome.get("ok")) is not bool:
+            raise ToolError("Job completion requires a tool outcome")
+        if type(elapsed_ms) is not int or elapsed_ms < 0:
+            raise ToolError("Invalid job duration")
+        if outcome["ok"]:
+            result = outcome.get("result", {})
+            if not isinstance(result, dict):
+                raise ToolError("Invalid job result")
+            if (
+                not isinstance(result.get("response"), str)
+                or not result["response"].strip()
+                or len(result["response"]) > 200_000
+            ):
+                raise ToolError("Job result requires bounded nonempty response text")
+            refs = result.get("artifacts", [])
+            if (
+                not isinstance(refs, list)
+                or len(refs) > 128
+                or any(
+                    not isinstance(r, dict)
+                    or set(r) != {"path", "version"}
+                    or any(not isinstance(v, str) for v in r.values())
+                    for r in refs
+                )
+            ):
+                raise ToolError("Invalid job artifact references")
+            for ref in refs:
+                if (
+                    self.artifact_key(self.path(ref["path"]), ref["version"])
+                    not in self.artifacts
+                ):
+                    raise ToolError("Job result artifact not found")
+            eids = result.get("executions", [])
+            if not isinstance(eids, list) or any(
+                not isinstance(eid, str) or eid not in self.executions for eid in eids
+            ):
+                raise ToolError("Job result execution not found")
+            if "reviewed_artifacts" in result and result["reviewed_artifacts"] != job[
+                "arguments"
+            ].get("artifacts", []):
+                raise ToolError("Review provenance differs from supplied context")
+            worker = result.get("worker_id")
+            conversation = self.conversations[job["conversationId"]]
+            if worker is not None:
+                if not isinstance(worker, str) or not worker or len(worker) > 128:
+                    raise ToolError("Invalid worker identity")
+                if conversation.get("worker_id", worker) != worker:
+                    raise ToolError("Persistent conversation changed worker identity")
+                conversation["worker_id"] = worker
+        elif not isinstance(outcome.get("error"), str):
+            raise ToolError("Failed job requires error text")
+        self.finish_subagent(job["conversationId"], outcome)
+        updated = {
+            **job,
+            "status": "completed" if outcome["ok"] else "failed",
+            "elapsed_ms": elapsed_ms,
+            "outcome": deepcopy(outcome),
+        }
+        self.put(self.jobs, jid, updated)
+        return deepcopy(updated)
 
     def begin_subagent(self, args, conversation_id=None):
         """Dispatch a live or recorded turn using only context available now."""
@@ -580,7 +863,10 @@ class Sandbox:
                 key = self.artifact_key(path, ref["version"])
                 if key not in self.artifacts:
                     raise ToolError("Artifact version not found")
-                artifacts.append({**ref, "path": path, "content": self.artifacts[key]})
+                shared = {**ref, "path": path}
+                if not args.get("background"):
+                    shared["content"] = self.artifacts[key]
+                artifacts.append(shared)
             content += "\n\nReferenced artifacts (data):\n" + json.dumps(
                 artifacts, ensure_ascii=False
             )

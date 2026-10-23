@@ -6,9 +6,11 @@ import asyncio
 import copy
 import json
 import uuid
+import time
 from dataclasses import dataclass, field
 
 from .tools import SCHEMAS, STORES, Sandbox, ToolError, tool_failure
+from .agents import AgentJobs, ACTIVE
 
 
 class ToolSessionError(ValueError):
@@ -24,19 +26,25 @@ class ToolSession:
     endpoint_id: str | None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     interactions: list = field(default_factory=list)
+    trajectory_id: str | None = None
+    on_events: object = None
+    recording_error: str | None = None
 
 
 class ToolSessions:
     def __init__(self, max_sessions=8, max_log_bytes=4_000_000):
         self.sessions = {}
         self.max_sessions, self.max_log_bytes = max_sessions, max_log_bytes
+        self.agents = AgentJobs(self)
 
     def get(self, session_id):
         if session_id not in self.sessions:
             raise ToolSessionError(f"Tool session not found: {session_id}", "not_found")
         return self.sessions[session_id]
 
-    def create(self, session_id, options, endpoint_id=None):
+    def create(
+        self, session_id, options, endpoint_id=None, trajectory_id=None, on_events=None
+    ):
         session_id = session_id if session_id is not None else str(uuid.uuid4())
         if not session_id or len(session_id) > 128:
             raise ToolSessionError("session_id must have 1..128 characters")
@@ -47,7 +55,13 @@ class ToolSessions:
                 "Tool session limit reached; delete an unused session", "quota_exceeded"
             )
         sandbox = Sandbox(**options)
-        self.sessions[session_id] = ToolSession(sandbox, options.copy(), endpoint_id)
+        self.sessions[session_id] = ToolSession(
+            sandbox,
+            options.copy(),
+            endpoint_id,
+            trajectory_id=trajectory_id,
+            on_events=on_events,
+        )
         return self.inspect(session_id, include_state=False, include_log=False)
 
     def inspect(self, session_id, include_state=True, include_log=True):
@@ -57,6 +71,8 @@ class ToolSessions:
             "session_id": session_id,
             "busy": session.lock.locked(),
             "endpoint_id": session.endpoint_id,
+            "trajectory_id": session.trajectory_id,
+            "recording_error": session.recording_error,
             "clock": sandbox.clock.isoformat(),
             "seconds_per_call": sandbox.step,
             "calls": sandbox.calls,
@@ -87,9 +103,19 @@ class ToolSessions:
         session = self.get(session_id) if session_id is not None else None
         definitions = copy.deepcopy(SCHEMAS)
         for definition in definitions:
-            definition["available"] = definition["function"][
-                "name"
-            ] != "subagent" or bool(session and session.sandbox.broker)
+            name = definition["function"]["name"]
+            definition["available"] = (
+                bool(
+                    session
+                    and (session.sandbox.broker or session.sandbox.external_agents)
+                )
+                if name == "subagent"
+                else (
+                    bool(session and session.sandbox.executor)
+                    if name == "python_run"
+                    else True
+                )
+            )
         return {
             "tools": definitions,
             "requires_session": True,
@@ -100,6 +126,11 @@ class ToolSessions:
         session = self.get(session_id)
         if session.lock.locked():
             raise ToolSessionError("Tool session has an in-flight call", "busy")
+        if session.trajectory_id:
+            raise ToolSessionError(
+                "A bound trajectory session cannot be reset; delete it and bind a new session"
+            )
+        self.agents.discard(session_id)
         sandbox = Sandbox(**session.options)
         session.sandbox.close()
         session.sandbox = sandbox
@@ -110,12 +141,15 @@ class ToolSessions:
         session = self.get(session_id)
         if session.lock.locked():
             raise ToolSessionError("Tool session has an in-flight call", "busy")
+        self.agents.discard(session_id)
         session.sandbox.close()
         del self.sessions[session_id]
         return {"deleted": session_id}
 
     def interaction(self, session_id, interaction_id):
         session = self.get(session_id)
+        if session.recording_error:
+            raise ToolSessionError(session.recording_error, "conflict")
         entry = next(
             (e for e in session.interactions if e["id"] == interaction_id), None
         )
@@ -126,7 +160,16 @@ class ToolSessions:
         return copy.deepcopy(entry)
 
     async def call(self, session_id, name, arguments, recorder=None, context=None):
+        started = time.monotonic()
         session = self.get(session_id)
+        if session.recording_error:
+            raise ToolSessionError(session.recording_error, "conflict")
+        if name == "subagent_wait":
+            session.sandbox.check_args(name, arguments)
+            await self.agents.wait(
+                session_id, arguments["jobId"], arguments.get("timeout_seconds", 10)
+            )
+            session = self.get(session_id)
         if session.lock.locked():
             raise ToolSessionError("Tool session has an in-flight call", "busy")
         try:
@@ -152,6 +195,7 @@ class ToolSessions:
                     "outcome": copy.deepcopy(outcome),
                     "clock": candidate.clock.isoformat(),
                     "call_number": candidate.calls,
+                    "elapsed_ms": int((time.monotonic() - started) * 1000),
                 }
                 size = len(json.dumps(entry, ensure_ascii=False).encode())
                 if size > self.max_log_bytes:
@@ -161,6 +205,8 @@ class ToolSessions:
                 if self.sessions.get(session_id) is not session:
                     raise ToolSessionError("Tool session was closed", "not_found")
                 recording = recorder(entry) if recorder else None
+                if recording and "_sandbox" in recording:
+                    candidate.restore(recording.pop("_sandbox"))
                 session.sandbox.close()
                 session.sandbox = candidate
                 session.interactions.append(entry)
@@ -172,6 +218,7 @@ class ToolSessions:
                     > self.max_log_bytes
                 ):
                     session.interactions.pop(0)
+                self.agents.adopt(session_id)
                 return {
                     "session_id": session_id,
                     "interaction": copy.deepcopy(entry),
@@ -182,6 +229,18 @@ class ToolSessions:
                 raise
 
     def close(self):
+        self.agents.discard()
         for session in self.sessions.values():
             session.sandbox.close()
         self.sessions.clear()
+
+    async def aclose(self):
+        tasks = list(
+            {
+                *self.agents.tasks.values(),
+                *self.agents.active_tools.values(),
+                *self.agents.retired,
+            }
+        )
+        self.close()
+        await asyncio.gather(*tasks, return_exceptions=True)

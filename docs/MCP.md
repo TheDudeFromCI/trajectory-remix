@@ -151,12 +151,12 @@ result. Omitted text produces a canonical request from `tool` and `arguments`;
 those structured fields always determine execution. Result text is always masked.
 Multiple calls can share an open tool window. Equal completions use stable
 replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
-tool failures become `{ok:false,error:...}` observations. Only `subagent` accepts
-a recorded `outcome`; compilation and inspection never repeat an LLM request.
+tool failures become `{ok:false,error:...}` observations. `subagent` and `python_run`
+accept recorded outcomes; replay never repeats model requests or code execution.
 
 `get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
 and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
-`artifacts`, `conversations`, `calls` and started `tool_calls`. Invisible calls
+`artifacts`, `conversations`, `jobs`, `executions`, `calls` and started `tool_calls`. Invisible calls
 are marked `invisible: true` and include `source` in this author-facing history.
 Each call has resolved `request_start`, execution
 `start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
@@ -307,7 +307,7 @@ retain display text and have zero live KV. Bounds are inclusive; `step` samples
 `start_tick`, `start_tick + step`, and so on through `end_tick`. `windows` filters
 the returned windows.
 
-Preview requests are bounded to 100 frames, 50,000 compiled rows and 4 MB of
+Preview requests are bounded to 100 frames and 4 MB of
 frame JSON. Narrow the tick range/filter windows to reduce output; split the
 trajectory if its compiled plan exceeds the row limit. List/history page sizes
 are bounded to 5,000 entries. Full source reads return untruncated sample JSON.
@@ -427,10 +427,11 @@ availability. Create a workbench with `create_tool_session`, for example:
 ```
 
 Clock and call-budget defaults come from the dashboard configuration. Sessions
-are independent of each other and of generation sandboxes. They are not tied
-to a sample ID; record their interactions into any suitable trajectory. Virtual
-paths never access host files. Sessions do not expose shell commands, process
-execution, arbitrary URL fetching, or host credentials.
+are independent of each other and of generation sandboxes. Optionally bind one
+to a sample using `trajectory_id` for automatic recording, as described below.
+Virtual paths never access host files. Python execution requires explicit Docker
+enablement on both the server and session; shell commands, arbitrary URL fetching
+and host credentials are not exposed.
 
 `call_simulated_tool` can execute and record a call together:
 
@@ -476,7 +477,7 @@ undo may be recorded again from the retained log.
 to 256 calls, up to 2 MB of virtual storage, and a 4 MB retained call log. Old log
 entries are evicted, so record useful interactions before they expire. Session
 state and logs disappear on server shutdown and are excluded from dataset saves
-unless explicitly recorded as trajectory events. In-flight calls prevent another
+unless explicitly recorded as trajectory events. Blocking in-flight calls prevent another
 call, reset or deletion of that workbench; cancellation preserves prior state.
 
 To enable `subagent`, create the session with `subagent_endpoint` set to an
@@ -508,17 +509,56 @@ array to clear them. Self-dependencies/cycles are rejected. Marking a task `done
 requires all dependencies to exist and be done, with no blockers. Acceptance
 criteria are recorded requirements, not executable evidence checks.
 
-Live subagents have no tools or recursive delegation and must return
+Blocking delegation has no tools. Background workers have private persistent
+workspaces with bounded file, note, memory, skill and optional execution tools;
+recursive delegation is disabled. Workers must return
 nonempty text of at most 200,000 characters. Provider calls use configured
 credentials without exposing them. Provider failures are reported without raw
 error details. Rejected recording can roll back virtual state and source, but
 cannot undo a provider request that has already occurred.
 
-Live delegation still waits for a text response; it does not launch background
-workers or execute code. Lifecycle inspection is available, but background
-launch/wait/cancel and an isolated execution backend remain future work. Replays
-represent authored outcomes; they do not prove those agents actually ran. See
-[sandbox behavior](SANDBOX.md) for timing, quotas and compatibility details.
+Set `background: true` on `subagent` to immediately receive
+`{conversationId, jobId, status:"queued"}`. `subagent_result({jobId})` retrieves
+status/result. `subagent_wait` also takes `timeout_seconds` in 0..30 and releases
+the coordinator while waiting. `subagent_cancel` stops active work and rejects
+late publication. Results include artifact references, execution IDs, worker
+identity and tool activity. Queue/runtime duration is recorded as `elapsed_ms`,
+separately from synthetic time and token ticks.
+
+### Live trajectory recording and external workers
+
+`create_tool_session` accepts `trajectory_id`, `external_agents` and
+`enable_execution`. A bound trajectory must compile and have no unfinished
+recorded jobs. Calls record executable events automatically in one reusable
+`tools` window; workers publish artifacts/evidence through invisible events.
+Completion observations reach Kidra as masked `<subagent_result>` messages.
+External source changes invalidate a binding instead of overwriting it. Bound
+sessions cannot reset; delete and rebind after resolving source conflicts.
+
+With `external_agents: true`, actual external workers use:
+
+| MCP tool | Arguments / behavior |
+|---|---|
+| `list_subagent_jobs` | `session_id`, optional `include_completed`; inspect the queue without budget use. |
+| `claim_subagent_job` | `session_id`, `job_id`, `worker_id`; receive scoped messages/references. Resumes require the same worker. |
+| `call_subagent_tool` | Those IDs plus `name`, `arguments`; execute in that worker's private workspace. |
+| `complete_subagent_job` | Those IDs plus exactly one of `response` or `error`; publish artifacts/evidence atomically with version checks. |
+| `finalize_trajectory` | `sample_id`, optional `require_done`/`expected_revision`; require terminal jobs/done TODOs and close all windows with EOS. |
+
+`python_run` takes `argv`, optional pinned `files`, and `timeout_seconds` in 1..30.
+Enable `--execution-backend docker` on the server and `enable_execution: true` on
+the workbench. Omitted files use the virtual workspace. The installed image is
+pinned by content ID. Each execution records its ID, exact input versions,
+bounded output, exit status, timeout/truncation, duration and checksum. Inspect
+it with `execution_get({executionId})`. There is no host-process fallback.
+
+Notes accept `requires_evidence` and `evidence` (execution IDs). Required tasks
+cannot become done without passing receipts for current input versions.
+`metadata.coordination_contract` enables extra validation of specialist/worker
+counts, follow-ups, TODOs, review context, current evidence, progress updates and
+coordinator file-write constraints. These consistency checks do not prove
+arbitrary prose claims or authenticate an edited receipt. See
+[sandbox behavior](SANDBOX.md) and the [live benchmark](BENCHMARK.md).
 
 ## Verification
 

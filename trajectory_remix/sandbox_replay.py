@@ -4,7 +4,7 @@ import copy
 import json
 
 from .compiler import MAX_TICKS, CompileError, integer
-from .tools import STORES, Sandbox, ToolError, tool_failure
+from .tools import INTERNAL, STORES, Sandbox, ToolError, tool_failure
 
 MAX_TOOL_CALLS = 256
 EXTERNAL_TOOLS = {
@@ -17,6 +17,7 @@ EXTERNAL_TOOLS = {
     "skill_save",
     "time_advance",
 }
+EXTERNAL_TOOLS.update(INTERNAL)
 
 
 def validate_call(event, path):
@@ -44,13 +45,38 @@ def validate_call(event, path):
     integer(event.get("duration-ticks", 0), path)
     if "outcome" in event:
         outcome = event["outcome"]
-        if event["tool"] != "subagent":
-            raise CompileError("Only subagent accepts a recorded outcome", path)
+        if event["tool"] not in ("subagent", "python_run"):
+            raise CompileError(
+                "Only subagent and python_run accept a recorded outcome", path
+            )
         if not isinstance(outcome, dict) or type(outcome.get("ok")) is not bool:
             raise CompileError("Recorded outcome requires an ok boolean", path)
-        if outcome["ok"]:
+        if outcome["ok"] and not isinstance(outcome.get("result"), dict):
+            raise CompileError(
+                "Successful recorded outcome requires a result object", path
+            )
+        if outcome["ok"] and event["tool"] == "subagent":
             result = outcome.get("result")
-            if not isinstance(result, dict) or not isinstance(
+            background = event["arguments"].get("background") is True
+            if background:
+                if (
+                    not isinstance(result, dict)
+                    or result.get("status") != "queued"
+                    or any(
+                        not isinstance(result.get(k), str) or not result[k]
+                        for k in ("conversationId", "jobId")
+                    )
+                ):
+                    raise CompileError(
+                        "Background subagent requires recorded conversationId/jobId and queued status",
+                        path,
+                    )
+                if event.get("duration-ticks", 0):
+                    raise CompileError(
+                        "Background launch duration must be zero; job runtime is recorded separately",
+                        path,
+                    )
+            elif not isinstance(result, dict) or not isinstance(
                 result.get("response"), str
             ):
                 raise CompileError(
@@ -62,7 +88,7 @@ def validate_call(event, path):
                 or len(result["conversationId"]) > 128
             ):
                 raise CompileError("Invalid recorded conversationId", path)
-        elif not isinstance(outcome.get("error"), str):
+        elif not outcome["ok"] and not isinstance(outcome.get("error"), str):
             raise CompileError("Failed outcome requires error text", path)
         if "conversationId" in outcome and (
             not isinstance(outcome["conversationId"], str)
@@ -72,8 +98,8 @@ def validate_call(event, path):
             raise CompileError("Invalid recorded conversationId", path)
         if len(json.dumps(outcome).encode()) > 200_000:
             raise CompileError("Recorded outcome exceeds 200,000 bytes", path)
-    elif event["tool"] == "subagent":
-        raise CompileError("Subagent replay requires a recorded outcome", path)
+    elif event["tool"] in ("subagent", "python_run"):
+        raise CompileError(f"{event['tool']} replay requires a recorded outcome", path)
 
 
 def chat_context_at(items, tick, order, eos_id, metadata):
@@ -156,14 +182,53 @@ def compile_sandbox(items, sample, eos_id):
         # Resumes must refer to a conversation already available at dispatch.
         actions = [(c["end"], c["order"], 1, c) for c in calls]
         actions += [
-            (c["start"], c["order"], 0, c) for c in calls if c["tool"] == "subagent"
+            (c["start"], c["order"], 0, c)
+            for c in calls
+            if (c["tool"] == "subagent" and not c["arguments"].get("background"))
+            or c["tool"] == "python_run"
         ]
         pending = {}
         previous = initial
         for tick, _, phase, call in sorted(actions, key=lambda a: a[:3]):
             event = events[call["path"]]
             try:
-                if call["tool"] == "subagent":
+                if call["tool"] == "subagent" and call["arguments"].get("background"):
+                    sandbox.start_call("subagent", call["arguments"])
+                    outcome = copy.deepcopy(event["outcome"])
+                    if outcome["ok"]:
+                        outcome["result"] = sandbox.start_job(
+                            call["arguments"], outcome["result"]
+                        )
+                elif call["tool"] == "python_run":
+                    if phase == 0:
+                        sandbox.check_args("python_run", call["arguments"])
+                        pending[call["path"]] = (
+                            [
+                                {k: f[k] for k in ("path", "version")}
+                                for f in sandbox.execution_files(
+                                    call["arguments"].get("files")
+                                )
+                            ]
+                            if event["outcome"]["ok"]
+                            else []
+                        )
+                    else:
+                        sandbox.start_call("python_run", call["arguments"])
+                        expected = pending[call["path"]]
+                        if isinstance(expected, ToolError):
+                            raise expected
+                        outcome = copy.deepcopy(event["outcome"])
+                        if outcome["ok"]:
+                            result = outcome.get("result", {})
+                            if (
+                                result.get("inputs") != expected
+                                or result.get("argv") != call["arguments"]["argv"]
+                            ):
+                                raise ToolError(
+                                    "Execution evidence does not match dispatch inputs/arguments"
+                                )
+                            sandbox.record_execution(result)
+                elif call["tool"] == "subagent":
                     if phase == 0:
                         result = event["outcome"].get("result")
                         recorded_id = (
