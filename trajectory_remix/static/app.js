@@ -1,8 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
-const AUTOSAVE_ENABLED_KEY = "trajectory-remix.autosave-enabled";
-const AUTOSAVE_MINUTES_KEY = "trajectory-remix.autosave-minutes";
 const SHOW_HEADERS_KEY = "trajectory-remix.show-window-headers";
 const SAMPLE_PAGE_SIZE = 100;
 let sampleOffset = 0,
@@ -10,7 +8,6 @@ let sampleOffset = 0,
 let state,
   selected = -1,
   sample = null,
-  savedRevision = null,
   plan = null,
   tick = 0,
   dirty = false,
@@ -23,13 +20,8 @@ let configDraft,
   eventDraft = [],
   toastTimer,
   compileTimer,
-  compileWaiters = [],
-  autosaveTimer,
-  autosaveBusy = false,
   editRevision = 0,
   autoCompileDelayMs = loadAutoCompileDelay(),
-  autosaveEnabled = loadAutosaveEnabled(),
-  autosaveMinutes = loadAutosaveMinutes(),
   showWindowHeaders = loadShowWindowHeaders(),
   pollBusy = false,
   compileBusy = false,
@@ -110,49 +102,12 @@ function loadAutoCompileDelay() {
     return 1000;
   }
 }
-function loadAutosaveEnabled() {
-  try {
-    return localStorage.getItem(AUTOSAVE_ENABLED_KEY) !== "false";
-  } catch {
-    return true;
-  }
-}
 function loadShowWindowHeaders() {
   try {
     return localStorage.getItem(SHOW_HEADERS_KEY) === "true";
   } catch {
     return false;
   }
-}
-function loadAutosaveMinutes() {
-  try {
-    const saved = Number(localStorage.getItem(AUTOSAVE_MINUTES_KEY));
-    return Number.isInteger(saved) && saved >= 1 && saved <= 120 ? saved : 5;
-  } catch {
-    return 5;
-  }
-}
-function scheduleAutosave() {
-  clearInterval(autosaveTimer);
-  autosaveTimer = null;
-  if (!autosaveEnabled) return;
-  autosaveTimer = setInterval(
-    action(async () => {
-      if (
-        autosaveBusy ||
-        !state ||
-        (!hasPendingChanges() && state.revision === savedRevision)
-      )
-        return;
-      autosaveBusy = true;
-      try {
-        await saveSession();
-      } finally {
-        autosaveBusy = false;
-      }
-    }),
-    autosaveMinutes * 60_000,
-  );
 }
 function scheduleCompile() {
   clearTimeout(compileTimer);
@@ -226,9 +181,6 @@ async function refresh(initial = false) {
       next.revision !== state.revision ||
       next.offset !== state.offset ||
       next.query !== state.query;
-    if (Number.isInteger(next.status.last_saved_revision))
-      savedRevision = next.status.last_saved_revision;
-    else if (savedRevision === null) savedRevision = next.revision;
     state = next;
     renderStatus();
     if (changed || initial) renderSamples();
@@ -293,12 +245,6 @@ function renderStatus() {
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
-  const unsaved = hasPendingChanges() || state.revision !== savedRevision;
-  $("save-status").textContent = unsaved
-    ? "Unsaved changes"
-    : s.last_saved
-      ? `Saved ${new Date(s.last_saved).toLocaleTimeString()}`
-      : "Not saved yet";
   $("selected-tags").replaceChildren(
     ...(state.config.tags || []).map((t) => node("span", "tag", t)),
   );
@@ -439,7 +385,6 @@ async function compileSample(persist = true) {
   } finally {
     compileBusy = false;
     renderHistoryActions();
-    for (const resolve of compileWaiters.splice(0)) resolve();
   }
 }
 function setTick(value) {
@@ -2169,15 +2114,6 @@ $("delete-sample").onclick = action(async () => {
     renderReplay();
   }
 });
-async function saveSession() {
-  while (compileBusy)
-    await new Promise((resolve) => compileWaiters.push(resolve));
-  if (hasPendingChanges()) await compileSample(true);
-  const result = await json("checkpoint", "POST");
-  savedRevision = result.revision;
-  await refresh();
-  toast("Dataset saved.");
-}
 async function changeHistory(direction) {
   if (compileBusy)
     throw new Error("Wait for the current compilation to finish.");
@@ -2241,14 +2177,8 @@ $("edit-menu-button").onclick = () => toggleMenu("edit");
 $("preferences-button").onclick = () => {
   closeMenus();
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
-  $("autosave-enabled").checked = autosaveEnabled;
-  $("autosave-minutes").value = String(autosaveMinutes);
-  $("autosave-minutes").disabled = !autosaveEnabled;
   $("show-window-headers").checked = showWindowHeaders;
   $("preferences-dialog").showModal();
-};
-$("autosave-enabled").onchange = () => {
-  $("autosave-minutes").disabled = !$("autosave-enabled").checked;
 };
 $("close-preferences").onclick = () => $("preferences-dialog").close();
 $("cancel-preferences").onclick = () => $("preferences-dialog").close();
@@ -2258,31 +2188,11 @@ $("preferences-form").onsubmit = action(async (event) => {
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0.1 || delaySeconds > 60)
     throw new Error("Compile delay must be between 0.1 and 60 seconds.");
   const delayMs = Math.round(delaySeconds * 1000);
-  const autosaveEnabledValue = $("autosave-enabled").checked;
-  const autosaveMinutesValue = Number($("autosave-minutes").value);
-  if (
-    autosaveEnabledValue &&
-    (!Number.isInteger(autosaveMinutesValue) ||
-      autosaveMinutesValue < 1 ||
-      autosaveMinutesValue > 120)
-  )
-    throw new Error("Autosave interval must be between 1 and 120 minutes.");
-  const nextAutosaveMinutes =
-    Number.isInteger(autosaveMinutesValue) &&
-    autosaveMinutesValue >= 1 &&
-    autosaveMinutesValue <= 120
-      ? autosaveMinutesValue
-      : autosaveMinutes;
   localStorage.setItem(AUTO_COMPILE_DELAY_KEY, String(delayMs));
-  localStorage.setItem(AUTOSAVE_ENABLED_KEY, String(autosaveEnabledValue));
-  localStorage.setItem(AUTOSAVE_MINUTES_KEY, String(nextAutosaveMinutes));
   autoCompileDelayMs = delayMs;
-  autosaveEnabled = autosaveEnabledValue;
-  autosaveMinutes = nextAutosaveMinutes;
   showWindowHeaders = $("show-window-headers").checked;
   localStorage.setItem(SHOW_HEADERS_KEY, String(showWindowHeaders));
   renderReplay();
-  scheduleAutosave();
   if (compileTimer !== null) scheduleCompile();
   $("preferences-dialog").close();
 });
@@ -2291,10 +2201,6 @@ for (const name of ["file", "edit"])
     const anyOpen = !$("file-menu").hidden || !$("edit-menu").hidden;
     if ($(name + "-menu").hidden && anyOpen) toggleMenu(name);
   };
-$("file-save").onclick = action(async () => {
-  closeMenus();
-  await saveSession();
-});
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".file-menu")) closeMenus();
 });
@@ -2466,7 +2372,6 @@ $("download-export").onclick = action(async () => {
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    $("file-save").click();
     return;
   }
   if (e.key === "Escape") closeMenus();
@@ -2501,7 +2406,6 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 await action(() => refresh(true))();
-scheduleAutosave();
 setInterval(
   () =>
     action(async () => {
