@@ -27,7 +27,10 @@ in a sample runs code, launches a worker or contacts a subagent provider.
    before editing an existing one. Use `expected_revision` on edits. After changing
    event arrays, relist addresses: event indexes are zero-based and can shift.
 
-The bridge installation instructions are in `docs/MCP.md`. Once connected, all
+Connect HTTP clients to `http://127.0.0.1:8765/mcp`, not the dashboard root.
+Stdio clients launch `trajectory_remix.mcp_server` with the dashboard root URL.
+Browser UIs require an explicit `--mcp-allow-origin` matching their origin.
+The transport setup and curl checks are in `docs/MCP.md`. Once connected, all
 authoring and inspection below can be done with MCP alone.
 
 ## Plan the example before writing tokens

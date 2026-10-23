@@ -4,6 +4,12 @@
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic
   edits, revision conflicts, patches, metadata, diagnostics and timeline inspection.
+- Streamable HTTP checks cover direct POST initialization, initialized notifications,
+  tool discovery/calls, session and protocol headers, deletion, malformed requests,
+  HTTP methods, CORS preflight/exposed session headers and explicit origin/Host
+  restrictions without weakening dashboard token checks. A real network test uses
+  the official SDK, verifies HTTP and stdio share edits, and holds GET/SSE open
+  while POST remains operational. The dashboard also works without the MCP extra.
 - DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample

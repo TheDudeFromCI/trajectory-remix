@@ -60,7 +60,22 @@ python -m pip install -e '.[mcp]'
 python -m trajectory_remix --dataset project.sqlite
 ```
 
-Add this server to your MCP client's configuration, replacing the Python path
+For **Streamable HTTP**, including llama.cpp Web UI, connect to
+**`http://127.0.0.1:8765/mcp`** (the root URL serves the dashboard). The HTTP
+endpoint is available when the MCP extra is installed; restart after installation.
+For a browser UI on port 8123, explicitly allow its origin when starting Remix:
+
+```bash
+python -m trajectory_remix --dataset project.sqlite \
+  --mcp-allow-origin http://127.0.0.1:8123
+```
+
+In llama.cpp, select `streamable_http` and use the full `/mcp` URL. Its
+`--ui-mcp-proxy` may remain enabled. If you browse via `localhost`, allow
+`http://localhost:8123` instead, or repeat the flag to allow both origins.
+See the [HTTP connection and curl checks](docs/MCP.md#streamable-http-and-llamacpp-web-ui).
+
+For **stdio** clients, add this server configuration, replacing the Python path
 with the absolute path to your virtual environment:
 
 ```json
@@ -78,11 +93,11 @@ with the absolute path to your virtual environment:
 ```
 
 On Windows, use `.venv/Scripts/python.exe`. Match `--url` to the dashboard's port
-if you changed it. The client launches the stdio bridge; the URL points to the
-dashboard, not an HTTP MCP endpoint. Once connected, call `get_session` and
+if you changed it. The client launches the stdio bridge; its `--url` points to
+the dashboard root, while Streamable HTTP clients use `/mcp`. Call `get_session` and
 `get_authoring_guide` to check the connection and read the authoring workflow.
 
-The bridge exposes 42 tools for trajectory creation, full JSON inspection,
+Both transports expose the same 42 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running

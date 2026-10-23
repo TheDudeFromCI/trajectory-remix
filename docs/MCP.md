@@ -1,9 +1,10 @@
 # MCP trajectory authoring
 
-Trajectory Remix exposes MCP tools over **stdio** through the official Python MCP
-SDK. The bridge connects to the running dashboard over its guarded local API.
-The dashboard owns the dataset, tokenizer, generation loop and saves, so browser
-and MCP clients share one session.
+Trajectory Remix exposes MCP tools over **Streamable HTTP** at `/mcp` and over
+**stdio**, using the existing official Python MCP SDK. Both transports share the
+running dashboard's command handlers, dataset, tokenizer, generation loop and
+saves. The stdio bridge connects through the dashboard's guarded local API;
+HTTP requests use the same in-process dataset owner.
 
 Read [Skill.md](../trajectory_remix/Skill.md) for the parallel authoring workflow,
 or retrieve it with `get_authoring_guide`. All sandbox tools are synthetic;
@@ -20,6 +21,104 @@ python -m trajectory_remix init \
   --dataset project.sqlite
 python -m trajectory_remix --dataset project.sqlite
 ```
+
+### Streamable HTTP and llama.cpp Web UI
+
+The endpoint is **`http://127.0.0.1:8765/mcp`**. It is served by the dashboard
+when `.[mcp]` is installed; no separate bridge process or new dependency is needed.
+Restart the dashboard after installing the extra. Without the optional SDK,
+`/mcp` returns `503` with installation instructions and the dashboard still works.
+
+For llama.cpp Web UI at `http://127.0.0.1:8123`, start Remix with:
+
+```bash
+python -m trajectory_remix --dataset project.sqlite \
+  --mcp-allow-origin http://127.0.0.1:8123
+```
+
+Set the UI's MCP transport to `streamable_http`, URL to
+`http://127.0.0.1:8765/mcp`, and leave authentication unset for this local service.
+The llama.cpp `--ui-mcp-proxy` option may stay enabled. Include `/mcp` in the
+upstream URL; the proxy does not turn the dashboard root into an MCP endpoint.
+The proxy must preserve POST bodies, Accept/Content-Type, `Mcp-Session-Id` and
+`Mcp-Protocol-Version` headers and allow streaming responses.
+
+Direct browser access is allowed only for explicitly configured origins. Use
+the actual address shown in the browser: `localhost` and `127.0.0.1` differ.
+Repeat `--mcp-allow-origin` for multiple UIs; wildcards and opaque `null` origins
+are rejected. Allowed origins receive scoped CORS preflight responses for
+GET/POST/DELETE and can read the session headers. An absent Origin is permitted
+for local clients such as curl; same-origin dashboard requests are also allowed.
+Other cross-origin MCP requests are rejected. The `/api/` dashboard routes retain
+their session-token and same-origin requirements; CORS is not enabled for them.
+This remains a trusted local, single-user service, not an authenticated public
+MCP server. Allowing an origin grants that UI access to the authoring tools.
+
+The SDK handles the initialize/initialized handshake, JSON-RPC requests, session
+IDs and protocol negotiation. POST requests accept `application/json` with
+`Accept: application/json, text/event-stream`; normal responses are JSON.
+Notifications return `202`. A successful initialize returns `Mcp-Session-Id`;
+send that header and the negotiated `Mcp-Protocol-Version` on later requests.
+Use DELETE to end the transport session. Unknown/expired session IDs return 404,
+so initialize again after a server restart. MCP transport sessions are separate
+from synthetic `create_tool_session` workbenches, and both share the project.
+
+GET with `Accept: text/event-stream` and a valid session opens the optional SSE
+notification stream while POST requests continue to work. There is no legacy
+`/sse` endpoint or persistent event replay store.
+
+Test initialization directly, independently of llama.cpp:
+
+```bash
+curl -i http://127.0.0.1:8765/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl-test","version":"1"}}}'
+```
+
+Expect `200`, a JSON-RPC initialize result and the `Mcp-Session-Id` header. Copy
+that ID below (use the response's protocol version if it differs):
+
+```bash
+REMIX_MCP_SESSION='paste-session-id-here'
+curl -i http://127.0.0.1:8765/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26' \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+curl -i http://127.0.0.1:8765/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+curl -i http://127.0.0.1:8765/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_session","arguments":{}}}'
+curl -i -X DELETE http://127.0.0.1:8765/mcp \
+  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26'
+```
+
+The initialized notification returns `202`; list/call return `200` with JSON-RPC
+results. To check CORS, repeat initialization with
+`-H 'Origin: http://127.0.0.1:8123'` and inspect `Access-Control-Allow-Origin`
+and `Access-Control-Expose-Headers`.
+
+#### Diagnosing proxy errors
+
+Before this endpoint was added, direct `POST /` returned `405`, `Allow: GET`,
+and `{"detail":"Method Not Allowed"}` from Remix; `/mcp` returned 404 because
+only stdio MCP existed. This reproduces the reported response without llama.cpp.
+A proxy's outer `Server: llama.cpp` header alone does not identify who generated
+the body. The current root remains a GET-only dashboard; use `/mcp` for MCP.
+
+If the direct initialize/list/call sequence succeeds but the proxied equivalent
+fails, compare the proxy's upstream path, method, Origin, Accept, session and
+protocol headers with these working requests. The observed `feature_disabled`
+403 is not a Remix error payload; inspect llama.cpp's proxy/access configuration
+and logs to locate it. An unexpected Origin can also produce a Remix 403 with a
+`detail` message; permit the actual UI origin explicitly. We cannot establish
+the behavior of a separate llama.cpp installation from direct server tests alone.
+
+### Stdio clients
 
 Configure your MCP client to launch the bridge. Use absolute paths appropriate
 for your checkout; the client starts this command as a subprocess:
@@ -47,8 +146,9 @@ stdout. Running it interactively waits for an MCP client on stdin.
 Only loopback HTTP URLs (`127.0.0.1`, `localhost`, `[::1]`) are accepted. The bridge
 bootstraps the same local session token as the browser, sends it in a header, and
 refreshes it after a dashboard restart. Host and Origin checks also apply to
-the bridge's API routes. There is no remote hosting or HTTP MCP transport in
-this implementation. MCP does not expose endpoint credentials, arbitrary file
+the bridge's API routes. The stdio bridge's `--url` targets the dashboard root;
+Streamable HTTP clients instead connect to `/mcp`. There is no remote hosting.
+MCP does not expose endpoint credentials, arbitrary file
 paths, shell execution, or provider configuration.
 
 ## Tools
