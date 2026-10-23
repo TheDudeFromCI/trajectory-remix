@@ -95,7 +95,11 @@ with the absolute path to your virtual environment:
 On Windows, use `.venv/Scripts/python.exe`. Match `--url` to the dashboard's port
 if you changed it. The client launches the stdio bridge; its `--url` points to
 the dashboard root, while Streamable HTTP clients use `/mcp`. Call `get_session` and
-`get_authoring_guide` to check the connection and read the authoring workflow.
+`get_authoring_guide` to check the connection and read a short starting guide.
+Request one lesson at a time with `topic`: `first`, `parallel`, `edit`, `sandbox`
+or `tools`. The [starting guide](trajectory_remix/guides/start.md) links each
+walkthrough; [starter tool selection](trajectory_remix/guides/tools.md) recommends
+which tools to expose before introducing batching, full JSON and workbenches.
 
 Both transports expose the same 42 tools for trajectory creation, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
@@ -570,7 +574,7 @@ External execution logs must be curated into appropriately masked observations
 and invisible state changes before becoming training samples.
 
 For the complete parallel authoring workflow, read [Skill.md](trajectory_remix/Skill.md)
-or call `get_authoring_guide` through MCP. It covers synthetic histories, scoped
+or call `get_authoring_guide(topic="reference")` through MCP. It covers synthetic histories, scoped
 artifacts, parallel timing, masks, markers, TODOs and review.
 
 The HTTP service also enforces a random per-process session token on API calls,
