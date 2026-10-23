@@ -25,19 +25,14 @@
   reusable tool windows, request anchors, segment losses and dispatch timing.
 - Persistent sandbox tests cover invisible mutations without token/window/export
   changes, history beyond the token horizon, author diagnostics for hidden failures,
-  live follow-up message retention, isolated conversations, restored generation,
+  authored follow-up message retention, isolated conversations, restored generation,
   dispatch-time resume checks, pinned artifacts, stale writes, quotas, task
   dependencies and runtime status without future answers. MCP and DOM tests
   cover external event authoring, undo/redo, persistence and historical scrubbing.
-- Background-runtime checks cover concurrent configured workers, real retained
-  follow-ups, external worker claims, isolated workspaces, atomic publication,
-  stale-write conflicts, bounded waits, cancellation of an in-flight execution,
-  result retention, live source recording and EOS finalization. Execution tests
-  cover offline receipts, changed-input detection, stale evidence and argument
-  bounds. Set `REMIX_TEST_DOCKER=1` to run real container isolation, Unicode,
-  network/input restrictions, output limits, timeout and cleanup checks.
-  The checked-in six-worker benchmark is also validated as a regression fixture;
-  its provenance and reproduction steps are documented in `BENCHMARK.md`.
+  Synthetic subagent tests reject malformed replies before dispatch, preserve
+  failed identities for clarification, and forbid nested provider calls. The
+  bundled Skill.md is available through MCP and its worked call sequence is
+  tested for parallel timing, follow-ups, external writes and masked observations.
 - Chat checks cover message framing, metadata speaker names, missing/closed
   windows, completion-time lifecycle, literal arguments, exported loss masks,
   generation error feedback and undoable MCP recording. DOM checks cover the

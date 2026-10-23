@@ -41,8 +41,9 @@ Both paths support source history, atomic batches, revision checks and saving.
 ## Persistent conversations
 
 `subagent({"task":"Implement"})` returns `conversationId` and `response`.
-`subagent({"task":"Explain your choice","resume":"conversation-1"})` sends that
-conversation's retained user and assistant turns to the configured provider.
+`subagent({"task":"Explain your choice","resume":"conversation-1"})` carries that
+conversation's retained user and assistant turns into the next synthetic turn.
+The author supplies each response; no provider or real agent is called.
 New calls without `resume` create independent conversations. Identities and
 messages belong to one sandbox, and reset/deletion destroys them. The generation
 builder restores retained conversations when continuing saved trajectories.
@@ -61,7 +62,7 @@ conversation available at that tick, even if its eventual completion is much
 later. Running history contains the submitted task, not its future answer.
 Successful completion appends the answer atomically. These checks produce tool
 error observations for invalid visible calls, like other sandbox failures.
-If a dispatched live turn fails, its error observation includes `conversationId`
+If an authored dispatched turn fails, its error observation includes `conversationId`
 at the top level so the coordinator can inspect or resume it. Recording preserves
 that identity during offline replay as well.
 
@@ -72,9 +73,7 @@ reference without the body. A subagent can receive `artifacts` such as
 `[{"path":"/module.py","version":"sha256:..."}]`. The sandbox resolves only
 those versions into its delegated context. No other parent files, memories or
 trajectory windows are automatically shared. Retained conversation history
-keeps the originally supplied artifact context on later turns. Blocking text-only
-calls embed bodies in that context. Background calls retain references and load
-the pinned files into the private workspace, where workers read them with tools.
+keeps the originally supplied artifact data on later turns.
 
 `file_read` accepts optional `version` for an immutable historical read. Deleting
 a current file preserves historical versions. `file_write` and `file_patch`
@@ -91,75 +90,31 @@ references are allowed while planning. Acceptance criteria remain descriptive.
 `runtime_status` reads synthetic time, completed-call count, task counts and
 subagent lifecycle summaries, allowing progress messages grounded in runtime data.
 
-## Background work and live recording
+## Synthetic authoring and limits
 
-`subagent({"task":"...","background":true})` returns a queued `jobId` and
-`conversationId`. Configured workers run concurrently, each with a private
-workspace, scoped artifact inputs and bounded tools. External workers can claim
-jobs through MCP instead of using provider credentials. A conversation keeps
-its external worker identity and private workspace across follow-ups. Native
-workers pin their broker when dispatched. Nested delegation is unavailable.
+For scheduled source, `create_tool_call` takes the authored `outcome`. In a
+workbench, `call_simulated_tool` also accepts top-level `outcome` for subagents
+only; deterministic tool results are computed from state. Read the retained
+conversation before writing a follow-up. A missing reply produces a failed
+synthetic turn rather than contacting a provider. The workbench's transcript
+recording does not create executable replay events; use scheduled calls for
+reconstructable state and parallel timing.
 
-`subagent_result`, `subagent_wait` and `subagent_cancel` accept `jobId`. Wait
-releases the parent session lock, with a maximum 30-second wait per call.
-Cancellation stops active work, including an in-flight execution, and prevents
-late results from publishing. Job states are queued, running, completed, failed
-and cancelled. `elapsed_ms` measures dispatch through completion, including queue
-time, without pretending token ticks are elapsed wall time.
-
-Bind `create_tool_session(trajectory_id="sample-id", ...)` to a compiled source
-trajectory. Root calls become executable events in one shared tool window.
-Worker transitions, file changes and receipts become invisible source events;
-masked completion observations deliver responses/references to Kidra. Worker
-publication checks file versions and records one atomic source edit. A conflict
-cannot silently overwrite another worker's changes. Source edits outside the
-binding are detected; restore the expected source or resolve recorded jobs and
-bind a new session. Source undo does not undo external work.
-
-The registry retains up to 64 jobs and 16 private workspaces per session. Each
-child has at most 512 KB state and 128 calls across its conversation. Configured
-workers additionally have 32 rounds/64 tool calls per turn and at most eight
-concurrent worker requests. The coordinator retains its existing 2 MB state and
-4 MB call-log limits. Active workers are cancelled on session deletion/shutdown.
-Private child workspaces are ephemeral; saved source retains conversations,
-published artifacts, receipts and job outcomes. Active jobs are not automatically
-restarted after a server restart. Resolve/cancel unfinished recorded jobs before
-binding a saved trajectory for more work.
-
-## Isolated execution and evidence
-
-Start with `--execution-backend docker` and an installed Python image, then opt
-the session into `enable_execution: true`. `python_run` executes an argv array
-against immutable virtual files. It uses a pinned image ID, UID 65534, no network,
-read-only root/inputs, dropped capabilities, no privilege escalation, 128 MB RAM,
-one CPU, 64 processes, bounded temporary storage and bounded output. Timeout and
-cancellation remove the container. No host interpreter fallback exists. Docker
-shares the host kernel; it is not a microVM or a general hostile-code guarantee.
-
-Receipts contain exact file versions, argv, image ID, exit status, timeout and
-truncation flags, output, elapsed time and a checksum. `execution_get` reads them.
-`note_save(requires_evidence=true, evidence=[...])` requires passing executions
-against current inputs before marking a task done. Code changes invalidate stale
-evidence. Receipts are reconstructed offline; compiler inspection never executes
-Docker. The checksum detects inconsistency, not malicious re-authoring.
-
-`metadata.coordination_contract` makes validation check specialist and worker
-counts, retained follow-ups, completed TODOs, current passing evidence, actual
-artifact context supplied to reviewers, progress calls and coordinator file-write
-constraints. `finalize_trajectory` closes all open windows in one EOS batch after
-jobs and notes finish. Large dashboard previews omit token rows from responses
-while retaining server-side frame replay.
-
-## Limits
+This is a capability interpreter over JSON state. It has no real workers,
+provider-backed subagents, code execution or background job scheduler. Authors
+represent concurrent work through timestamps and durations and publish external
+changes using invisible calls. See [Skill.md](../trajectory_remix/Skill.md), also
+available through MCP's `get_authoring_guide`, for the complete authoring workflow.
 
 Synthetic time still advances per tool call independently of logical token ticks.
 Compiler validation enforces structure, temporal conversation availability,
-artifact existence, receipt consistency and task dependency constraints. It
-cannot prove arbitrary prose assertions or establish who authored an edited
-source file. A live run supplies stronger evidence than an authored fixture.
+artifact existence and task dependency constraints. It does not prove an authored
+response is truthful, a claimed test was executed, or an acceptance criterion was
+met. Supplied outcomes are synthetic scenario data, not proof of real execution.
+Logs from work performed outside Remix must be selected, rewritten and assigned
+correct actors, masks, markers, timing and state effects before use as training
+samples; importing a raw log is not sufficient curation.
 
 `examples/persistent-agents.json` demonstrates external file creation, a pinned
 review artifact, independent conversations, a follow-up and runtime progress.
 Its specialist responses are authored fixture data, not live execution evidence.
-The separate [six-specialist benchmark](BENCHMARK.md) records an actual MCP run
-with six external workers and Docker execution.

@@ -44,6 +44,7 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 catalog = await session.list_tools()
                 tools = {tool.name: tool for tool in catalog.tools}
                 assert {
+                    "get_authoring_guide",
                     "create_tool_call",
                     "get_sandbox_state",
                     "create_tool_session",
@@ -51,8 +52,18 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "query_trajectories",
                 } <= set(tools)
                 assert tools["get_trajectory"].annotations.readOnlyHint
+                guide = await session.call_tool("get_authoring_guide", {})
+                assert (
+                    not guide.isError
+                    and "Synthetic tool inventory" in guide.structuredContent["content"]
+                )
                 assert tools["delete_event"].annotations.destructiveHint
-                assert tools["create_tool_call"].inputSchema["properties"]["invisible"]["type"] == "boolean"
+                assert (
+                    tools["create_tool_call"].inputSchema["properties"]["invisible"][
+                        "type"
+                    ]
+                    == "boolean"
+                )
                 for tool in tools.values():
                     Draft202012Validator.check_schema(tool.inputSchema)
                     assert tool.inputSchema["additionalProperties"] is False

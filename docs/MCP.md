@@ -5,6 +5,10 @@ SDK. The bridge connects to the running dashboard over its guarded local API.
 The dashboard owns the dataset, tokenizer, generation loop and saves, so browser
 and MCP clients share one session.
 
+Read [Skill.md](../trajectory_remix/Skill.md) for the parallel authoring workflow,
+or retrieve it with `get_authoring_guide`. All sandbox tools are synthetic;
+authors write specialist replies without running real subagents or code.
+
 ## Setup
 
 Install the optional MCP dependency in the dashboard's virtual environment:
@@ -54,6 +58,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 
 | Tool | Purpose |
 | --- | --- |
+| `get_authoring_guide` | Read the bundled Skill.md with parallel authoring, synthetic tools and curation guidance. |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
 | `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
 | `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
@@ -151,12 +156,12 @@ result. Omitted text produces a canonical request from `tool` and `arguments`;
 those structured fields always determine execution. Result text is always masked.
 Multiple calls can share an open tool window. Equal completions use stable
 replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
-tool failures become `{ok:false,error:...}` observations. `subagent` and `python_run`
-accept recorded outcomes; replay never repeats model requests or code execution.
+tool failures become `{ok:false,error:...}` observations. Only `subagent` accepts
+a recorded `outcome`; compilation and inspection never repeat an LLM request.
 
 `get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
 and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
-`artifacts`, `conversations`, `jobs`, `executions`, `calls` and started `tool_calls`. Invisible calls
+`artifacts`, `conversations`, `calls` and started `tool_calls`. Invisible calls
 are marked `invisible: true` and include `source` in this author-facing history.
 Each call has resolved `request_start`, execution
 `start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
@@ -307,7 +312,7 @@ retain display text and have zero live KV. Bounds are inclusive; `step` samples
 `start_tick`, `start_tick + step`, and so on through `end_tick`. `windows` filters
 the returned windows.
 
-Preview requests are bounded to 100 frames and 4 MB of
+Preview requests are bounded to 100 frames, 50,000 compiled rows and 4 MB of
 frame JSON. Narrow the tick range/filter windows to reduce output; split the
 trajectory if its compiled plan exceeds the row limit. List/history page sizes
 are bounded to 5,000 entries. Full source reads return untruncated sample JSON.
@@ -409,7 +414,7 @@ These commands use the same `Sandbox` dispatcher as trajectory generation:
 - Lexical memory search: `memory_save`, `memory_search`.
 - Notes/tasks: `note_save`, `note_list`, `note_delete`.
 - Text skills: `skill_save`, `skill_load`, `skill_list`.
-- Optional configured LLM: `subagent`.
+- Authored synthetic delegation: `subagent`; the author supplies its outcome.
 - Conversation inspection: `subagent_list`, `subagent_get`, `subagent_close`.
 - Coordination status: `runtime_status` returns synthetic time, completed call
   count, task counts and subagent identities/statuses.
@@ -427,11 +432,10 @@ availability. Create a workbench with `create_tool_session`, for example:
 ```
 
 Clock and call-budget defaults come from the dashboard configuration. Sessions
-are independent of each other and of generation sandboxes. Optionally bind one
-to a sample using `trajectory_id` for automatic recording, as described below.
-Virtual paths never access host files. Python execution requires explicit Docker
-enablement on both the server and session; shell commands, arbitrary URL fetching
-and host credentials are not exposed.
+are independent of each other and of generation sandboxes. They are not tied
+to a sample ID; record their interactions into any suitable trajectory. Virtual
+paths never access host files. Sessions do not expose shell commands, process
+execution, arbitrary URL fetching, or host credentials.
 
 `call_simulated_tool` can execute and record a call together:
 
@@ -477,18 +481,36 @@ undo may be recorded again from the retained log.
 to 256 calls, up to 2 MB of virtual storage, and a 4 MB retained call log. Old log
 entries are evicted, so record useful interactions before they expire. Session
 state and logs disappear on server shutdown and are excluded from dataset saves
-unless explicitly recorded as trajectory events. Blocking in-flight calls prevent another
+unless explicitly recorded as trajectory events. In-flight calls prevent another
 call, reset or deletion of that workbench; cancellation preserves prior state.
 
-To enable `subagent`, create the session with `subagent_endpoint` set to an
-existing configured endpoint ID. Start a conversation with `{"task":"Implement"}`.
-The result is `{"conversationId":"conversation-1","response":"..."}`. Follow up
-with `{"task":"Explain your edge cases","resume":"conversation-1"}`; the provider
-receives that conversation's earlier user and assistant messages. Each conversation
-is scoped to its sandbox and survives until reset, deletion or server shutdown.
-Generation also retains conversations, restores them when extending a saved
-trajectory, and records IDs for deterministic offline replay. Legacy recorded
-outcomes without IDs receive deterministic IDs during compilation.
+`subagent` is available without any configured endpoint. Supply an authored
+`outcome` at the top level of `call_simulated_tool`, separate from the model's
+`arguments`:
+
+```json
+{
+  "session_id": "experiment",
+  "name": "subagent",
+  "arguments": {"task": "Implement the parser"},
+  "outcome": {
+    "ok": true,
+    "result": {"conversationId": "coder", "response": "I used a state machine."}
+  }
+}
+```
+
+Read retained history using `subagent_get` or `get_tool_session`, then author the
+next response yourself. Follow up with `arguments: {"task":"Why that choice?",
+"resume":"coder"}` and another authored `outcome`. Replies should reflect only
+that specialist's task, retained history and explicitly supplied artifact versions.
+Independent calls create independent conversations. The author may choose an ID;
+otherwise Remix assigns one. No model/provider request or real agent launch occurs.
+A missing outcome becomes a failed synthetic turn; malformed outcomes are rejected
+before workbench dispatch. Deterministic tools reject authored outcome overrides.
+For timestamped executable replay, supply the same outcome to `create_tool_call`.
+The generation tool loop does not advertise `subagent` or invoke nested providers;
+authored seed conversations remain available for inspection by ordinary tools.
 
 Optional `artifacts` is an array of `{"path":"/code.py","version":"sha256:..."}`
 references. Only those immutable versions are resolved into the delegated context;
@@ -509,56 +531,12 @@ array to clear them. Self-dependencies/cycles are rejected. Marking a task `done
 requires all dependencies to exist and be done, with no blockers. Acceptance
 criteria are recorded requirements, not executable evidence checks.
 
-Blocking delegation has no tools. Background workers have private persistent
-workspaces with bounded file, note, memory, skill and optional execution tools;
-recursive delegation is disabled. Workers must return
-nonempty text of at most 200,000 characters. Provider calls use configured
-credentials without exposing them. Provider failures are reported without raw
-error details. Rejected recording can roll back virtual state and source, but
-cannot undo a provider request that has already occurred.
-
-Set `background: true` on `subagent` to immediately receive
-`{conversationId, jobId, status:"queued"}`. `subagent_result({jobId})` retrieves
-status/result. `subagent_wait` also takes `timeout_seconds` in 0..30 and releases
-the coordinator while waiting. `subagent_cancel` stops active work and rejects
-late publication. Results include artifact references, execution IDs, worker
-identity and tool activity. Queue/runtime duration is recorded as `elapsed_ms`,
-separately from synthetic time and token ticks.
-
-### Live trajectory recording and external workers
-
-`create_tool_session` accepts `trajectory_id`, `external_agents` and
-`enable_execution`. A bound trajectory must compile and have no unfinished
-recorded jobs. Calls record executable events automatically in one reusable
-`tools` window; workers publish artifacts/evidence through invisible events.
-Completion observations reach Kidra as masked `<subagent_result>` messages.
-External source changes invalidate a binding instead of overwriting it. Bound
-sessions cannot reset; delete and rebind after resolving source conflicts.
-
-With `external_agents: true`, actual external workers use:
-
-| MCP tool | Arguments / behavior |
-|---|---|
-| `list_subagent_jobs` | `session_id`, optional `include_completed`; inspect the queue without budget use. |
-| `claim_subagent_job` | `session_id`, `job_id`, `worker_id`; receive scoped messages/references. Resumes require the same worker. |
-| `call_subagent_tool` | Those IDs plus `name`, `arguments`; execute in that worker's private workspace. |
-| `complete_subagent_job` | Those IDs plus exactly one of `response` or `error`; publish artifacts/evidence atomically with version checks. |
-| `finalize_trajectory` | `sample_id`, optional `require_done`/`expected_revision`; require terminal jobs/done TODOs and close all windows with EOS. |
-
-`python_run` takes `argv`, optional pinned `files`, and `timeout_seconds` in 1..30.
-Enable `--execution-backend docker` on the server and `enable_execution: true` on
-the workbench. Omitted files use the virtual workspace. The installed image is
-pinned by content ID. Each execution records its ID, exact input versions,
-bounded output, exit status, timeout/truncation, duration and checksum. Inspect
-it with `execution_get({executionId})`. There is no host-process fallback.
-
-Notes accept `requires_evidence` and `evidence` (execution IDs). Required tasks
-cannot become done without passing receipts for current input versions.
-`metadata.coordination_contract` enables extra validation of specialist/worker
-counts, follow-ups, TODOs, review context, current evidence, progress updates and
-coordinator file-write constraints. These consistency checks do not prove
-arbitrary prose claims or authenticate an edited receipt. See
-[sandbox behavior](SANDBOX.md) and the [live benchmark](BENCHMARK.md).
+Synthetic subagent responses are bounded to nonempty text of at most 200,000
+characters and recorded outcomes to 200,000 bytes. Conversation state and artifact
+versions count toward storage quotas. Parallelism is represented by overlapping
+scheduled calls, not a background worker registry. Test results can be authored
+scenario data; Remix does not execute them or verify arbitrary prose claims.
+See [sandbox behavior](SANDBOX.md) for timing and compatibility details.
 
 ## Verification
 
@@ -576,7 +554,7 @@ and pending-browser-draft conflicts. Semantic providers are mocked in tests.
 
 Tests also cover batch rollback and final-state validation, JSON Patch roundtrips,
 history across browser/generation/MCP edits, sandbox isolation, call budgets,
-literal marker content, recording, cancellation and in-flight revision conflicts.
+literal marker content, authored outcomes, recording, busy workbenches and revision conflicts.
 
 ## Querying metadata and project constraints
 

@@ -10,11 +10,9 @@ from .llm import SampleBuilder
 
 
 class Runner:
-
-    def __init__(self, state, compiler, save_path, client=None, executor=None):
+    def __init__(self, state, compiler, save_path, client=None):
         self.state, self.compiler, self.save_path = state, compiler, save_path
         self.client = client
-        self.executor = executor
         self.history = SQLiteHistory(state)
         self.job = None
         self.save_lock = asyncio.Lock()
@@ -104,7 +102,7 @@ class Runner:
                 for retry in range(options.get("regenerations", 2) + 1):
                     await self.resume_event.wait()
                     builder = SampleBuilder(
-                        self.compiler, config, self.client, self.log, self.executor
+                        self.compiler, config, self.client, self.log
                     )
                     try:
                         sample = await builder.generate(feedback, task_ids, seed)

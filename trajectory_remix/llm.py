@@ -15,9 +15,7 @@ from .compiler import KEY
 from .dataset import reject_constant
 from .tools import (
     SCHEMAS,
-    SUBAGENT_INSTRUCTION,
     Sandbox,
-    ToolError,
     chat_context,
     tool_failure,
 )
@@ -449,12 +447,10 @@ class LLMClient:
 
 
 class SampleBuilder:
-
-    def __init__(self, compiler, config, client=None, log=None, executor=None):
+    def __init__(self, compiler, config, client=None, log=None):
         self.compiler, self.config = compiler, config
         self.client = client or LLMClient()
         self.log = log or (lambda message: None)
-        self.executor = executor
         self.endpoints = {e["id"]: e for e in config["endpoints"]}
         self.sample = {
             "schema-version": "1.0",
@@ -523,7 +519,7 @@ class SampleBuilder:
             self.add_stream(window, self.compiler.special["eos"], start="auto")
         return plan
 
-    async def task(self, task, sandbox, feedback="", depth=0, runtime=None):
+    async def task(self, task, sandbox, feedback=""):
         endpoint = self.endpoints[task["endpoint"]]
         visibility = dict(task)
         if self.sample["replay"]:
@@ -551,10 +547,14 @@ class SampleBuilder:
             windows = []
         messages = assemble(windows, task, self.config.get("tags", []), feedback)
         self.log(f"Task {task['id']} → {endpoint['id']} / {endpoint['model']}")
-        schemas = SCHEMAS if task.get("tools") else None
+        # Synthetic delegation is authored through MCP/source outcomes, never a
+        # nested provider request from the generated coordinator.
+        schemas = (
+            [s for s in SCHEMAS if s["function"]["name"] != "subagent"]
+            if task.get("tools")
+            else None
+        )
         for turn in range(self.config.get("max_tool_rounds", 12) + 1):
-            if runtime is not None:
-                sandbox = runtime.get("generation").sandbox
             message = await self.client.complete(endpoint, messages, schemas)
             calls = message.get("tool_calls") or []
             if not isinstance(calls, list):
@@ -600,39 +600,16 @@ class SampleBuilder:
                 if not isinstance(args, dict):
                     raise ValueError("Tool arguments must be a JSON object")
                 started = monotonic()
-                context = {}
-                if function.get("name") == "chat":
-                    windows = (
-                        self.compiler.compile(self.sample)["windows"]
-                        if self.sample["replay"]
-                        else []
-                    )
-                    context = chat_context(windows, self.sample.get("metadata"))
-                if runtime is not None:
-                    dispatched = await runtime.call(
-                        "generation",
-                        function.get("name"),
-                        args,
-                        recorder=lambda entry: self.record_generated_tool(
-                            function.get("name"),
-                            args,
-                            call["id"],
-                            entry["outcome"],
-                            started,
-                        ),
-                        context=context,
-                    )
-                    outcome = dispatched["interaction"]["outcome"]
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call["id"],
-                            "content": json.dumps(outcome, ensure_ascii=False),
-                        }
-                    )
-                    self.log(f"Tool {function.get('name')} completed")
-                    continue
                 try:
+                    context = {}
+                    if function.get("name") == "chat":
+                        windows = (
+                            self.compiler.compile(self.sample)["windows"]
+                            if self.sample["replay"] else []
+                        )
+                        context = chat_context(
+                            windows, self.sample.get("metadata")
+                        )
                     result = await sandbox.call(function.get("name"), args, **context)
                     outcome = {"ok": True, "result": result}
                 except (ValueError, KeyError, OverflowError) as e:
@@ -646,7 +623,7 @@ class SampleBuilder:
                     "duration-ticks": int(monotonic() - started),
                     "request-id": call["id"],
                 }
-                if event["tool"] in ("subagent", "python_run"):
+                if event["tool"] == "subagent":
                     event["outcome"] = outcome
                 self.sample["replay"].setdefault(str(self.next_tick), []).append(event)
                 compiled = self.compiler.compile(self.sample)
@@ -663,29 +640,6 @@ class SampleBuilder:
                 )
                 self.log(f"Tool {function.get('name')} completed")
         raise ValueError("Task exhausted")
-
-    def record_generated_tool(self, name, args, request_id, outcome, started):
-        event = {
-            "op": "tool-call",
-            "window": "tool-result-shared",
-            "tool": name,
-            "arguments": args,
-            "delivery": "stream",
-            "request-id": request_id,
-            "duration-ticks": (
-                0
-                if name == "subagent" and args.get("background")
-                else int(monotonic() - started)
-            ),
-        }
-        if name in ("subagent", "python_run"):
-            event["outcome"] = outcome
-        self.sample["replay"].setdefault(str(self.next_tick), []).append(event)
-        compiled = self.compiler.compile(self.sample)
-        self.next_tick = compiled["max_tick"] + 1
-        return {
-            "_sandbox": self.compiler.frame(compiled, compiled["max_tick"])["sandbox"]
-        }
 
     async def validators(self, sample):
         self.sample = sample
@@ -728,64 +682,15 @@ class SampleBuilder:
             self.next_tick = self.compiler.compile(self.sample)["max_tick"] + 1
             self.serial = len([e for v in self.sample["replay"].values() for e in v])
 
-        async def broker(messages, depth, child_tool=None, endpoint_id=None):
-            endpoint_id = endpoint_id or self._subagent_endpoint
-            if child_tool is not None:
-                from .delegation import run_worker
-
-                return await run_worker(
-                    self.client, self.endpoints[endpoint_id], messages, child_tool
-                )
-            try:
-                message = await self.client.complete(
-                    self.endpoints[endpoint_id],
-                    [{"role": "system", "content": SUBAGENT_INSTRUCTION}, *messages],
-                    None,
-                )
-            except Exception as error:
-                raise ToolError("Configured subagent request failed") from error
-            if not isinstance(message, dict) or message.get("tool_calls"):
-                raise ToolError("Subagent must return text without tool calls")
-            return message.get("content")
-
         metadata = self.sample.get("metadata", {})
-        from .tool_sessions import ToolSessions
-
-        runtime = ToolSessions()
-
-        def on_events(events):
-            from .agents import completion_notices
-
-            notices = completion_notices(
-                events,
-                runtime.get("generation").sandbox.jobs,
-                self.compiler.special.values(),
-                "tool-result-shared",
-            )
-            self.sample["replay"].setdefault(str(self.next_tick), []).extend(
-                copy.deepcopy(events)
-            )
-            self.sample["replay"][str(self.next_tick)].extend(notices)
-            plan = self.compiler.compile(self.sample)
-            self.next_tick = plan["max_tick"] + 1
-            return self.compiler.frame(plan, plan["max_tick"])["sandbox"]
-
-        runtime.create(
-            "generation",
-            dict(
-                **(
-                    metadata.get("synthetic_clock", {})
-                    if isinstance(metadata, dict)
-                    else {}
-                ),
-                broker=broker,
-                max_calls=self.config.get("max_tool_calls", 64),
-                executor=self.executor,
+        sandbox = Sandbox(
+            **(
+                metadata.get("synthetic_clock", {})
+                if isinstance(metadata, dict)
+                else {}
             ),
-            on_events=on_events,
+            max_calls=self.config.get("max_tool_calls", 64),
         )
-        sandbox = runtime.get("generation").sandbox
-
         try:
             if self.sample["replay"]:
                 plan = self.compiler.compile(self.sample)
@@ -802,16 +707,7 @@ class SampleBuilder:
             if not tasks:
                 raise ValueError("No enabled generation tasks selected")
             for task in tasks:
-                self._subagent_endpoint = task["endpoint"]
-                async def pinned_broker(
-                    messages, depth, child_tool=None, endpoint_id=task["endpoint"]
-                ):
-                    return await broker(messages, depth, child_tool, endpoint_id)
-
-                runtime.get("generation").sandbox.broker = pinned_broker
-                content = await self.task(
-                    task, runtime.get("generation").sandbox, feedback, runtime=runtime
-                )
+                content = await self.task(task, sandbox, feedback)
                 self.add_stream(
                     task["window"],
                     content,
@@ -823,13 +719,6 @@ class SampleBuilder:
                 )
             # Keep real tool observations available through downstream reasoning/
             # responses, then supervise resource release after they are integrated.
-            if any(
-                j["status"] in ("queued", "running")
-                for j in runtime.get("generation").sandbox.jobs.values()
-            ):
-                raise ValueError(
-                    "Generation ended with active jobs; wait for subagents before returning the final response"
-                )
             final_plan = self.compiler.compile(self.sample)
             closure_tick = self.next_tick
             for window in final_plan["windows"]:
@@ -842,4 +731,4 @@ class SampleBuilder:
             self.compiler.compile(self.sample)
             return copy.deepcopy(self.sample)
         finally:
-            await runtime.aclose()
+            sandbox.close()

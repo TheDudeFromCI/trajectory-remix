@@ -33,17 +33,6 @@ def main(argv=None):
     if not initializing:
         parser.add_argument("--port", type=int, default=8765)
         parser.add_argument(
-            "--execution-backend",
-            choices=["none", "docker"],
-            default="none",
-            help="Enable opt-in isolated Python execution for tool sessions",
-        )
-        parser.add_argument(
-            "--execution-image",
-            default="python:3.12-slim",
-            help="Preinstalled Docker Python image; executions pin its content ID",
-        )
-        parser.add_argument(
             "--export",
             type=Path,
             help="Compile --dataset to chunked JSONL without starting the dashboard",
@@ -94,18 +83,10 @@ def main(argv=None):
         import uvicorn
 
         from .server import create_app
-        from .execution import DockerExecutor
 
         print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
         uvicorn.run(
-            create_app(
-                args.dataset,
-                executor=(
-                    DockerExecutor(args.execution_image)
-                    if args.execution_backend == "docker"
-                    else None
-                ),
-            ),
+            create_app(args.dataset),
             host="127.0.0.1",
             port=args.port,
             log_level="warning",

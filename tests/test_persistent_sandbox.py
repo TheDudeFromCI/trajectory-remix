@@ -103,15 +103,16 @@ def test_invalid_invisible_events_are_diagnosed_for_author(compiler, sample, ext
     assert error.value.path == "replay[1][0]"
 
 
-async def test_live_resume_retains_prior_answers_and_shares_only_pinned_artifacts():
-    prompts = []
+async def test_authored_resume_retains_answers_and_only_pinned_artifacts():
+    sandbox = Sandbox()
 
-    async def broker(messages, depth):
-        prompts.append(copy.deepcopy(messages))
-        messages.clear()  # A provider must not be able to mutate retained history.
-        return f"answer {len(prompts)}"
+    async def delegate(task, resume=None, target=sandbox):
+        return await target.call(
+            "subagent",
+            {"task": task, **({"resume": resume} if resume else {})},
+            subagent_outcome={"ok": True, "result": {"response": "Authored: " + task}},
+        )
 
-    sandbox = Sandbox(broker=broker)
     first = await sandbox.call("file_write", {"path": "code.py", "content": "original"})
     await sandbox.call("file_write", {"path": "private", "content": "unshared secret"})
     started = await sandbox.call(
@@ -120,30 +121,34 @@ async def test_live_resume_retains_prior_answers_and_shares_only_pinned_artifact
             "task": "Review",
             "artifacts": [{"path": "code.py", "version": first["version"]}],
         },
+        subagent_outcome={"ok": True, "result": {"response": "answer 1"}},
     )
     cid = started["conversationId"]
     await sandbox.call("file_write", {"path": "code.py", "content": "new content"})
-    result = await sandbox.call("subagent", {"task": "Why that choice?", "resume": cid})
-    assert result == {"conversationId": cid, "response": "answer 2"}
-    assert [m["role"] for m in prompts[1]] == ["user", "assistant", "user"]
-    assert prompts[1][1]["content"] == "answer 1"
-    assert "original" in prompts[1][0]["content"]
-    assert "new content" not in json.dumps(prompts)
-    assert "unshared secret" not in json.dumps(prompts)
-    await sandbox.call("subagent", {"task": "Independent"})
-    assert prompts[2] == [{"role": "user", "content": "Independent"}]
-    restored = Sandbox(broker=broker)
+    await delegate("Why that choice?", cid)
+    history = (await sandbox.call("subagent_get", {"conversationId": cid}))["messages"]
+    assert [m["role"] for m in history] == ["user", "assistant", "user", "assistant"]
+    assert history[1]["content"] == "answer 1"
+    assert "original" in history[0]["content"]
+    assert "new content" not in json.dumps(
+        history
+    ) and "unshared secret" not in json.dumps(history)
+    history.clear()
+    assert len(sandbox.conversations[cid]["messages"]) == 4
+    independent = await delegate("Independent")
+    assert sandbox.conversations[independent["conversationId"]]["messages"][0] == {
+        "role": "user",
+        "content": "Independent",
+    }
+    restored = Sandbox()
     restored.restore(sandbox.snapshot())
-    await restored.call("subagent", {"task": "Continue after restore", "resume": cid})
-    assert prompts[-1][3]["content"] == "answer 2"
-    assert len(prompts[-1]) == 5
+    await delegate("Continue after restore", cid, restored)
+    assert len(restored.conversations[cid]["messages"]) == 6
     await restored.call("subagent_close", {"conversationId": cid})
     with pytest.raises(ToolError, match="closed"):
-        await restored.call("subagent", {"task": "late", "resume": cid})
+        await delegate("late", cid, restored)
     with pytest.raises(ToolError, match="Unknown conversationId"):
-        await Sandbox(broker=broker).call(
-            "subagent", {"task": "cross sample", "resume": cid}
-        )
+        await delegate("cross sample", cid, Sandbox())
     sandbox.close()
     assert sandbox.conversations == {} and sandbox.artifacts == {}
 
@@ -373,11 +378,12 @@ def test_artifacts_must_exist_at_dispatch_and_remain_pinned_during_work(
 
 
 @pytest.mark.parametrize("response", [None, "", "a" * 200_001])
-async def test_invalid_broker_responses_do_not_complete_conversations(response):
-    async def broker(messages, depth):
-        return response
-
-    sandbox = Sandbox(broker=broker)
-    with pytest.raises(ToolError, match="nonempty text"):
-        await sandbox.call("subagent", {"task": "Implement"})
-    assert next(iter(sandbox.conversations.values()))["status"] == "failed"
+async def test_invalid_authored_responses_leave_state_unchanged(response):
+    sandbox = Sandbox()
+    with pytest.raises(ToolError):
+        await sandbox.call(
+            "subagent",
+            {"task": "Implement"},
+            subagent_outcome={"ok": True, "result": {"response": response}},
+        )
+    assert not sandbox.conversations and sandbox.calls == 0

@@ -70,7 +70,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
         "runtime_status",
         "file_patch",
     }
-    assert not next(d for d in definitions if d["function"]["name"] == "subagent")[
+    assert next(d for d in definitions if d["function"]["name"] == "subagent")[
         "available"
     ]
     file_path = str(tmp_path / "must-stay-virtual.txt")
@@ -342,115 +342,74 @@ async def test_session_limit_and_duplicate_ids(studio):
     assert response.json()["code"] == "quota_exceeded"
 
 
-async def test_optional_subagent_is_bounded_and_receives_no_parent_state(studio):
-    messages = []
-
-    class FakeClient:
-        async def complete(self, endpoint, prompt, tools=None):
-            assert tools is None
-            messages.extend(prompt)
-            return {"content": "delegated result"}
-
-    commands = studio[0].state.commands
-    commands.client = FakeClient()
-    endpoint = studio[0].state.dataset["config"]["endpoints"][0]["id"]
-    await call(
-        studio, "create_tool_session", session_id="tools", subagent_endpoint=endpoint
-    )
-    await tool(
-        studio, "file_write", {"path": "/private", "content": "private virtual state"}
-    )
-    result = await tool(studio, "subagent", {"task": "inspect this task"})
-    assert result["interaction"]["outcome"]["result"] == {
-        "response": "delegated result",
-        "conversationId": result["interaction"]["outcome"]["result"]["conversationId"],
-    }
-    assert "private virtual state" not in json.dumps(messages)
-    assert messages[-1]["content"] == "inspect this task"
-    assert next(
-        d
-        for d in (await call(studio, "list_simulated_tools", session_id="tools"))[
-            "tools"
-        ]
-        if d["function"]["name"] == "subagent"
-    )["available"]
-
-
-async def test_inflight_calls_are_locked_and_revision_rechecked_after_provider(studio):
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    class Blocked:
+async def test_authored_subagent_can_be_recorded_without_provider_access(
+    studio, compiler
+):
+    class Forbidden:
         async def complete(self, *args, **kwargs):
-            entered.set()
-            await release.wait()
-            return {"content": "completed"}
+            pytest.fail("Authoring cannot request a real subagent")
 
-    commands = studio[0].state.commands
-    commands.client = Blocked()
-    endpoint = studio[0].state.dataset["config"]["endpoints"][0]["id"]
-    await commands.call(
-        "create_tool_session", {"session_id": "tools", "subagent_endpoint": endpoint}
+    studio[0].state.commands.client = Forbidden()
+    await call(studio, "create_tool_session", session_id="tools")
+    result = await tool(
+        studio,
+        "subagent",
+        {"task": "Inspect"},
+        outcome={
+            "ok": True,
+            "result": {"conversationId": "reviewer", "response": "Authored review"},
+        },
+        record_sample_id="test",
     )
-    pending = asyncio.create_task(
-        commands.call(
-            "call_simulated_tool",
-            {
-                "session_id": "tools",
-                "name": "subagent",
-                "arguments": {"task": "wait"},
-                "record_sample_id": "test",
-                "expected_revision": 0,
-            },
-        )
+    assert result["interaction"]["outcome"]["result"]["conversationId"] == "reviewer"
+    source = (await call(studio, "get_trajectory", sample_id="test"))["sample"]
+    plan = compiler.compile(source)
+    # Recording represents a curated observation; executable source authoring uses create_tool_call.
+    observations = [
+        e
+        for events in source["replay"].values()
+        for e in events
+        if e["op"] == "append" and "Authored review" in e.get("content", "")
+    ]
+    assert len(observations) == 1 and observations[0]["loss"] == {"mask": "exclude"}
+    assert (await call(studio, "get_tool_session", session_id="tools"))["state"][
+        "conversations"
+    ]["reviewer"]["messages"][-1]["content"] == "Authored review"
+
+
+async def test_authored_failure_retains_identity_and_can_be_resumed(studio):
+    await call(studio, "create_tool_session", session_id="tools")
+    failed = await tool(
+        studio,
+        "subagent",
+        {"task": "Inspect"},
+        outcome={"ok": False, "error": "Need an API contract"},
     )
-    await asyncio.wait_for(entered.wait(), 2)
-    try:
-        for name, arguments in [
+    outcome = failed["interaction"]["outcome"]
+    assert not outcome["ok"]
+    cid = outcome["conversationId"]
+    resumed = await tool(
+        studio,
+        "subagent",
+        {"task": "Here is the contract", "resume": cid},
+        outcome={"ok": True, "result": {"response": "Reviewed the contract"}},
+    )
+    assert resumed["interaction"]["outcome"]["result"]["conversationId"] == cid
+
+
+async def test_busy_workbench_rejects_calls_reset_and_delete(studio):
+    await call(studio, "create_tool_session", session_id="tools")
+    async with studio[0].state.tool_sessions.get("tools").lock:
+        for operation, extra in [
             ("reset_tool_session", {}),
             ("delete_tool_session", {}),
             ("call_simulated_tool", {"name": "time_now", "arguments": {}}),
         ]:
-            with pytest.raises(CommandError) as error:
-                await commands.call(name, {"session_id": "tools", **arguments})
-            assert error.value.code == "busy"
-        await commands.call(
-            "update_trajectory_metadata",
-            {"sample_id": "test", "patch": {"metadata": {"concurrent": True}}},
-        )
-        release.set()
-        with pytest.raises(CommandError) as error:
-            await pending
-        assert error.value.code == "conflict"
-        session = await commands.call("get_tool_session", {"session_id": "tools"})
-        assert (
-            session["calls"] == 0
-            and session["interaction_count"] == 0
-            and not session["busy"]
-        )
-    finally:
-        release.set()
-        if not pending.done():
-            pending.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await pending
-
-
-async def test_cancelled_call_preserves_session(studio):
-    manager = ToolSessions()
-    entered = asyncio.Event()
-
-    async def broker(task, depth):
-        entered.set()
-        await asyncio.Event().wait()
-
-    manager.create("tools", {"broker": broker})
-    pending = asyncio.create_task(manager.call("tools", "subagent", {"task": "wait"}))
-    await asyncio.wait_for(entered.wait(), 2)
-    pending.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await pending
-    assert manager.inspect("tools")["calls"] == 0
-    assert not manager.inspect("tools")["busy"]
+            response = await studio[1].post(
+                "/api/mcp/call",
+                json={"name": operation, "arguments": {"session_id": "tools", **extra}},
+            )
+            assert response.status_code == 409 and response.json()["code"] == "busy"
 
 
 async def test_bounded_call_logs_and_shutdown_cleanup():
@@ -468,44 +427,50 @@ async def test_bounded_call_logs_and_shutdown_cleanup():
 
 
 @pytest.mark.parametrize(
-    "message",
+    "outcome",
     [
-        {"content": ""},
-        {"content": "x" * 200_001},
-        {"content": "text", "tool_calls": [{"id": "unexpected"}]},
+        {"ok": True, "result": {"response": ""}},
+        {"ok": True, "result": {"response": "x" * 200_001}},
+        {"ok": True, "result": {}},
+        {"ok": "true", "result": {"response": "x"}},
+        {"ok": False},
     ],
 )
-async def test_subagent_rejects_invalid_or_unbounded_output(studio, message):
-    class FakeClient:
-        async def complete(self, *args, **kwargs):
-            return message
-
-    studio[0].state.commands.client = FakeClient()
-    endpoint = studio[0].state.dataset["config"]["endpoints"][0]["id"]
-    await call(
-        studio, "create_tool_session", session_id="tools", subagent_endpoint=endpoint
+async def test_invalid_authored_outcomes_are_rejected_before_dispatch(studio, outcome):
+    await call(studio, "create_tool_session", session_id="tools")
+    response = await studio[1].post(
+        "/api/mcp/call",
+        json={
+            "name": "call_simulated_tool",
+            "arguments": {
+                "session_id": "tools",
+                "name": "subagent",
+                "arguments": {"task": "Inspect"},
+                "outcome": outcome,
+            },
+        },
     )
-    result = await tool(studio, "subagent", {"task": "task"})
-    assert not result["interaction"]["outcome"]["ok"]
-    assert "must return" in result["interaction"]["outcome"]["error"]
+    assert response.status_code == 422
+    session = await call(studio, "get_tool_session", session_id="tools")
+    assert session["calls"] == 0 and not session["state"]["conversations"]
 
 
-async def test_provider_errors_do_not_echo_secrets(studio):
-    class Failed:
-        async def complete(self, *args, **kwargs):
-            raise ValueError("provider echoed private-key")
-
-    studio[0].state.commands.client = Failed()
-    endpoint = studio[0].state.dataset["config"]["endpoints"][0]["id"]
-    await call(
-        studio, "create_tool_session", session_id="tools", subagent_endpoint=endpoint
+async def test_deterministic_tool_outcomes_cannot_be_overridden(studio):
+    await call(studio, "create_tool_session", session_id="tools")
+    response = await studio[1].post(
+        "/api/mcp/call",
+        json={
+            "name": "call_simulated_tool",
+            "arguments": {
+                "session_id": "tools",
+                "name": "file_read",
+                "arguments": {"path": "missing"},
+                "outcome": {"ok": True, "result": {"content": "invented"}},
+            },
+        },
     )
-    result = await tool(studio, "subagent", {"task": "task"})
-    assert not result["interaction"]["outcome"]["ok"]
-    assert "private-key" not in json.dumps(result)
-    assert "private-key" not in json.dumps(
-        await call(studio, "get_tool_session", session_id="tools")
-    )
+    assert response.status_code == 422
+    assert (await call(studio, "get_tool_session", session_id="tools"))["calls"] == 0
 
 
 async def test_dashboard_shutdown_destroys_tool_sessions(studio):

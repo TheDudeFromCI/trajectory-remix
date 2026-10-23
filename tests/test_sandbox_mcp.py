@@ -212,44 +212,39 @@ async def test_invisible_mcp_edits_are_atomic_undoable_and_saved(studio, tmp_pat
     }
 
 
-async def test_workbench_resumes_real_broker_with_prior_answer_and_resets_history(
-    studio,
-):
-    prompts = []
+async def test_workbench_resumes_authored_history_without_a_provider(studio):
+    class Forbidden:
+        async def complete(self, *args, **kwargs):
+            pytest.fail("Synthetic subagents must not contact a provider")
 
-    class Client:
-        async def complete(self, endpoint, messages, tools=None):
-            prompts.append(copy.deepcopy(messages))
-            return {"content": "answer " + str(len(prompts))}
+    studio[0].state.commands.client = Forbidden()
+    await call(studio, "create_tool_session", session_id="persistent")
 
-    studio[0].state.commands.client = Client()
-    endpoint = studio[0].state.dataset["config"]["endpoints"][0]["id"]
-    await call(
-        studio,
-        "create_tool_session",
-        session_id="persistent",
-        subagent_endpoint=endpoint,
-    )
-
-    async def delegate(arguments):
+    async def delegate(arguments, response):
         return await call(
             studio,
             "call_simulated_tool",
             session_id="persistent",
             name="subagent",
             arguments=arguments,
+            outcome={"ok": True, "result": {"response": response}},
         )
 
-    initial = await delegate({"task": "Implement"})
+    initial = await delegate({"task": "Implement"}, "I used a state machine.")
     cid = initial["interaction"]["outcome"]["result"]["conversationId"]
-    followup = await delegate({"task": "Explain edge cases", "resume": cid})
+    followup = await delegate(
+        {"task": "Explain edge cases", "resume": cid}, "It handles quoted separators."
+    )
     assert followup["interaction"]["outcome"]["result"]["conversationId"] == cid
-    assert prompts[1][-2] == {"role": "assistant", "content": "answer 1"}
-    assert prompts[1][-1] == {"role": "user", "content": "Explain edge cases"}
     inspected = await call(studio, "get_tool_session", session_id="persistent")
     assert inspected["counts"]["conversations"] == 1
-    assert len(inspected["state"]["conversations"][cid]["messages"]) == 4
+    assert inspected["state"]["conversations"][cid]["messages"] == [
+        {"role": "user", "content": "Implement"},
+        {"role": "assistant", "content": "I used a state machine."},
+        {"role": "user", "content": "Explain edge cases"},
+        {"role": "assistant", "content": "It handles quoted separators."},
+    ]
     await call(studio, "reset_tool_session", session_id="persistent")
-    assert not (await delegate({"task": "old identity", "resume": cid}))["interaction"][
-        "outcome"
-    ]["ok"]
+    assert not (await delegate({"task": "old identity", "resume": cid}, "Should fail"))[
+        "interaction"
+    ]["outcome"]["ok"]

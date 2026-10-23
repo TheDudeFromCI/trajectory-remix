@@ -376,46 +376,51 @@ async def test_tool_generation_preserves_literal_data_and_seed_state(compiler, s
     }
 
 
-async def test_generated_subagent_records_duration_and_replays_offline(
-    compiler, monkeypatch
-):
+async def test_generation_never_launches_real_subagents(compiler):
     config = minimal_config()
     config["tasks"] = [config["tasks"][1]]
-    fake = FakeClient(
-        [
-            {
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "child",
-                        "type": "function",
-                        "function": {
-                            "name": "subagent",
-                            "arguments": json.dumps({"task": "Inspect"}),
-                        },
-                    }
-                ],
-            },
-            "Child answer.",
-            "Integrated the answer.",
-        ]
-    )
-    readings = iter([10, 13.75])
-    monkeypatch.setattr("trajectory_remix.llm.monotonic", lambda: next(readings))
-    generated = await SampleBuilder(compiler, config, fake).generate()
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def complete(self, endpoint, messages, tools=None):
+            self.calls += 1
+            assert tools is not None
+            assert "subagent" not in {t["function"]["name"] for t in tools}
+            if self.calls == 1:
+                # Even an unsolicited delegation must not cause a nested provider call.
+                return {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "child",
+                            "type": "function",
+                            "function": {
+                                "name": "subagent",
+                                "arguments": json.dumps({"task": "Inspect"}),
+                            },
+                        }
+                    ],
+                }
+            failure = json.loads(messages[-1]["content"])
+            assert not failure["ok"] and "authored outcome" in failure["error"]
+            return {"content": "Use an authored synthetic reply."}
+
+    client = Client()
+    generated = await SampleBuilder(compiler, config, client).generate()
+    assert client.calls == 2
     plan = compiler.compile(generated)
-    call = plan["tool_calls"][0]
-    assert call["end"] - call["start"] == 3
-    assert call["outcome"]["ok"]
-    assert call["outcome"]["result"]["response"] == "Child answer."
-    assert call["outcome"]["result"]["conversationId"].startswith("conversation-")
+    assert not plan["tool_calls"][0]["outcome"]["ok"]
+    cid = plan["tool_calls"][0]["outcome"]["conversationId"]
     assert (
-        compiler.frame(plan, call["start"])["sandbox"]["tool_calls"][0]["status"]
-        == "running"
+        compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"][cid][
+            "status"
+        ]
+        == "failed"
     )
 
 
-async def test_generation_resumes_a_seeded_subagent_conversation(compiler, sample):
+async def test_generation_inspects_authored_seeded_conversation(compiler, sample):
     config = minimal_config()
     config["tasks"] = [config["tasks"][1]]
     sample["replay"]["1"] = [
@@ -439,93 +444,33 @@ async def test_generation_resumes_a_seeded_subagent_conversation(compiler, sampl
                 "content": None,
                 "tool_calls": [
                     {
-                        "id": "followup",
+                        "id": "inspect",
                         "type": "function",
                         "function": {
-                            "name": "subagent",
-                            "arguments": json.dumps(
-                                {"task": "Why a state machine?", "resume": "coder"}
-                            ),
+                            "name": "subagent_get",
+                            "arguments": json.dumps({"conversationId": "coder"}),
                         },
                     }
                 ],
             },
-            "It handles quoted separators.",
-            "Reviewed the explanation.",
+            "Reviewed the authored conversation.",
         ]
     )
     generated = await SampleBuilder(compiler, config, fake).generate(seed=sample)
-    assert fake.messages[1][-3:] == [
+    observed = json.loads(
+        next(m["content"] for m in fake.messages[1] if m["role"] == "tool")
+    )
+    assert observed["result"]["messages"] == [
         {"role": "user", "content": "Implement parser"},
         {"role": "assistant", "content": "I used a state machine."},
-        {"role": "user", "content": "Why a state machine?"},
     ]
     plan = compiler.compile(generated)
-    assert plan["tool_calls"][1]["outcome"] == {
-        "ok": True,
-        "result": {
-            "conversationId": "coder",
-            "response": "It handles quoted separators.",
-        },
-    }
     assert (
-        len(
-            compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"]["coder"][
-                "messages"
-            ]
-        )
-        == 4
+        compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"]["coder"][
+            "status"
+        ]
+        == "ready"
     )
-
-
-async def test_generated_failed_turn_keeps_its_identity_for_resume_and_offline_replay(
-    compiler,
-):
-    config = minimal_config()
-    config["tasks"] = [config["tasks"][1]]
-
-    class Client:
-        def __init__(self):
-            self.parent_turns = self.child_turns = 0
-            self.cid = None
-
-        async def complete(self, endpoint, messages, tools=None):
-            if tools is None:
-                self.child_turns += 1
-                if self.child_turns == 1:
-                    raise RuntimeError("provider details must stay private")
-                assert messages[-2:] == [
-                    {"role": "user", "content": "Implement"},
-                    {"role": "user", "content": "Try again"},
-                ]
-                return {"content": "Recovered"}
-            self.parent_turns += 1
-            if self.parent_turns == 3:
-                return {"content": "Done"}
-            if self.parent_turns == 2:
-                failed = json.loads(messages[-1]["content"])
-                assert not failed["ok"]
-                self.cid = failed["conversationId"]
-                args = {"task": "Try again", "resume": self.cid}
-            else:
-                args = {"task": "Implement"}
-            return {
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": f"delegate-{self.parent_turns}",
-                        "type": "function",
-                        "function": {"name": "subagent", "arguments": json.dumps(args)},
-                    }
-                ],
-            }
-
-    client = Client()
-    generated = await SampleBuilder(compiler, config, client).generate()
-    plan = compiler.compile(generated)
-    assert plan["tool_calls"][0]["outcome"]["conversationId"] == client.cid
-    assert plan["tool_calls"][1]["outcome"]["result"]["conversationId"] == client.cid
-    assert "provider details" not in json.dumps(generated)
 
 
 async def test_explicit_start_prefix_limits_task_context(compiler, sample):

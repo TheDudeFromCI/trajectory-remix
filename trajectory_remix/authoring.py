@@ -9,10 +9,10 @@ from __future__ import annotations
 import copy
 import difflib
 import inspect
-import hashlib
 import json
 import re
 import uuid
+from pathlib import Path
 from collections import OrderedDict
 from contextvars import ContextVar
 from typing import Annotated, Literal, get_type_hints
@@ -22,13 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import KEY, CompileError
 from .dataset import new_sample, prepare_sample
-from .llm import LLMClient, SampleBuilder
+from .llm import SampleBuilder
 from .metadata import MetadataFilter, query as query_metadata, counts as metadata_counts
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import (
-    SUBAGENT_INSTRUCTION,
-    ToolError,
     chat_context,
     tool_message,
     tool_request,
@@ -114,17 +112,13 @@ def merge_patch(target, patch):
 
 
 class TrajectoryCommands:
-
-    def __init__(
-        self, state, compiler, runner, client=None, history=None, executor=None
-    ):
+    def __init__(self, state, compiler, runner, client=None, history=None):
         self.state, self.compiler, self.runner = state, compiler, runner
         self.client = client
         self.history = history if history is not None else runner.history
         self.action = ContextVar("trajectory_command", default="Edit trajectory")
         self.edit_revision = ContextVar("trajectory_revision", default=None)
         self.tool_sessions = ToolSessions()
-        self.executor = executor
         self.cache = OrderedDict()
         self.commands = {
             name: getattr(self, name)
@@ -291,6 +285,13 @@ class TrajectoryCommands:
             "status": self.runner.status,
             "tokenizer_sha256": self.compiler.fingerprint,
             "special_tokens": self.compiler.special,
+        }
+
+    @command()
+    def get_authoring_guide(self):
+        """Read Skill.md: synthetic parallel authoring, available tools, timing, masks and review."""
+        return {
+            "content": Path(__file__).with_name("Skill.md").read_text(encoding="utf-8")
         }
 
     @command()
@@ -745,26 +746,13 @@ class TrajectoryCommands:
             "row_count": len(plan["rows"]),
             "revision": revision,
         }
-        from .coordination import audit
-
-        sample = self._find(sample_id)[1]
-        coordination = audit(
-            sample, plan, self.compiler.frame(plan, plan["max_tick"])["sandbox"]
-        )
-        if coordination is not None:
-            result["coordination"] = coordination
-            result["valid"] = coordination["valid"]
-            result["diagnostics"] = [
-                *result["diagnostics"],
-                *coordination["diagnostics"],
-            ]
         if semantic:
             sample = copy.deepcopy(self._find(sample_id)[1])
             builder = SampleBuilder(
                 self.compiler, copy.deepcopy(self.state["config"]), self.client
             )
             result["semantic"] = await builder.validators(sample)
-            result["valid"] = result["valid"] and result["semantic"]["valid"]
+            result["valid"] = result["semantic"]["valid"]
         return result
 
     @command()
@@ -843,15 +831,17 @@ class TrajectoryCommands:
     ):
         """Preview post-commit snapshots over an inclusive timeline range, retaining earlier context.
 
-        At most 100 frames and 4 MB of output per request.
+        At most 100 frames, 50,000 compiled rows and 4 MB of output per request.
         Filter windows or narrow the range for larger trajectories. kv_tokens is zero
         for closed/pending windows; cached_tokens counts historical durable tokens.
         """
         plan = self._plan(sample_id)
         self._range(plan, start_tick, end_tick)
         ticks = range(start_tick, end_tick + 1, step)
-        if len(ticks) > 100:
-            raise CommandError("Preview exceeds 100 frames; narrow the range")
+        if len(ticks) > 100 or len(plan["rows"]) > 50_000:
+            raise CommandError(
+                "Preview exceeds 100 frames or 50,000 rows; narrow the range or split the sample"
+            )
         known = {w["id"] for w in plan["windows"]}
         if windows is not None and not set(windows) <= known:
             raise CommandError("Unknown preview window", "not_found")
@@ -1056,9 +1046,8 @@ class TrajectoryCommands:
     def list_simulated_tools(self, session_id: str | None = None):
         """Discover the real Remix simulated-tool schemas, including clock, RAM files, memories, notes and skills.
 
-        Dispatch with call_simulated_tool. subagent is available only when a session
-        explicitly selects a configured endpoint or enables external workers. Python
-        execution additionally requires the Docker capability. Even reads advance time.
+        Dispatch with call_simulated_tool. Subagents require author-supplied outcomes;
+        no real subagents or code are executed. Even reads advance the synthetic clock.
         """
         return self.tool_sessions.definitions(session_id)
 
@@ -1165,19 +1154,12 @@ class TrajectoryCommands:
         ) = None,
         max_calls: Annotated[int, Field(ge=1, le=256)] | None = None,
         max_bytes: Annotated[int, Field(ge=128, le=2_000_000)] = 2_000_000,
-        subagent_endpoint: str | None = None,
-        external_agents: bool = False,
-        enable_execution: bool = False,
-        trajectory_id: str | None = None,
     ):
         """Create an isolated simulated-tool workbench (up to eight sessions).
 
         Defaults use the configured synthetic clock and call budget. Sessions are RAM-only,
-        separate from generation sandboxes. trajectory_id binds live calls and worker
-        publications to executable source events; otherwise workbench state is not saved.
-        subagent_endpoint selects a configured worker provider; external_agents accepts
-        claimed MCP workers instead. background subagents get private tool workspaces.
-        enable_execution requires the server's opt-in Docker backend.
+        separate from generation sandboxes, and excluded from saves/source edit history.
+        Subagent replies are supplied by the author, never requested from a provider.
         Subagents retain history; resume uses the returned conversationId. Only explicitly
         referenced artifact versions are shared; other parent RAM/trajectory context is excluded.
         """
@@ -1199,175 +1181,8 @@ class TrajectoryCommands:
                 else self.state["config"].get("max_tool_calls", 64)
             ),
             "max_bytes": max_bytes,
-            "external_agents": external_agents,
         }
-        if external_agents and subagent_endpoint is not None:
-            raise CommandError(
-                "Select external workers or a configured endpoint, not both"
-            )
-        if enable_execution:
-            if self.executor is None:
-                raise CommandError(
-                    "Start the server with --execution-backend docker to enable isolated execution"
-                )
-            options["executor"] = self.executor
-        if subagent_endpoint is not None:
-            if not any(
-                e["id"] == subagent_endpoint for e in self.state["config"]["endpoints"]
-            ):
-                raise CommandError(
-                    "Configured subagent endpoint not found", "not_found"
-                )
-
-            async def broker(messages, depth, child_tool=None):
-                endpoint = next(
-                    (
-                        e
-                        for e in self.state["config"]["endpoints"]
-                        if e["id"] == subagent_endpoint
-                    ),
-                    None,
-                )
-                if endpoint is None:
-                    raise ToolError("Configured subagent endpoint no longer exists")
-                if child_tool is not None:
-                    from .delegation import run_worker
-
-                    return await run_worker(
-                        self.client or LLMClient(),
-                        copy.deepcopy(endpoint),
-                        messages,
-                        child_tool,
-                    )
-                try:
-                    message = await (self.client or LLMClient()).complete(
-                        copy.deepcopy(endpoint),
-                        [
-                            {
-                                "role": "system",
-                                "content": SUBAGENT_INSTRUCTION,
-                            },
-                            *messages,
-                        ],
-                        tools=None,
-                    )
-                except Exception as error:
-                    raise ToolError("Configured subagent request failed") from error
-                text = message.get("content") if isinstance(message, dict) else None
-                if (
-                    not isinstance(text, str)
-                    or not text.strip()
-                    or len(text) > 200_000
-                    or message.get("tool_calls")
-                ):
-                    raise ToolError(
-                        "Subagent must return nonempty text of at most 200,000 characters without tool calls"
-                    )
-                return text
-
-            options["broker"] = broker
-        if trajectory_id is None:
-            return self.tool_sessions.create(session_id, options, subagent_endpoint)
-        _, bound = self._find(trajectory_id)
-        plan = self.compiler.compile(bound)
-        initial = self.compiler.frame(plan, plan["max_tick"])["sandbox"]
-        if any(j["status"] in ("queued", "running") for j in initial["jobs"].values()):
-            raise CommandError("Cannot bind a trajectory with unfinished recorded jobs")
-        options["seed"] = initial["clock"]
-        clock = bound.get("metadata", {}).get("synthetic_clock", {})
-        options["seconds_per_call"] = clock.get("seconds_per_call", 1)
-        fingerprint = [self._source_hash(bound)]
-
-        def on_events(events):
-            return self._record_runtime(trajectory_id, fingerprint, events=events)[
-                "_sandbox"
-            ]
-
-        created = self.tool_sessions.create(
-            session_id, options, subagent_endpoint, trajectory_id, on_events
-        )
-        session = self.tool_sessions.get(created["session_id"])
-        session.sandbox.restore(initial)
-        session.record_call = lambda entry, revision=None: self._record_runtime(
-            trajectory_id, fingerprint, entry=entry, expected_revision=revision
-        )
-        return self.tool_sessions.inspect(created["session_id"], False, False)
-
-    @staticmethod
-    def _source_hash(sample):
-        return hashlib.sha256(
-            json.dumps(sample, sort_keys=True, ensure_ascii=False).encode()
-        ).hexdigest()
-
-    def _record_runtime(
-        self, sample_id, fingerprint, *, events=None, entry=None, expected_revision=None
-    ):
-        """One source transaction for an actual coordinator call or external worker commit."""
-        token = self.edit_revision.set(self.state["revision"])
-        try:
-            index, sample = self._draft(sample_id, expected_revision)
-            if self._source_hash(sample) != fingerprint[0]:
-                raise CommandError(
-                    "Bound trajectory changed outside its runtime; rebind the session before recording more work",
-                    "conflict",
-                )
-            plan = self.compiler.compile(sample)
-            start = plan["max_tick"] + 1
-            if entry is not None:
-                name = entry["name"]
-                duration = (
-                    (entry["elapsed_ms"] + 999) // 1000
-                    if name in ("python_run", "subagent_wait")
-                    or (name == "subagent" and not entry["arguments"].get("background"))
-                    else 0
-                )
-                event = {
-                    "op": "tool-call",
-                    "tool": name,
-                    "arguments": entry["arguments"],
-                    "window": "tools",
-                    "delivery": "stream",
-                    "duration-ticks": duration,
-                    "request-id": entry["id"],
-                }
-                if name in ("subagent", "python_run"):
-                    event["outcome"] = entry["outcome"]
-                sample["replay"].setdefault(str(start), []).append(event)
-            else:
-                sample["replay"].setdefault(str(start), []).extend(
-                    copy.deepcopy(events)
-                )
-                from .agents import completion_notices
-
-                prior = self.compiler.frame(plan, plan["max_tick"])["sandbox"]
-                sample["replay"][str(start)].extend(
-                    completion_notices(
-                        events, prior["jobs"], self.compiler.special.values()
-                    )
-                )
-            compiled = self.compiler.compile(sample)
-            if entry is not None:
-                actual = next(
-                    c
-                    for c in compiled["tool_calls"]
-                    if c.get("request-id") == entry["id"]
-                )
-                if actual["outcome"] != entry["outcome"]:
-                    raise CommandError(
-                        "Runtime observation differs from replay; source and workspace were not committed",
-                        "conflict",
-                    )
-            committed = self._commit(sample, index)
-            fingerprint[0] = self._source_hash(self._find(sample_id)[1])
-            return {
-                **committed,
-                "start_tick": start,
-                "_sandbox": self.compiler.frame(compiled, compiled["max_tick"])[
-                    "sandbox"
-                ],
-            }
-        finally:
-            self.edit_revision.reset(token)
+        return self.tool_sessions.create(session_id, options)
 
     @command()
     def list_tool_sessions(self):
@@ -1391,7 +1206,7 @@ class TrajectoryCommands:
         """
         return self.tool_sessions.inspect(session_id, include_state, include_log)
 
-    @command(write=True, destructive=True, open_world=True)
+    @command(write=True, destructive=True)
     async def call_simulated_tool(
         self,
         session_id: str,
@@ -1399,6 +1214,7 @@ class TrajectoryCommands:
         arguments: dict,
         record_sample_id: str | None = None,
         expected_revision: Revision = None,
+        outcome: dict | None = None,
     ):
         """Execute a simulated Remix tool in a session, preserving its real outcome and state.
 
@@ -1407,33 +1223,17 @@ class TrajectoryCommands:
         record_sample_id also appends the actual call/result in one tick-0 tool window
         as one undoable source edit.
         Recording requires a compilable sample (or empty draft) and stopped generation.
-        A rejected recording leaves the virtual state/log unchanged. Configured subagent
-        requests can contact an LLM; their external request cannot be rolled back.
+        A rejected recording leaves virtual state/log unchanged. For subagent, supply
+        outcome={ok:true,result:{response:"authored reply",conversationId:"optional-id"}}
+        or an authored failure. This is author-only data, separate from model arguments.
+        No simulated tool contacts a provider, launches an agent or executes code.
         """
-        if (
-            expected_revision is not None
-            and record_sample_id is None
-            and not self.tool_sessions.get(session_id).trajectory_id
-        ):
+        if expected_revision is not None and record_sample_id is None:
             raise CommandError(
                 "expected_revision applies to recording; supply record_sample_id"
             )
         recorder = None
         context = None
-        session = self.tool_sessions.get(session_id)
-        if session.trajectory_id is not None:
-            if record_sample_id not in (None, session.trajectory_id):
-                raise CommandError("A bound session can record only to its trajectory")
-            self._editable(expected_revision)
-            if name == "chat":
-                _, sample = self._find(session.trajectory_id)
-                context = chat_context(
-                    self.compiler.compile(sample)["windows"], sample.get("metadata")
-                )
-            recorder = lambda entry: session.record_call(entry, expected_revision)
-            return await self.tool_sessions.call(
-                session_id, name, arguments, recorder, context
-            )
         if record_sample_id is not None:
             self._editable(expected_revision)
             _, sample = self._find(record_sample_id)
@@ -1446,7 +1246,7 @@ class TrajectoryCommands:
                 record_sample_id, entry, expected_revision
             )
         return await self.tool_sessions.call(
-            session_id, name, arguments, recorder, context
+            session_id, name, arguments, recorder, context, outcome
         )
 
     def _record_interaction(self, sample_id, entry, expected_revision):
@@ -1542,81 +1342,6 @@ class TrajectoryCommands:
     def delete_tool_session(self, session_id: str):
         """Destroy one simulated-tool workbench and its RAM state/log."""
         return self.tool_sessions.delete(session_id)
-
-    @command()
-    def list_subagent_jobs(self, session_id: str, include_completed: bool = False):
-        """Inspect queued/running external or configured-agent jobs without consuming budget."""
-        jobs = self.tool_sessions.get(session_id).sandbox.jobs
-        return {
-            "jobs": [
-                copy.deepcopy(j)
-                for j in jobs.values()
-                if include_completed or j["status"] in ("queued", "running")
-            ]
-        }
-
-    @command(write=True)
-    async def claim_subagent_job(
-        self,
-        session_id: str,
-        job_id: str,
-        worker_id: Annotated[str, Field(min_length=1, max_length=128)],
-    ):
-        """Attach an external worker to a job; resumes require the same worker identity. Returns scoped messages and artifact references."""
-        return await self.tool_sessions.agents.claim(session_id, job_id, worker_id)
-
-    @command(write=True, open_world=True)
-    async def call_subagent_tool(
-        self, session_id: str, job_id: str, worker_id: str, name: str, arguments: dict
-    ):
-        """Execute a bounded tool inside a claimed worker's private workspace, including opt-in isolated Python execution."""
-        return await self.tool_sessions.agents.tool(
-            session_id, job_id, worker_id, name, arguments
-        )
-
-    @command(write=True)
-    async def complete_subagent_job(
-        self,
-        session_id: str,
-        job_id: str,
-        worker_id: str,
-        response: Annotated[str, Field(max_length=200_000)] | None = None,
-        error: Annotated[str, Field(max_length=4000)] | None = None,
-    ):
-        """Publish worker files/evidence atomically with version checks and a retained response; cancelled jobs reject late results."""
-        if (response is None) == (error is None):
-            raise CommandError("Supply exactly one of response or error")
-        return await self.tool_sessions.agents.complete(
-            session_id, job_id, worker_id, response, error
-        )
-
-    @command(write=True)
-    def finalize_trajectory(
-        self,
-        sample_id: str,
-        require_done: bool = True,
-        expected_revision: Revision = None,
-    ):
-        """Close all remaining windows with one EOS batch after jobs finish and task notes are done."""
-        index, sample = self._draft(sample_id, expected_revision)
-        plan = self.compiler.compile(sample)
-        state = self.compiler.frame(plan, plan["max_tick"])["sandbox"]
-        if any(j["status"] in ("queued", "running") for j in state["jobs"].values()):
-            raise CommandError("Wait for or cancel active jobs before finalizing")
-        if require_done and any(n["status"] != "done" for n in state["notes"].values()):
-            raise CommandError("Complete task notes before finalizing")
-        opened = [w["id"] for w in plan["windows"] if w["close"] is None]
-        if opened:
-            sample["replay"].setdefault(str(plan["max_tick"] + 1), []).extend(
-                {
-                    "op": "generate",
-                    "window": window,
-                    "content": self.compiler.special["eos"],
-                }
-                for window in opened
-            )
-        self.compiler.compile(sample)
-        return {**self._commit(sample, index), "closed_windows": opened}
 
     @command(write=True)
     async def save_dataset(self):
