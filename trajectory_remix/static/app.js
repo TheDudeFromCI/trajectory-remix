@@ -500,10 +500,7 @@ function renderSandbox() {
   }
   const sandbox = currentFrame.sandbox;
   if (!sandbox) return;
-  $("sandbox-state").append(
-    node("p", "", `${sandbox.clock} · ${sandbox.calls} completed calls`),
-  );
-  for (const call of sandbox.tool_calls) {
+  for (const call of currentFrame.tool_calls || []) {
     const row = node("details", `sandbox-call ${call.status}`);
     row.append(
       node(
@@ -525,32 +522,8 @@ function renderSandbox() {
     );
     $("sandbox-calls").append(row);
   }
-  for (const name of [
-    "files",
-    "memory",
-    "notes",
-    "skills",
-    "artifacts",
-    "conversations",
-  ]) {
-    const group = node("details", "sandbox-store");
-    group.open = name === "files";
-    const entries = Object.entries(sandbox[name]);
-    group.append(node("summary", "", `${name} (${entries.length})`));
-    for (const [key, value] of entries) {
-      const entry = node("details");
-      entry.append(node("summary", "", key));
-      entry.append(
-        node(
-          "pre",
-          "window-content",
-          typeof value === "string" ? value : JSON.stringify(value, null, 2),
-        ),
-      );
-      group.append(entry);
-    }
-    $("sandbox-state").append(group);
-  }
+  const contents = node("pre", "window-content", JSON.stringify(sandbox, null, 2));
+  $("sandbox-state").append(contents);
 }
 function drawTimeline() {
   const canvas = $("timeline"),
@@ -758,6 +731,7 @@ function showMetadataNames(metadata) {
     typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
   $("user-name").value =
     typeof metadata?.user_name === "string" ? metadata.user_name : "";
+  $("tick-rate").value = metadata?.synthetic_clock?.tick_rate ?? 10;
 }
 function loadMetadata(trajectory) {
   $("trajectory-uuid").value = trajectory?.uuid || "";
@@ -1121,12 +1095,13 @@ function buildEventCard(item, i) {
       head.append(
         at,
         select(
-          ["open", "append", "generate", "tool-call", "invisible-tool-call"],
+          ["open", "append", "generate", "tool-call", "invisible-tool-call", "show_tools"],
           e.op,
           (v) => {
             e.op = v;
             if (
               v === "open" ||
+              v === "show_tools" ||
               v === "tool-call" ||
               v === "invisible-tool-call"
             ) {
@@ -1156,23 +1131,13 @@ function buildEventCard(item, i) {
                 "result-anchor",
               ])
                 delete e[key];
-              if (
-                ![
-                  "file_write",
-                  "file_patch",
-                  "file_delete",
-                  "memory_save",
-                  "note_save",
-                  "note_delete",
-                  "skill_save",
-                  "time_advance",
-                  "time_set",
-                ].includes(e.tool)
-              ) {
-                e.tool = "file_write";
-                e.arguments = { path: "/example.txt", content: "" };
-              }
+
             } else e.window ||= "new-window";
+            if (v === "show_tools") e.tools ??= [];
+            else {
+              delete e.tools;
+              delete e["randomly-add-additional-tools"];
+            }
             if (v !== "tool-call" && v !== "invisible-tool-call") {
               for (const key of [
                 "tool",
@@ -1241,26 +1206,27 @@ function buildEventCard(item, i) {
           ),
         );
         card.append(options);
+      } else if (e.op === "show_tools") {
+        const options = node("div", "event-options show-tools-options");
+        for (const schema of (state.tools || []).filter((s) => !s.invisible)) {
+          const name = schema.function.name;
+          options.append(field(name, checkbox((e.tools || []).includes(name), (checked) => {
+            const selected = new Set(e.tools || []);
+            if (checked) selected.add(name);
+            else selected.delete(name);
+            e.tools = [...selected];
+            update();
+          })));
+        }
+        options.append(field("Randomly add additional tools", checkbox(e["randomly-add-additional-tools"] || false, (checked) => {
+          e["randomly-add-additional-tools"] = checked;
+          update();
+        })));
+        card.append(options);
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
         const invisible = e.op === "invisible-tool-call";
-        const schemas = (state.tools || [])
-          .map((s) => s.function)
-          .filter(
-            (s) =>
-              !invisible ||
-              [
-                "file_write",
-                "file_patch",
-                "file_delete",
-                "memory_save",
-                "note_save",
-                "note_delete",
-                "skill_save",
-                "time_advance",
-                "time_set",
-              ].includes(s.name),
-          );
+        const schemas = (state.tools || []).filter((s) => invisible || !s.invisible).map((s) => s.function);
         options.append(
           field(
             "Tool",
@@ -1273,7 +1239,7 @@ function buildEventCard(item, i) {
                   (s) => s.name === value,
                 ).parameters;
                 e.arguments = Object.fromEntries(
-                  parameters.required.map((key) => [
+                  (parameters.required || []).map((key) => [
                     key,
                     parameters.properties[key].type.includes("null")
                       ? null
@@ -1998,7 +1964,7 @@ function renderConfig() {
     );
     configDraft.clock ??= {
       seed: "2030-01-01T09:00:00+00:00",
-      seconds_per_call: 1,
+      tick_rate: 10,
     };
     form.append(
       field(
@@ -2007,10 +1973,10 @@ function renderConfig() {
         "wide",
       ),
       field(
-        "Synthetic seconds per tool call",
+        "Default tick rate (tokens/s)",
         input(
-          configDraft.clock.seconds_per_call,
-          (v) => (configDraft.clock.seconds_per_call = v),
+          configDraft.clock.tick_rate ?? 10,
+          (v) => (configDraft.clock.tick_rate = v),
           "number",
         ),
       ),
@@ -2078,6 +2044,14 @@ $("agent-name").oninput = () =>
   updateMetadataName("agent_name", $("agent-name").value);
 $("user-name").oninput = () =>
   updateMetadataName("user_name", $("user-name").value);
+$("tick-rate").oninput = () => {
+  try {
+    const metadata = readMetadata();
+    metadata.synthetic_clock = {...(metadata.synthetic_clock || {}), tick_rate: Number($("tick-rate").value)};
+    $("metadata-json").value = JSON.stringify(metadata, null, 2);
+    updateMetadata();
+  } catch (e) { $("metadata-status").textContent = e.message; }
+};
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
 allowDrop(
@@ -2104,6 +2078,12 @@ $("add-event").onclick = () => {
       loss: { mask: "auto", weight: 1 },
     },
   });
+  setDirty();
+  renderEvents();
+};
+$("add-show-tools").onclick = () => {
+  const window = eventDraft.find(({event}) => event.op === "open")?.event.window || "system";
+  eventDraft.push({key: "1", event: {op: "show_tools", window, tools: []}});
   setDirty();
   renderEvents();
 };

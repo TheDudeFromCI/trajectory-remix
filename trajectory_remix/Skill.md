@@ -13,7 +13,7 @@ history and explicitly shared artifacts. No real agents, execution environment,
 provider credentials or shell access are needed for this workflow.
 
 Trajectory Remix is a simulator and editor. File tools modify virtual text in RAM, synthetic subagents consume authored outcomes, and replay reconstructs that state.
-Nothing in a sample runs code, launches a worker or contacts a subagent provider.
+Built-in tools do not run code, launch workers or contact providers. Custom tools loaded by the server operator are trusted Python; inspect their schemas and descriptions.
 
 ## Connect and discover
 
@@ -94,8 +94,9 @@ A window begins with the project's configured BOS/header framing, and its
 lifetime ends with Kidra's generated EOS. Merely finishing a message, delivering
 a tool result or leaving a window idle does **not** close it. Active windows do
 not need to produce useful text on every tick; NOOP expresses intentional idle
-behavior. Separate logical ticks from the synthetic clock used by `time_now`,
-`time_advance` and `time_set`.
+behavior. The synthetic clock advances by one second per `tick_rate` logical
+ticks (default 10). `time_set` and `time_advance` establish Unix/tick anchors;
+`time_now` extrapolates from them.
 
 Conceptual replay (tokens shown as placeholders, not literal tokenizer output):
 
@@ -272,13 +273,14 @@ For custom streamed requests, `content` or `segments` controls the request text;
 `tool` and `arguments` still determine the simulated operation. Keep them
 consistent. To teach explicit waiting, add a segment such as
 `{"text":"<|noop|><|noop|><|noop|>","loss":{"weight":1}}`, using the project's
-configured NOOP spelling. Do not invent a wait/cancel/background-job
-tool: those tools are not implemented. Status comes from scheduled conversations.
+configured NOOP spelling. Use `timer` for simulated waits. Cancellation and
+background-process launch tools are not implemented. Status comes from scheduled conversations.
 
-Ticks measure token scheduling, not real seconds. `time_now`, `time_advance` and `time_set`
-use a separate synthetic clock. Automatic increments are per dispatched tool
-call; an author-side inspection does not advance time. Write status messages
-that match the observable scenario rather than claiming wall-clock runtimes.
+Ticks measure token scheduling. The synthetic clock advances at the trajectory's
+`metadata.synthetic_clock.tick_rate` (default 10 tokens/s). `time_set` and
+`time_advance` store Unix/tick anchors; tools calculate elapsed simulated seconds
+from them. Author-side inspection does not advance ticks. Write status messages
+that match the observable scenario rather than claiming host wall-clock runtimes.
 
 ## Publish external activity invisibly
 
@@ -304,14 +306,13 @@ call budget or automatically advance the synthetic clock. It is not permission
 to inject information into Kidra's visible context: schedule a visible reply or
 file read if Kidra needs to observe the change.
 
-Allowed invisible tools are `file_write`, `file_patch`, `file_delete`,
-`memory_save`, `note_save`, `note_delete`, `skill_save`, `time_advance` and `time_set`.
-Do not attach `window`, `outcome`, `content`, `segments`, delivery or loss settings
-to an invisible source event. Use `arguments.content` for a file body.
-`duration_ticks` delays its commit; `source` attributes its external actor.
-Hidden activity after all visible tokens extends inspection time without adding
-idle training tokens. Prefer a later tick for dependent calls: equal-tick effects
-follow stable source order, including numeric keys before anchor expressions.
+Any registered tool can be invoked invisibly. Invisible arguments are marked
+`invisible` in the full author schema and omitted from the public model schema.
+Use them only in `invisible-tool-call` events; MCP rejects them in visible calls.
+For example, invisible `chat` accepts `username`. Do not add windows, content,
+loss settings, delivery options or outcomes to an invisible source event.
+`duration_ticks` is a compatibility delay for built-in tools; new tools finish
+according to `is_done`. `source` attributes the external actor.
 
 Use `file_stat` / `get_sandbox_state` to obtain a version. Supply pinned references
 to reviewers with `arguments.artifacts: [{"path":"/math.py","version":"sha256:..."}]`.
@@ -321,7 +322,7 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. All 23 tools are local
+Always confirm current schemas with `list_simulated_tools`. The 38 built-in tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
@@ -329,12 +330,14 @@ simulations; a stored skill is text, not installed code.
 | `chat`                                            | `content`; append a framed message from `metadata.agent_name` (default Kidra) to the open `chat` window.                                                           |
 | `time_now`                                        | No arguments; read the synthetic timestamp.                                                                                                                        |
 | `time_set` | All seven fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `timezone`; use `null` for seeded random values. Sets the synthetic clock exactly. Timezone accepts IANA names, UTC or ±HH:MM. See [clock rules](../docs/SANDBOX.md#setting-synthetic-time). |
-| `time_advance`                                    | Nonnegative `seconds`; advance synthetic time without sleeping.                                                                                                    |
+| `time_advance`                                    | Invisible-only: nonnegative `seconds`; prepare synthetic time without sleeping.                                                                                                    |
 | `file_write`                                      | `path`, `content`; save virtual UTF-8 text and return its version; optional `expected_version` prevents stale writes.                                              |
-| `file_read`                                       | `path`; read current content, or historical content with optional `version`.                                                                                       |
+| `file_read` | `path`; optional historical `version`, inclusive 1-based start_line/end_line, and line_numbers. |
 | `file_stat`                                       | `path`; return current version and byte size without its body.                                                                                                     |
-| `file_patch`                                      | `path`, `old`, `new`; replace exactly one nonempty unique occurrence; optional `expected_version`.                                                                 |
-| `file_list`, `file_delete`                        | List virtual paths with no arguments; delete a current file with `path`. Historical versions remain.                                                               |
+| `file_patch` | `path` with old/new or an atomic edits array of old/new pairs; each old matches once. Optional expected_version. |
+| `file_list`, `file_delete` | List sorted virtual paths, optionally filtered by glob; delete with path. Historical versions remain. |
+| `file_copy`, `file_move`, `file_rename` | source/destination; optional overwrite and source expected_version. Move and rename are atomic; all retain historical artifacts. |
+| `file_search` | query; optional regex, case_sensitive, glob, context_lines and max_results. Returns bounded line-numbered matches. |
 | `memory_save`, `memory_search`                    | Save `key`, `text`; search with `query`, returning up to eight lexical matches.                                                                                    |
 | `note_save`                                       | `key`, `text`, `status` (`todo`, `doing`, `blocked`, `done`); optional `owner`, `depends_on`, `blockers`, `acceptance_criteria`. The last three are string arrays. |
 | `note_list`, `note_delete`                        | List notes with no arguments; delete with `key`.                                                                                                                   |
@@ -342,6 +345,25 @@ simulations; a stored skill is text, not installed code.
 | `subagent`                                        | `task`; optional `resume` and `artifacts`; author supplies the outcome separately. No real delegation occurs.                                                      |
 | `subagent_list`, `subagent_get`, `subagent_close` | List with no arguments; inspect/close with `conversationId`.                                                                                                       |
 | `runtime_status`                                  | No arguments; inspect synthetic clock, call count, TODO counts and conversation lifecycle summaries.                                                               |
+| `calculator` | `expression`; numeric math via simpleeval, including trigonometry, logarithms, roots and constants. Angles use radians. |
+| `random` | `kind`: int, bool, float, choice; optional min/max or required choices. Reproducible draws persisted in sandbox state. |
+| `timer` | `mode`: timeout/interval with seconds (or explicit ticks); intervals require finite count. Alarm uses at_tick or a timezone-aware synthetic timestamp. |
+| `file_watch` | `path`; optional events, count and timeout_seconds (or explicit timeout_ticks). Poll for completed virtual file changes and emit masked observations. |
+| `system_diagnostics` | Read simulated CPU, RAM, VRAM, core count, OS and architecture. No host measurements. |
+| `system_diagnostics_set` | Invisible-only partial updates to simulated diagnostics. Resource usage must fit totals. |
+| `hardware_load_set` | Invisible-only file_io_ticks and per-operation operation_ticks. New file calls sample additive latency once at dispatch. |
+| `tool_permissions_set` | Invisible-only permission policy: default allow/deny and ordered tool/path glob rules with decision and optional remaining/message. Simulate user rejection before dispatch. |
+| `io_failure_set` | Invisible-only rules for I/O faults by tool/path glob, code, optional remaining/message. Empty rules clears faults. |
+| `network_set` | Invisible-only HTTP routes with URL glob, method, optional request_body/request_headers, and sequential responses with status/headers/body, latency_seconds/error. Last response repeats. |
+| `network_request` | url; optional method, headers, body and timeout_seconds (default 30). Simulated fixtures only; no internet requests. HTTP errors are returned statuses; transport errors fail. |
+
+Generated EOS cancels the owning tool window. A request ending with EOS is never
+dispatched, so its arguments may be incomplete. For a running call, schedule a
+generate event containing EOS on that window. Phase-B work on the EOS tick can
+finish before closure; future execution/results stop, and pending registrations
+are cleaned up. Earlier mutations remain. A cancelled call's result-anchor
+captures its EOS tick. See [cancellation](../docs/SANDBOX.md#cancellation-with-eos).
+
 
 Optional note fields survive updates; clear them with empty strings/arrays. A
 task cannot become `done` with blockers or missing/unfinished dependencies.
@@ -420,3 +442,17 @@ actually executed by Remix or as verification of the dataset's real quality.
 `examples/persistent-agents.json` is a small synthetic source example of these
 mechanics. Extend the scenario's histories and timing
 to suit the requested training behavior rather than copying generic replies.
+
+
+## Tool protocol and schema displays
+
+Use `create_event` with `{"op":"show_tools","window":"system","tools":["chat"]}`
+to append selected public schemas to an already open window. Set
+`randomly-add-additional-tools: true` to include deterministic extra distractor
+tools. Invisible arguments never appear in these schemas.
+
+Every tool, including subagents and custom tools, runs once per tick until
+`is_done`. State begins with `tick_rate` (default 10 tokens/s); other keys are tool-owned.
+`get_sandbox_state` and preview frames return `sandbox` and `tool_calls` as separate
+properties. Do not assume any store exists before its first tool execution.
+See [the tool contract](../docs/SANDBOX.md) for custom modules and sparse caching.

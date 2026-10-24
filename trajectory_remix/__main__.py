@@ -33,6 +33,7 @@ def main(argv=None):
     if not initializing:
         from .mcp_server import browser_origin
 
+        parser.add_argument("--tools-dir", type=Path, help="Folder of custom Python tool modules")
         parser.add_argument("--port", type=int, default=8765)
         parser.add_argument(
             "--mcp-allow-origin",
@@ -62,7 +63,8 @@ def main(argv=None):
             parser.error("--chunk-ticks must be positive")
         store = DatasetStore(args.dataset)
         if args.export:
-            compiler = store.load_compiler()
+            from .tools import ToolRegistry
+            compiler, _ = store.configure_tools(ToolRegistry(args.tools_dir))
 
             import os
             from tempfile import NamedTemporaryFile
@@ -95,7 +97,7 @@ def main(argv=None):
 
         print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
         uvicorn.run(
-            create_app(args.dataset, mcp_allowed_origins=args.mcp_allow_origin),
+            create_app(args.dataset, mcp_allowed_origins=args.mcp_allow_origin, tools_dir=args.tools_dir),
             host="127.0.0.1",
             port=args.port,
             log_level="warning",

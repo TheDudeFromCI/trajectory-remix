@@ -85,6 +85,8 @@
             <input id="agent-name" placeholder="Kidra" />
             <label for="user-name">User name</label>
             <input id="user-name" placeholder="User" />
+            <label for="tick-rate">Tick rate (tokens/s)</label>
+            <input id="tick-rate" type="number" min="0" step="any" value="10" />
             <details id="metadata-details">
               <summary>All properties (JSON)</summary>
               <textarea id="metadata-json" spellcheck="false" aria-label="Metadata JSON">{}</textarea>
@@ -199,7 +201,8 @@
                 step="0.01" /></label
             ><button id="add-event">+ Add event</button>
             <button id="add-group">+ Group</button>
-            <button id="add-tool-call">+ Tool call</button>
+            <button id="add-show-tools">+ Show tools</button>
+              <button id="add-tool-call">+ Tool call</button>
             <button id="add-invisible-call">+ External activity</button>
           </div>
           <div class="hint">

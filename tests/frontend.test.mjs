@@ -326,6 +326,7 @@ assert.equal(
 );
 await click("preferences-button");
 await $("preferences-form").onsubmit({ preventDefault() {} });
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 const compileCountBeforePreference = compileCount();
 $("sample-json").oninput();
 await waitFor(() => compileCount() > compileCountBeforePreference);
@@ -531,7 +532,7 @@ assert.match(
   new RegExp(`file_write · ${execution.start}–${execution.end}`),
 );
 jump(100);
-await waitFor(() => /files \(0\)/.test($("sandbox-state").textContent));
+await waitFor(() => /"tick_rate": 10/.test($("sandbox-state").textContent));
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
 // Tool windows exist at tick zero; result delivery changes independently of the request.
 jump(0);
@@ -618,6 +619,7 @@ anchorCheckbox().onchange();
 await waitFor(() => lastPlan?.tool_calls[0].result_anchor === undefined);
 // Chat is selectable as a synthetic tool and appends into the existing chat window.
 await click("add-tool-call");
+assert(![...w.document.querySelectorAll(".event-card")].at(-1).querySelector(".event-options select").querySelector('option[value="time_advance"]'));
 let chatCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 const chatTick = chatCard.querySelector(".event-header input");
 chatTick.value = "0";
@@ -726,6 +728,8 @@ assert.equal(
 );
 // Listings are paged in SQLite, and search reaches trajectories beyond page one.
 const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
+  "schema-version": "1.0",
+  "tick-policy": "external-first",
   id: `sqlite-page-${index}`,
   replay: { 0: [{ op: "open", window: "a" }] },
   metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
@@ -756,11 +760,78 @@ await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
 assert.equal($("sample-list").children.length, 1);
 await $("sample-list").firstElementChild.onclick();
 assert.equal(JSON.parse($("sample-json").value).id, "sqlite-page-204");
+// Show-tools events advertise only checked tools and keep invisible arguments hidden.
+await w.document.querySelector('.tab[data-view="events"]').onclick();
+await click("add-show-tools");
+let showCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+assert.equal(showCard.querySelector(".event-header select").value, "show_tools");
+assert(![...showCard.querySelectorAll("label")].some((label) => label.textContent === "time_advance"));
+const toolCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "chat").querySelector("input");
+toolCheck.checked = true;
+toolCheck.onchange();
+await waitFor(() => !w.document.title.startsWith("*"));
+await waitFor(() => lastPlan?.sample_id === "sqlite-page-204" && lastPlan.events.some((event) => event.key === "1" && event.text.includes('"chat"')));
+assert.deepEqual(JSON.parse($("sample-json").value).replay["1"][0].tools, ["chat"]);
+const shown = lastPlan.events.find((event) => event.key === "1").text;
+assert.match(shown, /"chat"/);
+assert.doesNotMatch(shown, /"username"|"file_read"/);
+const extraCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "Randomly add additional tools").querySelector("input");
+extraCheck.checked = true;
+extraCheck.onchange();
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"] === true);
+assert.equal(JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"], true);
+// Per-trajectory tick rate is an ordinary persisted metadata setting.
+$("tick-rate").value = "20";
+$("tick-rate").oninput();
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && lastPlan?.sandbox.initial.tick_rate === 20);
+assert.equal(JSON.parse($("sample-json").value).metadata.synthetic_clock.tick_rate, 20);
+// New math, timer, and author-only load tools use the same actual editor flow.
+await click("add-tool-call");
+let mathCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+let mathSelect = mathCard.querySelector(".event-options select");
+assert(mathSelect.querySelector('option[value="calculator"]'));
+assert(!mathSelect.querySelector('option[value="hardware_load_set"]'));
+assert(!mathSelect.querySelector('option[value="system_diagnostics_set"]'));
+mathSelect.value = "calculator";
+mathSelect.onchange();
+mathCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const mathArgs = mathCard.querySelector('textarea[aria-label="arguments JSON"]');
+mathArgs.value = JSON.stringify({expression: "sin(pi / 2) + sqrt(9)"});
+mathArgs.oninput();
+await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "calculator"));
+assert.equal(lastPlan.tool_calls.find((call) => call.tool === "calculator").outcome.result.value, 4);
+await click("add-tool-call");
+let timerCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const timerSelect = timerCard.querySelector(".event-options select");
+timerSelect.value = "timer";
+timerSelect.onchange();
+timerCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const timerArgs = timerCard.querySelector('textarea[aria-label="arguments JSON"]');
+timerArgs.value = JSON.stringify({mode: "interval", seconds: 0.1, count: 2});
+timerArgs.oninput();
+await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "timer"));
+const interval = lastPlan.tool_calls.find((call) => call.tool === "timer");
+assert.equal(interval.outputs.length, 2);
+assert.equal(interval.end - interval.start, 4);
+await click("add-invisible-call");
+let loadCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const loadSelect = loadCard.querySelector(".event-options select");
+assert(loadSelect.querySelector('option[value="hardware_load_set"]'));
+loadSelect.value = "hardware_load_set";
+loadSelect.onchange();
+loadCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const loadArgs = loadCard.querySelector('textarea[aria-label="arguments JSON"]');
+loadArgs.value = JSON.stringify({file_io_ticks: 2});
+loadArgs.oninput();
+await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "hardware_load_set"));
+jump(lastPlan.max_tick);
+await waitFor(() => $("sandbox-state").textContent.includes('"file_io_ticks": 2'));
+assert.match($("sandbox-state").textContent, /"file_io_ticks": 2/);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 82,
+    checks: 99,
     errors,
   }),
 );

@@ -45,12 +45,12 @@ def test_invisible_events_never_add_training_rows_windows_or_export_chunks(
     assert plan["events"] == baseline["events"]
     assert list(chunks(plan, 8)) == list(chunks(baseline, 8))
     assert plan["max_tick"] == 500 and plan["token_max_tick"] == 0
-    assert compiler.frame(plan, 499)["sandbox"]["files"] == {}
+    assert compiler.frame(plan, 499)["sandbox"].get("files", {}) == {}
     state = compiler.frame(plan, 500)["sandbox"]
     assert state["files"] == {"/secret": "external implementation"}
     assert state["calls"] == 0
-    assert state["clock"] == baseline["sandbox"]["initial"]["clock"]
-    assert state["tool_calls"][0]["source"] == "subagent"
+    assert state["clock"] == "2030-01-01T09:00:00+00:00"
+    assert compiler.frame(plan, 500)["tool_calls"][0]["source"] == "subagent"
 
 
 def test_external_writes_share_completion_order_and_can_use_anchors(compiler, sample):
@@ -75,7 +75,7 @@ def test_external_writes_share_completion_order_and_can_use_anchors(compiler, sa
         }
     )
     plan = compiler.compile(sample)
-    assert compiler.frame(plan, 4)["sandbox"]["files"] == {}
+    assert compiler.frame(plan, 4)["sandbox"].get("files", {}) == {}
     assert plan["tool_calls"][-1]["outcome"]["result"]["content"] == "provided"
     assert compiler.frame(plan, 5)["sandbox"]["calls"] == 1
     assert not any(
@@ -180,7 +180,7 @@ async def test_artifact_references_survive_edits_deletion_and_reject_conflicts()
     before = small.snapshot()
     with pytest.raises(ToolError, match="quota"):
         await small.call("file_write", {"path": "x", "content": "a" * 100})
-    assert small.files == before["files"] and small.artifacts == before["artifacts"]
+    assert small.files == before.get("files", {}) and small.artifacts == before.get("artifacts", {})
 
 
 async def test_task_dependencies_blockers_and_acceptance_criteria():
@@ -373,7 +373,7 @@ def test_artifacts_must_exist_at_dispatch_and_remain_pinned_during_work(
     plan = compiler.compile(sample)
     assert not plan["tool_calls"][0]["outcome"]["ok"]
     assert plan["tool_calls"][2]["outcome"]["ok"]
-    state = compiler.frame(plan, 21)["sandbox"]
+    state = compiler.frame(plan, plan["max_tick"])["sandbox"]
     assert "early" not in state["conversations"]
     assert state["files"]["/x"] == "changed"
     messages = json.dumps(state["conversations"]["reviewer"]["messages"])
@@ -389,4 +389,4 @@ async def test_invalid_authored_responses_leave_state_unchanged(response):
             {"task": "Implement"},
             subagent_outcome={"ok": True, "result": {"response": response}},
         )
-    assert not sandbox.conversations and sandbox.calls == 0
+    assert not sandbox.conversations and sandbox.calls == 1

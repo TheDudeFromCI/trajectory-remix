@@ -306,9 +306,9 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     old = await session.call_tool(
                         "get_sandbox_state", {"sample_id": "stdio-test", "tick": scheduled.structuredContent["tool_call"]["start"]}
                     )
-                    assert old.structuredContent["sandbox"]["files"] == {}
+                    assert old.structuredContent["sandbox"].get("files", {}) == {}
                     assert (
-                        old.structuredContent["sandbox"]["tool_calls"][-1]["status"]
+                        old.structuredContent["tool_calls"][-1]["status"]
                         == "running"
                     )
                     current = await session.call_tool(

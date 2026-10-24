@@ -29,15 +29,15 @@ from .dataset import (
 from .llm import TAGS, SampleBuilder, validate_config
 from .runner import Runner
 from .mcp_server import StreamableHTTP
-from .tools import SCHEMAS
+from .tools import ToolRegistry, default_registry
 from .storage import DatasetState, DatasetStore, StorageConflict
 
 MAX_BODY = 40_000_000
 
 
-def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
+def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=None):
     store = DatasetStore(dataset)
-    compiler = store.load_compiler()
+    compiler, tool_diagnostics = store.configure_tools(ToolRegistry(tools_dir) if tools_dir is not None else default_registry())
     config = validate_config(json.loads(store.info()[3]))
     state = DatasetState(store, config)
     runner = Runner(state, compiler, dataset, client)
@@ -64,6 +64,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
     app.state.history = runner.history
     app.state.csrf = token
     commands = TrajectoryCommands(state, compiler, runner, client)
+    app.state.compiler = compiler
+    app.state.tool_diagnostics = tool_diagnostics
     app.state.commands = commands
     app.state.tool_sessions = commands.tool_sessions
     mcp_http = StreamableHTTP(commands, mcp_allowed_origins)
@@ -174,7 +176,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
             "status": {**runner.status, "last_saved_revision": revision},
             "logs": list(runner.logs),
             "tags": TAGS,
-            "tools": SCHEMAS,
+            "tools": compiler.tools.schemas(invisible=True),
+            "tool_diagnostics": tool_diagnostics,
             "tokenizer": {
                 "sha256": compiler.fingerprint,
                 "vocab": compiler.tokenizer.get_vocab_size(),
@@ -213,7 +216,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
 
     @app.get("/api/tools")
     async def list_tools():
-        return {"tools": SCHEMAS}
+        return {"tools": compiler.tools.schemas(invisible=True)}
 
     @app.get("/api/samples/{index}/sandbox/{tick}")
     async def get_sandbox(index: int, tick: int):
@@ -224,7 +227,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
                 "tick": tick,
             },
         )
-        return result["sandbox"]
+        return {"sandbox": result["sandbox"], "tool_calls": result["tool_calls"]}
 
     @app.post("/api/samples/{index}/tool-calls")
     async def add_tool_call(index: int, request: Request):
@@ -345,7 +348,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=()):
                 "Preview exceeds 50,000 rows; export via CLI or split the trajectory"
             )
         plan_id = hashlib.sha256(
-            json.dumps(sample, sort_keys=True).encode()
+            (json.dumps(sample, sort_keys=True) + compiler.tools.fingerprint).encode()
         ).hexdigest()[:24]
         previews[plan_id] = plan
         previews.move_to_end(plan_id)
