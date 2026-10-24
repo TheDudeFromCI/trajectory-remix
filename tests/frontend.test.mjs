@@ -123,12 +123,16 @@ assert.equal(
 );
 const selectedSample = JSON.parse($("sample-json").value);
 confirmResult = false;
+await click("edit-menu-button");
+assert.equal($("edit-menu").hidden, false);
 await click("delete-sample");
 confirmResult = true;
 assert.equal(
   confirmationMessage,
   `Delete sample "${selectedSample.id}" from the dataset?`,
 );
+assert.equal($("edit-menu").hidden, true);
+assert.equal($("edit-menu-button").getAttribute("aria-expanded"), "false");
 await click("file-menu-button");
 await click("export-menu-button");
 assert.equal($("export-menu").hidden, false);
