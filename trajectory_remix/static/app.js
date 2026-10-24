@@ -2396,6 +2396,56 @@ $("timeline").onmousemove = (e) => {
   e.target.title = text;
 };
 new ResizeObserver(drawTimeline).observe($("timeline-scroll"));
+
+document.querySelectorAll(".resizer").forEach((handle) => {
+  handle.addEventListener("pointerdown", (down) => {
+    const kind = handle.dataset.resize,
+      ws = $("workspace"),
+      wsRect = ws.getBoundingClientRect(),
+      main = document.querySelector("main"),
+      vertical = kind === "timeline",
+      startH = $("timeline-scroll").offsetHeight;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    down.preventDefault();
+    handle.setPointerCapture(down.pointerId);
+    handle.classList.add("dragging");
+    document.body.classList.add(
+      "resizing",
+      vertical ? "resizing-y" : "resizing-x",
+    );
+    const move = (e) => {
+      if (kind === "sidebar")
+        ws.style.setProperty(
+          "--sidebar-w",
+          clamp(e.clientX - wsRect.left, 120, wsRect.width * 0.5) + "px",
+        );
+      else if (kind === "editor")
+        ws.style.setProperty(
+          "--editor-w",
+          clamp(wsRect.right - e.clientX, 240, wsRect.width * 0.7) + "px",
+        );
+      else {
+        const mainRect = main.getBoundingClientRect();
+        main.style.setProperty(
+          "--timeline-h",
+          clamp(startH + down.clientY - e.clientY, 100, mainRect.height - 200) +
+            "px",
+        );
+      }
+      drawTimeline();
+    };
+    const up = () => {
+      handle.classList.remove("dragging");
+      document.body.classList.remove("resizing", "resizing-x", "resizing-y");
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  });
+});
 $("edit-tags").onclick = () => {
   configTab = "conditions";
   openSettings();

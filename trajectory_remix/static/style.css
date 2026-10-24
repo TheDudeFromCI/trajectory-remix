@@ -175,8 +175,44 @@ header {
 }
 .workspace {
   display: grid;
-  grid-template-columns: 222px minmax(0, 1fr) minmax(320px, 34%);
+  grid-template-columns: var(--sidebar-w, 222px) 0 minmax(0, 1fr) 0 var(
+      --editor-w,
+      minmax(320px, 34%)
+    );
   height: calc(100vh - 36px);
+}
+.resizer {
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  touch-action: none;
+}
+.resizer-x {
+  cursor: col-resize;
+  width: 9px;
+  margin: 0 -4px;
+}
+.resizer-y {
+  cursor: row-resize;
+  height: 9px;
+  margin: -4px 0;
+  flex-shrink: 0;
+}
+.resizer:hover,
+.resizer.dragging {
+  background: #5b8def55;
+}
+body.resizing {
+  user-select: none;
+}
+body.resizing-x {
+  cursor: col-resize;
+}
+body.resizing-y {
+  cursor: row-resize;
+}
+body.resizing iframe {
+  pointer-events: none;
 }
 .sidebar {
   background: #111925;
@@ -639,7 +675,8 @@ h2 {
 }
 #timeline-scroll {
   overflow: auto;
-  max-height: 210px;
+  max-height: var(--timeline-h, 210px);
+  height: var(--timeline-h, auto);
   min-height: 100px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1119,7 +1156,10 @@ dialog::backdrop {
 }
 @media (max-width: 1250px) {
   .workspace {
-    grid-template-columns: 190px minmax(0, 1fr) minmax(300px, 34%);
+    grid-template-columns: var(--sidebar-w, 190px) 0 minmax(0, 1fr) 0 var(
+        --editor-w,
+        minmax(300px, 34%)
+      );
   }
   .timeline-options {
     display: none;
@@ -1130,7 +1170,10 @@ dialog::backdrop {
 }
 @media (max-width: 980px) {
   .workspace {
-    grid-template-columns: 160px minmax(0, 1fr) minmax(280px, 32%);
+    grid-template-columns: var(--sidebar-w, 160px) 0 minmax(0, 1fr) 0 var(
+        --editor-w,
+        minmax(280px, 32%)
+      );
   }
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1141,6 +1184,9 @@ dialog::backdrop {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(220px, 40vh) minmax(90px, 20vh);
     overflow: auto;
+  }
+  .resizer-x {
+    display: none;
   }
   main {
     grid-row: 1;
@@ -1159,7 +1205,7 @@ dialog::backdrop {
     padding-top: 4.5px;
   }
   #timeline-scroll {
-    max-height: 150px;
+    max-height: var(--timeline-h, 150px);
   }
   .window-card {
     min-height: 125px;
