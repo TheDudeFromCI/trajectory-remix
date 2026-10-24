@@ -13,7 +13,9 @@ const requests = [];
 let holdNextCompile = false,
   releaseCompile = null,
   completedStateReads = 0,
-  lastPlan = null;
+  lastPlan = null,
+  confirmResult = true,
+  confirmationMessage = null;
 w.fetch = async (path, options) => {
   requests.push({ path, options });
   const response = await fetch(new URL(path, base), options);
@@ -26,7 +28,10 @@ w.fetch = async (path, options) => {
     lastPlan = await response.clone().json();
   return response;
 };
-w.confirm = () => true;
+w.confirm = (message) => {
+  confirmationMessage = message;
+  return confirmResult;
+};
 w.ResizeObserver = class {
   observe() {}
 };
@@ -117,6 +122,13 @@ assert.equal(
   JSON.parse($("sample-json").value).uuid,
 );
 const selectedSample = JSON.parse($("sample-json").value);
+confirmResult = false;
+await click("delete-sample");
+confirmResult = true;
+assert.equal(
+  confirmationMessage,
+  `Delete sample "${selectedSample.id}" from the dataset?`,
+);
 await click("file-menu-button");
 await click("export-menu-button");
 assert.equal($("export-menu").hidden, false);

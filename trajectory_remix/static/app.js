@@ -2148,7 +2148,7 @@ $("duplicate").onclick = action(async () => {
 });
 $("delete-sample").onclick = action(async () => {
   if (selected < 0) return;
-  if (!confirm("Delete this sample from the dataset?")) return;
+  if (!confirm(`Delete sample "${sample.id}" from the dataset?`)) return;
   await json(
     `samples/${selected}?expected_revision=${sampleRevision}`,
     "DELETE",
