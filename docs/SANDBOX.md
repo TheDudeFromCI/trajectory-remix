@@ -20,6 +20,17 @@ nonempty output becomes a masked tool observation at that invocation's tick.
 `result-anchor` captures the final delivered result token. Subagents use this
 same scheduler and protocol.
 
+Each `run()` invocation has a 10-second wall-clock deadline. An invocation that
+stalls fails with an error identifying the tool and tick; repeated invocations
+that return `is_done=False` are still bounded by the 100,000-tick trajectory
+limit. A tool may run for many ticks as long as each invocation returns promptly.
+Custom tools run in a disposable worker process, which is terminated on timeout;
+partial state and window writes from failed invocations are discarded. Keep
+persistent progress in the supplied dictionary: module globals are not retained
+between invocations. Custom state must be serializable for the worker process.
+Built-ins use a lightweight POSIX deadline on the main thread, with worker
+isolation on other platforms or threads.
+
 The compiler trusts `modified_state`. It deep-copies state only when this flag
 is true, keeping one snapshot per changed tick. For example, snapshots at ticks
 1, 8, and 12 describe all intervening ticks without seven redundant copies.

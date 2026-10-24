@@ -24,6 +24,7 @@ ArgumentValidator = validators.extend(
 )
 
 from ._protocol import ToolError
+from ._timeout import invoke
 
 
 @dataclass(frozen=True)
@@ -262,6 +263,9 @@ class ToolRegistry:
                 try:
                     # Compile source directly: same-size edits must not reuse stale pyc files.
                     exec(compile(source, str(path), "exec"), module.__dict__)
+                    # Spawned workers must receive dynamic modules by value.
+                    import cloudpickle
+                    cloudpickle.register_pickle_by_value(module)
                     self.register(
                         module, hashlib.sha256(source).hexdigest(), external=True
                     )
@@ -333,7 +337,7 @@ class ToolRegistry:
     def run_tick(self, name, args, state, windows, context):
         token = execution_context.set(context)
         try:
-            result = self.get(name).run(args, state, windows)
+            result = invoke(self.get(name), args, state, windows, context)
             if not isinstance(result, tuple) or len(result) != 3:
                 raise ToolError(
                     f"{name}: run must return (output, is_done, modified_state)"
