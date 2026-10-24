@@ -1165,6 +1165,7 @@ function buildEventCard(item, i) {
                   "note_delete",
                   "skill_save",
                   "time_advance",
+                  "time_set",
                 ].includes(e.tool)
               ) {
                 e.tool = "file_write";
@@ -1256,6 +1257,7 @@ function buildEventCard(item, i) {
                 "note_delete",
                 "skill_save",
                 "time_advance",
+                "time_set",
               ].includes(s.name),
           );
         options.append(
@@ -1272,8 +1274,10 @@ function buildEventCard(item, i) {
                 e.arguments = Object.fromEntries(
                   parameters.required.map((key) => [
                     key,
-                    parameters.properties[key].enum?.[0] ??
-                      (parameters.properties[key].type === "number" ? 0 : ""),
+                    parameters.properties[key].type.includes("null")
+                      ? null
+                      : parameters.properties[key].enum?.[0] ??
+                        (parameters.properties[key].type === "number" ? 0 : ""),
                   ]),
                 );
                 delete e.outcome;

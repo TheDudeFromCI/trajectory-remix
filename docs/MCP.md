@@ -512,7 +512,7 @@ These commands use the same `Sandbox` dispatcher as trajectory generation:
   error observation. Scheduled `create_tool_call` events check the window at
   completion. `metadata.agent_name` supplies the speaker (default: Kidra), and
   `metadata.user_name` can store the user's name.
-- Synthetic clock: `time_now`, `time_advance`.
+- Synthetic clock: `time_now`, `time_advance`, `time_set`.
 - Virtual RAM filesystem: `file_write`, `file_read`, `file_list`, `file_delete`.
 - Versioned artifacts: `file_stat`, `file_patch`; writes return a `version`.
   `file_read` optionally accepts a pinned `version`, and writes/patches accept
@@ -563,7 +563,9 @@ file) and may also be recorded. Invalid arguments are rejected before execution.
 Every dispatched call, including reads and failed operations, consumes one call
 and advances synthetic time by `seconds_per_call`; `time_advance` additionally
 advances by its requested seconds. Source inspection with `get_tool_session`
-does not advance time or consume calls.
+does not advance time or consume calls. `time_set` replaces the clock with supplied
+local date/time fields, randomizing explicit nulls deterministically. All seven
+fields are required; see [synthetic time rules](SANDBOX.md#setting-synthetic-time).
 
 Recording appends supervised `<tool>` request text followed by masked
 `<tool_result>` content in the same tool window, open from tick 0. The response's

@@ -317,11 +317,14 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     assert current.structuredContent["sandbox"]["files"] == {
                         "/mcp.txt": "saved"
                     }
+                    # Requests stream before the duration starts; schedule after
+                    # actual completion rather than assuming an instant request.
+                    external_tick = scheduled.structuredContent["tool_call"]["end"] + 1
                     external = await session.call_tool(
                         "create_tool_call",
                         {
                             "sample_id": "stdio-test",
-                            "tick": "201",
+                            "tick": str(external_tick),
                             "tool": "file_write",
                             "arguments": {
                                 "path": "external.txt",
@@ -334,7 +337,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     assert not external.isError, external
                     assert external.structuredContent["tool_call"]["invisible"]
                     state = await session.call_tool(
-                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": 201}
+                        "get_sandbox_state", {"sample_id": "stdio-test", "tick": external_tick}
                     )
                     assert (
                         state.structuredContent["sandbox"]["files"]["/external.txt"]
@@ -350,7 +353,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                     == "tool-call"
                 )
                 assert (
-                    DatasetStore(dataset).samples[0]["replay"]["201"][0]["op"]
+                    DatasetStore(dataset).samples[0]["replay"][str(external_tick)][0]["op"]
                     == "invisible-tool-call"
                 )
         finally:

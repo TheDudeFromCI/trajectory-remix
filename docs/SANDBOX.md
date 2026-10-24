@@ -16,7 +16,7 @@
 
 Place it under a numeric or anchor tick key. It commits at the resolved tick plus
 `duration-ticks`. Allowed tools are `file_write`, `file_patch`, `file_delete`,
-`memory_save`, `note_save`, `note_delete`, `skill_save`, and `time_advance`.
+`memory_save`, `note_save`, `note_delete`, `skill_save`, `time_advance`, and `time_set`.
 The optional `source` identifies the external actor; it defaults to `external`.
 It is attribution supplied by the author, not authenticated evidence of execution.
 
@@ -37,6 +37,44 @@ on a completion, use a later tick or put equal-tick calls in explicit array orde
 MCP exposes this through `create_tool_call(..., invisible=true, source="coder")`.
 The dashboard provides **+ External activity** and the event operation selector.
 Both paths support source history, atomic batches, revision checks and saving.
+
+## Setting synthetic time
+
+`time_set` takes all seven fields: `year`, `month`, `day`, `hour`, `minute`,
+`second`, and `timezone`. Supply an integer for each date/time component or
+`null` to randomize it. For example:
+
+```json
+{
+  "year": 2024, "month": 2, "day": 29,
+  "hour": null, "minute": null, "second": 0,
+  "timezone": "Asia/Kolkata"
+}
+```
+
+Timezone accepts an IANA name such as `America/New_York`, `UTC`, or a fixed
+offset such as `+05:30` or `UTC-03:30`. A null timezone chooses from a fixed
+list of populated regions and UTC. Null years use 2000–2099; months use 1–12,
+days respect the chosen month and leap year, hours use 0–23, and minutes/seconds
+use 0–59. Supplied fields remain exact. A randomized year/month can accommodate
+an explicit February 29 or day 31. Impossible dates, invalid types/ranges,
+unknown zones, and nonexistent local times return tool errors. Ambiguous local
+times use the first occurrence. Named zones retain their DST rules when advancing
+or restoring the clock.
+
+Random choices use a versioned SHA-256 derivation from the trajectory's immutable
+UUID and current completed-call count. Labels, metadata, process randomness and
+wall-clock time do not affect them. Replaying the same trajectory reproduces its
+results; separate trajectories and successive agent calls have distinct seed
+inputs. Standalone workbenches use their configured initial clock seed instead
+and reproduce the same sequence after reset.
+
+The result has the same shape as `time_now`: `{"timestamp":"...","synthetic":true}`.
+A successful call replaces the clock exactly, after the normal call-budget and
+automatic increment effects. Subsequent calls advance from that value. It may
+move time backward and never changes logical token ticks. A failed operation
+retains the normal per-call increment. As an invisible external event it sets
+the clock without an automatic increment, agent call charge, or model tokens.
 
 ## Persistent conversations
 

@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .compiler import KEY
-from .dataset import reject_constant
+from .dataset import reject_constant, trajectory_uuid
 from .tools import (
     SCHEMAS,
     Sandbox,
@@ -689,6 +689,7 @@ class SampleBuilder:
                 if isinstance(metadata, dict)
                 else {}
             ),
+            random_seed=trajectory_uuid(self.sample),
             max_calls=self.config.get("max_tool_calls", 64),
         )
         try:

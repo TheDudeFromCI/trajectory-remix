@@ -10,9 +10,11 @@ import json
 import hashlib
 import math
 import re
+from calendar import monthrange
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import PurePosixPath
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 class ToolError(ValueError):
@@ -108,6 +110,26 @@ DEFINITIONS = [
         "time_advance",
         "Advance synthetic time without real sleeping.",
         {"seconds": {"type": "number", "minimum": 0}},
+    ),
+    (
+        "time_set",
+        "Set synthetic local time. Null fields are deterministically randomized from "
+        "the trajectory seed and call count; null years use 2000–2099. "
+        "Timezone accepts an IANA name, UTC or ±HH:MM.",
+        {
+            **{
+                name: {"type": ["integer", "null"], "minimum": low, "maximum": high}
+                for name, low, high in (
+                    ("year", 1, 9999),
+                    ("month", 1, 12),
+                    ("day", 1, 31),
+                    ("hour", 0, 23),
+                    ("minute", 0, 59),
+                    ("second", 0, 59),
+                )
+            },
+            "timezone": {"type": ["string", "null"], "maxLength": 128},
+        },
     ),
     (
         "file_write",
@@ -235,6 +257,8 @@ class Sandbox:
         seconds_per_call=1,
         max_calls=64,
         max_bytes=2_000_000,
+        *,
+        random_seed=None,
     ):
         self.clock = datetime.fromisoformat(seed)
         if self.clock.tzinfo is None:
@@ -246,6 +270,7 @@ class Sandbox:
         ):
             raise ToolError("seconds_per_call must be finite and nonnegative")
         self.step = seconds_per_call
+        self.random_seed = seed if random_seed is None else random_seed
         self.max_calls, self.max_bytes, self.calls = max_calls, max_bytes, 0
         for name in STORES:
             setattr(self, name, {})
@@ -260,6 +285,8 @@ class Sandbox:
         return deepcopy(
             {
                 "clock": self.clock.isoformat(),
+                "clock_timezone": getattr(self.clock.tzinfo, "key", None),
+                "random_seed": self.random_seed,
                 "calls": self.calls,
                 **{name: getattr(self, name) for name in STORES},
             }
@@ -268,6 +295,9 @@ class Sandbox:
     def restore(self, state):
         """Restore a compiler-produced snapshot when extending a trajectory."""
         self.clock = datetime.fromisoformat(state["clock"])
+        if state.get("clock_timezone"):
+            self.clock = self.clock.astimezone(ZoneInfo(state["clock_timezone"]))
+        self.random_seed = state.get("random_seed", self.random_seed)
         self.calls = state["calls"]
         for name in STORES:
             setattr(self, name, deepcopy(state.get(name, {})))
@@ -302,8 +332,15 @@ class Sandbox:
             )
         for key, v in args.items():
             spec = allowed[key]
-            if spec["type"] == "string" and (
-                not isinstance(v, str) or len(v) > 200_000
+            types = spec["type"] if isinstance(spec["type"], list) else [spec["type"]]
+            if v is None and "null" in types:
+                continue
+            if "integer" in types and (
+                type(v) is not int or not spec["minimum"] <= v <= spec["maximum"]
+            ):
+                raise ToolError(f"Invalid integer argument: {key}")
+            if "string" in types and (
+                not isinstance(v, str) or len(v) > spec.get("maxLength", 200_000)
             ):
                 raise ToolError(f"Invalid string argument: {key}")
             if spec["type"] == "number" and (
@@ -356,7 +393,73 @@ class Sandbox:
         self.calls += 1
         if self.calls > self.max_calls:
             raise ToolError("Tool call budget exhausted")
-        self.clock += timedelta(seconds=self.step)
+        self.advance_clock(self.step)
+
+    def advance_clock(self, seconds):
+        # Advance elapsed seconds across named-zone DST transitions as well.
+        if isinstance(self.clock.tzinfo, ZoneInfo):
+            advanced = self.clock.astimezone(UTC) + timedelta(seconds=seconds)
+            self.clock = advanced.astimezone(self.clock.tzinfo)
+        else:
+            self.clock += timedelta(seconds=seconds)
+
+    def set_time(self, args):
+        """Choose a valid local timestamp without hidden RNG state or host time."""
+        def choices(field, values):
+            values = list(values)
+            if not values:
+                return []
+            payload = json.dumps(["time-set-v1", self.random_seed, self.calls, field])
+            digest = hashlib.sha256(payload.encode()).digest()
+            offset = int.from_bytes(digest, "big") % len(values)
+            return values[offset:] + values[:offset]
+
+        def components(field, values):
+            return choices(field, values) if args[field] is None else [args[field]]
+
+        zones = components("timezone", (
+            "UTC", "America/New_York", "America/Los_Angeles", "America/Sao_Paulo",
+            "Europe/London", "Europe/Paris", "Africa/Johannesburg",
+            "Asia/Kolkata", "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland",
+        ))
+        years = range(2000, 2100) if args["year"] is None else [args["year"]]
+        months = range(1, 13) if args["month"] is None else [args["month"]]
+        dates = choices("date", (
+            (year, month) for year in years for month in months
+            if args["day"] is None or args["day"] <= monthrange(year, month)[1]
+        ))
+        hours = components("hour", range(24))
+        minutes = components("minute", range(60))
+        second = components("second", range(60))[0]
+        for zone_name in zones:
+            try:
+                if re.fullmatch(r"(?:UTC)?[+-](?:[01]\d|2[0-3]):[0-5]\d", zone_name):
+                    offset = zone_name.removeprefix("UTC")
+                    seconds = (int(offset[1:3]) * 60 + int(offset[4:])) * 60
+                    zone = timezone(timedelta(
+                        seconds=seconds if offset[0] == "+" else -seconds
+                    ))
+                else:
+                    zone = ZoneInfo(zone_name)
+            except (ZoneInfoNotFoundError, ValueError) as error:
+                raise ToolError("Invalid timezone; use an IANA name, UTC or ±HH:MM") from error
+            for year, month in dates:
+                for day in components("day", range(1, monthrange(year, month)[1] + 1)):
+                    for hour in hours:
+                        for minute in minutes:
+                            candidate = datetime(
+                                year, month, day, hour, minute, second, tzinfo=zone
+                            )
+                            # Reject local times skipped by timezone transitions;
+                            # ambiguous times use the first occurrence (fold=0).
+                            try:
+                                valid = candidate.astimezone(UTC).astimezone(zone) == candidate
+                            except (ValueError, OverflowError):
+                                valid = False
+                            if valid:
+                                self.clock = candidate
+                                return {"timestamp": self.clock.isoformat(), "synthetic": True}
+        raise ToolError("Invalid date or nonexistent local time for the supplied fields")
 
     async def call(self, name, args, *, subagent_outcome=None, **context):
         if subagent_outcome is not None:
@@ -409,8 +512,10 @@ class Sandbox:
         if name == "time_now":
             return {"timestamp": self.clock.isoformat(), "synthetic": True}
         if name == "time_advance":
-            self.clock += timedelta(seconds=args["seconds"])
+            self.advance_clock(args["seconds"])
             return {"timestamp": self.clock.isoformat(), "synthetic": True}
+        if name == "time_set":
+            return self.set_time(args)
         if name.startswith("file_"):
             if name == "file_list":
                 return sorted(self.files)
