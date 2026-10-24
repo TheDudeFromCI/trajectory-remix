@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from tokenizers import Tokenizer
 
 from .dataset import trajectory_uuid
-from .tools import tool_message, tool_request, tool_text
+from .tools import ToolError, default_registry, tool_message, tool_request, tool_text
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")
@@ -86,6 +87,8 @@ class Compiler:
         *,
         max_window_slots=None,
         slot_policy="uuid-hash-v1",
+        tools=None,
+        tool_store=None,
     ):
         if max_window_slots is not None and (
             type(max_window_slots) is not int or max_window_slots < 1
@@ -93,6 +96,8 @@ class Compiler:
             raise ValueError("max_window_slots must be a positive integer or null")
         if slot_policy not in ("uuid-hash-v1", "declaration-v1"):
             raise ValueError("Unsupported window slot allocation policy")
+        self.tools = tools or default_registry()
+        self.tool_store = tool_store
         self.max_window_slots, self.slot_policy = max_window_slots, slot_policy
         self.tokenizer = tokenizer
         tokenizer.no_truncation()
@@ -238,6 +243,27 @@ class Compiler:
             raise CompileError("Only one EOS may close a window", path)
         return Encoded(text, enc.ids, enc.offsets, converted, weights)
 
+    def show_tools(self, event, sample, path):
+        selected = event.get("tools", [])
+        if not isinstance(selected, list) or any(not isinstance(name, str) for name in selected) or len(set(selected)) != len(selected):
+            raise CompileError("show_tools tools must be unique tool names", path)
+        additional = event.get("randomly-add-additional-tools", False)
+        if type(additional) is not bool:
+            raise CompileError("randomly-add-additional-tools must be a boolean", path)
+        try:
+            for name in selected:
+                self.tools.get(name)
+        except ToolError as error:
+            raise CompileError(str(error), path) from error
+        if additional:
+            rng = random.Random(trajectory_uuid(sample) + path)
+            candidates = sorted(set(self.tools.tools) - set(selected))
+            selected = selected + [name for name in candidates if rng.random() < 0.5]
+        schemas = [self.tools.get(name).definition() for name in selected]
+        return {"op": "append", "window": event["window"], "source": "tools",
+                "content": json.dumps(schemas, ensure_ascii=False, indent=2),
+                "delivery": "instant", "loss": {"mask": "exclude"}}
+
     def compile(self, sample: dict) -> dict:
         from .sandbox_replay import compile_sandbox, validate_call
 
@@ -264,6 +290,8 @@ class Compiler:
             raise CompileError(
                 "window-headers must be a boolean", "defaults.window-headers"
             )
+        if self.tool_store is not None:
+            self.tool_store.verify_tool_dependencies(sample, self.tools)
         prepared, owners = [], {}
         # Assign slots before tokenization: reference widths can affect anchors.
         keys = sorted(
@@ -290,9 +318,10 @@ class Compiler:
                     "generate",
                     "tool-call",
                     "invisible-tool-call",
+                    "show_tools",
                 ):
                     raise CompileError(
-                        "Allowed operations: open, append, generate, tool-call, invisible-tool-call; close via generated EOS",
+                        "Allowed operations: open, append, generate, tool-call, invisible-tool-call, show_tools; close via generated EOS",
                         path,
                     )
                 for field in ("window-type", "request-id", "caused-by"):
@@ -306,20 +335,28 @@ class Compiler:
                         "window must be a nonempty string of at most 128 characters",
                         path,
                     )
+                showing_tools = event["op"] == "show_tools"
+                if showing_tools:
+                    event = self.show_tools(event, sample, path)
                 item = {
                     "event": event,
                     "key": key,
                     "path": path,
                     "order": len(prepared),
+                    "show_tools": showing_tools,
                 }
+                if "replace-content" in event:
+                    if event["op"] != "append" or type(event["replace-content"]) is not bool:
+                        raise CompileError("replace-content requires an append and a boolean", path)
+                    item["replace_content"] = event["replace-content"]
                 if event["op"] in ("tool-call", "invisible-tool-call"):
-                    validate_call(event, path)
+                    validate_call(event, path, self.tools)
                 if event["op"] == "invisible-tool-call":
                     prepared.append(item)
                     continue
                 if event["op"] != "open":
                     content_event = event
-                    literal = False
+                    literal = item.get("show_tools", False)
                     if event["op"] == "tool-call":
                         content_event = {
                             **event,
@@ -447,37 +484,28 @@ class Compiler:
             for item in prepared:
                 item["tick"] = solve(item)
 
-        def finish_result(item, call):
+        def finish_result(item, call, tick, output):
             result = {
-                "op": "append",
-                "window": call["window"],
-                "source": "tool",
+                "op": "append", "window": call["window"], "source": "tool",
                 "delivery": item["event"].get("delivery", "instant"),
-                "content": tool_message(
-                    "tool_result", call["outcome"], self.special.values()
-                ),
+                "content": "<tool_result>" + tool_text(output, self.special.values(), json_encoded=True).replace("<", r"\u003c") + "</tool_result>",
                 "loss": {"mask": "exclude"},
             }
-            item["result_event"] = result
-            item["result_encoded"] = self.encode(
-                result, item["path"], noop_weight, literal=True
-            )
+            encoded = self.encode(result, item["path"], noop_weight, literal=True)
             rate = item["event"].get("tokens-per-tick", 1)
-            offset = (
-                (len(item["result_encoded"].ids) - 1) // rate
-                if result["delivery"] == "stream" and item["result_encoded"].ids
-                else 0
-            )
-            item["result_end"] = call["end"] + offset
-            if item["result_end"] >= MAX_TICKS:
+            if result["delivery"] == "stream" and call["results"]:
+                tick = max(tick, call["results"][-1]["end"] + 1)
+            offset = ((len(encoded.ids)-1)//rate if result["delivery"] == "stream" and encoded.ids else 0)
+            end = tick + offset
+            if end >= MAX_TICKS:
                 raise CompileError("Expanded stream exceeds tick limit", item["path"] + ".result")
-            call["result_end"] = item["result_end"]
-            if "result-anchor" in item["event"]:
-                call["result_anchor"] = item["event"]["result-anchor"]
+            call["results"].append({"event": result, "encoded": encoded,
+                                    "tick": tick, "end": end, "rate": rate,
+                                    "instant": result["delivery"] == "instant"})
 
         resolve_items()
-        sandbox, tool_calls = compile_sandbox(
-            prepared, sample, self.ids["eos"], resolve_items, finish_result
+        sandbox, tool_calls, window_changes = compile_sandbox(
+            prepared, sample, self, resolve_items, finish_result
         )
         resolve_items()
         if any(item["tick"] is None for item in prepared):
@@ -523,51 +551,23 @@ class Compiler:
                 continue
             call = calls_by_path[item["path"]]
             # Requests and results share a window that has existed since tick zero.
-            # Only allowlisted sandbox operations run; request text remains data.
-            result = item["result_event"]
-            expanded.extend(
-                [
-                    {
-                        **item,
-                        "event": item["request_event"],
-                        "path": item["path"] + ".request",
-                        "synthetic_request": True,
-                    },
-                    {
-                        **item,
-                        "event": result,
-                        "tick": call["end"],
-                        "path": item["path"] + ".result",
-                        "instant": result["delivery"] == "instant",
-                        "rate": item["event"].get("tokens-per-tick", 1),
-                        "encoded": item["result_encoded"],
-                    },
-                ]
-            )
-            if call["tool"] == "chat" and call["outcome"]["ok"]:
-                message = {
-                    "op": "append",
-                    "window": "chat",
-                    "source": "tool",
-                    "content": tool_text(
-                        call["outcome"]["result"]["content"], self.special.values()
-                    ),
-                    "loss": {"mask": "exclude"},
-                }
-                expanded.append(
-                    {
-                        **item,
-                        "event": message,
-                        "tick": call["end"],
-                        "path": item["path"] + ".chat",
-                        "instant": True,
-                        "rate": 1,
-                        "synthetic_chat": True,
-                        "encoded": self.encode(
-                            message, item["path"], noop_weight, literal=True
-                        ),
-                    }
-                )
+            # Structured arguments select a registered tool; request text remains data.
+            expanded.append({**item, "event": item["request_event"],
+                             "path": item["path"] + ".request", "synthetic_request": True})
+            for index, result in enumerate(call.pop("results")):
+                expanded.append({**item, "event": result["event"], "tick": result["tick"],
+                                 "path": item["path"] + ".result" + (f".{index}" if index else ""),
+                                 "instant": result["instant"], "rate": result["rate"],
+                                 "encoded": result["encoded"], "synthetic_window_write": True, "sort_stage": 2})
+        for index, change in enumerate(window_changes):
+            message = {"op": "append", "window": change["window"], "source": "tool",
+                       "content": tool_text(change["content"], self.special.values()), "loss": {"mask": "exclude"}}
+            expanded.append({"event": message, "key": str(change["tick"]),
+                             "tick": change["tick"], "path": change["path"] + f".window.{index}",
+                             "instant": True, "rate": 1, "replace_content": change["replace"],
+                             "synthetic_window_write": True, "order": change["order"], "sort_stage": 1,
+                             "encoded": self.encode(message, change["path"], noop_weight, literal=True)})
+        expanded.sort(key=lambda item: (item.get("order", -1), item.get("sort_stage", 0)))
         prepared = expanded
         for order, item in enumerate(prepared):
             item["order"] = order
@@ -679,6 +679,7 @@ class Compiler:
         openers = {
             p["event"]["window"]: p for p in prepared if p["event"]["op"] == "open"
         }
+        reset_items = set()
         for tick in range(visible_end + 1):
             items = sorted(
                 scheduled[tick],
@@ -725,11 +726,11 @@ class Compiler:
                     writers[wid].append(delivery)
             for wid, group in writers.items():
                 # Tool messages are external input in B and may arrive while the
-                # model emits its next chat token in D (including EOS).
+                # model emits its next token in D (including EOS).
                 distinct = {
                     x["item"]["order"]: x["item"]
                     for x in group
-                    if not x["item"].get("synthetic_chat")
+                    if not x["item"].get("synthetic_window_write")
                     and not (x.get("empty") and x["item"].get("synthetic_request"))
                 }
                 if len(distinct) > 1 and not all(
@@ -742,6 +743,14 @@ class Compiler:
                     )
             input_rank = 0
             for delivery in items:
+                item = delivery["item"]
+                if item.get("replace_content") and item["order"] not in reset_items:
+                    reset_items.add(item["order"])
+                    wid = item["event"]["window"]
+                    for previous in rows:
+                        if previous["window"] == wid and previous["durable"] and previous["op"] not in ("open", "header") and "removed_at" not in previous:
+                            previous["removed_at"] = {"tick": tick, "input_rank": input_rank}
+                    positions[wid] = sum(r["durable"] for r in rows if r["window"] == wid and r["op"] in ("open", "header"))
                 if delivery.get("empty"):
                     continue
                 item = delivery["item"]
@@ -798,7 +807,7 @@ class Compiler:
             for w in windows.values()
             if w["close"] is None
         ]
-        return {
+        plan = {
             "sample_id": sample["id"],
             "trajectory_uuid": trajectory_uuid(sample),
             "max_window_slots": self.max_window_slots,
@@ -816,9 +825,12 @@ class Compiler:
             "rows": rows,
             "diagnostics": warnings,
         }
+        if self.tool_store is not None:
+            self.tool_store.record_tool_compilation(sample, self.tools, plan)
+        return plan
 
     def frame(self, plan, tick):
-        from .sandbox_replay import sandbox_frame
+        from .sandbox_replay import sandbox_frame, tool_calls_frame
 
         integer(tick, "tick")
         if tick > plan["max_tick"]:
@@ -826,13 +838,14 @@ class Compiler:
         cumulative = defaultdict(list)
         counts = defaultdict(int)
         for r in plan["rows"]:
-            if r["tick"] <= tick and r["durable"]:
+            if r["tick"] <= tick and r["durable"] and ("removed_at" not in r or tick < r["removed_at"]["tick"]):
                 counts[r["window"]] += 1
                 if r["token_id"] not in self.ids.values():
                     cumulative[r["window"]].append(r["token_id"])
         return {
             "tick": tick,
             "sandbox": sandbox_frame(plan, tick),
+            "tool_calls": tool_calls_frame(plan, tick),
             "windows": {
                 w["id"]: {
                     "text": self.tokenizer.decode(
@@ -851,6 +864,9 @@ def visible_to(query: dict, key: dict, windows: list[dict]) -> bool:
     Loss masks DO NOT change this predicate. NOOP is a decision, never a KV key.
     """
     if not key["durable"]:
+        return False
+    removed = key.get("removed_at")
+    if removed and (query["tick"] > removed["tick"] or query["tick"] == removed["tick"] and (query["phase"] == "D" or query["phase"] == "B" and query["input_rank"] >= removed["input_rank"])):
         return False
     life = next(w for w in windows if w["id"] == key["window"])
     if life["open"] > query["tick"] or (

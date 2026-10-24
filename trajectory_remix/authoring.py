@@ -29,7 +29,7 @@ from .metadata import query as query_metadata
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import (
-    chat_context,
+    WindowProperties,
     tool_message,
     tool_request,
     tool_text,
@@ -120,7 +120,7 @@ class TrajectoryCommands:
         self.history = history if history is not None else runner.history
         self.action = ContextVar("trajectory_command", default="Edit trajectory")
         self.edit_revision = ContextVar("trajectory_revision", default=None)
-        self.tool_sessions = ToolSessions()
+        self.tool_sessions = ToolSessions(registry=compiler.tools)
         self.cache = OrderedDict()
         self.commands = {
             name: getattr(self, name)
@@ -208,6 +208,19 @@ class TrajectoryCommands:
             )
         if duplicate:
             raise CommandError(f"Duplicate sample ID: {ident}", "conflict")
+        # Hidden arguments are never valid model calls, even in an unfinished draft.
+        from .tools.runtime import reject_invisible
+        replay = sample.get("replay", {})
+        if isinstance(replay, dict):
+            for group in replay.values():
+                if not isinstance(group, list):
+                    continue
+                for event in group:
+                    if isinstance(event, dict) and event.get("op") == "tool-call" and event.get("tool") in self.compiler.tools.tools:
+                        try:
+                            reject_invisible(event.get("arguments", {}), self.compiler.tools.get(event["tool"]).schema)
+                        except ValueError as error:
+                            raise CommandError(str(error)) from error
         # Reject non-JSON values before changing the live session.
         json.dumps(sample, allow_nan=False)
         if validate:
@@ -533,7 +546,7 @@ class TrajectoryCommands:
         validate: bool = False,
         expected_revision: Revision = None,
     ):
-        """Insert an open, append, generate, tool-call or invisible-tool-call event at a numeric or anchor tick key.
+        """Insert an open, append, generate, show_tools, tool-call or invisible-tool-call event at a numeric or anchor tick key.
 
         position defaults to the end of the tick array. Close via generated EOS.
         """
@@ -1079,10 +1092,11 @@ class TrajectoryCommands:
 
     @command()
     def list_simulated_tools(self, session_id: str | None = None):
-        """Discover the real Remix simulated-tool schemas, including clock, RAM files, memories, notes and skills.
+        """Discover registered tool schemas, including invisible arguments available to authors.
 
-        Dispatch with call_simulated_tool. Subagents require author-supplied outcomes;
-        no real subagents or code are executed. Even reads advance the synthetic clock.
+        Dispatch visible calls with call_simulated_tool. Invisible arguments require
+        invisible trajectory events. Built-ins are local simulations; custom modules
+        follow the same tick protocol.
         """
         return self.tool_sessions.definitions(session_id)
 
@@ -1115,11 +1129,12 @@ class TrajectoryCommands:
         controlling streamed results. auto_anchor assigns an unused result-anchor
         ID marking the final result token. Optional content
         or segments replace the canonical <tool> request and support anchors/NOOPs.
-        Sandbox changes at dispatch + duration_ticks. Only subagent requires a
-        recorded outcome; replay never contacts an endpoint. Save with save_dataset.
+        Each tool runs every tick until is_done. Built-ins retain duration_ticks as
+        a compatibility delay. outcome is legacy author data passed to the tool,
+        rather than an output override. Save with save_dataset.
         invisible=True schedules external sandbox activity with no model tokens/window,
         call-budget use or implicit clock advance. source optionally identifies its actor.
-        Hidden failures are compile diagnostics; only deterministic mutations are allowed.
+        Hidden failures are compile diagnostics. Every registered tool may run invisibly.
         """
         index, sample = self._draft(sample_id, expected_revision)
         event = {
@@ -1181,22 +1196,22 @@ class TrajectoryCommands:
     def get_sandbox_state(
         self, sample_id: str, tick: Nonnegative, include_calls: bool = True
     ):
-        """Inspect historical virtual files, memory, notes, skills, clock and tool statuses.
+        """Inspect opaque historical sandbox state and separate tool statuses.
 
         Post-commit state at tick; running calls omit future results. Reading never
         executes external requests or mutates a workbench. Set include_calls=False
         to omit argument/outcome logs from a large preview. Maximum output: 4 MB.
         """
         plan = self._plan(sample_id)
-        sandbox = self.compiler.frame(plan, tick)["sandbox"]
-        if not include_calls:
-            sandbox.pop("tool_calls")
+        frame = self.compiler.frame(plan, tick)
+        sandbox = frame["sandbox"]
         if len(json.dumps(sandbox, ensure_ascii=False).encode()) > 4_000_000:
             raise CommandError("Sandbox preview exceeds 4 MB; set include_calls=False")
         return {
             "sample_id": sample_id,
             "tick": tick,
             "sandbox": sandbox,
+            **({"tool_calls": frame["tool_calls"]} if include_calls else {}),
             "revision": self.state["revision"],
         }
 
@@ -1242,7 +1257,7 @@ class TrajectoryCommands:
 
     @command()
     def list_tool_sessions(self):
-        """List live simulated-tool workbenches with quotas, clock and state counts."""
+        """List live tool workbenches with options, quotas, and state counts."""
         return {
             "sessions": [
                 self.tool_sessions.inspect(ident, False, False)
@@ -1282,7 +1297,7 @@ class TrajectoryCommands:
         A rejected recording leaves virtual state/log unchanged. For subagent, supply
         outcome={ok:true,result:{response:"authored reply",conversationId:"optional-id"}}
         or an authored failure. This is author-only data, separate from model arguments.
-        No simulated tool contacts a provider, launches an agent or executes code.
+        Built-ins are local simulations. Custom modules run with server permissions.
         """
         if expected_revision is not None and record_sample_id is None:
             raise CommandError(
@@ -1293,13 +1308,14 @@ class TrajectoryCommands:
         if record_sample_id is not None:
             self._editable(expected_revision)
             _, sample = self._find(record_sample_id)
-            if name == "chat":
-                windows = (
-                    self.compiler.compile(sample)["windows"]
-                    if sample.get("replay")
-                    else []
-                )
-                context = chat_context(windows, sample.get("metadata"))
+            windows = []
+            if any(sample.get("replay", {}).values()):
+                plan = self.compiler.compile(sample)
+                frame = self.compiler.frame(plan, plan["max_tick"])
+                windows = [WindowProperties(w["id"], w["type"], frame["windows"][w["id"]]["text"].removeprefix(w["header"]))
+                           for w in plan["windows"] if w["close"] is None]
+            metadata = sample.get("metadata", {})
+            context = {"windows": windows, "agent_name": metadata.get("agent_name", "Kidra") if isinstance(metadata, dict) else "Kidra"}
             recorder = lambda entry: self._record_interaction(
                 record_sample_id, entry, expected_revision
             )
@@ -1356,23 +1372,17 @@ class TrajectoryCommands:
             loss={"mask": "exclude"},
             request_id=request_id,
         )
-        if entry["name"] == "chat" and entry["outcome"]["ok"]:
-            plan = self.compiler.compile(builder.sample)
-            if not chat_context(plan["windows"], sample.get("metadata"))["chat_open"]:
-                raise CommandError('No window named "chat" is open')
+        for update in entry.get("window_updates", []):
+            update_tick = str(builder.next_tick)
             builder.add_stream(
-                "chat",
-                tool_text(
-                    entry["outcome"]["result"]["content"],
-                    self.compiler.special.values(),
-                )
-                .replace("{N_TICK", "\\{N_TICK")
-                .replace("{WINDOW", "\\{WINDOW"),
-                op="append",
-                source="tool",
-                loss={"mask": "exclude"},
-                request_id=request_id,
+                update["window"],
+                tool_text(update["content"], self.compiler.special.values())
+                    .replace("{N_TICK", "\\{N_TICK").replace("{WINDOW", "\\{WINDOW"),
+                op="append", source="tool", loss={"mask": "exclude"}, request_id=request_id,
             )
+            if update["replace"]:
+                # Recorded window observations preserve replacements without rerunning the tool.
+                builder.sample["replay"][update_tick][-1]["replace-content"] = True
         return {
             **self._commit(builder.sample, index),
             "interaction_id": entry["id"],

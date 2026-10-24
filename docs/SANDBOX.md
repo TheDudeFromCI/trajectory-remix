@@ -1,158 +1,169 @@
-# Sandbox coordination
+# Tools and sandbox state
 
-## External activity
+Every compilation starts with an empty Python dictionary. Remix assigns no
+meaning to its keys. Tools own their state conventions; the compiler, training
+export, and generation prompts never interpret that dictionary. Kidra sees
+window content and tool output only.
 
-`invisible-tool-call` represents an external actor changing the virtual sandbox:
+A tool is a Python module with `name`, a JSON argument `schema`, and:
 
-```json
-{
-  "op": "invisible-tool-call",
-  "tool": "file_write",
-  "arguments": {"path": "/module.py", "content": "provided by a subagent"},
-  "source": "coder",
-  "duration-ticks": 0
-}
+```python
+def run(args: dict, state: dict, windows: list[WindowProperties]) -> tuple[str, bool, bool]:
+    return output, is_done, modified_state
 ```
 
-Place it under a numeric or anchor tick key. It commits at the resolved tick plus
-`duration-ticks`. Allowed tools are `file_write`, `file_patch`, `file_delete`,
-`memory_save`, `note_save`, `note_delete`, `skill_save`, `time_advance`, and `time_set`.
-The optional `source` identifies the external actor; it defaults to `external`.
-It is attribution supplied by the author, not authenticated evidence of execution.
+Execution begins on the tick after the final request token. Invisible calls begin
+at their scheduled tick. `run` executes once per tick, in stable source order,
+until `is_done` is true. Instant tools finish on their first invocation. Every
+nonempty output becomes a masked tool observation at that invocation's tick.
+`delivery: "stream"` streams observations using `tokens-per-tick`; a
+`result-anchor` captures the final delivered result token. Subagents use this
+same scheduler and protocol.
 
-External activity has no model-owned window, request, result, loss, or tokens.
-It remains in editable source and author-facing sandbox history, but is absent
-from compiled token rows, model windows and training exports. Later visible
-reads can expose its effects. Activity after the final visible event extends
-the inspection horizon (`max_tick`) without extending the token horizon
-(`token_max_tick`), idle NOOPs, or exported chunks. No agent call budget or
-automatic clock increment is charged; explicit `time_advance` still changes time.
-Invalid operations stop compilation with an event-path diagnostic.
+The compiler trusts `modified_state`. It deep-copies state only when this flag
+is true, keeping one snapshot per changed tick. For example, snapshots at ticks
+1, 8, and 12 describe all intervening ticks without seven redundant copies.
+Scrubbing selects the last applicable snapshot and returns an independent copy;
+it never executes tools. Recompiling discards and recomputes the state history.
+Tool implementations must report every mutation and return deepcopyable state.
+Use JSON-compatible values when exposing state through the dashboard or API.
 
-Normal calls and external mutations share completion ordering: resolved tick,
-then the compiler's existing stable source order. That order sorts numeric keys
-before anchor expressions and preserves array order within each key. To depend
-on a completion, use a later tick or put equal-tick calls in explicit array order.
+Frames contain separate `sandbox` and `tool_calls` properties. State may itself
+use any key, including `tool_calls`, without colliding with scheduler metadata.
+The author-facing Sandbox panel displays the dictionary as JSON. Training
+exports contain only replay rows and window lifecycle data.
 
-MCP exposes this through `create_tool_call(..., invisible=true, source="coder")`.
-The dashboard provides **+ External activity** and the event operation selector.
-Both paths support source history, atomic batches, revision checks and saving.
+`duration-ticks` remains supported by the built-in simulation tools as a legacy
+execution delay. New tools implement their own progress in `run` and normally
+omit it. `ExecutionContext`, available through
+`trajectory_remix.tools.execution_context.get()`, provides the current tick,
+start tick, call ID, author metadata, and compatibility duration. It is optional;
+a tool can implement progress entirely within its arguments and sandbox state.
 
-## Setting synthetic time
+## Windows
 
-`time_set` takes all seven fields: `year`, `month`, `day`, `hour`, `minute`,
-`second`, and `timezone`. Supply an integer for each date/time component or
-`null` to randomize it. For example:
+`windows` is a list of all currently open windows. Each `WindowProperties` has
+read-only `name` and `purpose` properties and a writable text `content` property.
+Dictionary access (`window["content"]`) is supported as well. Tools can inspect
+other windows, append text, or replace content. Changes are masked external
+input in phase B. A replacement removes the previous content from subsequent
+frames and attention while retaining earlier history. Automatic BOS/header
+context remains available. Same-tick generated output becomes visible on the
+next tick, and generated EOS removes a window after phase D.
+
+Window writes and sandbox changes are independent: a tool that only updates a
+window should return `modified_state=False`.
+
+## Invisible arguments and external activity
+
+Annotate an argument property with `"invisible": true` (or `"x-invisible": true`).
+Public model schemas and `show_tools` omit invisible properties and their required
+entries. The full schema remains available to the author in the editor and
+`list_simulated_tools`. A visible call that supplies an invisible argument is
+rejected, including through MCP draft-editing commands and workbench calls.
+
+Any registered tool can be called invisibly. These events have no request or
+result window and produce no model tokens unless the tool writes to a window.
+They accept only `op`, `tool`, `arguments`, optional `source`, and optional
+`duration-ticks`. Hidden tool failures are compilation errors.
+
+For example, `chat` defaults to `metadata.agent_name` (Kidra by default). Authors
+can simulate another participant with its invisible `username` argument:
 
 ```json
-{
-  "year": 2024, "month": 2, "day": 29,
-  "hour": null, "minute": null, "second": 0,
-  "timezone": "Asia/Kolkata"
-}
+{"op":"invisible-tool-call", "tool":"chat",
+ "arguments":{"content":"Hello!", "username":"Alex"}, "source":"user"}
 ```
 
-Timezone accepts an IANA name such as `America/New_York`, `UTC`, or a fixed
-offset such as `+05:30` or `UTC-03:30`. A null timezone chooses from a fixed
-list of populated regions and UTC. Null years use 2000–2099; months use 1–12,
-days respect the chosen month and leap year, hours use 0–23, and minutes/seconds
-use 0–59. Supplied fields remain exact. A randomized year/month can accommodate
-an explicit February 29 or day 31. Impossible dates, invalid types/ranges,
-unknown zones, and nonexistent local times return tool errors. Ambiguous local
-times use the first occurrence. Named zones retain their DST rules when advancing
-or restoring the clock.
+This appends `<|msg|>Alex: Hello!<|/msg|>\n` to the already open `chat` window.
+Kidra cannot supply `username` in a visible chat call.
 
-Random choices use a versioned SHA-256 derivation from the trajectory's immutable
-UUID and current completed-call count. Labels, metadata, process randomness and
-wall-clock time do not affect them. Replaying the same trajectory reproduces its
-results; separate trajectories and successive agent calls have distinct seed
-inputs. Standalone workbenches use their configured initial clock seed instead
-and reproduce the same sequence after reset.
+## Showing tools
 
-The result has the same shape as `time_now`: `{"timestamp":"...","synthetic":true}`.
-A successful call replaces the clock exactly, after the normal call-budget and
-automatic increment effects. Subsequent calls advance from that value. It may
-move time backward and never changes logical token ticks. A failed operation
-retains the normal per-call increment. As an invisible external event it sets
-the clock without an automatic increment, agent call charge, or model tokens.
+Add a **Show tools** event and select the tools to advertise using checkboxes:
 
-## Persistent conversations
+```json
+{"op":"show_tools", "window":"system", "tools":["chat", "file_read"],
+ "randomly-add-additional-tools":true}
+```
 
-`subagent({"task":"Implement"})` returns `conversationId` and `response`.
-`subagent({"task":"Explain your choice","resume":"conversation-1"})` carries that
-conversation's retained user and assistant turns into the next synthetic turn.
-The author supplies each response; no provider or real agent is called.
-New calls without `resume` create independent conversations. Identities and
-messages belong to one sandbox, and reset/deletion destroys them. The generation
-builder restores retained conversations when continuing saved trajectories.
+It appends formatted public schemas as excluded-loss external content to an
+already open window. With the option disabled, only selected tools are shown.
+With it enabled, each other tool has a deterministic 50% chance of inclusion,
+seeded by trajectory UUID and event position. Selected tools always remain.
+Recompiling unchanged source with the same registry gives the same selection.
+This advertises capabilities; it does not restrict the execution registry.
+MCP authors can insert it using `create_event`.
 
-`subagent_list` returns identities, status and completed turn counts.
-`subagent_get({"conversationId":"..."})` returns messages and status.
-`subagent_close` retains history and prevents further resumes. States are
-`running`, `ready`, `failed`, and `closed`. Failed turns can be followed up;
-unknown, closed and already-running conversations cannot be resumed.
+## Custom Python tools
 
-Replay never calls a provider. Each recorded subagent event supplies its response
-and optionally `conversationId` in `outcome.result`. Older outcomes without an ID
-receive deterministic IDs. IDs cannot be reused for unrelated new conversations,
-and a recorded resumed ID must match the requested ID. A dispatch must find its
-conversation available at that tick, even if its eventual completion is much
-later. Running history contains the submitted task, not its future answer.
-Successful completion appends the answer atomically. These checks produce tool
-error observations for invalid visible calls, like other sandbox failures.
-If an authored dispatched turn fails, its error observation includes `conversationId`
-at the top level so the coordinator can inspect or resume it. Recording preserves
-that identity during offline replay as well.
+Start the server or headless exporter with a folder:
 
-## Artifacts and tasks
+```bash
+python -m trajectory_remix --dataset project.sqlite --tools-dir ./custom-tools
+```
 
-File writes/patches return a SHA-256 `version`. `file_stat` retrieves the current
-reference without the body. A subagent can receive `artifacts` such as
-`[{"path":"/module.py","version":"sha256:..."}]`. The sandbox resolves only
-those versions into its delegated context. No other parent files, memories or
-trajectory windows are automatically shared. Retained conversation history
-keeps the originally supplied artifact data on later turns.
+Every directly contained `.py` file is loaded as one tool. Names must be unique
+across custom and built-in tools. Invalid modules, duplicate names, invalid
+schemas, and incompatible run signatures report a startup error. Files are
+loaded from their current source bytes, avoiding stale Python bytecode caches.
 
-`file_read` accepts optional `version` for an immutable historical read. Deleting
-a current file preserves historical versions. `file_write` and `file_patch`
-accept optional `expected_version`; a stale version fails without changing the
-file or artifact store. `file_patch` takes `path`, `old`, `new`, and replaces
-exactly one nonempty unique occurrence. Version storage and retained conversation
-messages count toward the existing aggregate RAM quota; neither grows unbounded.
+For example, `custom-tools/counter.py`:
 
-`note_save` accepts optional `owner`, `depends_on`, `blockers`, and
-`acceptance_criteria`, plus `blocked` status. Optional fields survive later updates
-unless explicitly cleared. Self-dependencies and cycles fail. A task cannot be
-marked done while blockers or unfinished/missing dependencies remain. Forward
-references are allowed while planning. Acceptance criteria remain descriptive.
-`runtime_status` reads synthetic time, completed-call count, task counts and
-subagent lifecycle summaries, allowing progress messages grounded in runtime data.
+```python
+name = "counter"
+description = "Increment a counter."
+schema = {
+    "type": "object",
+    "properties": {"amount": {"type": "integer"}},
+    "required": ["amount"],
+    "additionalProperties": False,
+}
 
-## Synthetic authoring and limits
+def run(args, state, windows):
+    state["counter"] = state.get("counter", 0) + args["amount"]
+    return str(state["counter"]), True, True
+```
 
-For scheduled source, `create_tool_call` takes the authored `outcome`. In a
-workbench, `call_simulated_tool` also accepts top-level `outcome` for subagents
-only; deterministic tool results are computed from state. Read the retained
-conversation before writing a follow-up. A missing reply produces a failed
-synthetic turn rather than contacting a provider. The workbench's transcript
-recording does not create executable replay events; use scheduled calls for
-reconstructable state and parallel timing.
+Custom modules are trusted Python supplied by the server operator and run with
+server permissions. Trajectory text cannot select a folder or load a module.
+The built-ins continue to simulate files, clocks, memory, notes, skills, and
+conversations locally; they do not execute code or contact providers.
 
-This is a capability interpreter over JSON state. It has no real workers,
-provider-backed subagents, code execution or background job scheduler. Authors
-represent concurrent work through timestamps and durations and publish external
-changes using invisible calls. See [Skill.md](../trajectory_remix/Skill.md), also
-available through MCP's `get_authoring_guide`, for the complete authoring workflow.
+SQLite stores external tool names, full argument schemas, SHA-256 file hashes,
+and per-trajectory schema dependencies. Startup compares the current files with
+that catalog and recompiles affected saved trajectories. The database retains
+successful compiled previews and compilation diagnostics. Missing tools and any
+schema change fail compilation, even if the old arguments happen to fit the new
+schema. A code-only change with the same schema recomputes state and outputs.
+Restart the server to rescan files; there is no live file watcher.
 
-Synthetic time still advances per tool call independently of logical token ticks.
-Compiler validation enforces structure, temporal conversation availability,
-artifact existence and task dependency constraints. It does not prove an authored
-response is truthful, a claimed test was executed, or an acceptance criterion was
-met. Supplied outcomes are synthetic scenario data, not proof of real execution.
-Logs from work performed outside Remix must be selected, rewritten and assigned
-correct actors, masks, markers, timing and state effects before use as training
-samples; importing a raw log is not sufficient curation.
+To adopt a changed schema intentionally, remove the tool's references from the
+trajectory and save, then add the repaired calls or `show_tools` selection. This
+clears and recreates its schema dependency. Unrelated trajectories remain lazy.
+Projects using the previous SQLite version are migrated additively on opening.
 
-`examples/persistent-agents.json` demonstrates external file creation, a pinned
-review artifact, independent conversations, a follow-up and runtime progress.
-Its specialist responses are authored fixture data, not live execution evidence.
+## Built-in simulation conventions
+
+The built-ins share their own clock and stores inside the otherwise opaque dict.
+Visible built-in calls increment their simulated call count and clock; invisible
+calls omit that automatic increment. Synthetic clock metadata remains
+`{"synthetic_clock":{"seed":"2030-01-01T09:00:00Z","seconds_per_call":1}}`.
+`time_set` accepts nullable local date/time fields and an IANA or fixed-offset
+zone; null fields are deterministic from the trajectory UUID and call count.
+
+File tools operate on virtual UTF-8 text, with immutable SHA-256 versions and
+optional stale-write checks. Memory retrieval uses local lexical overlap. Notes
+support task dependencies, owners, blockers, and acceptance criteria. Skills
+store text only. These formats are owned entirely by the built-in tool modules.
+
+The built-in `subagent` retains synthetic conversations. An invisible call with
+`task` and invisible `response` prepares an authored response for that task.
+A subsequent visible call supplies `task` and optionally `resume` and pinned
+`artifacts`. Old trajectories may retain their author-only event `outcome` field;
+the tool reads it through execution context. No compiler or generation branch
+recognizes subagent names, and the built-in never invokes an LLM.
+
+MCP workbenches are isolated, ephemeral state dictionaries. Their call budgets
+and logs are session bookkeeping. Use executable trajectory calls for replayable
+state; recording workbench observations alone does not copy its dictionary.

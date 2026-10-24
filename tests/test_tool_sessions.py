@@ -112,7 +112,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     clock = await tool(studio, "time_advance", {"seconds": 10})
     assert clock["interaction"]["outcome"]["result"]["synthetic"]
     state = await call(studio, "get_tool_session", session_id="tools")
-    assert state["calls"] == 12 and state["clock"] == "2031-01-01T00:00:34+00:00"
+    assert state["calls"] == 12 and state["state"]["clock"] == "2031-01-01T00:00:34+00:00"
     assert (
         state["state"]["files"] == {}
         and state["state"]["memory"]["one"] == "Remix tools"
@@ -127,7 +127,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     assert (
         old_sandbox.closed and reset["calls"] == 0 and reset["interaction_count"] == 0
     )
-    assert reset["clock"] == "2031-01-01T00:00:00+00:00"
+    assert reset["options"]["seed"] == "2031-01-01T00:00:00Z"
     await call(studio, "delete_tool_session", session_id="tools")
     assert len((await call(studio, "list_tool_sessions"))["sessions"]) == 1
 
@@ -413,9 +413,10 @@ async def test_busy_workbench_rejects_calls_reset_and_delete(studio):
 
 
 async def test_bounded_call_logs_and_shutdown_cleanup():
-    manager = ToolSessions(max_log_bytes=400)
+    manager = ToolSessions(max_log_bytes=1000)
     manager.create("tools", {})
     first = await manager.call("tools", "time_now", {})
+    manager.max_log_bytes = manager.inspect("tools")["log_bytes"] + 10
     second = await manager.call("tools", "time_now", {})
     assert manager.inspect("tools")["interaction_count"] == 1
     assert manager.interaction("tools", second["interaction"]["id"])
@@ -436,7 +437,7 @@ async def test_bounded_call_logs_and_shutdown_cleanup():
         {"ok": False},
     ],
 )
-async def test_invalid_authored_outcomes_are_rejected_before_dispatch(studio, outcome):
+async def test_invalid_authored_outcomes_use_the_standard_tool_failure_protocol(studio, outcome):
     await call(studio, "create_tool_session", session_id="tools")
     response = await studio[1].post(
         "/api/mcp/call",
@@ -450,9 +451,11 @@ async def test_invalid_authored_outcomes_are_rejected_before_dispatch(studio, ou
             },
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert not response.json()["interaction"]["outcome"]["ok"]
     session = await call(studio, "get_tool_session", session_id="tools")
-    assert session["calls"] == 0 and not session["state"]["conversations"]
+    assert session["calls"] == 1 and session["state"] == {}
+
 
 
 async def test_deterministic_tool_outcomes_cannot_be_overridden(studio):
@@ -469,8 +472,11 @@ async def test_deterministic_tool_outcomes_cannot_be_overridden(studio):
             },
         },
     )
-    assert response.status_code == 422
-    assert (await call(studio, "get_tool_session", session_id="tools"))["calls"] == 0
+    assert response.status_code == 200
+    assert response.json()["interaction"]["outcome"]["ok"] is False
+    assert "not found" in response.json()["interaction"]["outcome"]["error"]
+    assert (await call(studio, "get_tool_session", session_id="tools"))["calls"] == 1
+
 
 
 async def test_dashboard_shutdown_destroys_tool_sessions(studio):

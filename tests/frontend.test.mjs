@@ -531,7 +531,7 @@ assert.match(
   new RegExp(`file_write · ${execution.start}–${execution.end}`),
 );
 jump(100);
-await waitFor(() => /files \(0\)/.test($("sandbox-state").textContent));
+await waitFor(() => /^\s*\{\s*\}\s*$/.test($("sandbox-state").textContent));
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
 // Tool windows exist at tick zero; result delivery changes independently of the request.
 jump(0);
@@ -726,6 +726,8 @@ assert.equal(
 );
 // Listings are paged in SQLite, and search reaches trajectories beyond page one.
 const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
+  "schema-version": "1.0",
+  "tick-policy": "external-first",
   id: `sqlite-page-${index}`,
   replay: { 0: [{ op: "open", window: "a" }] },
   metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
@@ -756,11 +758,30 @@ await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
 assert.equal($("sample-list").children.length, 1);
 await $("sample-list").firstElementChild.onclick();
 assert.equal(JSON.parse($("sample-json").value).id, "sqlite-page-204");
+// Show-tools events advertise only checked tools and keep invisible arguments hidden.
+await w.document.querySelector('.tab[data-view="events"]').onclick();
+await click("add-show-tools");
+let showCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+assert.equal(showCard.querySelector(".event-header select").value, "show_tools");
+const toolCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "chat").querySelector("input");
+toolCheck.checked = true;
+toolCheck.onchange();
+await waitFor(() => !w.document.title.startsWith("*"));
+await waitFor(() => lastPlan?.sample_id === "sqlite-page-204" && lastPlan.events.some((event) => event.key === "1" && event.text.includes('"chat"')));
+assert.deepEqual(JSON.parse($("sample-json").value).replay["1"][0].tools, ["chat"]);
+const shown = lastPlan.events.find((event) => event.key === "1").text;
+assert.match(shown, /"chat"/);
+assert.doesNotMatch(shown, /"username"|"file_read"/);
+const extraCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "Randomly add additional tools").querySelector("input");
+extraCheck.checked = true;
+extraCheck.onchange();
+await waitFor(() => !w.document.title.startsWith("*"));
+assert.equal(JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"], true);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 82,
+    checks: 88,
     errors,
   }),
 );

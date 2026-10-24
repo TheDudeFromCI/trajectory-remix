@@ -13,7 +13,7 @@ history and explicitly shared artifacts. No real agents, execution environment,
 provider credentials or shell access are needed for this workflow.
 
 Trajectory Remix is a simulator and editor. File tools modify virtual text in RAM, synthetic subagents consume authored outcomes, and replay reconstructs that state.
-Nothing in a sample runs code, launches a worker or contacts a subagent provider.
+Built-in tools do not run code, launch workers or contact providers. Custom tools loaded by the server operator are trusted Python; inspect their schemas and descriptions.
 
 ## Connect and discover
 
@@ -304,14 +304,13 @@ call budget or automatically advance the synthetic clock. It is not permission
 to inject information into Kidra's visible context: schedule a visible reply or
 file read if Kidra needs to observe the change.
 
-Allowed invisible tools are `file_write`, `file_patch`, `file_delete`,
-`memory_save`, `note_save`, `note_delete`, `skill_save`, `time_advance` and `time_set`.
-Do not attach `window`, `outcome`, `content`, `segments`, delivery or loss settings
-to an invisible source event. Use `arguments.content` for a file body.
-`duration_ticks` delays its commit; `source` attributes its external actor.
-Hidden activity after all visible tokens extends inspection time without adding
-idle training tokens. Prefer a later tick for dependent calls: equal-tick effects
-follow stable source order, including numeric keys before anchor expressions.
+Any registered tool can be invoked invisibly. Invisible arguments are marked
+`invisible` in the full author schema and omitted from the public model schema.
+Use them only in `invisible-tool-call` events; MCP rejects them in visible calls.
+For example, invisible `chat` accepts `username`. Do not add windows, content,
+loss settings, delivery options or outcomes to an invisible source event.
+`duration_ticks` is a compatibility delay for built-in tools; new tools finish
+according to `is_done`. `source` attributes the external actor.
 
 Use `file_stat` / `get_sandbox_state` to obtain a version. Supply pinned references
 to reviewers with `arguments.artifacts: [{"path":"/math.py","version":"sha256:..."}]`.
@@ -321,7 +320,7 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. All 23 tools are local
+Always confirm current schemas with `list_simulated_tools`. The 23 built-in tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
@@ -420,3 +419,17 @@ actually executed by Remix or as verification of the dataset's real quality.
 `examples/persistent-agents.json` is a small synthetic source example of these
 mechanics. Extend the scenario's histories and timing
 to suit the requested training behavior rather than copying generic replies.
+
+
+## Tool protocol and schema displays
+
+Use `create_event` with `{"op":"show_tools","window":"system","tools":["chat"]}`
+to append selected public schemas to an already open window. Set
+`randomly-add-additional-tools: true` to include deterministic extra distractor
+tools. Invisible arguments never appear in these schemas.
+
+Every tool, including subagents and custom tools, runs once per tick until
+`is_done`. State begins as `{}` and is otherwise opaque to Remix.
+`get_sandbox_state` and preview frames return `sandbox` and `tool_calls` as separate
+properties. Do not assume any store exists before its first tool execution.
+See [the tool contract](../docs/SANDBOX.md) for custom modules and sparse caching.

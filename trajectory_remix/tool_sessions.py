@@ -9,12 +9,10 @@ import uuid
 from dataclasses import dataclass, field
 
 from .tools import (
-    SCHEMAS,
-    STORES,
     Sandbox,
     ToolError,
     tool_failure,
-    validate_subagent_outcome,
+    WindowProperties,
 )
 
 class ToolSessionError(ValueError):
@@ -32,7 +30,9 @@ class ToolSession:
 
 
 class ToolSessions:
-    def __init__(self, max_sessions=8, max_log_bytes=4_000_000):
+    def __init__(self, max_sessions=8, max_log_bytes=4_000_000, registry=None):
+        from .tools import default_registry
+        self.registry = registry or default_registry()
         self.sessions = {}
         self.max_sessions, self.max_log_bytes = max_sessions, max_log_bytes
 
@@ -51,7 +51,7 @@ class ToolSessions:
             raise ToolSessionError(
                 "Tool session limit reached; delete an unused session", "quota_exceeded"
             )
-        sandbox = Sandbox(**options)
+        sandbox = Sandbox(**options, registry=self.registry)
         self.sessions[session_id] = ToolSession(sandbox, options.copy())
         return self.inspect(session_id, include_state=False, include_log=False)
 
@@ -61,17 +61,13 @@ class ToolSessions:
         result = {
             "session_id": session_id,
             "busy": session.lock.locked(),
-            "clock": sandbox.clock.isoformat(),
-            "seconds_per_call": sandbox.step,
+            "options": session.options.copy(),
             "calls": sandbox.calls,
             "max_calls": sandbox.max_calls,
             "remaining_calls": max(0, sandbox.max_calls - sandbox.calls),
             "max_bytes": sandbox.max_bytes,
-            "bytes_used": sum(
-                len(json.dumps(s).encode())
-                for s in (getattr(sandbox, name) for name in STORES)
-            ),
-            "counts": {name: len(getattr(sandbox, name)) for name in STORES},
+            "bytes_used": len(json.dumps(sandbox.state).encode()),
+            "counts": {name: len(value) for name, value in sandbox.state.items() if isinstance(value, (dict, list))},
             "interaction_count": len(session.interactions),
             "max_log_bytes": self.max_log_bytes,
             "log_bytes": sum(
@@ -80,9 +76,7 @@ class ToolSessions:
             ),
         }
         if include_state:
-            result["state"] = copy.deepcopy(
-                {name: getattr(sandbox, name) for name in STORES}
-            )
+            result["state"] = sandbox.snapshot()
         if include_log:
             result["interactions"] = copy.deepcopy(session.interactions)
         return result
@@ -90,22 +84,20 @@ class ToolSessions:
     def definitions(self, session_id=None):
         if session_id is not None:
             self.get(session_id)
-        definitions = copy.deepcopy(SCHEMAS)
+        definitions = self.registry.schemas(invisible=True)
         for definition in definitions:
             definition["available"] = True
-            if definition["function"]["name"] == "subagent":
-                definition["requires_authored_outcome"] = True
         return {
             "tools": definitions,
             "requires_session": True,
-            "note": "Every dispatched call, including reads, consumes budget and advances synthetic time.",
+            "note": "Calls run tick by tick against an opaque state dictionary. Invisible arguments require invisible-tool-calls.",
         }
 
     def reset(self, session_id):
         session = self.get(session_id)
         if session.lock.locked():
             raise ToolSessionError("Tool session has an in-flight call", "busy")
-        sandbox = Sandbox(**session.options)
+        sandbox = Sandbox(**session.options, registry=self.registry)
         session.sandbox.close()
         session.sandbox = sandbox
         session.interactions.clear()
@@ -138,10 +130,6 @@ class ToolSessions:
             raise ToolSessionError("Tool session has an in-flight call", "busy")
         try:
             session.sandbox.check_args(name, arguments)
-            if outcome is not None:
-                if name != "subagent":
-                    raise ToolError("Only subagent accepts an authored outcome")
-                validate_subagent_outcome(outcome)
         except ToolError as error:
             raise ToolSessionError(str(error)) from error
         if session.sandbox.calls >= session.sandbox.max_calls:
@@ -150,10 +138,20 @@ class ToolSessions:
             )
         async with session.lock:
             candidate = copy.deepcopy(session.sandbox)
+            updates = []
+            call_context = dict(context or {})
+            if "windows" in call_context:
+                def window_write(name, before, after):
+                    if before != after:
+                        append = after.startswith(before)
+                        updates.append({"window": name, "replace": not append,
+                                        "content": after[len(before):] if append else after})
+                call_context["windows"] = [WindowProperties(w.name, w.purpose, w.content, window_write)
+                                           for w in call_context["windows"]]
             try:
                 try:
                     result = await candidate.call(
-                        name, arguments, subagent_outcome=outcome, **(context or {})
+                        name, arguments, recorded_outcome=outcome, **call_context
                     )
                     outcome = {"ok": True, "result": result}
                 except (ToolError, ValueError, OverflowError) as error:
@@ -163,8 +161,8 @@ class ToolSessions:
                     "name": name,
                     "arguments": copy.deepcopy(arguments),
                     "outcome": copy.deepcopy(outcome),
-                    "clock": candidate.clock.isoformat(),
                     "call_number": candidate.calls,
+                    **({"window_updates": updates} if updates else {}),
                 }
                 size = len(json.dumps(entry, ensure_ascii=False).encode())
                 if size > self.max_log_bytes:

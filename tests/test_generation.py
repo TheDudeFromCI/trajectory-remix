@@ -386,7 +386,7 @@ async def test_generation_never_launches_real_subagents(compiler):
         async def complete(self, endpoint, messages, tools=None):
             self.calls += 1
             assert tools is not None
-            assert "subagent" not in {t["function"]["name"] for t in tools}
+            assert "subagent" in {t["function"]["name"] for t in tools}
             if self.calls == 1:
                 # Even an unsolicited delegation must not cause a nested provider call.
                 return {
@@ -403,7 +403,7 @@ async def test_generation_never_launches_real_subagents(compiler):
                     ],
                 }
             failure = json.loads(messages[-1]["content"])
-            assert not failure["ok"] and "authored outcome" in failure["error"]
+            assert not failure["ok"] and "authored response" in failure["error"]
             return {"content": "Use an authored synthetic reply."}
 
     client = Client()
@@ -411,13 +411,8 @@ async def test_generation_never_launches_real_subagents(compiler):
     assert client.calls == 2
     plan = compiler.compile(generated)
     assert not plan["tool_calls"][0]["outcome"]["ok"]
-    cid = plan["tool_calls"][0]["outcome"]["conversationId"]
-    assert (
-        compiler.frame(plan, plan["max_tick"])["sandbox"]["conversations"][cid][
-            "status"
-        ]
-        == "failed"
-    )
+    assert compiler.frame(plan, plan["max_tick"])["sandbox"] == {}
+
 
 
 async def test_generation_inspects_authored_seeded_conversation(compiler, sample):
