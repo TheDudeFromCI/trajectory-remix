@@ -872,7 +872,7 @@ function renderEvents() {
           if (v === "invisible-tool-call") {
             for (const key of ["window", "window-type", "request-id", "caused-by", "outcome", "result-anchor"])
               delete e[key];
-            if (!["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance"].includes(e.tool)) {
+            if (!["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance", "time_set"].includes(e.tool)) {
               e.tool = "file_write";
               e.arguments = {path: "/example.txt", content: ""};
             }
@@ -964,7 +964,7 @@ function renderEvents() {
         const options = node("div", "event-options");
         const invisible = e.op === "invisible-tool-call";
         const schemas = (state.tools || []).map((s) => s.function).filter((s) =>
-          !invisible || ["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance"].includes(s.name));
+          !invisible || ["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance", "time_set"].includes(s.name));
         options.append(
           field(
             "Tool",
@@ -977,7 +977,8 @@ function renderEvents() {
                 e.arguments = Object.fromEntries(
                   parameters.required.map((key) => [
                     key,
-                    parameters.properties[key].enum?.[0] ?? (parameters.properties[key].type === "number" ? 0 : ""),
+                    parameters.properties[key].type.includes("null") ? null :
+                      parameters.properties[key].enum?.[0] ?? (parameters.properties[key].type === "number" ? 0 : ""),
                   ]),
                 );
                 delete e.outcome;

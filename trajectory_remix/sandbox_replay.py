@@ -5,6 +5,7 @@ import json
 import heapq
 
 from .compiler import MAX_TICKS, CompileError, integer
+from .dataset import trajectory_uuid
 from .tools import STORES, Sandbox, ToolError, tool_failure, validate_subagent_outcome
 
 MAX_TOOL_CALLS = 256
@@ -17,6 +18,7 @@ EXTERNAL_TOOLS = {
     "note_delete",
     "skill_save",
     "time_advance",
+    "time_set",
 }
 
 
@@ -93,7 +95,9 @@ def compile_sandbox(items, sample, eos_id, resolve_items, finish_result):
             "synthetic_clock requires seed / seconds_per_call", "metadata"
         )
     try:
-        sandbox = Sandbox(**clock, max_calls=MAX_TOOL_CALLS)
+        sandbox = Sandbox(
+            **clock, random_seed=trajectory_uuid(sample), max_calls=MAX_TOOL_CALLS
+        )
     except (ValueError, TypeError, OverflowError) as error:
         raise CompileError(f"Invalid synthetic clock: {error}", "metadata") from error
     initial = sandbox.snapshot()
@@ -211,7 +215,11 @@ def compile_sandbox(items, sample, eos_id, resolve_items, finish_result):
                 if not call.get("invisible"):
                     finish_result(item, call)
             current = sandbox.snapshot()
-            patch = {"clock": current["clock"], "calls": current["calls"]}
+            patch = {
+                "clock": current["clock"],
+                "clock_timezone": current["clock_timezone"],
+                "calls": current["calls"],
+            }
             for name in STORES:
                 before, after = previous[name], current[name]
                 patch[name] = {
@@ -239,7 +247,10 @@ def sandbox_frame(plan, tick):
         if change["tick"] > tick:
             break
         patch = change["patch"]
-        state.update(clock=patch["clock"], calls=patch["calls"])
+        state.update(
+            clock=patch["clock"], clock_timezone=patch.get("clock_timezone"),
+            calls=patch["calls"],
+        )
         for name in STORES:
             for key in patch[name]["delete"]:
                 state[name].pop(key, None)
