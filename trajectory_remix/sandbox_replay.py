@@ -2,6 +2,7 @@
 
 import copy
 import json
+import heapq
 
 from .compiler import MAX_TICKS, CompileError, integer
 from .tools import STORES, Sandbox, ToolError, tool_failure, validate_subagent_outcome
@@ -62,11 +63,14 @@ def chat_context_at(items, tick, order, eos_id, metadata):
         event = item["event"]
         if event.get("window") != "chat":
             continue
-        start = item["tick"]
         if event["op"] == "tool-call":
-            # Tool windows are implicitly open from tick zero.
+            # Implicit tool windows exist even before their schedule resolves.
             opened = True
-        elif event["op"] == "open":
+            continue
+        start = item["tick"]
+        if start is None:
+            continue
+        if event["op"] == "open":
             if start < tick or (start == tick and item["order"] < order):
                 opened = True
         elif event["op"] == "generate" and eos_id in item["encoded"].ids:
@@ -81,7 +85,7 @@ def chat_context_at(items, tick, order, eos_id, metadata):
     }
 
 
-def compile_sandbox(items, sample, eos_id):
+def compile_sandbox(items, sample, eos_id, resolve_items, finish_result):
     metadata = sample.get("metadata", {})
     clock = metadata.get("synthetic_clock", {}) if isinstance(metadata, dict) else {}
     if not isinstance(clock, dict) or set(clock) - {"seed", "seconds_per_call"}:
@@ -95,24 +99,35 @@ def compile_sandbox(items, sample, eos_id):
     initial = sandbox.snapshot()
     calls, changes = [], []
     try:
-        for item in items:
-            event = item["event"]
-            if event["op"] not in ("tool-call", "invisible-tool-call"):
-                continue
-            invisible = event["op"] == "invisible-tool-call"
-            start = item["tick"] + (
-                len(item["encoded"].ids) if not invisible and not item["instant"] else 0
-            )
-            end = start + event.get("duration-ticks", 0)
-            if end >= MAX_TICKS:
-                raise CompileError("Tool completion exceeds tick limit", item["path"])
-            calls.append(
-                {
+        unresolved = [item for item in items if item["event"]["op"] in (
+            "tool-call", "invisible-tool-call"
+        )]
+        if len(unresolved) > MAX_TOOL_CALLS:
+            raise CompileError(f"Tool event limit exceeded ({MAX_TOOL_CALLS})")
+        by_path = {item["path"]: item for item in unresolved}
+        actions, pending = [], {}
+        previous = initial
+        # Resolve new calls after each action: result-dependent calls can dispatch
+        # before other scheduled completions. Subagent starts still expose running
+        # conversations and check resume identities at dispatch.
+        while unresolved or actions:
+            resolve_items()
+            waiting = []
+            for item in unresolved:
+                if item["tick"] is None:
+                    waiting.append(item)
+                    continue
+                event = item["event"]
+                invisible = event["op"] == "invisible-tool-call"
+                start = item["tick"] + (0 if invisible else len(item["encoded"].ids))
+                end = start + event.get("duration-ticks", 0)
+                if end >= MAX_TICKS:
+                    raise CompileError("Tool completion exceeds tick limit", item["path"])
+                call = {
                     "path": item["path"],
                     **(
                         {"invisible": True, "source": event.get("source", "external")}
-                        if invisible
-                        else {"window": event["window"]}
+                        if invisible else {"window": event["window"]}
                     ),
                     "tool": event["tool"],
                     "arguments": copy.deepcopy(event["arguments"]),
@@ -120,26 +135,18 @@ def compile_sandbox(items, sample, eos_id):
                     "start": start,
                     "end": end,
                     "order": item["order"],
-                    **(
-                        {"request-id": event["request-id"]}
-                        if "request-id" in event
-                        else {}
-                    ),
+                    **({"request-id": event["request-id"]} if "request-id" in event else {}),
                 }
-            )
-        if len(calls) > MAX_TOOL_CALLS:
-            raise CompileError(f"Tool event limit exceeded ({MAX_TOOL_CALLS})")
-        events = {item["path"]: item["event"] for item in items}
-        # Starts expose running conversations; results and mutations commit at completion.
-        # Resumes must refer to a conversation already available at dispatch.
-        actions = [(c["end"], c["order"], 1, c) for c in calls]
-        actions += [
-            (c["start"], c["order"], 0, c) for c in calls if c["tool"] == "subagent"
-        ]
-        pending = {}
-        previous = initial
-        for tick, _, phase, call in sorted(actions, key=lambda a: a[:3]):
-            event = events[call["path"]]
+                calls.append(call)
+                heapq.heappush(actions, (end, call["order"], 1, call))
+                if call["tool"] == "subagent":
+                    heapq.heappush(actions, (start, call["order"], 0, call))
+            unresolved = waiting
+            if not actions:
+                raise CompileError("Cyclic anchor dependency", unresolved[0]["path"])
+            tick, _, phase, call = heapq.heappop(actions)
+            item = by_path[call["path"]]
+            event = item["event"]
             try:
                 if call["tool"] == "subagent":
                     if phase == 0:
@@ -201,6 +208,8 @@ def compile_sandbox(items, sample, eos_id):
                 outcome = tool_failure(error)
             if phase == 1:
                 call["outcome"] = outcome
+                if not call.get("invisible"):
+                    finish_result(item, call)
             current = sandbox.snapshot()
             patch = {"clock": current["clock"], "calls": current["calls"]}
             for name in STORES:
@@ -215,6 +224,7 @@ def compile_sandbox(items, sample, eos_id):
                 }
             changes.append({"tick": tick, "patch": patch})
             previous = current
+        calls.sort(key=lambda call: call["order"])
         for call in calls:
             del call["order"]
         return {"initial": initial, "changes": changes}, calls

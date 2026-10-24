@@ -21,7 +21,7 @@
           "path": "/summary.txt",
           "content": "2030-01-01T09:00:01+00:00 Document summary."
         },
-        "delivery": "stream",
+        "delivery": "instant",
         "content": "<tool>{\"tool\":\"file_write\",\"args\":{\"path\":\"/summary.txt\",\"content\":\"{N_TICK:1}<|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|><|noop|>2030-01-01T09:00:01+00:00 Document summary.\"}}</tool>{N_TICK:2}"
       }
     ],
@@ -32,7 +32,7 @@
         "tool": "time_now",
         "arguments": {},
         "duration-ticks": 2,
-        "delivery": "stream"
+        "delivery": "instant"
       }
     ],
     "{N_TICK:2}+2": [

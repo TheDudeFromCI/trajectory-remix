@@ -137,8 +137,10 @@ examples, validation options and limits.
    `close` operation is rejected. Segmented content is edited in Source JSON.
    **+ Tool call** schedules a synthetic tool with JSON arguments, a duration in
    ticks, and a tool window ID. Tool windows exist from tick 0; each contains
-   both the request and result. Select streamed delivery to author a request
-   over multiple ticks, with optional custom text, NOOPs and anchors.
+   both the request and result. Requests always stream one token per tick, with
+   optional custom text, NOOPs and anchors. **Result delivery** selects instant or
+   streamed results. **Auto-generate post-result anchor** assigns a marker for
+   scheduling later events after the full result arrives.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
@@ -467,35 +469,49 @@ expressions:
   "tick-policy": "external-first",
   "replay": {
     "0": [{"op": "tool-call", "window": "initial-write", "tool": "file_write",
-           "arguments": {"path": "/example.txt", "content": "old"}}],
-    "150": [{"op": "tool-call", "window": "updated-write", "tool": "file_write",
+           "arguments": {"path": "/example.txt", "content": "old"},
+           "result-anchor": 1}],
+    "{N_TICK:1}+1": [{"op": "tool-call", "window": "updated-write", "tool": "file_write",
              "arguments": {"path": "/example.txt", "content": "new"},
-             "duration-ticks": 25}],
-    "200": [{"op": "tool-call", "window": "read-result", "tool": "file_read",
+             "duration-ticks": 25, "result-anchor": 2}],
+    "{N_TICK:2}+1": [{"op": "tool-call", "window": "read-result", "tool": "file_read",
              "arguments": {"path": "/example.txt"}}]
   }
 }
 ```
 
-Tick 100 shows `old`; ticks 150–174 show a running write and the old file;
-tick 175 commits `new`. Tools execute atomically at `start + duration-ticks`
+The first result anchor marks the initial write of `old`; the second marks the
+update to `new`. The final read starts composing after the update's result.
+Tools execute atomically at `start + duration-ticks`
 (default duration: zero). Reads observe state at completion. Equal completion
 ticks follow the compiler's stable replay order. Failures produce an error
 observation and retain any clock/call-budget effects of the attempted call.
 Tool windows are implicitly open from tick 0, with one BOS and idle NOOPs even
-before their first request. Each call appends a `<tool>` request at its start
-and the actual JSON outcome inside `<tool_result>` at completion. Instant
-requests and all results are excluded-loss external input by default. Use
+before their first request. Each call generates a `<tool>` request and delivers
+the actual JSON outcome inside `<tool_result>` when execution completes.
+Requests use normal generation supervision; all results are excluded-loss
+external input. Use
 generated EOS to close the window after consuming its results. Multiple calls
 may reuse one open tool window; explicit opens must be at tick 0 with type `tool`.
 
-Set `delivery: "stream"` to generate the request one token per tick, with normal
-supervision. Execution starts on the tick after the final request token;
-`duration-ticks` measures execution only. Omit `content`/`segments` to use the
+Requests always generate one token per tick. Execution starts on the tick after
+the final request token; `duration-ticks` measures execution only.
+`delivery` controls the result: `"instant"` (the default) inserts the whole result
+at completion, while `"stream"` delivers it from completion at `tokens-per-tick`
+(default 1). Result streaming does not delay sandbox mutations.
+Omit `content`/`segments` to use the
 canonical `<tool>{"tool":...,"args":...}</tool>` request. Custom `content` or
 `segments` support the same anchors, NOOPs and loss controls as `generate`.
 The structured `tool` and `arguments` fields determine execution; custom text is
 the authored model transcript and should describe those arguments.
+
+Set `result-anchor` to an unused nonnegative integer to capture the tick of the
+final result token, including the closing `</tool_result>` tag. The marker is
+metadata and adds no visible text or tokens. For example, `"result-anchor": 7`
+allows a later event at `"{N_TICK:7}+1"`. Anchors capture phase B; a generated
+event in another window may consume the full result at `"{N_TICK:7}"`, while
+open/append events require `+1` or later. The editor checkbox and the API/MCP
+`auto_anchor: true` option allocate an unused ID and save it in source JSON.
 
 [The parallel-tools sample](examples/parallel-tools.json) pauses a file-write
 request halfway through its arguments using NOOPs, checks the clock in a second
@@ -564,7 +580,7 @@ It is a local single-user tool, not a multi-user/public hosting service.
 The existing MCP bridge also exposes `create_tool_call(sample_id, tick, tool,
 arguments, duration_ticks=0, window=null, outcome=null, position=null,
 expected_revision=null, delivery="instant", content=null, segments=null,
-loss=null, invisible=false, source=null)` and `get_sandbox_state(sample_id, tick,
+loss=null, auto_anchor=false, tokens_per_tick=1, invisible=false, source=null)` and `get_sandbox_state(sample_id, tick,
 include_calls=true)`. Discover schemas with `list_simulated_tools`. Scheduled
 calls compile before committing one undoable edit, support `apply_batch` and
 revision guards, and save with `save_dataset`. Both commands operate on the
@@ -621,7 +637,7 @@ collator. Endpoint integration is tested with mocks, not a paid/live model.
 Skill persistence and memory retrieval are simulated inside each sample; they
 do not modify the real user's skills or external RAG databases. Generation API
 responses are collected per task, while the resulting sample is replayed at
-logical token ticks. Executable tool-call results commit instantly at completion;
+logical token ticks. Executable tool-call results use instant or streamed delivery;
 ordinary append events can stream manually authored observations with inline
 anchors when authoring reactive trajectories.
 

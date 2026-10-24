@@ -61,8 +61,9 @@ async def test_guide_worked_calls_preserve_parallel_timing_context_and_masks(
             "loss": {"mask": "exclude"},
         },
     )
-    for arguments in worked_calls:
-        await command(studio, "create_tool_call", **arguments)
+    scheduled = [await command(studio, "create_tool_call", **arguments)
+                 for arguments in worked_calls]
+    coder, followup, external = [result["tool_call"] for result in scheduled]
     await command(
         studio,
         "create_tool_call",
@@ -73,7 +74,8 @@ async def test_guide_worked_calls_preserve_parallel_timing_context_and_masks(
         arguments={
             "task": "Draft numeric double API documentation from the requirement."
         },
-        duration_ticks=12,
+        content="x",
+        duration_ticks=coder["end"] + 1000,
         outcome={
             "ok": True,
             "result": {
@@ -86,7 +88,7 @@ async def test_guide_worked_calls_preserve_parallel_timing_context_and_masks(
         studio,
         "create_tool_call",
         sample_id=sid,
-        tick="12",
+        tick=str(coder["start"] + 1),
         tool="runtime_status",
         window="status",
         arguments={},
@@ -95,9 +97,9 @@ async def test_guide_worked_calls_preserve_parallel_timing_context_and_masks(
         studio,
         "create_tool_call",
         sample_id=sid,
-        tick="13",
+        tick=str(coder["start"] + 2),
         tool="chat",
-        window="status",
+        window="status-message",
         arguments={"content": "Both specialists are working."},
     )
     sample = (await command(studio, "get_trajectory", sample_id=sid))["sample"]
@@ -109,14 +111,14 @@ async def test_guide_worked_calls_preserve_parallel_timing_context_and_masks(
     )
     assert {c["status"] for c in status["subagents"]} == {"running"}
     assert len(status["subagents"]) == 2
-    before = compiler.frame(plan, 17)["sandbox"]
+    before = compiler.frame(plan, coder["end"] - 1)["sandbox"]
     assert (
         not before["files"] and len(before["conversations"]["coder"]["messages"]) == 1
     )
-    assert compiler.frame(plan, 18)["sandbox"]["files"]["/math.py"].startswith(
+    assert compiler.frame(plan, external["end"])["sandbox"]["files"]["/math.py"].startswith(
         "def double"
     )
-    during = compiler.frame(plan, 20)["sandbox"]
+    during = compiler.frame(plan, followup["start"] + 1)["sandbox"]
     assert during["conversations"]["coder"]["status"] == "running"
     assert during["conversations"]["docs"]["status"] == "running"
     final = compiler.frame(plan, plan["max_tick"])

@@ -29,6 +29,10 @@
   clock in another window, and verify the resumed request can attend to its
   result without seeing the pending write outcome. They also cover tick-0 BOS,
   reusable tool windows, request anchors, segment losses and dispatch timing.
+  Requests always generate one token per tick; result checks cover instant and
+  streamed delivery, rates, masks, final-token anchors, dependent execution order,
+  duplicate/cyclic markers and collision-free, undoable anchor allocation. DOM
+  checks exercise result delivery and persistence of the post-result anchor toggle.
 - Persistent sandbox tests cover invisible mutations without token/window/export
   changes, history beyond the token horizon, author diagnostics for hidden failures,
   authored follow-up message retention, isolated conversations, restored generation,

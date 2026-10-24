@@ -91,7 +91,7 @@ def test_escaped_references_and_tool_arguments_are_literal(compiler, sample):
     plan = compiler.compile(sample)
     assert next(e for e in plan["events"] if e["window"] == "a" and e["op"] == "append")["text"] == "{WINDOW:missing}"
     result = plan["tool_calls"][0]
-    assert compiler.frame(plan, 1)["sandbox"]["files"]["/x"] == "{WINDOW:a}{WINDOW:missing}"
+    assert compiler.frame(plan, result["end"])["sandbox"]["files"]["/x"] == "{WINDOW:a}{WINDOW:missing}"
     assert "{WINDOW:missing}" in next(e for e in plan["events"] if e["path"] == result["path"] + ".request")["text"]
 
 

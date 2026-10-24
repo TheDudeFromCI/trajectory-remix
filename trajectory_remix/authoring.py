@@ -20,7 +20,7 @@ from typing import Annotated, Literal, get_type_hints
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
-from .compiler import KEY, CompileError
+from .compiler import ANCHOR, KEY, CompileError
 from .dataset import new_sample, prepare_sample
 from .llm import SampleBuilder
 from .metadata import MetadataFilter
@@ -1102,14 +1102,18 @@ class TrajectoryCommands:
         content: str | None = None,
         segments: list[dict] | None = None,
         loss: dict | None = None,
+        auto_anchor: bool = False,
+        tokens_per_tick: Annotated[int, Field(ge=1)] = 1,
         invisible: bool = False,
         source: str | None = None,
     ):
         """Schedule an executable synthetic tool event and compile before committing one undoable edit.
 
         Tool windows exist from tick 0; request and masked result share that window.
-        Instant delivery dispatches at tick; stream generates one request token per
-        tick and dispatches on the next tick after the last token. Optional content
+        Requests generate one token per tick and dispatch on the next tick after
+        the last token. Delivery controls the masked result, with tokens_per_tick
+        controlling streamed results. auto_anchor assigns an unused result-anchor
+        ID marking the final result token. Optional content
         or segments replace the canonical <tool> request and support anchors/NOOPs.
         Sandbox changes at dispatch + duration_ticks. Only subagent requires a
         recorded outcome; replay never contacts an endpoint. Save with save_dataset.
@@ -1128,6 +1132,7 @@ class TrajectoryCommands:
             if (
                 any(v is not None for v in (window, content, segments, loss, outcome))
                 or delivery != "instant"
+                or auto_anchor or tokens_per_tick != 1
             ):
                 raise CommandError(
                     "Invisible calls cannot have windows, model content, outcomes or streamed delivery"
@@ -1145,6 +1150,8 @@ class TrajectoryCommands:
                 ),
                 delivery=delivery,
             )
+        if not invisible:
+            event["tokens-per-tick"] = tokens_per_tick
         for key, value in (
             ("content", content),
             ("segments", segments),
@@ -1155,6 +1162,16 @@ class TrajectoryCommands:
         if outcome is not None:
             event["outcome"] = outcome
         address = self._insert(sample, tick, event, position)
+        event = sample["replay"][tick][address["event_index"]]
+        if auto_anchor:
+            ids = [int(match[1]) for match in ANCHOR.finditer(json.dumps(sample))]
+            ids.extend(
+                e["result-anchor"]
+                for group in sample["replay"].values()
+                for e in group
+                if type(e.get("result-anchor")) is int
+            )
+            event["result-anchor"] = max(ids, default=0) + 1
         plan = self.compiler.compile(sample)
         path = f"replay[{address['tick']}][{address['event_index']}]"
         call = next(c for c in plan["tool_calls"] if c["path"] == path)

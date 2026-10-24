@@ -77,13 +77,15 @@ async def test_tool_authoring_history_and_atomic_rejection(client):
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["tool_call"]["end"] == 200
-    old = (await client.get("/api/samples/0/sandbox/175")).json()
+    call = response.json()["tool_call"]
+    assert call["start"] > call["request_start"] == 150
+    assert call["end"] == call["start"] + 50
+    old = (await client.get(f"/api/samples/0/sandbox/{call['start']}")).json()
     assert old["files"] == {} and old["tool_calls"][-1]["status"] == "running"
-    assert (await client.get("/api/samples/0/sandbox/200")).json()["files"] == {
+    assert (await client.get(f"/api/samples/0/sandbox/{call['end']}")).json()["files"] == {
         "/x": "new"
     }
-    assert (await client.get("/api/samples/0/sandbox/201")).status_code == 422
+    assert (await client.get(f"/api/samples/0/sandbox/{call['end'] + 1}")).status_code == 422
     assert (await client.get("/api/samples/1/sandbox/0")).status_code == 404
 
 

@@ -12,7 +12,8 @@ w.structuredClone = structuredClone;
 const requests = [];
 let holdNextCompile = false,
   releaseCompile = null,
-  completedStateReads = 0;
+  completedStateReads = 0,
+  lastPlan = null;
 w.fetch = async (path, options) => {
   requests.push({ path, options });
   const response = await fetch(new URL(path, base), options);
@@ -21,6 +22,7 @@ w.fetch = async (path, options) => {
     holdNextCompile = false;
     await new Promise((resolve) => (releaseCompile = resolve));
   }
+  if (path === "/api/compile" && response.ok) lastPlan = await response.clone().json();
   return response;
 };
 w.confirm = () => true;
@@ -69,6 +71,12 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
+assert.doesNotMatch($("window-grid").textContent, /<\|cxt\|>/);
+await click("preferences-button");
+assert.equal($("show-window-headers").checked, false);
+$("show-window-headers").checked = true;
+await $("preferences-form").onsubmit({ preventDefault() {} });
+assert.equal(w.localStorage.getItem("trajectory-remix.show-window-headers"), "true");
 assert.match(
   $("window-grid").textContent,
   /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
@@ -118,7 +126,7 @@ assert.deepEqual(JSON.parse($("metadata-json").value).custom, {
 $("user-name").value = "Sam";
 $("user-name").oninput();
 assert.equal(JSON.parse($("sample-json").value).metadata.user_name, "Sam");
-await waitFor(() => !w.document.title.startsWith("*"));
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 await click("undo-edit");
 assert.equal($("agent-name").value, initialMetadata.agent_name || "");
 await click("redo-edit");
@@ -303,6 +311,7 @@ assert.equal(
   requests.some((request) => request.path === "/api/checkpoint"),
   false,
 );
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 assert.equal(w.document.title, "Trajectory Remix");
 
 // External MCP edits refresh the selected sample; pending local edits survive a conflict.
@@ -441,31 +450,36 @@ const duration = updatedToolCard.querySelector(
 );
 duration.value = "50";
 duration.oninput();
-await waitFor(() => $("max-tick").textContent === "200");
+await waitFor(() => lastPlan?.tool_calls?.some((call) =>
+  call.tool === "file_write" && call.end - call.start === 50 &&
+  call.arguments.content === "new file version" &&
+  Number($("max-tick").textContent) === call.end));
+const execution = lastPlan.tool_calls.find((call) => call.tool === "file_write");
+assert(execution.start > 150);
 const jump = (value) => {
   $("tick-number").value = String(value);
   $("tick-number").onchange({ target: $("tick-number") });
 };
-jump(175);
+jump(execution.start);
 await waitFor(() =>
   /file_write · running/.test($("sandbox-calls").textContent),
 );
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
-jump(200);
+jump(execution.end);
 await waitFor(() => /new file version/.test($("sandbox-state").textContent));
 assert.match($("sandbox-calls").textContent, /file_write · completed/);
 const resultCards = w.document.querySelectorAll(".window-card").length;
 $("timeline").onmousemove({
   target: $("timeline"),
   clientX:
-    125 + 175 * +$("timeline-zoom").value - $("timeline-scroll").scrollLeft,
+    125 + execution.start * +$("timeline-zoom").value - $("timeline-scroll").scrollLeft,
   clientY: 35 + resultCards * 32,
 });
-assert.match($("timeline-event").textContent, /file_write · 150–200/);
+assert.match($("timeline-event").textContent, new RegExp(`file_write · ${execution.start}–${execution.end}`));
 jump(100);
 await waitFor(() => /files \(0\)/.test($("sandbox-state").textContent));
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
-// Tool windows already exist at tick zero, and streamed requests share the result window.
+// Tool windows exist at tick zero; result delivery changes independently of the request.
 jump(0);
 await waitFor(() => /Sandbox · tick 0/.test($("sandbox-title").textContent));
 const toolWindowId = updatedToolCard.querySelector(".event-window").value;
@@ -475,11 +489,10 @@ const findToolWindow = () =>
   );
 assert.ok(findToolWindow());
 assert.doesNotMatch(findToolWindow().className, /future/);
-const requestDelivery = updatedToolCard.querySelectorAll(
-  ".event-options select",
-)[1];
-requestDelivery.value = "stream";
-requestDelivery.onchange();
+const resultDelivery = updatedToolCard.querySelectorAll(".event-options select")[1];
+assert.match(resultDelivery.parentElement.textContent, /Result delivery/);
+resultDelivery.value = "stream";
+resultDelivery.onchange();
 const customRequest = updatedToolCard.querySelector('input[type="checkbox"]');
 customRequest.checked = true;
 customRequest.onchange();
@@ -489,7 +502,10 @@ const requestArea = w.document.querySelector(
 requestArea.value =
   '<tool>{"tool":"file_write",<|noop|>"args":{"path":"history.txt","content":"new file version"}}</tool>';
 requestArea.oninput();
-await waitFor(() => Number($("max-tick").textContent) > 200);
+await waitFor(() => lastPlan?.events.some((event) =>
+  event.path.endsWith(".request") && event.text.includes("file_write\",<|noop|>")) &&
+  lastPlan.tool_calls[0].result_end > lastPlan.tool_calls[0].end &&
+  Number($("max-tick").textContent) === lastPlan.max_tick);
 jump(160);
 await waitFor(() =>
   /file_write · composing/.test($("sandbox-calls").textContent),
@@ -502,6 +518,25 @@ await waitFor(() =>
 );
 assert.match(findToolWindow().textContent, /<tool>/);
 assert.match(findToolWindow().textContent, /<tool_result>/);
+// Auto-generated anchors persist in source and mark the full streamed result.
+const currentToolCard = () => [...w.document.querySelectorAll(".event-card")].at(-1);
+const anchorCheckbox = () => [...currentToolCard().querySelectorAll("label")]
+  .find((label) => label.textContent.includes("Auto-generate post-result anchor"))
+  .querySelector('input[type="checkbox"]');
+anchorCheckbox().checked = true;
+anchorCheckbox().onchange();
+await waitFor(() => lastPlan?.tool_calls[0].result_anchor !== undefined);
+const resultAnchor = lastPlan.tool_calls[0].result_anchor;
+assert.equal(lastPlan.anchors[resultAnchor].tick, lastPlan.tool_calls[0].result_end);
+assert.match(currentToolCard().textContent, new RegExp(`Result complete: \\{N_TICK:${resultAnchor}\\}`));
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
+const savedSource = await (await w.fetch("/api/samples/0", {
+  headers: { "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content },
+})).json();
+assert.equal(savedSource.replay["150"][0]["result-anchor"], resultAnchor);
+anchorCheckbox().checked = false;
+anchorCheckbox().onchange();
+await waitFor(() => lastPlan?.tool_calls[0].result_anchor === undefined);
 // Chat is selectable as a synthetic tool and appends into the existing chat window.
 await click("add-tool-call");
 let chatCard = [...w.document.querySelectorAll(".event-card")].at(-1);
@@ -518,11 +553,9 @@ const chatArgs = chatCard.querySelector(
 );
 chatArgs.value = JSON.stringify({ content: "Hi, Sam!" });
 chatArgs.oninput();
-await waitFor(() => !w.document.title.startsWith("*"));
-jump(0);
-await waitFor(() =>
-  /<\|msg\|>Nova: Hi, Sam!<\|\/msg\|>/.test($("window-grid").textContent),
-);
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
+jump(lastPlan.tool_calls.find((call) => call.tool === "chat").end);
+await waitFor(() => /<\|msg\|>Nova: Hi, Sam!<\|\/msg\|>/.test($("window-grid").textContent));
 // External activity mutates the sandbox without creating a model window.
 const windowCountBeforeExternal =
   w.document.querySelectorAll(".window-card").length;
@@ -545,7 +578,7 @@ externalArgs.value = JSON.stringify({
   content: "external implementation",
 });
 externalArgs.oninput();
-await waitFor(() => !w.document.title.startsWith("*"));
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 jump(999);
 await waitFor(() => /Sandbox · tick 999/.test($("sandbox-title").textContent));
 await waitFor(() => !/external.py/.test($("sandbox-state").textContent));
