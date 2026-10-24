@@ -243,6 +243,7 @@ await new Promise((resolve) => setTimeout(resolve, 500));
 assert.equal(compileCount(), compileCountBeforeEdit);
 await waitFor(() => /Invalid marker/.test($("diagnostics").textContent));
 assert.match($("diagnostics").textContent, /Invalid marker/);
+assert.equal($("diagnostics").parentElement, $("events-view"));
 assert($("diagnostics").querySelector(".diagnostics-close"));
 await $("diagnostics").querySelector(".diagnostics-close").onclick();
 assert.equal($("diagnostics").hidden, true);
