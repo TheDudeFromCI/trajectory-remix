@@ -162,7 +162,7 @@ def default_config():
         ],
         "tasks": tasks,
         "tags": ["competent", "software", "tool-use"],
-        "clock": {"seed": "2030-01-01T09:00:00+00:00", "seconds_per_call": 1},
+        "clock": {"seed": "2030-01-01T09:00:00+00:00", "tick_rate": 10},
         "automatic": {
             "max_samples": 10,
             "max_attempts": 30,
@@ -294,7 +294,7 @@ def validate_config(config):
             and not isinstance(config["clock"][name], str)
         ):
             raise ValueError("Clock seed must be an ISO timestamp string")
-    if set(config.get("clock", {})) - {"seed", "seconds_per_call"}:
+    if set(config.get("clock", {})) - {"seed", "seconds_per_call", "tick_rate"}:
         raise ValueError("Unknown clock setting")
     # Validate synthetic clock without invoking a tool.
     clock = Sandbox(**config.get("clock", {}))

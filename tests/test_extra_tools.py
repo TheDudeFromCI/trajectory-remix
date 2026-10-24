@@ -39,7 +39,7 @@ def test_calculator_library_functions(expression, expected):
     assert sandbox.call_sync("calculator", {"expression": expression})[
         "value"
     ] == pytest.approx(expected)
-    assert sandbox.snapshot() == {}
+    assert sandbox.snapshot() == {"tick_rate": 10}
 
 
 @pytest.mark.parametrize(
@@ -75,7 +75,7 @@ def test_random_types_ranges_determinism_and_resume(compiler, sample):
     values = [item["outcome"]["result"]["value"] for item in plan["tool_calls"]]
     assert values[0] == -5 and type(values[1]) is bool and 2 <= values[2] <= 3
     assert values[3] == {"nested": [1, 2]}
-    assert compiler.frame(plan, 0)["sandbox"] == {}
+    assert compiler.frame(plan, 0)["sandbox"] == {"tick_rate": 10}
     assert compiler.frame(plan, plan["max_tick"])["sandbox"]["random"]["counter"] == 4
     sandbox = Sandbox(random_seed=trajectory_uuid(sample))
     restored = Sandbox(random_seed=trajectory_uuid(sample))
@@ -108,7 +108,7 @@ def test_tick_timers_and_interval_outputs_do_not_create_state(compiler, sample):
     sample["replay"]["1"] = [
         call("timer", {"mode": "timeout", "ticks": 3}, "timeout"),
         call("timer", {"mode": "interval", "ticks": 2, "count": 3}, "interval"),
-        call("timer", {"mode": "alarm", "at_tick": 5}, "alarm"),
+        call("timer", {"mode": "alarm", "at_tick": 5, "timeout_ticks": 1000}, "alarm"),
     ]
     plan = compiler.compile(sample)
     timeout, interval, alarm = plan["tool_calls"]
@@ -124,12 +124,12 @@ def test_timestamp_alarm_uses_authored_clock_not_host_time(compiler, sample):
         "synthetic_clock": {"seed": "2030-01-01T00:00:00Z", "seconds_per_call": 0}
     }
     sample["replay"]["1"] = [
-        call("timer", {"mode": "alarm", "timestamp": "2030-01-01T00:00:10+00:00"})
+        call("timer", {"mode": "alarm", "timestamp": "2030-01-01T00:00:10+00:00", "timeout_ticks": 1000})
     ]
     sample["replay"]["5"] = [invisible("time_advance", {"seconds": 10})]
     plan = compiler.compile(sample)
     assert plan["tool_calls"][0]["end"] == 6
-    assert compiler.frame(plan, 4)["sandbox"] == {}
+    assert compiler.frame(plan, 4)["sandbox"] == {"tick_rate": 10}
     sample["replay"]["1"][0]["arguments"]["timeout_ticks"] = 1
     assert compiler.compile(sample)["tool_calls"][0]["outcome"]["ok"] is False
 
@@ -167,7 +167,7 @@ def test_diagnostics_are_author_configured_and_time_scoped(compiler, sample):
     assert before["outcome"]["result"]["synthetic"] is True
     assert after["outcome"]["result"]["cpu_cores"] == 32
     assert after["outcome"]["result"]["os"] == "ExampleOS"
-    assert compiler.frame(plan, 4)["sandbox"] == {}
+    assert compiler.frame(plan, 4)["sandbox"] == {"tick_rate": 10}
     sandbox = Sandbox()
     sandbox.call_sync(
         "system_diagnostics_set",
@@ -272,4 +272,4 @@ def test_file_watch_timeout_is_a_failed_observation_and_cleans_up(compiler, samp
     plan = compiler.compile(sample)
     assert plan["tool_calls"][0]["end"] == 4
     assert not plan["tool_calls"][0]["outcome"]["ok"]
-    assert compiler.frame(plan, 4)["sandbox"] == {}
+    assert compiler.frame(plan, 4)["sandbox"] == {"tick_rate": 10}

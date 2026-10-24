@@ -81,7 +81,7 @@ async def test_tool_authoring_history_and_atomic_rejection(client):
     assert call["start"] > call["request_start"] == 150
     assert call["end"] == call["start"] + 50
     old = (await client.get(f"/api/samples/0/sandbox/{call['start']}")).json()
-    assert old["sandbox"] == {} and old["tool_calls"][-1]["status"] == "running"
+    assert old["sandbox"] == {"tick_rate": 10} and old["tool_calls"][-1]["status"] == "running"
     assert (await client.get(f"/api/samples/0/sandbox/{call['end']}")).json()["sandbox"]["files"] == {
         "/x": "new"
     }

@@ -411,7 +411,7 @@ async def test_generation_never_launches_real_subagents(compiler):
     assert client.calls == 2
     plan = compiler.compile(generated)
     assert not plan["tool_calls"][0]["outcome"]["ok"]
-    assert compiler.frame(plan, plan["max_tick"])["sandbox"] == {}
+    assert compiler.frame(plan, plan["max_tick"])["sandbox"] == {"tick_rate": 10}
 
 
 

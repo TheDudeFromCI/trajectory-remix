@@ -55,16 +55,16 @@ def test_opaque_state_sparse_cache_and_recompile(compiler, sample):
         }
     )
     plan = compiler.compile(sample)
-    assert executions == [{}, {"arbitrary": {"items": [1]}}]
+    assert executions == [{"tick_rate": 10}, {"tick_rate": 10, "arbitrary": {"items": [1]}}]
     assert list(plan["sandbox"]["snapshots"]) == ["2", "16"]
-    assert compiler.frame(plan, 1)["sandbox"] == {}
+    assert compiler.frame(plan, 1)["sandbox"] == {"tick_rate": 10}
     first = compiler.frame(plan, 2)
-    assert first["sandbox"] == {"arbitrary": {"items": [1]}}
+    assert first["sandbox"] == {"tick_rate": 10, "arbitrary": {"items": [1]}}
     first["sandbox"]["arbitrary"]["items"].append(99)
-    assert compiler.frame(plan, 15)["sandbox"] == {"arbitrary": {"items": [1]}}
+    assert compiler.frame(plan, 15)["sandbox"] == {"tick_rate": 10, "arbitrary": {"items": [1]}}
     assert len(executions) == 2  # Scrubbing never reruns tools.
     compiler.compile(sample)
-    assert executions[2] == {}  # Recompilation starts with an empty dict.
+    assert executions[2] == {"tick_rate": 10}  # Recompilation starts with only the configured tick rate.
 
 
 def test_long_running_tools_run_each_tick_and_expose_only_current_output(
@@ -91,7 +91,7 @@ def test_long_running_tools_run_each_tick_and_expose_only_current_output(
     assert ticks == [2, 3, 4]
     assert plan["anchors"]["4"]["tick"] == 4
     early = compiler.frame(plan, 2)
-    assert early["sandbox"] == {"progress": 1}
+    assert early["sandbox"] == {"tick_rate": 10, "progress": 1}
     assert early["tool_calls"][0]["status"] == "running"
     assert "part 1" in early["windows"]["result"]["text"]
     assert "part 2" not in early["windows"]["result"]["text"]
@@ -228,7 +228,7 @@ def test_external_files_track_schema_hash_and_recompile(compiler, sample, tmp_pa
         first_hash = db.execute("SELECT file_hash FROM external_tools").fetchone()[0]
         assert json.loads(
             db.execute("SELECT plan FROM tool_compilations").fetchone()[0]
-        )["sandbox"]["snapshots"]["2"] == {"arbitrary": "first"}
+        )["sandbox"]["snapshots"]["2"] == {"tick_rate": 10, "arbitrary": "first"}
     external_file(
         folder, "other"
     )  # Same size edit must bypass Python's bytecode cache.

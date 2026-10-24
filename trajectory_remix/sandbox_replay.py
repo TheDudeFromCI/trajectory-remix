@@ -212,6 +212,13 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
         clock=metadata.get("synthetic_clock", {}),
         seed=trajectory_uuid(sample),
     )
+    from .tools._clock import initialize
+
+    try:
+        initialize(state, context.clock)
+    except (TypeError, ValueError) as error:
+        raise CompileError(str(error), "metadata.synthetic_clock.tick_rate") from error
+    initial = copy.deepcopy(state)
     unresolved = [
         item
         for item in items
@@ -345,13 +352,17 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
     calls.sort(key=lambda c: c["order"])
     for call in calls:
         call.pop("order")
-    return {"initial": {}, "snapshots": snapshots}, calls, writes
+    return {"initial": initial, "snapshots": snapshots}, calls, writes
 
 
 def sandbox_frame(plan, tick):
     snapshots = plan["sandbox"]["snapshots"]
     key = next((key for key in reversed(snapshots) if int(key) <= tick), None)
-    return copy.deepcopy(snapshots[key]) if key is not None else {}
+    return (
+        copy.deepcopy(snapshots[key])
+        if key is not None
+        else copy.deepcopy(plan["sandbox"]["initial"])
+    )
 
 
 def tool_calls_frame(plan, tick):

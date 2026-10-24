@@ -94,8 +94,9 @@ A window begins with the project's configured BOS/header framing, and its
 lifetime ends with Kidra's generated EOS. Merely finishing a message, delivering
 a tool result or leaving a window idle does **not** close it. Active windows do
 not need to produce useful text on every tick; NOOP expresses intentional idle
-behavior. Separate logical ticks from the synthetic clock used by `time_now`,
-`time_advance` and `time_set`.
+behavior. The synthetic clock advances by one second per `tick_rate` logical
+ticks (default 10). `time_set` and `time_advance` establish Unix/tick anchors;
+`time_now` extrapolates from them.
 
 Conceptual replay (tokens shown as placeholders, not literal tokenizer output):
 
@@ -272,13 +273,14 @@ For custom streamed requests, `content` or `segments` controls the request text;
 `tool` and `arguments` still determine the simulated operation. Keep them
 consistent. To teach explicit waiting, add a segment such as
 `{"text":"<|noop|><|noop|><|noop|>","loss":{"weight":1}}`, using the project's
-configured NOOP spelling. Do not invent a wait/cancel/background-job
-tool: those tools are not implemented. Status comes from scheduled conversations.
+configured NOOP spelling. Use `timer` for simulated waits. Cancellation and
+background-process launch tools are not implemented. Status comes from scheduled conversations.
 
-Ticks measure token scheduling, not real seconds. `time_now`, `time_advance` and `time_set`
-use a separate synthetic clock. Automatic increments are per dispatched tool
-call; an author-side inspection does not advance time. Write status messages
-that match the observable scenario rather than claiming wall-clock runtimes.
+Ticks measure token scheduling. The synthetic clock advances at the trajectory's
+`metadata.synthetic_clock.tick_rate` (default 10 tokens/s). `time_set` and
+`time_advance` store Unix/tick anchors; tools calculate elapsed simulated seconds
+from them. Author-side inspection does not advance ticks. Write status messages
+that match the observable scenario rather than claiming host wall-clock runtimes.
 
 ## Publish external activity invisibly
 
@@ -343,8 +345,8 @@ simulations; a stored skill is text, not installed code.
 | `runtime_status`                                  | No arguments; inspect synthetic clock, call count, TODO counts and conversation lifecycle summaries.                                                               |
 | `calculator` | `expression`; numeric math via simpleeval, including trigonometry, logarithms, roots and constants. Angles use radians. |
 | `random` | `kind`: int, bool, float, choice; optional min/max or required choices. Reproducible draws persisted in sandbox state. |
-| `timer` | `mode`: timeout/interval with ticks; intervals require finite count. Alarm uses at_tick or a timezone-aware synthetic timestamp. |
-| `file_watch` | `path`; optional events, count and timeout_ticks. Poll for completed virtual file changes and emit masked observations. |
+| `timer` | `mode`: timeout/interval with seconds (or explicit ticks); intervals require finite count. Alarm uses at_tick or a timezone-aware synthetic timestamp. |
+| `file_watch` | `path`; optional events, count and timeout_seconds (or explicit timeout_ticks). Poll for completed virtual file changes and emit masked observations. |
 | `system_diagnostics` | Read simulated CPU, RAM, VRAM, core count, OS and architecture. No host measurements. |
 | `system_diagnostics_set` | Invisible-only partial updates to simulated diagnostics. Resource usage must fit totals. |
 | `hardware_load_set` | Invisible-only file_io_ticks and per-operation operation_ticks. New file calls sample additive latency once at dispatch. |
@@ -437,7 +439,7 @@ to append selected public schemas to an already open window. Set
 tools. Invisible arguments never appear in these schemas.
 
 Every tool, including subagents and custom tools, runs once per tick until
-`is_done`. State begins as `{}` and is otherwise opaque to Remix.
+`is_done`. State begins with `tick_rate` (default 10 tokens/s); other keys are tool-owned.
 `get_sandbox_state` and preview frames return `sandbox` and `tool_calls` as separate
 properties. Do not assume any store exists before its first tool execution.
 See [the tool contract](../docs/SANDBOX.md) for custom modules and sparse caching.

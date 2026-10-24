@@ -63,6 +63,7 @@ class ToolSessions:
             "busy": session.lock.locked(),
             "options": session.options.copy(),
             "calls": sandbox.calls,
+            "tick": sandbox.tick,
             "max_calls": sandbox.max_calls,
             "remaining_calls": max(0, sandbox.max_calls - sandbox.calls),
             "max_bytes": sandbox.max_bytes,
@@ -162,6 +163,7 @@ class ToolSessions:
                     "arguments": copy.deepcopy(arguments),
                     "outcome": copy.deepcopy(outcome),
                     "call_number": candidate.calls,
+                    "tick": candidate.tick - 1,
                     **({"window_updates": updates} if updates else {}),
                 }
                 size = len(json.dumps(entry, ensure_ascii=False).encode())

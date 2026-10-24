@@ -1,7 +1,8 @@
 # Tools and sandbox state
 
-Every compilation starts with an empty Python dictionary. Remix assigns no
-meaning to its keys. Tools own their state conventions; the compiler, training
+Every compilation creates a fresh Python dictionary, bootstrapped by the clock
+helper with the trajectory's `tick_rate` (10 tokens/s by default). Other keys are
+owned by tools. Tools own their state conventions; the compiler, training
 export, and generation prompts never interpret that dictionary. Kidra sees
 window content and tool output only.
 
@@ -164,11 +165,33 @@ Projects using the previous SQLite version are migrated additively on opening.
 
 ## Built-in simulation conventions
 
-The built-ins share their own clock and stores inside the otherwise opaque dict.
-The legacy clock/store tools increment their simulated call count and clock on
-visible calls; invisible calls omit that automatic increment. The calculator,
-random generator, timers, watchers and diagnostics do not implicitly advance time. Synthetic clock metadata remains
-`{"synthetic_clock":{"seed":"2030-01-01T09:00:00Z","seconds_per_call":1}}`.
+The built-ins share clock anchors and stores inside the otherwise opaque dict.
+Time advances with logical ticks, never with the number of tool calls. Configure
+it per trajectory with `metadata.synthetic_clock`, for example
+`{"seed":"2030-01-01T09:00:00Z","tick_rate":10}`. The metadata editor exposes a
+**Tick rate (tokens/s)** field. Project configuration sets the default for newly
+generated trajectories. Rates must be finite and positive; fractional rates work.
+
+`time_set` and `time_advance` record `clock_unix` (Unix seconds), `clock_tick`
+(the update tick), and `clock` (the same anchor formatted as ISO time). The
+sandbox also contains `tick_rate`. Current time is:
+
+```text
+clock_unix + (current_tick - clock_tick) / tick_rate
+```
+
+For example, an anchor at tick 14 and a query at tick 24 at 10 tokens/s gives
+one elapsed second. `time_now` reports that extrapolated time without rebasing
+the anchor. `time_advance` first extrapolates to its invocation tick, then adds
+its explicit seconds and records a new anchor. Before an explicit update, the
+configured seed is anchored at tick zero. Named timezones retain DST behavior;
+elapsed seconds are added in UTC.
+
+Anchors stay unchanged on idle ticks, preserving sparse caches. The old
+`seconds_per_call` setting is accepted when loading older projects but no longer
+advances time. MCP workbenches accept `tick_rate`, track a separate current tick,
+and return it in inspections and interaction logs. An instant workbench call
+consumes one logical tick; long-running calls consume their execution ticks.
 `time_set` accepts nullable local date/time fields and an IANA or fixed-offset
 zone; null fields are deterministic from the trajectory UUID and call count.
 
@@ -208,23 +231,29 @@ requests do not consume a draw. These values are for simulation, not secrets.
 
 `timer` uses logical execution ticks without sleeping:
 
-- `{"mode":"timeout","ticks":5}` completes five ticks after dispatch.
-- `{"mode":"interval","ticks":3,"count":4}` emits at offsets 3, 6, 9 and 12,
+- `{"mode":"timeout","seconds":0.5}` completes after 0.5 simulated seconds
+  (five ticks at the default rate).
+- `{"mode":"interval","seconds":0.3,"count":4}` emits at 0.3-second intervals,
   then completes. Intervals must be positive and counts are finite (at most 1024).
 - `{"mode":"alarm","at_tick":100}` fires at or after tick 100.
-- `{"mode":"alarm","timestamp":"2030-01-01T09:10:00Z","timeout_ticks":500}`
-  waits for the synthetic clock to reach that timestamp. Authors must advance
-  the synthetic clock explicitly; replay ticks do not represent wall seconds.
+- `{"mode":"alarm","timestamp":"2030-01-01T09:10:00Z","timeout_seconds":50}`
+  waits for the tick-derived synthetic clock to reach that timestamp. Clock
+  updates can also jump it forwards or backwards.
 
-Alarms have a waiting limit of 1000 ticks by default. Intervals and timeouts are
-also subject to the trajectory's existing tick limit. Timer invocations are
-stateless, so idle ticks do not create state snapshots. Streamed observations
+Alarms have a waiting limit of 100 simulated seconds by default. `seconds` and
+`timeout_seconds` follow the same anchored clock, including explicit clock
+advancement. Intervals and timeouts are also subject to the trajectory tick
+limit. Timer state records the start time and firing count; idle ticks do not
+create snapshots. After a large clock jump, an interval catches up one firing
+per tick. Explicit `ticks` and `timeout_ticks` remain available as alternatives
+for schedules defined in logical ticks. Streamed observations
 queue in firing order; the result anchor still captures the last result token.
 
 `file_watch({"path":"/report.txt","events":["created","modified","deleted"],
-"count":3,"timeout_ticks":200})` captures the current file version at dispatch
+"count":3,"timeout_seconds":20})` captures the current file version at dispatch
 and emits subsequent matching changes until its count is met or it times out.
-Defaults are all three events, one match and 1000 ticks. It polls the virtual
+Defaults are all three events, one match and 100 simulated seconds. Explicit
+`timeout_ticks` remains an alternative. It polls the virtual
 filesystem once per tick, comparing content hashes; it cannot observe transient
 changes that are reversed between polls. It sees writes only after their
 execution finishes, including delayed I/O. Calls follow stable source order: a

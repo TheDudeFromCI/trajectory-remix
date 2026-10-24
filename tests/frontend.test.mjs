@@ -326,6 +326,7 @@ assert.equal(
 );
 await click("preferences-button");
 await $("preferences-form").onsubmit({ preventDefault() {} });
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 const compileCountBeforePreference = compileCount();
 $("sample-json").oninput();
 await waitFor(() => compileCount() > compileCountBeforePreference);
@@ -531,7 +532,7 @@ assert.match(
   new RegExp(`file_write · ${execution.start}–${execution.end}`),
 );
 jump(100);
-await waitFor(() => /^\s*\{\s*\}\s*$/.test($("sandbox-state").textContent));
+await waitFor(() => /"tick_rate": 10/.test($("sandbox-state").textContent));
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
 // Tool windows exist at tick zero; result delivery changes independently of the request.
 jump(0);
@@ -779,6 +780,11 @@ extraCheck.checked = true;
 extraCheck.onchange();
 await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"] === true);
 assert.equal(JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"], true);
+// Per-trajectory tick rate is an ordinary persisted metadata setting.
+$("tick-rate").value = "20";
+$("tick-rate").oninput();
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && lastPlan?.sandbox.initial.tick_rate === 20);
+assert.equal(JSON.parse($("sample-json").value).metadata.synthetic_clock.tick_rate, 20);
 // New math, timer, and author-only load tools use the same actual editor flow.
 await click("add-tool-call");
 let mathCard = [...w.document.querySelectorAll(".event-card")].at(-1);
@@ -801,7 +807,7 @@ timerSelect.value = "timer";
 timerSelect.onchange();
 timerCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 const timerArgs = timerCard.querySelector('textarea[aria-label="arguments JSON"]');
-timerArgs.value = JSON.stringify({mode: "interval", ticks: 2, count: 2});
+timerArgs.value = JSON.stringify({mode: "interval", seconds: 0.1, count: 2});
 timerArgs.oninput();
 await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "timer"));
 const interval = lastPlan.tool_calls.find((call) => call.tool === "timer");
@@ -825,7 +831,7 @@ assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 98,
+    checks: 99,
     errors,
   }),
 );

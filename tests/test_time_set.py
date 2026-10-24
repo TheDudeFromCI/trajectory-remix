@@ -23,8 +23,8 @@ async def test_set_exact_time_and_subsequent_clock_calls(zone, offset):
     sandbox = Sandbox(seconds_per_call=2)
     result = await sandbox.call("time_set", {**LEAP_TIME, "timezone": zone})
     assert result == {"timestamp": f"2024-02-29T12:34:56{offset}", "synthetic": True}
-    assert (await sandbox.call("time_now", {}))["timestamp"] == f"2024-02-29T12:34:58{offset}"
-    assert (await sandbox.call("time_advance", {"seconds": 60}, invisible=True))["timestamp"] == f"2024-02-29T12:35:58{offset}"
+    assert (await sandbox.call("time_now", {}))["timestamp"] == f"2024-02-29T12:34:56.100000{offset}"
+    assert (await sandbox.call("time_advance", {"seconds": 60}, invisible=True))["timestamp"] == f"2024-02-29T12:35:56.200000{offset}"
     assert sandbox.calls == 2
 
 
@@ -68,7 +68,7 @@ async def test_invalid_calendar_and_timezone_leave_only_normal_call_effects(chan
     sandbox = Sandbox(seed="2030-01-01T00:00:00Z", seconds_per_call=2)
     with pytest.raises(ToolError):
         await sandbox.call("time_set", {**LEAP_TIME, **changes})
-    assert sandbox.clock.isoformat() == "2030-01-01T00:00:02+00:00"
+    assert sandbox.clock.isoformat() == "2030-01-01T00:00:00+00:00"
     assert sandbox.calls == 1
 
 
@@ -130,11 +130,10 @@ async def test_named_timezone_survives_restore_and_dst_transition():
     sandbox = Sandbox(seconds_per_call=0)
     await sandbox.call("time_set", dict(year=2024, month=3, day=10, hour=1, minute=59, second=59, timezone="America/New_York"))
     restored = Sandbox()
-    restored.restore(sandbox.snapshot())
-    restored.step = 1
+    restored.restore(sandbox.snapshot(), tick=10)
     assert (await restored.call("time_now", {}))["timestamp"] == "2024-03-10T03:00:00-04:00"
     assert await sandbox.call("time_advance", {"seconds": 1}, invisible=True) == {
-        "timestamp": "2024-03-10T03:00:00-04:00", "synthetic": True,
+        "timestamp": "2024-03-10T03:00:00.100000-04:00", "synthetic": True,
     }
 
 
@@ -150,7 +149,7 @@ def test_replay_uses_trajectory_identity_and_preserves_history(compiler, sample)
     assert plan["tool_calls"][0]["outcome"] == {"ok": True, "result": expected}
     for tick in (completed, 0, completed - 1, completed):
         state = compiler.frame(plan, tick)["sandbox"]
-        assert state == {} if tick < completed else state["clock"] == expected["timestamp"]
+        assert state == {"tick_rate": 10} if tick < completed else state["clock"] == expected["timestamp"]
     assert compiler.compile(sample) == plan
     renamed = {**sample, "uuid": trajectory_uuid(sample), "id": "new label"}
     assert compiler.compile(renamed)["tool_calls"] == plan["tool_calls"]
@@ -173,7 +172,7 @@ async def test_workbench_reset_and_session_isolation():
     sessions.create("a", {"seed": "2031-01-01T00:00:00Z"})
     sessions.create("b", {"seed": "2031-01-01T00:00:00Z"})
     first = await sessions.call("a", "time_set", NULL_TIME)
-    assert sessions.inspect("b")["state"] == {}
+    assert sessions.inspect("b")["state"] == {"tick_rate": 10}
     sessions.reset("a")
     assert (await sessions.call("a", "time_set", NULL_TIME))["interaction"]["outcome"] == first["interaction"]["outcome"]
 

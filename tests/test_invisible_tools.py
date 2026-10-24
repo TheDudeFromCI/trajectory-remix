@@ -48,7 +48,7 @@ def test_only_invisible_calls_can_execute_preparation_tools(compiler, sample):
         }
     ]
     plan = compiler.compile(sample)
-    assert compiler.frame(plan, 1)["sandbox"]["clock"] == "2030-01-01T09:00:05+00:00"
+    assert compiler.frame(plan, 1)["sandbox"]["clock"] == "2030-01-01T09:00:05.100000+00:00"
     assert compiler.frame(plan, 1)["sandbox"]["calls"] == 0
     assert all(row["event"] != "replay[1][0]" for row in plan["rows"])
 
@@ -155,7 +155,7 @@ def run(args, state, windows):
     assert registry.run_tick(
         "prepare", {}, state, [], ExecutionContext(invisible=True)
     ) == ("prepared", True, True)
-    assert state == {"prepared": True}
+    assert state == {"tick_rate": 10, "prepared": True}
     path.write_text(source.replace("FLAG", '"true"'))
     with pytest.raises(ToolError, match="invisible must be a boolean"):
         ToolRegistry(folder)

@@ -731,6 +731,7 @@ function showMetadataNames(metadata) {
     typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
   $("user-name").value =
     typeof metadata?.user_name === "string" ? metadata.user_name : "";
+  $("tick-rate").value = metadata?.synthetic_clock?.tick_rate ?? 10;
 }
 function loadMetadata(trajectory) {
   $("trajectory-uuid").value = trajectory?.uuid || "";
@@ -1963,7 +1964,7 @@ function renderConfig() {
     );
     configDraft.clock ??= {
       seed: "2030-01-01T09:00:00+00:00",
-      seconds_per_call: 1,
+      tick_rate: 10,
     };
     form.append(
       field(
@@ -1972,10 +1973,10 @@ function renderConfig() {
         "wide",
       ),
       field(
-        "Synthetic seconds per tool call",
+        "Default tick rate (tokens/s)",
         input(
-          configDraft.clock.seconds_per_call,
-          (v) => (configDraft.clock.seconds_per_call = v),
+          configDraft.clock.tick_rate ?? 10,
+          (v) => (configDraft.clock.tick_rate = v),
           "number",
         ),
       ),
@@ -2043,6 +2044,14 @@ $("agent-name").oninput = () =>
   updateMetadataName("agent_name", $("agent-name").value);
 $("user-name").oninput = () =>
   updateMetadataName("user_name", $("user-name").value);
+$("tick-rate").oninput = () => {
+  try {
+    const metadata = readMetadata();
+    metadata.synthetic_clock = {...(metadata.synthetic_clock || {}), tick_rate: Number($("tick-rate").value)};
+    $("metadata-json").value = JSON.stringify(metadata, null, 2);
+    updateMetadata();
+  } catch (e) { $("metadata-status").textContent = e.message; }
+};
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
 allowDrop(

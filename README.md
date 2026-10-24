@@ -440,7 +440,8 @@ available.
 
 ## Tools and sandbox state
 
-The sandbox is an initially empty dictionary owned by tools. Each tool lives in
+The sandbox is a tool-owned dictionary initialized with the trajectory tick rate
+(default 10 tokens/s). Each tool lives in
 its own module under `trajectory_remix/tools/` and defines a name, JSON argument
 schema, and `run(args, state, windows) -> (output, is_done, modified_state)`.
 The compiler runs unfinished calls every tick, caches state only on reported
@@ -481,7 +482,7 @@ or invisible executions. Frame and sandbox API responses keep `sandbox` and
 `tool_calls` separate so tool-owned keys never collide with scheduler metadata.
 
 The built-in selection also includes a `simpleeval` calculator, reproducible
-random draws, tick timers and synthetic-clock alarms, virtual file watchers,
+random draws, second-based timers and synthetic-clock alarms, virtual file watchers,
 and simulated system diagnostics. Invisible `system_diagnostics_set` and
 `hardware_load_set` events configure diagnostics and extra file-operation ticks.
 See [additional simulation tools](docs/SANDBOX.md#additional-simulation-tools)

@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ._protocol import ToolError, tool_failure
 from .runtime import execution_context
+from ._clock import now, anchor
 
 STORES = ("files", "memory", "notes", "skills", "artifacts", "conversations")
 
@@ -19,14 +20,17 @@ class BuiltinState:
         self,
         seed="2030-01-01T09:00:00+00:00",
         seconds_per_call=1,
+        tick_rate=10,
         max_calls=64,
         max_bytes=2_000_000,
         *,
         random_seed=None,
     ):
-        self.clock = datetime.fromisoformat(seed)
-        if self.clock.tzinfo is None:
-            self.clock = self.clock.replace(tzinfo=UTC)
+        self._clock = datetime.fromisoformat(seed)
+        if self._clock.tzinfo is None:
+            self._clock = self._clock.replace(tzinfo=UTC)
+        self.clock_tick = 0
+        self.tick_rate = tick_rate
         if (
             type(seconds_per_call) not in (int, float)
             or not math.isfinite(seconds_per_call)
@@ -40,10 +44,30 @@ class BuiltinState:
             setattr(self, name, {})
         self.closed = False
 
+    @property
+    def clock(self):
+        return now(
+            {
+                "clock": self._clock.isoformat(),
+                "clock_timezone": getattr(self._clock.tzinfo, "key", None),
+                "clock_tick": self.clock_tick,
+                "tick_rate": self.tick_rate,
+            },
+            execution_context.get(),
+        )
+
+    @clock.setter
+    def clock(self, value):
+        self._clock = value
+        self.clock_tick = execution_context.get().tick
+
     def snapshot(self):
         return {
-            "clock": self.clock.isoformat(),
-            "clock_timezone": getattr(self.clock.tzinfo, "key", None),
+            "clock": self._clock.isoformat(),
+            "clock_timezone": getattr(self._clock.tzinfo, "key", None),
+            "clock_unix": self._clock.timestamp(),
+            "clock_tick": self.clock_tick,
+            "tick_rate": self.tick_rate,
             "random_seed": self.random_seed,
             "calls": self.calls,
             **{name: getattr(self, name) for name in STORES},
@@ -51,11 +75,13 @@ class BuiltinState:
 
     def restore(self, state):
         """Restore a compiler-produced snapshot when extending a trajectory."""
-        self.clock = datetime.fromisoformat(state["clock"])
+        self._clock = datetime.fromisoformat(state["clock"])
         if state.get("clock_timezone"):
-            self.clock = self.clock.astimezone(ZoneInfo(state["clock_timezone"]))
+            self._clock = self._clock.astimezone(ZoneInfo(state["clock_timezone"]))
+        self.clock_tick = state.get("clock_tick", 0)
+        self.tick_rate = state.get("tick_rate", self.tick_rate)
         self.random_seed = state.get("random_seed", self.random_seed)
-        self.calls = state["calls"]
+        self.calls = state.get("calls", 0)
         for name in STORES:
             setattr(self, name, state.get(name, {}))
 
@@ -286,7 +312,6 @@ def run_builtin(args, state, windows, operation, *, modifies=False):
     try:
         if not context.invisible:
             runtime.calls += 1
-            runtime.advance_clock(runtime.step)
         result = operation(runtime, args, windows)
         output = {"ok": True, "result": result}
     except (ToolError, ValueError, OverflowError) as error:
@@ -302,6 +327,10 @@ def load_state(state):
     runtime = BuiltinState(
         **context.clock, random_seed=context.seed, max_bytes=context.max_bytes
     )
+    runtime.tick_rate = state.get("tick_rate", runtime.tick_rate)
     if "clock" in state:
         runtime.restore(state)
+    elif "clock_unix" in state:
+        value, _ = anchor(state, context.clock)
+        runtime.restore({**state, "clock": value.isoformat()})
     return runtime

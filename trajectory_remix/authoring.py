@@ -1221,9 +1221,7 @@ class TrajectoryCommands:
         self,
         session_id: str | None = None,
         clock_seed: str | None = None,
-        seconds_per_call: (
-            Annotated[float, Field(ge=0, le=31_536_000, allow_inf_nan=False)] | None
-        ) = None,
+        tick_rate: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = None,
         max_calls: Annotated[int, Field(ge=1, le=256)] | None = None,
         max_bytes: Annotated[int, Field(ge=128, le=2_000_000)] = 2_000_000,
     ):
@@ -1242,11 +1240,7 @@ class TrajectoryCommands:
                 if clock_seed is not None
                 else clock.get("seed", "2030-01-01T09:00:00+00:00")
             ),
-            "seconds_per_call": (
-                seconds_per_call
-                if seconds_per_call is not None
-                else clock.get("seconds_per_call", 1)
-            ),
+            "tick_rate": tick_rate if tick_rate is not None else clock.get("tick_rate", 10),
             "max_calls": (
                 max_calls
                 if max_calls is not None

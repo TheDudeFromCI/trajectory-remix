@@ -4,9 +4,10 @@ import hashlib
 from .runtime import execution_context
 from ._support import load_state
 from ._simulation import result, failure
+from ._clock import unix_time, now, elapsed_seconds
 
 name = "file_watch"
-description = "Watch a virtual path for created, modified, or deleted content. Emits matching changes and finishes after count matches (default 1), or timeout_ticks (default 1000). Observes completed file changes once per logical tick, not host files."
+description = "Watch a virtual path for created, modified, or deleted content. Emits matching changes and finishes after count matches (default 1), or timeout_seconds (default 100 simulated seconds; timeout_ticks is an explicit alternative). Observes completed file changes once per logical tick, not host files."
 schema = {
     "type": "object",
     "properties": {
@@ -20,6 +21,7 @@ schema = {
         },
         "count": {"type": "integer", "minimum": 1, "maximum": 1024},
         "timeout_ticks": {"type": "integer", "minimum": 0, "maximum": 99999},
+        "timeout_seconds": {"type": "number", "minimum": 0},
     },
     "required": ["path"],
     "additionalProperties": False,
@@ -44,7 +46,12 @@ def run(args, state, windows):
     entry = watchers.get(context.call_id)
     modified = False
     if entry is None:
-        entry = {"version": version, "matches": 0}
+        entry = {
+            "version": version,
+            "matches": 0,
+            "started_unix": unix_time(state, context),
+            "started_iso": now(state, context).isoformat(),
+        }
         state.setdefault("file_watchers", {})[context.call_id] = entry
         watchers = state["file_watchers"]
         modified = True
@@ -71,9 +78,13 @@ def run(args, state, windows):
             "tick": context.tick,
         }
         done = entry["matches"] >= args.get("count", 1)
-    timed_out = not done and context.elapsed - context.duration >= args.get(
-        "timeout_ticks", 1000
-    )
+    if "timeout_ticks" in args:
+        expired = context.elapsed - context.duration >= args["timeout_ticks"]
+    else:
+        expired = elapsed_seconds(
+            entry["started_iso"], state, context
+        ) + 1e-6 >= args.get("timeout_seconds", 100)
+    timed_out = not done and expired
     if done or timed_out:
         del watchers[context.call_id]
         if not watchers:

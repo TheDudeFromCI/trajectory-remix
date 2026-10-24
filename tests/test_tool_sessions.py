@@ -58,7 +58,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
         "create_tool_session",
         session_id="tools",
         clock_seed="2031-01-01T00:00:00Z",
-        seconds_per_call=2,
+        tick_rate=10,
     )
     await call(studio, "create_tool_session", session_id="other")
     definitions = (await call(studio, "list_simulated_tools", session_id="tools"))[
@@ -112,7 +112,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     clock = await tool(studio, "time_now", {})
     assert clock["interaction"]["outcome"]["result"]["synthetic"]
     state = await call(studio, "get_tool_session", session_id="tools")
-    assert state["calls"] == 12 and state["state"]["clock"] == "2031-01-01T00:00:24+00:00"
+    assert state["calls"] == 12 and state["state"]["clock"] == "2031-01-01T00:00:00+00:00"
     assert (
         state["state"]["files"] == {}
         and state["state"]["memory"]["one"] == "Remix tools"
@@ -313,7 +313,7 @@ async def test_recorded_marker_and_control_token_text_stays_literal(studio):
     [
         {"max_calls": 257},
         {"max_bytes": 2_000_001},
-        {"seconds_per_call": -1},
+        {"tick_rate": 0},
         {"clock_seed": "not-a-date"},
         {"session_id": ""},
         {"subagent_endpoint": "missing"},
@@ -454,7 +454,7 @@ async def test_invalid_authored_outcomes_use_the_standard_tool_failure_protocol(
     assert response.status_code == 200
     assert not response.json()["interaction"]["outcome"]["ok"]
     session = await call(studio, "get_tool_session", session_id="tools")
-    assert session["calls"] == 1 and session["state"] == {}
+    assert session["calls"] == 1 and session["state"] == {"tick_rate": 10}
 
 
 

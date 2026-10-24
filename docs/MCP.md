@@ -534,7 +534,7 @@ availability. Create a workbench with `create_tool_session`, for example:
 {
   "session_id": "experiment",
   "clock_seed": "2030-01-01T09:00:00Z",
-  "seconds_per_call": 1,
+  "tick_rate": 10,
   "max_calls": 64
 }
 ```
@@ -561,10 +561,11 @@ Without `record_sample_id`, the call changes only the workbench. The response
 contains an interaction ID, the actual arguments, outcome and synthetic clock.
 `outcome.ok: false` represents an actual simulated failure (for example a missing
 file) and may also be recorded. Invalid arguments are rejected before execution.
-Every dispatched call, including reads and failed operations, consumes one call
-and advances synthetic time by `seconds_per_call`; `time_advance` additionally
-advances by its requested seconds. Source inspection with `get_tool_session`
-does not advance time or consume calls. `time_set` replaces the clock with supplied
+Every dispatched workbench call consumes call budget and advances the workbench's
+logical tick (one tick for instant calls). Simulated elapsed seconds are derived
+from that tick and `tick_rate` (default 10 tokens/s), never from call count.
+`time_advance` additionally shifts the synthetic anchor by its requested seconds.
+Source inspection with `get_tool_session` does not advance ticks or consume calls. `time_set` replaces the clock with supplied
 local date/time fields, randomizing explicit nulls deterministically. All seven
 fields are required; see [synthetic time rules](SANDBOX.md#setting-synthetic-time).
 
@@ -690,7 +691,7 @@ stored metadata but are not grouped as scalar values.
 
 ## Generic tool protocol
 
-The sandbox is now an opaque, initially empty dictionary. `get_sandbox_state`,
+The sandbox is an opaque dictionary initialized with tick_rate (default 10 tokens/s). `get_sandbox_state`,
 `preview_snapshots`, and `/api/samples/{index}/sandbox/{tick}` keep `sandbox` and
 `tool_calls` separate. No store or clock key is guaranteed to exist. All tools
 use the same per-tick run protocol; unfinished tools can emit output and mutate

@@ -359,10 +359,15 @@ class ToolRegistry:
         return tool
 
     def run_tick(self, name, args, state, windows, context):
+        tool = self.check_visibility(name, context.invisible)
+        from ._clock import initialize
+
+        initialized = "tick_rate" not in state
+        initialize(state, context.clock)
         token = execution_context.set(context)
         try:
             result = invoke(
-                self.check_visibility(name, context.invisible),
+                tool,
                 args,
                 state,
                 windows,
@@ -379,7 +384,7 @@ class ToolRegistry:
                 or type(modified) is not bool
             ):
                 raise ToolError(f"{name}: expected (str, bool, bool) from run")
-            return output, done, modified
+            return output, done, modified or initialized
         finally:
             execution_context.reset(token)
 
@@ -395,7 +400,7 @@ def default_registry():
 
 
 class Sandbox:
-    """Workbench/generation adapter. The sandbox itself is only an initially empty dict."""
+    """Workbench/generation adapter. The sandbox is a dict initialized with the trajectory tick rate."""
 
     def __init__(
         self,
@@ -406,6 +411,7 @@ class Sandbox:
         *,
         random_seed=None,
         registry=None,
+        tick_rate=10,
     ):
         import math
 
@@ -417,8 +423,12 @@ class Sandbox:
         ):
             raise ToolError("seconds_per_call must be finite and nonnegative")
         self.state = {}
+        from ._clock import initialize
+
+        initialize(self.state, {"tick_rate": tick_rate})
+        self.tick = 0
         self.registry = registry or default_registry()
-        self.options = {"seed": seed, "seconds_per_call": seconds_per_call}
+        self.options = {"seed": seed, "tick_rate": tick_rate}
         self.random_seed = seed if random_seed is None else random_seed
         self.step = seconds_per_call
         self.max_calls, self.max_bytes, self.calls = max_calls, max_bytes, 0
@@ -426,7 +436,11 @@ class Sandbox:
 
     @property
     def clock(self):
-        return datetime.fromisoformat(self.state.get("clock", self.options["seed"]))
+        from ._clock import now
+
+        return now(
+            self.state, ExecutionContext(tick=max(0, self.tick - 1), clock=self.options)
+        )
 
     def __getattr__(self, key):
         if key in ("files", "memory", "notes", "skills", "artifacts", "conversations"):
@@ -436,8 +450,9 @@ class Sandbox:
     def snapshot(self):
         return copy.deepcopy(self.state)
 
-    def restore(self, state):
+    def restore(self, state, *, tick=None):
         self.state = copy.deepcopy(state)
+        self.tick = state.get("clock_tick", -1) + 1 if tick is None else tick
 
     def close(self):
         self.state.clear()
@@ -470,7 +485,8 @@ class Sandbox:
         if windows is None:
             windows = [WindowProperties("chat", "chat", "")] if chat_open else []
         output = []
-        for tick in range(100_000):
+        start = self.tick
+        for tick in range(start, start + 100_000):
             text, done, _ = self.registry.run_tick(
                 name,
                 args,
@@ -478,7 +494,8 @@ class Sandbox:
                 windows,
                 ExecutionContext(
                     tick=tick,
-                    call_id=f"standalone-{self.calls}",
+                    start=start,
+                    call_id=f"standalone-{start}",
                     invisible=invisible,
                     clock=self.options,
                     seed=self.random_seed,
@@ -491,6 +508,7 @@ class Sandbox:
             )
             output.append(text)
             if done:
+                self.tick = tick + 1
                 text = "".join(output)
                 try:
                     value = json.loads(text)

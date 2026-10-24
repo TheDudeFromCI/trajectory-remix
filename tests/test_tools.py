@@ -34,10 +34,10 @@ async def test_allowlist_and_argument_validation():
 
 async def test_fake_clock():
     s = Sandbox(seed="2030-01-01T00:00:00Z", seconds_per_call=2)
-    assert (await s.call("time_now", {}))["timestamp"] == "2030-01-01T00:00:02+00:00"
+    assert (await s.call("time_now", {}))["timestamp"] == "2030-01-01T00:00:00+00:00"
     assert (await s.call("time_advance", {"seconds": 8}, invisible=True))[
         "timestamp"
-    ] == "2030-01-01T00:00:10+00:00"
+    ] == "2030-01-01T00:00:08.100000+00:00"
 
 
 async def test_rag_notes_and_skills():

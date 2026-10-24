@@ -82,7 +82,7 @@ def test_all_stores_clock_errors_and_sample_isolation(compiler, sample):
     assert state["memory"] == {"k": "remember"}
     assert state["notes"]["n"]["status"] == "doing"
     assert state["skills"] == {"s": "inspect"}
-    assert state["clock"] == "2030-01-01T00:00:13+00:00"
+    assert state["clock"] == "2030-01-01T00:00:05.100000+00:00"
     assert state["calls"] == 4
     assert state["files"] == {}
     sample["replay"].pop("1")

@@ -191,7 +191,7 @@ async def test_invisible_mcp_edits_are_atomic_undoable_and_saved(studio, tmp_pat
     assert "window" not in scheduled["tool_call"]
     assert (await call(studio, "get_sandbox_state", sample_id="test", tick=99))[
         "sandbox"
-    ] == {}
+    ] == {"tick_rate": 10}
     assert (await call(studio, "get_sandbox_state", sample_id="test", tick=100))[
         "sandbox"
     ]["files"] == {"/subagent.py": "provided by coder"}

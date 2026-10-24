@@ -69,7 +69,7 @@ def test_alarm_is_restored_after_timeout_and_success(monkeypatch):
     registry.tools["hanging"] = replace(
         registry.get("hanging"), run=lambda args, state, windows: ("done", True, False)
     )
-    assert registry.run_tick("hanging", {}, {}, [], ExecutionContext()) == (
+    assert registry.run_tick("hanging", {}, {"tick_rate": 10}, [], ExecutionContext()) == (
         "done",
         True,
         False,
@@ -93,12 +93,12 @@ def run(args, state, windows):
     registry = ToolRegistry(tmp_path)
     monkeypatch.setattr(_timeout, "RUN_TIMEOUT_SECONDS", 0.5)
     children = {child.pid for child in multiprocessing.active_children()}
-    state, windows = {"original": True}, [WindowProperties("a", "document", "original")]
+    state, windows = {"tick_rate": 10, "original": True}, [WindowProperties("a", "document", "original")]
     started = time.monotonic()
     with pytest.raises(ToolError, match="exceeded 0.5 seconds at tick 7"):
         registry.run_tick("hanging", {}, state, windows, ExecutionContext(tick=7))
     assert time.monotonic() - started < 3
-    assert state == {"original": True} and windows[0].content == "original"
+    assert state == {"tick_rate": 10, "original": True} and windows[0].content == "original"
     assert {child.pid for child in multiprocessing.active_children()} == children
 
 
@@ -114,7 +114,7 @@ def test_threaded_execution_uses_worker_and_preserves_state_and_windows():
         assert pool.submit(
             registry.run_tick, "hanging", {}, state, windows, ExecutionContext()
         ).result(timeout=10) == ("done", True, True)
-    assert state == {"result": 1} and windows[0].content == "text updated"
+    assert state == {"tick_rate": 10, "result": 1} and windows[0].content == "text updated"
 
 
 def test_custom_worker_preserves_execution_context(tmp_path):
@@ -132,4 +132,4 @@ def run(args, state, windows):
     assert registry.run_tick(
         "context_tool", {}, state, [], ExecutionContext(tick=8)
     ) == ("done", True, True)
-    assert state == {"tick": 8}
+    assert state == {"tick_rate": 10, "tick": 8}

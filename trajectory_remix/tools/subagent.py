@@ -69,7 +69,6 @@ def run(args, state, windows):
         modified = True
         if not context.invisible:
             runtime.calls += 1
-            runtime.advance_clock(runtime.step)
         result = runtime.finish_subagent(cid, outcome)
         state.update(runtime.snapshot())
         modified = True
