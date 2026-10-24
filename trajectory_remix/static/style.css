@@ -259,13 +259,6 @@ header {
   width: 100%;
   margin-bottom: 7px;
 }
-.sidebar-footer {
-  margin-top: auto;
-  padding-top: 7px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .metadata-panel {
   flex: 0 1 auto;
   max-height: 45%;
@@ -282,11 +275,14 @@ header {
   display: grid;
   gap: 6px;
 }
-.metadata-panel label, .metadata-panel summary, #metadata-status {
+.metadata-panel label,
+.metadata-panel summary,
+#metadata-status {
   font-size: 11px;
   color: var(--muted);
 }
-.metadata-panel input, .metadata-panel textarea {
+.metadata-panel input,
+.metadata-panel textarea {
   width: 100%;
   min-width: 0;
 }
@@ -305,10 +301,6 @@ header {
 #metadata-status {
   display: block;
   margin-top: 6px;
-  overflow-wrap: anywhere;
-}
-.sidebar-footer small {
-  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 #sample-list {
@@ -819,6 +811,7 @@ h2 {
 }
 .event-card {
   border: 1px solid var(--border);
+  border-left-width: 3px;
   border-radius: 8px;
   background: var(--panel);
   padding: 7px;
@@ -828,21 +821,81 @@ h2 {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
-.event-header input {
+.event-header input,
+.event-header select {
   width: 145px;
+  min-width: 0;
+}
+.event-header .event-toggle {
+  padding: 0 6px;
+  border: none;
+  background: none;
+}
+.event-card.collapsed .event-summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .event-header .event-window {
   flex: 1;
-  min-width: 100px;
+  min-width: 0;
+}
+.event-header button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .event-header .event-delete {
   margin-left: auto;
 }
+.event-header .event-delete,
 .event-header .event-add-below {
-  border-color: var(--accent);
+  font-weight: 700;
+}
+.event-header .event-add-below {
+  border: none;
   color: var(--accent);
+}
+.event-grip {
+  cursor: grab;
+  color: var(--muted);
+  padding: 0 4px;
+  user-select: none;
+}
+.event-card.selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.event-group {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  margin-bottom: 6px;
+}
+.event-group-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.event-group-header .event-delete {
+  margin-left: auto;
+}
+.event-group-body {
+  margin-top: 6px;
+  padding-left: 14px;
+}
+.event-group-empty {
+  color: var(--muted);
+}
+.drop-before {
+  box-shadow: 0 -3px 0 var(--accent);
+}
+.drop-after {
+  box-shadow: 0 3px 0 var(--accent);
+}
+.drop-into {
+  border-color: var(--accent);
 }
 .event-card textarea {
   width: 100%;
@@ -1116,5 +1169,15 @@ dialog::backdrop {
   }
 }
 
-.sample-pagination { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px; font-size: 11px; }
-.sample-pagination button { padding: 5px 8px; font-size: 11px; }
+.sample-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px;
+  font-size: 11px;
+}
+.sample-pagination button {
+  padding: 5px 8px;
+  font-size: 11px;
+}

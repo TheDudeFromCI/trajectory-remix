@@ -15,7 +15,6 @@
           <button id="file-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">File</button>
           <div id="file-menu" class="file-menu-popup" role="menu" hidden>
             <button id="import-button" role="menuitem">Import</button>
-            <button id="file-save" role="menuitem">Save</button>
           </div>
         </div>
         <div class="file-menu">
@@ -87,9 +86,6 @@
           </fieldset>
           <small id="metadata-status" role="status">Select a trajectory to edit its metadata.</small>
         </section>
-        <div class="sidebar-footer">
-          <small id="save-status">Unsaved session</small>
-        </div>
       </aside>
       <main>
         <section id="replay-view" class="view replay-view">
@@ -194,6 +190,7 @@
                 min="0"
                 step="0.01" /></label
             ><button id="add-event">+ Add event</button>
+            <button id="add-group">+ Group</button>
             <button id="add-tool-call">+ Tool call</button>
             <button id="add-invisible-call">+ External activity</button>
           </div>
@@ -266,22 +263,10 @@
           />
           <span>seconds</span>
         </div>
-        <label class="preferences-toggle" for="autosave-enabled">
-          <input id="autosave-enabled" type="checkbox" />
-          Autosave project
+        <label class="preferences-toggle" for="show-window-headers">
+          <input id="show-window-headers" type="checkbox" />
+          Show window headers in replay
         </label>
-        <label class="preferences-label" for="autosave-minutes">Save every</label>
-        <div class="preferences-delay">
-          <input
-            id="autosave-minutes"
-            type="number"
-            min="1"
-            max="120"
-            step="1"
-            required
-          />
-          <span>minutes</span>
-        </div>
         <div class="dialog-footer">
           <button id="cancel-preferences" type="button">Cancel</button>
           <button class="primary" type="submit">Save preferences</button>

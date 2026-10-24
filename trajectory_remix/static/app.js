@@ -1,14 +1,13 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
-const AUTOSAVE_ENABLED_KEY = "trajectory-remix.autosave-enabled";
-const AUTOSAVE_MINUTES_KEY = "trajectory-remix.autosave-minutes";
+const SHOW_HEADERS_KEY = "trajectory-remix.show-window-headers";
 const SAMPLE_PAGE_SIZE = 100;
-let sampleOffset = 0, searchTimer;
+let sampleOffset = 0,
+  searchTimer;
 let state,
   selected = -1,
   sample = null,
-  savedRevision = null,
   plan = null,
   tick = 0,
   dirty = false,
@@ -21,13 +20,9 @@ let configDraft,
   eventDraft = [],
   toastTimer,
   compileTimer,
-  compileWaiters = [],
-  autosaveTimer,
-  autosaveBusy = false,
   editRevision = 0,
   autoCompileDelayMs = loadAutoCompileDelay(),
-  autosaveEnabled = loadAutosaveEnabled(),
-  autosaveMinutes = loadAutosaveMinutes(),
+  showWindowHeaders = loadShowWindowHeaders(),
   pollBusy = false,
   compileBusy = false,
   sampleRevision = null;
@@ -107,42 +102,12 @@ function loadAutoCompileDelay() {
     return 1000;
   }
 }
-function loadAutosaveEnabled() {
+function loadShowWindowHeaders() {
   try {
-    return localStorage.getItem(AUTOSAVE_ENABLED_KEY) !== "false";
+    return localStorage.getItem(SHOW_HEADERS_KEY) === "true";
   } catch {
-    return true;
+    return false;
   }
-}
-function loadAutosaveMinutes() {
-  try {
-    const saved = Number(localStorage.getItem(AUTOSAVE_MINUTES_KEY));
-    return Number.isInteger(saved) && saved >= 1 && saved <= 120 ? saved : 5;
-  } catch {
-    return 5;
-  }
-}
-function scheduleAutosave() {
-  clearInterval(autosaveTimer);
-  autosaveTimer = null;
-  if (!autosaveEnabled) return;
-  autosaveTimer = setInterval(
-    action(async () => {
-      if (
-        autosaveBusy ||
-        !state ||
-        (!hasPendingChanges() && state.revision === savedRevision)
-      )
-        return;
-      autosaveBusy = true;
-      try {
-        await saveSession();
-      } finally {
-        autosaveBusy = false;
-      }
-    }),
-    autosaveMinutes * 60_000,
-  );
 }
 function scheduleCompile() {
   clearTimeout(compileTimer);
@@ -201,22 +166,26 @@ async function refresh(initial = false) {
   pollBusy = true;
   try {
     const params = new URLSearchParams({
-      offset: String(sampleOffset), limit: String(SAMPLE_PAGE_SIZE),
+      offset: String(sampleOffset),
+      limit: String(SAMPLE_PAGE_SIZE),
       query: $("sample-search").value,
     });
     if (sample?.id) params.set("selected_id", sample.id);
     const next = await json("state?" + params);
     if (next.total > 0 && sampleOffset >= next.total) {
-      sampleOffset = Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
+      sampleOffset =
+        Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
     }
-    const changed = !state || next.revision !== state.revision || next.offset !== state.offset || next.query !== state.query;
-    if (Number.isInteger(next.status.last_saved_revision))
-      savedRevision = next.status.last_saved_revision;
-    else if (savedRevision === null) savedRevision = next.revision;
+    const changed =
+      !state ||
+      next.revision !== state.revision ||
+      next.offset !== state.offset ||
+      next.query !== state.query;
     state = next;
     renderStatus();
     if (changed || initial) renderSamples();
-    if (initial && state.samples.length) await selectSample(state.samples[0].index, true);
+    if (initial && state.samples.length)
+      await selectSample(state.samples[0].index, true);
     if (
       !initial &&
       sample &&
@@ -224,9 +193,11 @@ async function refresh(initial = false) {
       !compileBusy &&
       !hasPendingChanges()
     ) {
-      const current = state.samples.find((s) => s.id === sample.id) ||
+      const current =
+        state.samples.find((s) => s.id === sample.id) ||
         (Number.isInteger(next.selected_index) && next.selected_index >= 0
-          ? { index: next.selected_index } : null);
+          ? { index: next.selected_index }
+          : null);
       if (current) await selectSample(current.index, true);
       else {
         selected = -1;
@@ -235,7 +206,10 @@ async function refresh(initial = false) {
         renderReplay();
       }
     }
-    if (selected >= (state.sample_count ?? state.samples.length) && !hasPendingChanges()) {
+    if (
+      selected >= (state.sample_count ?? state.samples.length) &&
+      !hasPendingChanges()
+    ) {
       selected = -1;
       sample = null;
       plan = null;
@@ -271,12 +245,6 @@ function renderStatus() {
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
-  const unsaved = hasPendingChanges() || state.revision !== savedRevision;
-  $("save-status").textContent = unsaved
-    ? "Unsaved changes"
-    : s.last_saved
-      ? `Saved ${new Date(s.last_saved).toLocaleTimeString()}`
-      : "Not saved yet";
   $("selected-tags").replaceChildren(
     ...(state.config.tags || []).map((t) => node("span", "tag", t)),
   );
@@ -312,28 +280,27 @@ function renderSamples() {
   $("sample-page-prev").disabled = sampleOffset === 0;
   $("sample-page-next").disabled = sampleOffset + SAMPLE_PAGE_SIZE >= total;
   $("sample-list").replaceChildren(
-    ...state.samples
-      .map((s) => {
-        const b = button(
+    ...state.samples.map((s) => {
+      const b = button(
+        "",
+        action(() => selectSample(s.index)),
+      );
+      b.className = "sample-item" + (s.index === selected ? " active" : "");
+      const title = node("strong");
+      title.append(
+        node("span", "item-num", String(s.index + 1).padStart(3, "0")),
+        document.createTextNode(s.id),
+      );
+      b.append(
+        title,
+        node(
+          "small",
           "",
-          action(() => selectSample(s.index)),
-        );
-        b.className = "sample-item" + (s.index === selected ? " active" : "");
-        const title = node("strong");
-        title.append(
-          node("span", "item-num", String(s.index + 1).padStart(3, "0")),
-          document.createTextNode(s.id),
-        );
-        b.append(
-          title,
-          node(
-            "small",
-            "",
-            `${s.events} events${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
-          ),
-        );
-        return b;
-      }),
+          `${s.events} events${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
+        ),
+      );
+      return b;
+    }),
   );
 }
 async function selectSample(index, force = false) {
@@ -418,7 +385,6 @@ async function compileSample(persist = true) {
   } finally {
     compileBusy = false;
     renderHistoryActions();
-    for (const resolve of compileWaiters.splice(0)) resolve();
   }
 }
 function setTick(value) {
@@ -475,10 +441,16 @@ function renderReplay() {
     head.append(
       dot,
       node("strong", "", w.id),
-      node("small", "", `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`),
+      node(
+        "small",
+        "",
+        `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`,
+      ),
     );
     const data = currentFrame?.windows?.[w.id];
-    const content = data?.text || "";
+    let content = data?.text || "";
+    if (!showWindowHeaders)
+      content = content.replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
     card.append(
       head,
       windowContent(content || (unopened ? "Not opened yet." : "No content.")),
@@ -552,7 +524,14 @@ function renderSandbox() {
     );
     $("sandbox-calls").append(row);
   }
-  for (const name of ["files", "memory", "notes", "skills", "artifacts", "conversations"]) {
+  for (const name of [
+    "files",
+    "memory",
+    "notes",
+    "skills",
+    "artifacts",
+    "conversations",
+  ]) {
     const group = node("details", "sandbox-store");
     group.open = name === "files";
     const entries = Object.entries(sandbox[name]);
@@ -734,10 +713,34 @@ function validEventShape() {
 function loadEvents() {
   if (!sample) return;
   eventDraft = [];
+  eventGroups = [];
+  selectedEvents.clear();
   for (const [key, events] of Object.entries(sample.replay || {})) {
     if (!Array.isArray(events)) continue;
     events.forEach((e) => eventDraft.push({ key, event: structuredClone(e) }));
   }
+  const saved = sample.metadata?.event_groups;
+  const savedColors = sample.metadata?.window_colors;
+  windowColors =
+    savedColors &&
+    typeof savedColors === "object" &&
+    !Array.isArray(savedColors)
+      ? { ...savedColors }
+      : {};
+  if (Array.isArray(sample.metadata?.collapsed_events))
+    for (const k of sample.metadata.collapsed_events)
+      if (eventDraft[k]) collapsedEvents.add(eventDraft[k]);
+  if (Array.isArray(saved))
+    for (const g of saved) {
+      if (!g || typeof g.id !== "string") continue;
+      eventGroups.push({
+        id: g.id,
+        name: String(g.name ?? ""),
+        collapsed: !!g.collapsed,
+      });
+      for (const k of Array.isArray(g.events) ? g.events : [])
+        if (eventDraft[k] && !eventDraft[k].group) eventDraft[k].group = g.id;
+    }
   $("sample-id").value = sample.id || "";
   $("noop-weight").value =
     sample.defaults?.["implicit-noop-loss-weight"] ?? 0.1;
@@ -750,14 +753,20 @@ function readMetadata() {
   return metadata;
 }
 function showMetadataNames(metadata) {
-  $("agent-name").value = typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
-  $("user-name").value = typeof metadata?.user_name === "string" ? metadata.user_name : "";
+  $("agent-name").value =
+    typeof metadata?.agent_name === "string" ? metadata.agent_name : "";
+  $("user-name").value =
+    typeof metadata?.user_name === "string" ? metadata.user_name : "";
 }
 function loadMetadata(trajectory) {
   $("trajectory-uuid").value = trajectory?.uuid || "";
   $("metadata-fields").disabled = !trajectory;
   $("metadata-json").setCustomValidity("");
-  $("metadata-json").value = JSON.stringify(trajectory?.metadata ?? {}, null, 2);
+  $("metadata-json").value = JSON.stringify(
+    trajectory?.metadata ?? {},
+    null,
+    2,
+  );
   showMetadataNames(trajectory?.metadata);
   $("metadata-status").textContent = trajectory
     ? "Defaults to Kidra and User when left blank."
@@ -835,14 +844,274 @@ function checkbox(value, onChange) {
   n.onchange = () => onChange(n.checked);
   return n;
 }
+const collapsedEvents = new WeakSet();
+// Window id -> color, kept so event borders match even before a compile.
+let windowColors = {};
+// Groups are editor-only; they are not saved into the sample.
+let eventGroups = [];
+const selectedEvents = new Set();
+let dragItems = [];
+let dragGroup = null;
+function insertMoved(moving, groupId, after) {
+  const idx = eventDraft.flatMap((it, k) => (it.group === groupId ? [k] : []));
+  const at = !idx.length
+    ? eventDraft.length
+    : after
+      ? idx[idx.length - 1] + 1
+      : idx[0];
+  eventDraft.splice(at, 0, ...moving);
+}
+function normalizeGroups() {
+  const out = [],
+    done = new Set();
+  for (const item of eventDraft) {
+    if (!item.group) out.push(item);
+    else if (!done.has(item.group)) {
+      done.add(item.group);
+      out.push(...eventDraft.filter((it) => it.group === item.group));
+    }
+  }
+  eventDraft = out;
+}
+function takeDragged() {
+  const moving = eventDraft.filter((it) => dragItems.includes(it));
+  eventDraft = eventDraft.filter((it) => !dragItems.includes(it));
+  return moving;
+}
+function dropOnEvent(target, after) {
+  if (dragItems.includes(target)) return;
+  const moving = takeDragged();
+  if (dragGroup) {
+    if (target.group) insertMoved(moving, target.group, after);
+    else
+      eventDraft.splice(
+        eventDraft.indexOf(target) + (after ? 1 : 0),
+        0,
+        ...moving,
+      );
+    return finishDrop();
+  }
+  moving.forEach((it) => (it.group = target.group));
+  eventDraft.splice(eventDraft.indexOf(target) + (after ? 1 : 0), 0, ...moving);
+  finishDrop();
+}
+function dropGroupOnGroup(group, after) {
+  if (group === dragGroup) return;
+  const moving = takeDragged();
+  insertMoved(moving, group.id, after);
+  finishDrop();
+}
+function dropOnGroup(group) {
+  const moving = takeDragged();
+  moving.forEach((it) => (it.group = group.id));
+  let at = eventDraft.length;
+  for (let k = eventDraft.length - 1; k >= 0; k--)
+    if (eventDraft[k].group === group.id) {
+      at = k + 1;
+      break;
+    }
+  eventDraft.splice(at, 0, ...moving);
+  group.collapsed = false;
+  finishDrop();
+}
+function dropOnRoot() {
+  const moving = takeDragged();
+  if (!dragGroup) moving.forEach((it) => delete it.group);
+  eventDraft.push(...moving);
+  finishDrop();
+}
+function finishDrop() {
+  dragItems = [];
+  dragGroup = null;
+  selectedEvents.clear();
+  setDirty();
+  renderEvents();
+}
+function clearDropMarks() {
+  document
+    .querySelectorAll(".drop-before, .drop-after, .drop-into")
+    .forEach((n) =>
+      n.classList.remove("drop-before", "drop-after", "drop-into"),
+    );
+}
+function allowDrop(el, onDrop, mark) {
+  el.addEventListener("dragover", (ev) => {
+    if (!dragItems.length) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    clearDropMarks();
+    const cls = mark(ev);
+    if (cls) el.classList.add(cls);
+  });
+  el.addEventListener("drop", (ev) => {
+    if (!dragItems.length) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    clearDropMarks();
+    onDrop(ev);
+  });
+}
+function renderGroup(group, cards) {
+  const members = eventDraft.filter((it) => it.group === group.id);
+  const box = node(
+    "div",
+    "event-group" + (group.collapsed ? " collapsed" : ""),
+  );
+  const head = node("div", "event-group-header");
+  const toggle = button(
+    group.collapsed ? "▸" : "▾",
+    () => {
+      group.collapsed = !group.collapsed;
+      setDirty();
+      renderEvents();
+    },
+    "event-toggle",
+  );
+  toggle.title = group.collapsed ? "Expand group" : "Collapse group";
+  const name = input(group.name, (v) => {
+    group.name = v;
+    setDirty();
+  });
+  name.placeholder = "Group name";
+  const grip = node("span", "event-grip", "⠇");
+  grip.draggable = true;
+  grip.title = "Drag to move group";
+  grip.ondragstart = (ev) => {
+    dragGroup = group;
+    dragItems = [...members];
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", "");
+    ev.dataTransfer.setDragImage(box, 0, 0);
+  };
+  grip.ondragend = () => {
+    dragGroup = null;
+    dragItems = [];
+    clearDropMarks();
+  };
+  head.append(
+    toggle,
+    grip,
+    name,
+    node(
+      "small",
+      "",
+      `${members.length} event${members.length === 1 ? "" : "s"}`,
+    ),
+    button(
+      "Ungroup",
+      () => {
+        members.forEach((it) => delete it.group);
+        eventGroups = eventGroups.filter((g) => g !== group);
+        setDirty();
+        renderEvents();
+      },
+      "event-delete",
+    ),
+  );
+  box.append(head);
+  if (!group.collapsed) {
+    const body = node("div", "event-group-body");
+    if (!members.length)
+      body.append(node("small", "event-group-empty", "Drag events here"));
+    members.forEach((it) => body.append(cards.get(it)));
+    box.append(body);
+  }
+  allowDrop(
+    box,
+    (ev) =>
+      dragGroup
+        ? dropGroupOnGroup(group, isLowerHalf(ev, box))
+        : dropOnGroup(group),
+    (ev) =>
+      dragGroup
+        ? isLowerHalf(ev, box)
+          ? "drop-after"
+          : "drop-before"
+        : "drop-into",
+  );
+  return box;
+}
 function renderEvents() {
-  $("event-list").replaceChildren(
-    ...eventDraft.map((item, i) => {
+  normalizeGroups();
+  plan?.windows.forEach(
+    (w, i) => (windowColors[w.id] = colors[i % colors.length]),
+  );
+  const cards = new Map();
+  eventDraft.forEach((item, i) => cards.set(item, buildEventCard(item, i)));
+  const out = [],
+    shown = new Set();
+  for (const item of eventDraft) {
+    const group = eventGroups.find((g) => g.id === item.group);
+    if (!group) out.push(cards.get(item));
+    else if (!shown.has(group)) {
+      shown.add(group);
+      out.push(renderGroup(group, cards));
+    }
+  }
+  for (const g of eventGroups)
+    if (!shown.has(g)) out.push(renderGroup(g, cards));
+  $("event-list").replaceChildren(...out);
+}
+function buildEventCard(item, i) {
+  {
+    {
       const e = item.event,
         card = node("div", "event-card"),
         head = node("div", "event-header");
       const update = () => setDirty();
-      head.append(node("small", "", String(i + 1).padStart(2, "0")));
+      const winColor = windowColors[e.window];
+      if (winColor) card.style.borderLeftColor = winColor;
+      const collapsed = collapsedEvents.has(item);
+      const toggle = button(
+        collapsed ? "▸" : "▾",
+        () => {
+          if (collapsed) collapsedEvents.delete(item);
+          else collapsedEvents.add(item);
+          setDirty();
+          renderEvents();
+        },
+        "event-toggle",
+      );
+      toggle.title = collapsed ? "Expand event" : "Collapse event";
+      const grip = node("span", "event-grip", "⠇");
+      grip.draggable = true;
+      grip.title = "Drag to move; click to select";
+      card.classList.toggle("selected", selectedEvents.has(item));
+      grip.onclick = () => {
+        if (selectedEvents.has(item)) selectedEvents.delete(item);
+        else selectedEvents.add(item);
+        card.classList.toggle("selected", selectedEvents.has(item));
+      };
+      grip.ondragstart = (ev) => {
+        dragItems = selectedEvents.has(item) ? [...selectedEvents] : [item];
+        ev.dataTransfer.effectAllowed = "move";
+        ev.dataTransfer.setData("text/plain", "");
+        ev.dataTransfer.setDragImage(card, 0, 0);
+      };
+      grip.ondragend = () => {
+        dragItems = [];
+        clearDropMarks();
+      };
+      allowDrop(
+        card,
+        (ev) => dropOnEvent(item, isLowerHalf(ev, card)),
+        (ev) => (isLowerHalf(ev, card) ? "drop-after" : "drop-before"),
+      );
+      if (collapsed) {
+        card.classList.add("collapsed");
+        head.append(
+          toggle,
+          grip,
+          node(
+            "small",
+            "event-summary",
+            `${item.key} · ${e.op}${e.window ? " · " + e.window : ""}`,
+          ),
+        );
+        card.append(head);
+        return card;
+      }
+      head.append(toggle, grip);
       const at = input(item.key, (v) => {
         item.key = v;
         update();
@@ -850,46 +1119,73 @@ function renderEvents() {
       at.title = "Absolute tick or anchor expression";
       head.append(
         at,
-        select(["open", "append", "generate", "tool-call", "invisible-tool-call"], e.op, (v) => {
-          e.op = v;
-          if (v === "open" || v === "tool-call" || v === "invisible-tool-call") {
-            delete e.content;
-            delete e.segments;
-            delete e.loss;
-            delete e.delivery;
-            delete e["tokens-per-tick"];
-            delete e.source;
-            if (v === "tool-call" || v === "invisible-tool-call") {
-              e.tool ??= "file_list";
-              e.arguments ??= {};
-              e["duration-ticks"] ??= 0;
+        select(
+          ["open", "append", "generate", "tool-call", "invisible-tool-call"],
+          e.op,
+          (v) => {
+            e.op = v;
+            if (
+              v === "open" ||
+              v === "tool-call" ||
+              v === "invisible-tool-call"
+            ) {
+              delete e.content;
+              delete e.segments;
+              delete e.loss;
+              delete e.delivery;
+              delete e["tokens-per-tick"];
+              delete e.source;
+              if (v === "tool-call" || v === "invisible-tool-call") {
+                e.tool ??= "file_list";
+                e.arguments ??= {};
+                e["duration-ticks"] ??= 0;
+              }
+            } else {
+              if (!e.segments) e.content ??= "";
+              e.loss ??= { mask: "auto" };
+              if (v === "append") e.source ??= "tool";
             }
-          } else {
-            if (!e.segments) e.content ??= "";
-            e.loss ??= { mask: "auto" };
-            if (v === "append") e.source ??= "tool";
-          }
-          if (v === "invisible-tool-call") {
-            for (const key of ["window", "window-type", "request-id", "caused-by", "outcome", "result-anchor"])
-              delete e[key];
-            if (!["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance", "time_set"].includes(e.tool)) {
-              e.tool = "file_write";
-              e.arguments = {path: "/example.txt", content: ""};
+            if (v === "invisible-tool-call") {
+              for (const key of [
+                "window",
+                "window-type",
+                "request-id",
+                "caused-by",
+                "outcome",
+                "result-anchor",
+              ])
+                delete e[key];
+              if (
+                ![
+                  "file_write",
+                  "file_patch",
+                  "file_delete",
+                  "memory_save",
+                  "note_save",
+                  "note_delete",
+                  "skill_save",
+                  "time_advance",
+                  "time_set",
+                ].includes(e.tool)
+              ) {
+                e.tool = "file_write";
+                e.arguments = { path: "/example.txt", content: "" };
+              }
+            } else e.window ||= "new-window";
+            if (v !== "tool-call" && v !== "invisible-tool-call") {
+              for (const key of [
+                "tool",
+                "arguments",
+                "duration-ticks",
+                "outcome",
+                "result-anchor",
+              ])
+                delete e[key];
             }
-          } else e.window ||= "new-window";
-          if (v !== "tool-call" && v !== "invisible-tool-call") {
-            for (const key of [
-              "tool",
-              "arguments",
-              "duration-ticks",
-              "outcome",
-              "result-anchor",
-            ])
-              delete e[key];
-          }
-          update();
-          renderEvents();
-        }),
+            update();
+            renderEvents();
+          },
+        ),
       );
       const win = input(e.window || "", (v) => {
         e.window = v;
@@ -898,55 +1194,39 @@ function renderEvents() {
       win.className = "event-window";
       win.hidden = e.op === "invisible-tool-call";
       win.placeholder = e.op === "tool-call" ? "Tool window ID" : "Window ID";
-      head.append(
-        win,
-        button("↑", () => {
-          if (i) {
-            [eventDraft[i - 1], eventDraft[i]] = [
-              eventDraft[i],
-              eventDraft[i - 1],
-            ];
-            update();
-            renderEvents();
-          }
-        }),
-        button("↓", () => {
-          if (i < eventDraft.length - 1) {
-            [eventDraft[i + 1], eventDraft[i]] = [
-              eventDraft[i],
-              eventDraft[i + 1],
-            ];
-            update();
-            renderEvents();
-          }
-        }),
-        button(
-          "Remove",
-          () => {
-            eventDraft.splice(i, 1);
-            update();
-            renderEvents();
-          },
-          "danger-text event-delete",
-        ),
-        button(
-          "+ Add Event Below",
-          () => {
-            eventDraft.splice(i + 1, 0, {
-              key: item.key,
-              event: {
-                op: "generate",
-                window: "new-window",
-                content: "",
-                loss: { mask: "auto", weight: 1 },
-              },
-            });
-            update();
-            renderEvents();
-          },
-          "event-add-below",
-        ),
+      const removeButton = button(
+        "X",
+        () => {
+          selectedEvents.delete(item);
+          eventDraft.splice(i, 1);
+          update();
+          renderEvents();
+        },
+        "danger-text event-delete",
       );
+      removeButton.title = "Remove event";
+      removeButton.setAttribute("aria-label", "Remove event");
+      const addBelowButton = button(
+        "+",
+        () => {
+          eventDraft.splice(i + 1, 0, {
+            key: item.key,
+            group: item.group,
+            event: {
+              op: "generate",
+              window: "new-window",
+              content: "",
+              loss: { mask: "auto", weight: 1 },
+            },
+          });
+          update();
+          renderEvents();
+        },
+        "event-add-below",
+      );
+      addBelowButton.title = "Add event below";
+      addBelowButton.setAttribute("aria-label", "Add event below");
+      head.append(win, removeButton, addBelowButton);
       card.append(head);
       if (e.op === "open") {
         const options = node("div", "event-options");
@@ -963,8 +1243,23 @@ function renderEvents() {
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
         const invisible = e.op === "invisible-tool-call";
-        const schemas = (state.tools || []).map((s) => s.function).filter((s) =>
-          !invisible || ["file_write", "file_patch", "file_delete", "memory_save", "note_save", "note_delete", "skill_save", "time_advance", "time_set"].includes(s.name));
+        const schemas = (state.tools || [])
+          .map((s) => s.function)
+          .filter(
+            (s) =>
+              !invisible ||
+              [
+                "file_write",
+                "file_patch",
+                "file_delete",
+                "memory_save",
+                "note_save",
+                "note_delete",
+                "skill_save",
+                "time_advance",
+                "time_set",
+              ].includes(s.name),
+          );
         options.append(
           field(
             "Tool",
@@ -973,12 +1268,16 @@ function renderEvents() {
               e.tool,
               (value) => {
                 e.tool = value;
-                const parameters = schemas.find((s) => s.name === value).parameters;
+                const parameters = schemas.find(
+                  (s) => s.name === value,
+                ).parameters;
                 e.arguments = Object.fromEntries(
                   parameters.required.map((key) => [
                     key,
-                    parameters.properties[key].type.includes("null") ? null :
-                      parameters.properties[key].enum?.[0] ?? (parameters.properties[key].type === "number" ? 0 : ""),
+                    parameters.properties[key].type.includes("null")
+                      ? null
+                      : parameters.properties[key].enum?.[0] ??
+                        (parameters.properties[key].type === "number" ? 0 : ""),
                   ]),
                 );
                 delete e.outcome;
@@ -1045,11 +1344,22 @@ function renderEvents() {
           options.append(field("Result tokens per tick", rate));
         }
         if (invisible) {
-          options.append(field("External source", input(e.source || "external", (value) => {
-            e.source = value;
-            update();
-          })));
-          card.append(node("p", "segmented-note", "External sandbox activity. No model tokens or windows are created."));
+          options.append(
+            field(
+              "External source",
+              input(e.source || "external", (value) => {
+                e.source = value;
+                update();
+              }),
+            ),
+          );
+          card.append(
+            node(
+              "p",
+              "segmented-note",
+              "External sandbox activity. No model tokens or windows are created.",
+            ),
+          );
         }
         card.append(options);
         if ("result-anchor" in e) {
@@ -1057,7 +1367,11 @@ function renderEvents() {
         }
         if (e.segments) {
           card.append(
-            node("div", "segmented-note", "Edit request segments and loss masks in Source JSON."),
+            node(
+              "div",
+              "segmented-note",
+              "Edit request segments and loss masks in Source JSON.",
+            ),
           );
         } else if ("content" in e) {
           const area = node("textarea");
@@ -1123,7 +1437,9 @@ function renderEvents() {
           const markers = node(
             "div",
             "event-marker",
-            (e.content?.match(/\{(?:N_TICKS?|WINDOW)[^}]*\}/g) || []).join(" · "),
+            (e.content?.match(/\{(?:N_TICKS?|WINDOW)[^}]*\}/g) || []).join(
+              " · ",
+            ),
           );
           card.append(markers);
         }
@@ -1192,16 +1508,48 @@ function renderEvents() {
         card.append(options);
       }
       return card;
-    }),
-  );
+    }
+  }
+}
+function isLowerHalf(ev, el) {
+  const r = el.getBoundingClientRect();
+  return ev.clientY > r.top + r.height / 2;
 }
 function sampleFromEvents() {
-  const replay = {};
-  for (const item of eventDraft) (replay[item.key] ??= []).push(item.event);
+  const replay = {},
+    byKey = {};
+  for (const item of eventDraft) {
+    (replay[item.key] ??= []).push(item.event);
+    (byKey[item.key] ??= []).push(item);
+  }
+  // Group members are saved as indices in replay iteration order, matching loadEvents.
+  const ordered = Object.keys(replay).flatMap((k) => byKey[k]);
+  let metadata = readMetadata();
+  {
+    delete metadata.collapsed_events;
+    delete metadata.window_colors;
+    const collapsedIdx = ordered.flatMap((it, k) =>
+      collapsedEvents.has(it) ? [k] : [],
+    );
+    if (collapsedIdx.length) metadata.collapsed_events = collapsedIdx;
+    const used = Object.fromEntries(
+      ordered
+        .filter((it) => windowColors[it.event.window])
+        .map((it) => [it.event.window, windowColors[it.event.window]]),
+    );
+    if (Object.keys(used).length) metadata.window_colors = used;
+    delete metadata.event_groups;
+    if (eventGroups.length)
+      metadata.event_groups = eventGroups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        collapsed: g.collapsed,
+        events: ordered.flatMap((it, k) => (it.group === g.id ? [k] : [])),
+      }));
+  }
   return {
     ...sample,
-    ...(sample && ("metadata" in sample || $("metadata-json").value !== "{}")
-      ? { metadata: readMetadata() } : {}),
+    metadata,
     id: $("sample-id").value,
     defaults: {
       ...sample.defaults,
@@ -1656,7 +2004,10 @@ async function saveConfig() {
 $("sample-search").oninput = () => {
   clearTimeout(searchTimer);
   sampleOffset = 0;
-  searchTimer = setTimeout(action(() => refresh()), 200);
+  searchTimer = setTimeout(
+    action(() => refresh()),
+    200,
+  );
 };
 $("sample-page-prev").onclick = action(async () => {
   sampleOffset = Math.max(0, sampleOffset - SAMPLE_PAGE_SIZE);
@@ -1679,7 +2030,10 @@ $("file-input").onchange = action(async (e) => {
   e.target.value = "";
   await refresh();
   if (state.samples.length)
-    await selectSample(Math.max(0, (state.sample_count ?? state.samples.length) - 1), true);
+    await selectSample(
+      Math.max(0, (state.sample_count ?? state.samples.length) - 1),
+      true,
+    );
   toast("Samples imported.");
 });
 $("new-sample").onclick = action(async () => {
@@ -1698,10 +2052,26 @@ $("sample-json").oninput = () => {
   setDirty();
 };
 $("metadata-json").oninput = updateMetadata;
-$("agent-name").oninput = () => updateMetadataName("agent_name", $("agent-name").value);
-$("user-name").oninput = () => updateMetadataName("user_name", $("user-name").value);
+$("agent-name").oninput = () =>
+  updateMetadataName("agent_name", $("agent-name").value);
+$("user-name").oninput = () =>
+  updateMetadataName("user_name", $("user-name").value);
 $("sample-id").oninput = () => setDirty();
 $("noop-weight").oninput = () => setDirty();
+allowDrop(
+  $("event-list"),
+  () => dropOnRoot(),
+  () => "",
+);
+$("add-group").onclick = () => {
+  eventGroups.push({
+    id: `g${Date.now().toString(36)}${eventGroups.length}`,
+    name: "Group",
+    collapsed: false,
+  });
+  setDirty();
+  renderEvents();
+};
 $("add-event").onclick = () => {
   eventDraft.push({
     key: String(plan ? plan.max_tick + 1 : 0),
@@ -1732,10 +2102,15 @@ $("add-tool-call").onclick = () => {
 };
 $("add-invisible-call").onclick = () => {
   if (!sample) return;
-  eventDraft.push({key: String(tick), event: {
-    op: "invisible-tool-call", tool: "file_write",
-    arguments: {path: "/example.txt", content: ""}, source: "external",
-  }});
+  eventDraft.push({
+    key: String(tick),
+    event: {
+      op: "invisible-tool-call",
+      tool: "file_write",
+      arguments: { path: "/example.txt", content: "" },
+      source: "external",
+    },
+  });
   setDirty();
   renderEvents();
 };
@@ -1752,7 +2127,10 @@ $("duplicate").onclick = action(async () => {
 $("delete-sample").onclick = action(async () => {
   if (selected < 0) return;
   if (!confirm("Delete this sample from the dataset?")) return;
-  await json(`samples/${selected}?expected_revision=${sampleRevision}`, "DELETE");
+  await json(
+    `samples/${selected}?expected_revision=${sampleRevision}`,
+    "DELETE",
+  );
   selected = -1;
   sample = null;
   plan = null;
@@ -1763,15 +2141,6 @@ $("delete-sample").onclick = action(async () => {
     renderReplay();
   }
 });
-async function saveSession() {
-  while (compileBusy)
-    await new Promise((resolve) => compileWaiters.push(resolve));
-  if (hasPendingChanges()) await compileSample(true);
-  const result = await json("checkpoint", "POST");
-  savedRevision = result.revision;
-  await refresh();
-  toast("Dataset saved.");
-}
 async function changeHistory(direction) {
   if (compileBusy)
     throw new Error("Wait for the current compilation to finish.");
@@ -1835,13 +2204,8 @@ $("edit-menu-button").onclick = () => toggleMenu("edit");
 $("preferences-button").onclick = () => {
   closeMenus();
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
-  $("autosave-enabled").checked = autosaveEnabled;
-  $("autosave-minutes").value = String(autosaveMinutes);
-  $("autosave-minutes").disabled = !autosaveEnabled;
+  $("show-window-headers").checked = showWindowHeaders;
   $("preferences-dialog").showModal();
-};
-$("autosave-enabled").onchange = () => {
-  $("autosave-minutes").disabled = !$("autosave-enabled").checked;
 };
 $("close-preferences").onclick = () => $("preferences-dialog").close();
 $("cancel-preferences").onclick = () => $("preferences-dialog").close();
@@ -1851,28 +2215,11 @@ $("preferences-form").onsubmit = action(async (event) => {
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0.1 || delaySeconds > 60)
     throw new Error("Compile delay must be between 0.1 and 60 seconds.");
   const delayMs = Math.round(delaySeconds * 1000);
-  const autosaveEnabledValue = $("autosave-enabled").checked;
-  const autosaveMinutesValue = Number($("autosave-minutes").value);
-  if (
-    autosaveEnabledValue &&
-    (!Number.isInteger(autosaveMinutesValue) ||
-      autosaveMinutesValue < 1 ||
-      autosaveMinutesValue > 120)
-  )
-    throw new Error("Autosave interval must be between 1 and 120 minutes.");
-  const nextAutosaveMinutes =
-    Number.isInteger(autosaveMinutesValue) &&
-    autosaveMinutesValue >= 1 &&
-    autosaveMinutesValue <= 120
-      ? autosaveMinutesValue
-      : autosaveMinutes;
   localStorage.setItem(AUTO_COMPILE_DELAY_KEY, String(delayMs));
-  localStorage.setItem(AUTOSAVE_ENABLED_KEY, String(autosaveEnabledValue));
-  localStorage.setItem(AUTOSAVE_MINUTES_KEY, String(nextAutosaveMinutes));
   autoCompileDelayMs = delayMs;
-  autosaveEnabled = autosaveEnabledValue;
-  autosaveMinutes = nextAutosaveMinutes;
-  scheduleAutosave();
+  showWindowHeaders = $("show-window-headers").checked;
+  localStorage.setItem(SHOW_HEADERS_KEY, String(showWindowHeaders));
+  renderReplay();
   if (compileTimer !== null) scheduleCompile();
   $("preferences-dialog").close();
 });
@@ -1881,10 +2228,6 @@ for (const name of ["file", "edit"])
     const anyOpen = !$("file-menu").hidden || !$("edit-menu").hidden;
     if ($(name + "-menu").hidden && anyOpen) toggleMenu(name);
   };
-$("file-save").onclick = action(async () => {
-  closeMenus();
-  await saveSession();
-});
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".file-menu")) closeMenus();
 });
@@ -2056,7 +2399,6 @@ $("download-export").onclick = action(async () => {
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    $("file-save").click();
     return;
   }
   if (e.key === "Escape") closeMenus();
@@ -2091,7 +2433,6 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 await action(() => refresh(true))();
-scheduleAutosave();
 setInterval(
   () =>
     action(async () => {

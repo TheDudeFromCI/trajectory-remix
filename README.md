@@ -144,8 +144,8 @@ examples, validation options and limits.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
-6. **Save** (Ctrl+S) applies pending browser edits and reports a checkpoint.
-   Applied edits and accepted generated trajectories already commit to SQLite.
+6. Browser drafts are committed to SQLite automatically after the compile delay;
+  applied edits and accepted generated trajectories are durable immediately.
 7. **Export tokens** exports the selected sample or whole dataset as chunked
    token JSONL. Every selected sample must compile before export begins.
 

@@ -71,7 +71,16 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
-assert.match($("window-grid").textContent, /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/);
+assert.doesNotMatch($("window-grid").textContent, /<\|cxt\|>/);
+await click("preferences-button");
+assert.equal($("show-window-headers").checked, false);
+$("show-window-headers").checked = true;
+await $("preferences-form").onsubmit({ preventDefault() {} });
+assert.equal(w.localStorage.getItem("trajectory-remix.show-window-headers"), "true");
+assert.match(
+  $("window-grid").textContent,
+  /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
+);
 assert.match($("window-grid").textContent, /slot \d+/);
 assert.equal($("sample-title"), null);
 assert.equal(w.document.querySelector(".tabbar"), null);
@@ -84,37 +93,60 @@ assert.equal(
 );
 assert.equal($("timeline").closest("main"), w.document.querySelector("main"));
 assert.equal(w.document.title, "Trajectory Remix");
-assert.equal($("metadata-panel").closest(".sidebar"), w.document.querySelector(".sidebar"));
+assert.equal(
+  $("metadata-panel").closest(".sidebar"),
+  w.document.querySelector(".sidebar"),
+);
 assert.equal($("metadata-fields").disabled, false);
 assert.equal($("trajectory-uuid").readOnly, true);
-assert.equal($("trajectory-uuid").value, JSON.parse($("sample-json").value).uuid);
+assert.equal(
+  $("trajectory-uuid").value,
+  JSON.parse($("sample-json").value).uuid,
+);
 const initialMetadata = JSON.parse($("metadata-json").value);
 $("agent-name").value = "Nova";
 $("agent-name").oninput();
 $("user-name").value = "Alex";
 $("user-name").oninput();
-await [...w.document.querySelectorAll(".tab")].find((b) => b.dataset.view === "json").onclick();
+await [...w.document.querySelectorAll(".tab")]
+  .find((b) => b.dataset.view === "json")
+  .onclick();
 let metadataDraft = JSON.parse($("sample-json").value);
-assert.deepEqual(metadataDraft.metadata, { ...initialMetadata, agent_name: "Nova", user_name: "Alex" });
+assert.deepEqual(metadataDraft.metadata, {
+  ...initialMetadata,
+  agent_name: "Nova",
+  user_name: "Alex",
+});
 metadataDraft.metadata.custom = { nested: [1, "kept"] };
 $("sample-json").value = JSON.stringify(metadataDraft);
 $("sample-json").oninput();
-assert.deepEqual(JSON.parse($("metadata-json").value).custom, { nested: [1, "kept"] });
+assert.deepEqual(JSON.parse($("metadata-json").value).custom, {
+  nested: [1, "kept"],
+});
 $("user-name").value = "Sam";
 $("user-name").oninput();
 assert.equal(JSON.parse($("sample-json").value).metadata.user_name, "Sam");
-await click("file-save");
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 await click("undo-edit");
 assert.equal($("agent-name").value, initialMetadata.agent_name || "");
 await click("redo-edit");
 assert.equal($("agent-name").value, "Nova");
 assert.equal($("user-name").value, "Sam");
-assert.deepEqual(JSON.parse($("metadata-json").value).custom, { nested: [1, "kept"] });
-await [...w.document.querySelectorAll(".tab")].find((b) => b.dataset.view === "events").onclick();
+assert.deepEqual(JSON.parse($("metadata-json").value).custom, {
+  nested: [1, "kept"],
+});
+await [...w.document.querySelectorAll(".tab")]
+  .find((b) => b.dataset.view === "events")
+  .onclick();
 $("metadata-json").value = "[]";
 $("metadata-json").oninput();
 assert.match($("metadata-status").textContent, /JSON object/);
-$("metadata-json").value = JSON.stringify({ ...initialMetadata, agent_name: "Nova", user_name: "Sam", custom: { nested: [1, "kept"] } });
+$("metadata-json").value = JSON.stringify({
+  ...initialMetadata,
+  agent_name: "Nova",
+  user_name: "Sam",
+  custom: { nested: [1, "kept"] },
+});
 $("metadata-json").oninput();
 $("tick-number").value = "60";
 $("tick-number").onchange({ target: $("tick-number") });
@@ -138,6 +170,12 @@ assert(eventCount >= 10);
 assert.equal($("replay-view").hidden, false);
 const firstEvent = w.document.querySelector(".event-card");
 const firstEventKey = firstEvent.querySelector(".event-header input").value;
+assert.equal(firstEvent.querySelector(".event-delete").textContent, "X");
+assert.equal(
+  firstEvent.querySelector(".event-delete").getAttribute("aria-label"),
+  "Remove event",
+);
+assert.equal(firstEvent.querySelector(".event-add-below").textContent, "+");
 await firstEvent.querySelector(".event-add-below").onclick();
 const eventCards = w.document.querySelectorAll(".event-card");
 assert.equal(eventCards.length, eventCount + 1);
@@ -213,10 +251,12 @@ await w.document.querySelector('[data-config="automatic"]').onclick();
 assert.match($("config-content").textContent, /Consecutive failure limit/);
 await click("save-config");
 await click("close-settings");
-assert($("file-save").textContent === "Save");
+assert.equal($("file-save"), null);
 assert.equal($("file-save-as"), null);
 assert.equal($("load-dataset"), null);
 assert.equal($("checkpoint"), null);
+assert.equal($("autosave-enabled"), null);
+assert.equal($("autosave-minutes"), null);
 assert.equal(w.document.querySelector("header .brand"), null);
 assert.equal(
   [...w.document.querySelectorAll("header .menu-trigger, header .menu-label")]
@@ -237,31 +277,15 @@ assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 3);
 await click("preferences-button");
 assert($("preferences-dialog").hasAttribute("open"));
 assert.equal($("auto-compile-delay").value, "1");
-assert.equal($("autosave-enabled").checked, true);
-assert.equal($("autosave-minutes").value, "5");
 $("auto-compile-delay").value = "0.2";
-$("autosave-minutes").value = "2";
 await $("preferences-form").onsubmit({ preventDefault() {} });
 assert.equal($("preferences-dialog").hasAttribute("open"), false);
 assert.equal(
   w.localStorage.getItem("trajectory-remix.auto-compile-delay"),
   "200",
 );
-assert.equal(
-  w.localStorage.getItem("trajectory-remix.autosave-enabled"),
-  "true",
-);
-assert.equal(w.localStorage.getItem("trajectory-remix.autosave-minutes"), "2");
 await click("preferences-button");
-assert.equal($("autosave-minutes").value, "2");
-$("autosave-enabled").checked = false;
-$("autosave-enabled").onchange();
-assert.equal($("autosave-minutes").disabled, true);
 await $("preferences-form").onsubmit({ preventDefault() {} });
-assert.equal(
-  w.localStorage.getItem("trajectory-remix.autosave-enabled"),
-  "false",
-);
 const compileCountBeforePreference = compileCount();
 $("sample-json").oninput();
 await waitFor(() => compileCount() > compileCountBeforePreference);
@@ -277,22 +301,17 @@ const saveShortcut = new w.KeyboardEvent("keydown", {
 });
 w.document.dispatchEvent(saveShortcut);
 assert.equal(saveShortcut.defaultPrevented, true);
-for (
-  let i = 0;
-  i < 30 && !requests.some((request) => request.path === "/api/checkpoint");
-  i++
-)
-  await new Promise((r) => setTimeout(r, 20));
-assert(requests.some((request) => request.path === "/api/checkpoint"));
-for (
-  let i = 0;
-  i < 30 &&
-  (w.document.title.startsWith("*") ||
-    !/^Saved /.test($("save-status").textContent));
-  i++
-)
-  await new Promise((r) => setTimeout(r, 20));
-assert.match($("save-status").textContent, /^Saved /);
+await waitFor(() =>
+  requests.some(
+    (request) =>
+      request.path === "/api/samples/0" && request.options?.method === "PUT",
+  ),
+);
+assert.equal(
+  requests.some((request) => request.path === "/api/checkpoint"),
+  false,
+);
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 assert.equal(w.document.title, "Trajectory Remix");
 
 // External MCP edits refresh the selected sample; pending local edits survive a conflict.
@@ -464,8 +483,10 @@ assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
 jump(0);
 await waitFor(() => /Sandbox · tick 0/.test($("sandbox-title").textContent));
 const toolWindowId = updatedToolCard.querySelector(".event-window").value;
-const findToolWindow = () => [...w.document.querySelectorAll(".window-card")]
-  .find((card) => card.querySelector("strong").textContent === toolWindowId);
+const findToolWindow = () =>
+  [...w.document.querySelectorAll(".window-card")].find(
+    (card) => card.querySelector("strong").textContent === toolWindowId,
+  );
 assert.ok(findToolWindow());
 assert.doesNotMatch(findToolWindow().className, /future/);
 const resultDelivery = updatedToolCard.querySelectorAll(".event-options select")[1];
@@ -475,19 +496,26 @@ resultDelivery.onchange();
 const customRequest = updatedToolCard.querySelector('input[type="checkbox"]');
 customRequest.checked = true;
 customRequest.onchange();
-const requestArea = w.document.querySelector('textarea[aria-label="Tool request text"]');
-requestArea.value = '<tool>{"tool":"file_write",<|noop|>"args":{"path":"history.txt","content":"new file version"}}</tool>';
+const requestArea = w.document.querySelector(
+  'textarea[aria-label="Tool request text"]',
+);
+requestArea.value =
+  '<tool>{"tool":"file_write",<|noop|>"args":{"path":"history.txt","content":"new file version"}}</tool>';
 requestArea.oninput();
 await waitFor(() => lastPlan?.events.some((event) =>
   event.path.endsWith(".request") && event.text.includes("file_write\",<|noop|>")) &&
   lastPlan.tool_calls[0].result_end > lastPlan.tool_calls[0].end &&
   Number($("max-tick").textContent) === lastPlan.max_tick);
 jump(160);
-await waitFor(() => /file_write · composing/.test($("sandbox-calls").textContent));
+await waitFor(() =>
+  /file_write · composing/.test($("sandbox-calls").textContent),
+);
 assert.doesNotMatch($("sandbox-state").textContent, /new file version/);
 assert.doesNotMatch(findToolWindow().textContent, /<tool_result>/);
 jump(Number($("max-tick").textContent));
-await waitFor(() => /file_write · completed/.test($("sandbox-calls").textContent));
+await waitFor(() =>
+  /file_write · completed/.test($("sandbox-calls").textContent),
+);
 assert.match(findToolWindow().textContent, /<tool>/);
 assert.match(findToolWindow().textContent, /<tool_result>/);
 // Auto-generated anchors persist in source and mark the full streamed result.
@@ -501,7 +529,7 @@ await waitFor(() => lastPlan?.tool_calls[0].result_anchor !== undefined);
 const resultAnchor = lastPlan.tool_calls[0].result_anchor;
 assert.equal(lastPlan.anchors[resultAnchor].tick, lastPlan.tool_calls[0].result_end);
 assert.match(currentToolCard().textContent, new RegExp(`Result complete: \\{N_TICK:${resultAnchor}\\}`));
-await click("file-save");
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 const savedSource = await (await w.fetch("/api/samples/0", {
   headers: { "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content },
 })).json();
@@ -520,32 +548,48 @@ assert([...chatSelect.options].some((o) => o.value === "chat"));
 chatSelect.value = "chat";
 chatSelect.onchange();
 chatCard = [...w.document.querySelectorAll(".event-card")].at(-1);
-const chatArgs = chatCard.querySelector('textarea[aria-label="arguments JSON"]');
+const chatArgs = chatCard.querySelector(
+  'textarea[aria-label="arguments JSON"]',
+);
 chatArgs.value = JSON.stringify({ content: "Hi, Sam!" });
 chatArgs.oninput();
-await click("file-save");
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 jump(lastPlan.tool_calls.find((call) => call.tool === "chat").end);
 await waitFor(() => /<\|msg\|>Nova: Hi, Sam!<\|\/msg\|>/.test($("window-grid").textContent));
 // External activity mutates the sandbox without creating a model window.
-const windowCountBeforeExternal = w.document.querySelectorAll(".window-card").length;
+const windowCountBeforeExternal =
+  w.document.querySelectorAll(".window-card").length;
 await click("add-invisible-call");
 const externalCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 assert.equal(externalCard.querySelector(".event-window").hidden, true);
-assert.equal(externalCard.querySelector(".event-header select").value, "invisible-tool-call");
+assert.equal(
+  externalCard.querySelector(".event-header select").value,
+  "invisible-tool-call",
+);
 assert.equal(externalCard.querySelectorAll(".event-options select").length, 1);
 const externalTick = externalCard.querySelector(".event-header input");
 externalTick.value = "1000";
 externalTick.oninput();
-const externalArgs = externalCard.querySelector('textarea[aria-label="arguments JSON"]');
-externalArgs.value = JSON.stringify({path: "external.py", content: "external implementation"});
+const externalArgs = externalCard.querySelector(
+  'textarea[aria-label="arguments JSON"]',
+);
+externalArgs.value = JSON.stringify({
+  path: "external.py",
+  content: "external implementation",
+});
 externalArgs.oninput();
-await click("file-save");
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 jump(999);
 await waitFor(() => /Sandbox · tick 999/.test($("sandbox-title").textContent));
 await waitFor(() => !/external.py/.test($("sandbox-state").textContent));
 jump(1000);
-await waitFor(() => /external implementation/.test($("sandbox-state").textContent));
-assert.equal(w.document.querySelectorAll(".window-card").length, windowCountBeforeExternal);
+await waitFor(() =>
+  /external implementation/.test($("sandbox-state").textContent),
+);
+assert.equal(
+  w.document.querySelectorAll(".window-card").length,
+  windowCountBeforeExternal,
+);
 assert.doesNotMatch($("window-grid").textContent, /external implementation/);
 assert.match($("sandbox-calls").textContent, /External · file_write · completed/);
 // time_set initializes nullable arguments and is available for external mutations.
@@ -557,7 +601,7 @@ setSelect.onchange();
 setCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 const nullTime = {year: null, month: null, day: null, hour: null, minute: null, second: null, timezone: null};
 assert.deepEqual(JSON.parse(setCard.querySelector('textarea[aria-label="arguments JSON"]').value), nullTime);
-await click("file-save");
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 const setCall = lastPlan.tool_calls.find((call) => call.tool === "time_set");
 assert.equal(setCall.outcome.ok, true);
 jump(setCall.end);
@@ -568,21 +612,24 @@ setOperation.onchange();
 setCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 assert.equal(setCard.querySelector(".event-options select").value, "time_set");
 assert.equal(setCard.querySelector(".event-window").hidden, true);
-await click("file-save");
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 assert.equal(lastPlan.tool_calls.find((call) => call.tool === "time_set").invisible, true);
 // Listings are paged in SQLite, and search reaches trajectories beyond page one.
 const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
   id: `sqlite-page-${index}`,
-  replay: { "0": [{ op: "open", window: "a" }] },
+  replay: { 0: [{ op: "open", window: "a" }] },
   metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
 }));
 const imported = await fetch(base + "/api/import", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+    "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]')
+      .content,
   },
-  body: JSON.stringify({ files: [{ name: "pages.json", text: JSON.stringify(pagedSamples) }] }),
+  body: JSON.stringify({
+    files: [{ name: "pages.json", text: JSON.stringify(pagedSamples) }],
+  }),
 });
 assert.equal(imported.status, 200, await imported.clone().text());
 $("sample-search").value = "sqlite-page-";
