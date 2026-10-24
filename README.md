@@ -452,7 +452,9 @@ separate call status. Tools can inspect open windows and modify their content;
 window names and purposes remain immutable. Invisible calls may use schema
 properties marked `invisible`, which public schemas omit. For example, an
 invisible `chat` call can supply `username` to simulate a user message.
-Visible calls, including MCP calls, reject invisible arguments.
+Visible calls, including MCP calls, reject invisible arguments. Tools may declare
+`invisible = True` to restrict the entire tool to invisible calls; these tools
+never appear in public schemas or `show_tools`, including random additions.
 
 **+ Show tools** adds a `show_tools` event. Check the tools whose public schemas
 should be appended to an open window. **Randomly add additional tools** adds a

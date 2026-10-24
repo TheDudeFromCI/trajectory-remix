@@ -165,7 +165,7 @@ class DatasetStore:
                     if isinstance(event.get("tools"), list):
                         names.update(name for name in event["tools"] if isinstance(name, str))
                     if event.get("randomly-add-additional-tools") is True:
-                        names.update(registry.tools)
+                        names.update(name for name, tool in registry.tools.items() if not tool.invisible)
         return names
 
     @staticmethod

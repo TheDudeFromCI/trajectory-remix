@@ -1207,7 +1207,7 @@ function buildEventCard(item, i) {
         card.append(options);
       } else if (e.op === "show_tools") {
         const options = node("div", "event-options show-tools-options");
-        for (const schema of state.tools || []) {
+        for (const schema of (state.tools || []).filter((s) => !s.invisible)) {
           const name = schema.function.name;
           options.append(field(name, checkbox((e.tools || []).includes(name), (checked) => {
             const selected = new Set(e.tools || []);
@@ -1225,7 +1225,7 @@ function buildEventCard(item, i) {
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
         const invisible = e.op === "invisible-tool-call";
-        const schemas = (state.tools || []).map((s) => s.function);
+        const schemas = (state.tools || []).filter((s) => invisible || !s.invisible).map((s) => s.function);
         options.append(
           field(
             "Tool",

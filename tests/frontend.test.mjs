@@ -618,6 +618,7 @@ anchorCheckbox().onchange();
 await waitFor(() => lastPlan?.tool_calls[0].result_anchor === undefined);
 // Chat is selectable as a synthetic tool and appends into the existing chat window.
 await click("add-tool-call");
+assert(![...w.document.querySelectorAll(".event-card")].at(-1).querySelector(".event-options select").querySelector('option[value="time_advance"]'));
 let chatCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 const chatTick = chatCard.querySelector(".event-header input");
 chatTick.value = "0";
@@ -763,6 +764,7 @@ await w.document.querySelector('.tab[data-view="events"]').onclick();
 await click("add-show-tools");
 let showCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 assert.equal(showCard.querySelector(".event-header select").value, "show_tools");
+assert(![...showCard.querySelectorAll("label")].some((label) => label.textContent === "time_advance"));
 const toolCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "chat").querySelector("input");
 toolCheck.checked = true;
 toolCheck.onchange();
@@ -781,7 +783,7 @@ assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 88,
+    checks: 90,
     errors,
   }),
 );

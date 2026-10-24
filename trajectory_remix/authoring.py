@@ -218,7 +218,8 @@ class TrajectoryCommands:
                 for event in group:
                     if isinstance(event, dict) and event.get("op") == "tool-call" and event.get("tool") in self.compiler.tools.tools:
                         try:
-                            reject_invisible(event.get("arguments", {}), self.compiler.tools.get(event["tool"]).schema)
+                            tool = self.compiler.tools.check_visibility(event["tool"])
+                            reject_invisible(event.get("arguments", {}), tool.schema)
                         except ValueError as error:
                             raise CommandError(str(error)) from error
         # Reject non-JSON values before changing the live session.

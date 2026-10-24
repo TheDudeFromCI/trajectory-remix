@@ -34,5 +34,5 @@ DEFINITIONS = [
             if k in s["function"]["parameters"].get("required", [])
         },
     )
-    for s in SCHEMAS
+    for s in default_registry().schemas(invisible=True)
 ]

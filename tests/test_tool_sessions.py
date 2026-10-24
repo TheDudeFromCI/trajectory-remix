@@ -109,10 +109,10 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     ] == ["audit"]
     await tool(studio, "file_delete", {"path": file_path})
     await tool(studio, "note_delete", {"key": "work"})
-    clock = await tool(studio, "time_advance", {"seconds": 10})
+    clock = await tool(studio, "time_now", {})
     assert clock["interaction"]["outcome"]["result"]["synthetic"]
     state = await call(studio, "get_tool_session", session_id="tools")
-    assert state["calls"] == 12 and state["state"]["clock"] == "2031-01-01T00:00:34+00:00"
+    assert state["calls"] == 12 and state["state"]["clock"] == "2031-01-01T00:00:24+00:00"
     assert (
         state["state"]["files"] == {}
         and state["state"]["memory"]["one"] == "Remix tools"

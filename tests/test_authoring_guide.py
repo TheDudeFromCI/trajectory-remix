@@ -17,7 +17,7 @@ async def test_guide_is_available_without_repository_or_provider_access(studio):
     definitions = (await command(studio, "list_simulated_tools"))["tools"]
     assert f"The {len(DEFINITIONS)} built-in tools" in guide
     assert all(f"`{name}`" in guide for name, _, _ in DEFINITIONS)
-    assert all(t["available"] for t in definitions)
+    assert all(t["available"] == (not t.get("invisible", False)) for t in definitions)
     assert not {"python_run", "subagent_wait", "subagent_cancel"} & {
         t["function"]["name"] for t in definitions
     }

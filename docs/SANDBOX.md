@@ -73,6 +73,14 @@ entries. The full schema remains available to the author in the editor and
 `list_simulated_tools`. A visible call that supplies an invisible argument is
 rejected, including through MCP draft-editing commands and workbench calls.
 
+Tools may also declare a module-level `invisible = True` flag (default `False`).
+These tools can only execute through `invisible-tool-call` events. They are omitted
+from model tool lists, the visible-call editor, the `show_tools` checkboxes, and
+random additional tools. Explicitly listing one in `show_tools` is a compilation
+error. Full author schemas include an `invisible` boolean so invisible-call
+editors can still discover and schedule them. Visible MCP calls and draft edits
+reject these tools as well. The built-in `time_advance` uses this flag.
+
 Any registered tool can be called invisibly. These events have no request or
 result window and produce no model tokens unless the tool writes to a window.
 They accept only `op`, `tool`, `arguments`, optional `source`, and optional

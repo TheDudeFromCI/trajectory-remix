@@ -74,7 +74,7 @@ def test_all_stores_clock_errors_and_sample_isolation(compiler, sample):
         call("memory_save", {"key": "k", "text": "remember"}, "m"),
         call("note_save", {"key": "n", "text": "work", "status": "doing"}, "n"),
         call("skill_save", {"name": "s", "content": "inspect"}, "s"),
-        call("time_advance", {"seconds": 5}, "t"),
+        {"op": "invisible-tool-call", "tool": "time_advance", "arguments": {"seconds": 5}},
         call("file_write", {"path": "../host", "content": "no"}, "error"),
     ]
     plan = compiler.compile(sample)
@@ -82,8 +82,8 @@ def test_all_stores_clock_errors_and_sample_isolation(compiler, sample):
     assert state["memory"] == {"k": "remember"}
     assert state["notes"]["n"]["status"] == "doing"
     assert state["skills"] == {"s": "inspect"}
-    assert state["clock"] == "2030-01-01T00:00:15+00:00"
-    assert state["calls"] == 5
+    assert state["clock"] == "2030-01-01T00:00:13+00:00"
+    assert state["calls"] == 4
     assert state["files"] == {}
     sample["replay"].pop("1")
     assert compiler.frame(compiler.compile(sample), 0)["sandbox"].get("memory", {}) == {}

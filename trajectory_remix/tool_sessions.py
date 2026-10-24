@@ -86,7 +86,7 @@ class ToolSessions:
             self.get(session_id)
         definitions = self.registry.schemas(invisible=True)
         for definition in definitions:
-            definition["available"] = True
+            definition["available"] = not definition.get("invisible", False)
         return {
             "tools": definitions,
             "requires_session": True,

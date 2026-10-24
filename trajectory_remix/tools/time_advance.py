@@ -4,6 +4,7 @@ from ._support import run_builtin
 from .runtime import WindowProperties
 
 name = "time_advance"
+invisible = True
 description = "Advance synthetic time without real sleeping."
 schema = {
     "type": "object",

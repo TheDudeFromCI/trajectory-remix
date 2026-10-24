@@ -252,12 +252,12 @@ class Compiler:
             raise CompileError("randomly-add-additional-tools must be a boolean", path)
         try:
             for name in selected:
-                self.tools.get(name)
+                self.tools.check_visibility(name)
         except ToolError as error:
             raise CompileError(str(error), path) from error
         if additional:
             rng = random.Random(trajectory_uuid(sample) + path)
-            candidates = sorted(set(self.tools.tools) - set(selected))
+            candidates = sorted({name for name, tool in self.tools.tools.items() if not tool.invisible} - set(selected))
             selected = selected + [name for name in candidates if rng.random() < 0.5]
         schemas = [self.tools.get(name).definition() for name in selected]
         return {"op": "append", "window": event["window"], "source": "tools",

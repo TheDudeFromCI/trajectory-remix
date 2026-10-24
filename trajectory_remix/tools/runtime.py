@@ -225,9 +225,15 @@ class Tool:
     description: str = ""
     file_hash: str = ""
     external: bool = False
+    invisible: bool = False
 
     def definition(self, invisible=False):
+        if self.invisible and not invisible:
+            raise ToolError(
+                f"Tool {self.name} is invisible-only; use invisible-tool-calls"
+            )
         return {
+            **({"invisible": self.invisible} if invisible else {}),
             "type": "function",
             "function": {
                 "name": self.name,
@@ -265,6 +271,7 @@ class ToolRegistry:
                     exec(compile(source, str(path), "exec"), module.__dict__)
                     # Spawned workers must receive dynamic modules by value.
                     import cloudpickle
+
                     cloudpickle.register_pickle_by_value(module)
                     self.register(
                         module, hashlib.sha256(source).hexdigest(), external=True
@@ -276,7 +283,10 @@ class ToolRegistry:
                     ) from error
         self.fingerprint = hashlib.sha256(
             json.dumps(
-                [(t.name, t.schema, t.file_hash) for t in self.tools.values()],
+                [
+                    (t.name, t.schema, t.file_hash, t.invisible)
+                    for t in self.tools.values()
+                ],
                 sort_keys=True,
             ).encode()
         ).hexdigest()
@@ -293,6 +303,9 @@ class ToolRegistry:
             raise ToolError(f"Duplicate tool name: {name}")
         if not isinstance(schema, dict) or schema.get("type") != "object":
             raise ToolError(f"{name}: schema must describe an object")
+        invisible = getattr(module, "invisible", False)
+        if type(invisible) is not bool:
+            raise ToolError(f"{name}: invisible must be a boolean")
         Draft202012Validator.check_schema(schema)
         if not callable(run) or inspect.iscoroutinefunction(run):
             raise ToolError(f"{name}: run must be a synchronous function")
@@ -308,6 +321,7 @@ class ToolRegistry:
             ),
             file_hash,
             external,
+            invisible,
         )
 
     def get(self, name):
@@ -316,10 +330,20 @@ class ToolRegistry:
         return self.tools[name]
 
     def schemas(self, invisible=False):
-        return [tool.definition(invisible) for tool in self.tools.values()]
+        return [
+            tool.definition(invisible)
+            for tool in self.tools.values()
+            if invisible or not tool.invisible
+        ]
+
+    def check_visibility(self, name, invisible=False):
+        tool = self.get(name)
+        if tool.invisible and not invisible:
+            raise ToolError(f"Tool {name} is invisible-only; use invisible-tool-calls")
+        return tool
 
     def validate(self, name, args, invisible=False):
-        tool = self.get(name)
+        tool = self.check_visibility(name, invisible)
         if not isinstance(args, dict):
             raise ToolError("Tool arguments must be an object")
         if not invisible:
@@ -337,7 +361,13 @@ class ToolRegistry:
     def run_tick(self, name, args, state, windows, context):
         token = execution_context.set(context)
         try:
-            result = invoke(self.get(name), args, state, windows, context)
+            result = invoke(
+                self.check_visibility(name, context.invisible),
+                args,
+                state,
+                windows,
+                context,
+            )
             if not isinstance(result, tuple) or len(result) != 3:
                 raise ToolError(
                     f"{name}: run must return (output, is_done, modified_state)"

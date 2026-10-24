@@ -24,8 +24,8 @@ async def test_set_exact_time_and_subsequent_clock_calls(zone, offset):
     result = await sandbox.call("time_set", {**LEAP_TIME, "timezone": zone})
     assert result == {"timestamp": f"2024-02-29T12:34:56{offset}", "synthetic": True}
     assert (await sandbox.call("time_now", {}))["timestamp"] == f"2024-02-29T12:34:58{offset}"
-    assert (await sandbox.call("time_advance", {"seconds": 60}))["timestamp"] == f"2024-02-29T12:36:00{offset}"
-    assert sandbox.calls == 3
+    assert (await sandbox.call("time_advance", {"seconds": 60}, invisible=True))["timestamp"] == f"2024-02-29T12:35:58{offset}"
+    assert sandbox.calls == 2
 
 
 def test_nullable_schema_requires_all_seven_fields():
@@ -133,7 +133,7 @@ async def test_named_timezone_survives_restore_and_dst_transition():
     restored.restore(sandbox.snapshot())
     restored.step = 1
     assert (await restored.call("time_now", {}))["timestamp"] == "2024-03-10T03:00:00-04:00"
-    assert await sandbox.call("time_advance", {"seconds": 1}) == {
+    assert await sandbox.call("time_advance", {"seconds": 1}, invisible=True) == {
         "timestamp": "2024-03-10T03:00:00-04:00", "synthetic": True,
     }
 
