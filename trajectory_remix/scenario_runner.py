@@ -7,7 +7,7 @@ import copy
 import hashlib
 import json
 import os
-import time
+import re
 import uuid
 from collections import deque
 from datetime import UTC, datetime
@@ -69,7 +69,7 @@ class ScenarioRunner:
         self.job = None
         self.resume_event = asyncio.Event()
         self.resume_event.set()
-        self.logs = deque(maxlen=400)
+        self.logs = deque()
         self.status = {
             "running": False,
             "paused": False,
@@ -130,18 +130,22 @@ class ScenarioRunner:
         self.logs.append(
             {
                 "time": datetime.now(UTC).isoformat(),
-                "message": self.clean(message)[:8000],
+                "message": self.clean(message),
                 "level": level,
                 "step": step,
             }
         )
         self.persist()
 
-    def start(self, name, max_parallel=1):
-        if self.status["running"] or self.legacy.status["running"]:
+    def start(self, name, max_parallel=None, *, _retry=False, _schedule=True):
+        if not _retry and (self.status["running"] or self.legacy.status["running"]):
             raise ValueError("Generation is already running")
         if name not in self.registry.scenarios:
             raise ValueError("Unknown scenario; start Remix with --scenarios-dir")
+        if max_parallel is None:
+            max_parallel = (
+                self.state["config"].get("single_generation", {}).get("max_parallel", 1)
+            )
         if type(max_parallel) is not int or not 1 <= max_parallel <= 128:
             raise ValueError("max_parallel must be an integer between 1 and 128")
         self.scenario = self.registry.scenarios[name]
@@ -160,7 +164,6 @@ class ScenarioRunner:
         check_endpoints(self.scenario.flow.steps)
         self.limit = asyncio.Semaphore(max_parallel)
         self.resume_event.set()
-        self.logs.clear()
         self.status.update(
             running=True,
             paused=False,
@@ -171,7 +174,7 @@ class ScenarioRunner:
             active=[],
             draft_id=None,
             accepted=0,
-            attempts=1,
+            attempts=self.status["attempts"] + 1,
             scenario=name,
             last_error=None,
         )
@@ -206,6 +209,10 @@ class ScenarioRunner:
             for role, profile in roles.items()
             for tag in profile["tags"].values()
         ]
+        self.status["conditions"] = {
+            "scenario": self.context["scenario"]["tags"],
+            **{role: profile["tags"] for role, profile in roles.items()},
+        }
         self.expected_draft = None
         self.snapshot = {
             "id": str(uuid.uuid4()),
@@ -217,7 +224,8 @@ class ScenarioRunner:
             "logs": [],
         }
         self.log(f"Starting {name}; maximum concurrent LLM calls: {max_parallel}")
-        self.job = asyncio.create_task(self.run())
+        if _schedule:
+            self.job = asyncio.create_task(self.run(name, max_parallel))
 
     async def gate(self):
         if not self.resume_event.is_set():
@@ -243,7 +251,34 @@ class ScenarioRunner:
             except asyncio.CancelledError:
                 pass
 
-    async def run(self):
+    async def run(self, name, max_parallel):
+        maximum = self.config.get("single_generation", {}).get("max_attempts", 3)
+        try:
+            for attempt in range(maximum):
+                await self.run_attempt()
+                if (
+                    self.status["phase"] not in ("error", "rejected")
+                    or attempt + 1 == maximum
+                ):
+                    return
+                self.status["running"] = True
+                self.log(
+                    "Attempt failed; retrying with freshly sampled conditions",
+                    "warning",
+                )
+                await asyncio.sleep(0.1)
+                await self.gate()
+                self.start(name, max_parallel, _retry=True, _schedule=False)
+        except asyncio.CancelledError:
+            self.status.update(
+                running=False, phase="cancelled", paused=False, pause_requested=False
+            )
+            self.log("Generation stopped; log retained", "warning")
+            raise
+        finally:
+            self.persist()
+
+    async def run_attempt(self):
         try:
             await self.execute(self.scenario.flow.steps, self.context)
             if not self.status["draft_id"]:
@@ -371,9 +406,12 @@ class ScenarioRunner:
                     state="failed",
                     error=type(error).__name__,
                     detail=self.clean(str(error))[:2000]
-                    if isinstance(error, ValueError)
+                    if isinstance(
+                        error, (ValueError, ProviderFailure, jsonschema.ValidationError)
+                    )
                     else "Step execution failed",
                 )
+                self.log(record["detail"], "error", path)
                 self.log(
                     f"{path}: {type(error).__name__}; attempt {attempt + 1}/{step.retries + 1}",
                     "error",
@@ -429,8 +467,7 @@ class ScenarioRunner:
                     # Injected clients use identical rendered messages and request boundaries.
                     message = await self.client.complete(endpoint, messages)
                     text = message.get("content", "")
-                    self.log(text, "output", path)
-                    result = json.loads(text) if schema else text
+
                 else:
                     key = (
                         endpoint.get("api_key")
@@ -457,7 +494,7 @@ class ScenarioRunner:
                         parameters = ModelRequestParameters(
                             output_mode="prompted" if schema else "text"
                         )
-                        text, buffer, last_log = "", "", time.monotonic()
+                        text = ""
                         async with model.request_stream(
                             [request],
                             {
@@ -477,31 +514,44 @@ class ScenarioRunner:
                                 ):
                                     chunk = event.delta.content_delta
                                 text += chunk
-                                buffer += chunk
                                 if len(text) > 4_000_000:
                                     raise ValueError("Model output exceeds 4 MB")
-                                if buffer and time.monotonic() - last_log >= 0.2:
-                                    self.log(buffer, "output", path)
-                                    buffer, last_log = "", time.monotonic()
                             if stream.get().finish_reason in (
                                 "length",
                                 "content_filter",
                             ):
-                                raise ValueError("Incomplete model output")
-                        if buffer:
-                            self.log(buffer, "output", path)
+                                self.log(
+                                    re.sub(
+                                        r"<think>.*?(?:</think>|$)",
+                                        "",
+                                        text,
+                                        flags=re.DOTALL,
+                                    ),
+                                    "output",
+                                    path,
+                                )
+                                raise ValueError(
+                                    f"Incomplete model output: {stream.get().finish_reason}; increase completion token limit if length was reached"
+                                )
                         if not text.strip():
                             raise ValueError("Model returned no text")
                         if schema and text.strip().startswith("```"):
                             text = text.strip().split("\n", 1)[1].rsplit("```", 1)[0]
-                        result = json.loads(text) if schema else text
 
+                text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+                if schema and text.startswith("```"):
+                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+                self.log(text, "output", path)
+                if schema:
+                    result = json.loads(text)
+                else:
+                    result = text
                 if schema:
                     jsonschema.validate(result, schema)
                 return result
             except (httpx.HTTPError, APIError, ModelHTTPError) as error:
                 raise ProviderFailure(
-                    f"Endpoint {step.endpoint} unavailable"
+                    f"Endpoint {step.endpoint}: {type(error).__name__}, HTTP {getattr(error, 'status_code', 'unavailable')}"
                 ) from error
             finally:
                 self.status["active"].remove(path)
@@ -687,6 +737,11 @@ class ScenarioRunner:
             self.compiler.compile(draft)
             report = await self.llm(
                 step, {**inputs, "trajectory": draft}, context, path, REPORT
+            )
+            self.log(
+                {"validation": step.level, **report},
+                "success" if report["valid"] else "error",
+                path,
             )
             metadata = draft["metadata"]
             source_hash = hashlib.sha256(

@@ -1006,7 +1006,7 @@ dialog {
 }
 dialog::backdrop {
   background: #060c15bb;
-  backdrop-filter: blur(3px);
+
 }
 .dialog-header {
   padding: 11px 13px;
@@ -1253,3 +1253,15 @@ dialog::backdrop {
 .log-warning { color: #f2c66d; }
 .log-error { color: #ff9191; }
 .log-output { color: #b8c9ec; }
+
+#generation-panel { position: fixed; inset: 8vh 5vw auto; width: 90vw; height: 70vh; max-height: 84vh; }
+#generation-panel-header { cursor: default; flex: 0 0 auto; }
+.generation-layout { display: grid; grid-template-columns: 2fr 1fr; flex: 1; min-height: 0; gap: 16px; padding: 12px; }
+.generation-log { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.log-toolbar { display: flex; gap: 8px; align-items: center; }
+.log-toolbar b { margin-right: auto; }
+#generation-panel #activity-log { flex: 1; max-height: none; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.generation-controls { overflow: auto; min-height: 0; }
+#settings-errors { color: #ff9191; white-space: pre-wrap; padding: 0 14px; }
+#config-content input[aria-invalid="true"] { border: 2px solid #ff6767; }
+@media (max-width: 650px) { .generation-layout { grid-template-columns: 1fr; grid-template-rows: 2fr 1fr; } }

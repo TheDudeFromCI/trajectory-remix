@@ -443,7 +443,7 @@ class DatasetStore:
             for position, ident, attributes, events, tags, properties, ident_uuid in rows:
                 if dashboard:
                     index = db.execute("SELECT count(*) FROM samples WHERE position < ?", (position,)).fetchone()[0] if query else offset + len(result)
-                    result.append({"index": index, "id": ident if ident is not None else "untitled", "uuid": ident_uuid, "events": events, "tags": json.loads(tags), "validation_level": properties if properties is not None else 3})
+                    result.append({"index": index, "id": ident if ident is not None else "untitled", "uuid": ident_uuid, "events": events, "tags": json.loads(tags), "validation_level": properties if properties is not None else -3})
                 else:
                     item = json.loads(attributes)
                     if properties is not None:

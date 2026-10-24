@@ -1,4 +1,4 @@
-let lastGenerationDraft = null;
+let lastGenerationDraft = null, configBaseline = null;
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
@@ -241,8 +241,6 @@ function renderStatus() {
     scenarioSelect.value = scenarioNames.includes(previous) ? previous : (scenarioNames[0] || "");
   }
   scenarioSelect.disabled = s.running;
-  $("scenario-parallel").disabled = s.running;
-  $("scenario-start").disabled = s.running || !scenarioNames.length;
   $("scenario-hint").textContent = scenarioNames.length
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
     : "Start Remix with --scenarios-dir to load scenarios.";
@@ -270,17 +268,17 @@ function renderStatus() {
     "save-config",
   ])
     $(id).disabled = s.running;
-  $("pause-run").textContent = s.paused || s.pause_requested ? "Resume" : "Pause";
-  $("pause-run").disabled = !s.running;
+  $("pause-run").textContent = !s.running ? "Start" : s.paused || s.pause_requested ? "Resume" : "Pause";
+  $("pause-run").disabled = !s.running && !scenarioNames.length;
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
   $("selected-tags").replaceChildren(
-    ...(state.config.tags || []).map((t) => node("span", "tag", t)),
+    ...Object.entries(s.conditions || {}).flatMap(([scope, tags]) => Object.entries(tags).map(([dimension, tag]) => node("span", "tag", `${scope} · ${dimension}: ${tag.name}${tag.description ? " — " + tag.description : ""}`))),
   );
+  const logBox = $("activity-log"), followLog = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
   $("activity-log").replaceChildren(
     ...state.logs
       .slice()
-      .reverse()
       .map((log) => {
         const row = node("div", "log-line log-" + (log.level || "info"));
         row.append(
@@ -290,6 +288,8 @@ function renderStatus() {
         return row;
       }),
   );
+  if (followLog) logBox.scrollTop = logBox.scrollHeight;
+  updateSettingsState();
 }
 function renderHistoryActions() {
   for (const [id, direction] of [
@@ -326,7 +326,7 @@ function renderSamples() {
         node(
           "small",
           "",
-          `${s.events} events · Validation ${s.validation_level ?? 3}${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
+          `${s.events} events · Validation ${s.validation_level ?? -3}${s.validation_level === 3 ? " · Done" : (s.validation_level ?? -3) === -3 ? " · Unfinished" : ""}${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
         ),
       );
       return b;
@@ -1613,8 +1613,64 @@ async function download(path, filename, method = "GET", body) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+function configIssues() {
+  const errors = {};
+  const range = (path, value, lo, hi, integer = false) => {
+    if (!Number.isFinite(value) || value < lo || value > hi || (integer && !Number.isInteger(value))) errors[path] = `Must be ${integer ? "an integer " : ""}between ${lo} and ${hi}.`;
+  };
+  configDraft.endpoints.forEach((ep, i) => {
+    const prefix = `endpoints.${i}.`;
+    for (const key of ["id", "model"]) if (!ep[key]?.trim()) errors[prefix + key] = "Required.";
+    if (configDraft.endpoints.some((other, j) => j !== i && other.id === ep.id)) errors[prefix + "id"] = "Endpoint IDs must be unique.";
+    try { const url = new URL(ep.base_url); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw Error(); } catch { errors[prefix + "base_url"] = "Enter an HTTP(S) URL without credentials, query, or fragment."; }
+    range(prefix + "temperature", ep.temperature, 0, 2);
+    range(prefix + "max_tokens", ep.max_tokens, 1, 65536);
+    range(prefix + "timeout", ep.timeout, 1, 600);
+  });
+  const single = configDraft.single_generation;
+  range("single_generation.max_parallel", single.max_parallel, 1, 128, true);
+  range("single_generation.max_attempts", single.max_attempts, 1, 100, true);
+  for (const [key, lo, hi] of [["max_samples",0,100000],["max_attempts",0,1000000],["autosave_every",1,10000],["regenerations",0,10],["max_consecutive_failures",1,1000],["delay_seconds",0.1,3600]]) range("automatic." + key, configDraft.automatic[key], lo, hi, key !== "delay_seconds");
+  range("max_tool_calls", configDraft.max_tool_calls, 1, 256, true);
+  range("max_tool_rounds", configDraft.max_tool_rounds, 1, 32, true);
+  return errors;
+}
+function updateSettingsState() {
+  if (!configDraft) return false;
+  const issues = configIssues();
+  for (const box of $("config-content").querySelectorAll("input")) {
+    if (!box.dataset.configPath) {
+      const label = box.closest("label")?.textContent || box.parentElement?.textContent || "";
+      const keys = {"Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Maximum new samples":"automatic.max_samples", "Maximum candidate attempts":"automatic.max_attempts", "Autosave every N accepted":"automatic.autosave_every", "Regenerations per attempt":"automatic.regenerations", "Consecutive failure limit":"automatic.max_consecutive_failures", "Delay between attempts (s)":"automatic.delay_seconds", "Tool calls per sample":"max_tool_calls", "Tool rounds per task":"max_tool_rounds"};
+      for (const [name, path] of Object.entries(keys)) if (label.includes(name)) box.dataset.configPath = path;
+    }
+    const message = issues[box.dataset.configPath] || "";
+    box.setCustomValidity(message);
+    box.setAttribute("aria-invalid", String(!!message));
+    box.title = message;
+  }
+  $("settings-errors").textContent = Object.entries(issues).map(([path, message]) => `${path}: ${message}`).join("\n");
+  const valid = !Object.keys(issues).length;
+  $("save-config").disabled = !valid || JSON.stringify(configDraft) === configBaseline || state.status.running;
+  return valid;
+}
+$("config-content").addEventListener("input", () => updateSettingsState());
+$("config-content").addEventListener("change", () => updateSettingsState());
+function generationLogText() {
+  return state.logs.map(log => `${log.time} [${log.level || "info"}]${log.step ? " " + log.step : ""}\n${log.message}`).join("\n\n");
+}
+$("copy-generation-log").onclick = action(async () => { await navigator.clipboard.writeText(generationLogText()); toast("Output copied."); });
+$("export-generation-log").onclick = () => {
+  const url = URL.createObjectURL(new Blob([generationLogText()], {type: "text/plain"}));
+  const link = node("a"); link.href = url; link.download = "generation.log"; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+};
 function openSettings() {
-  configDraft = structuredClone(state.config);
+  if (!configDraft) {
+    configDraft = structuredClone(state.config);
+    configDraft.single_generation ??= {max_parallel: 1, max_attempts: 3};
+    configBaseline = JSON.stringify(configDraft);
+  }
   $("settings-dialog").showModal();
   renderConfig();
 }
@@ -1628,6 +1684,8 @@ function renderConfig() {
   root.replaceChildren();
   const eps = configDraft.endpoints.map((e) => e.id);
   if (configTab === "endpoints") {
+    configDraft.single_generation ??= {max_parallel: 1, max_attempts: 3};
+    root.append(field("Maximum simultaneous LLM calls", Object.assign(input(configDraft.single_generation.max_parallel, v => configDraft.single_generation.max_parallel = v, "number"), {id: "scenario-parallel"})), field("Maximum attempts per single sample", input(configDraft.single_generation.max_attempts, v => configDraft.single_generation.max_attempts = v, "number")));
     root.append(
       node(
         "div",
@@ -1659,14 +1717,11 @@ function renderConfig() {
         ["temperature", "Temperature", "number"],
         ["max_tokens", "Max completion tokens", "number"],
         ["timeout", "Timeout (seconds)", "number"],
-      ])
-        form.append(
-          field(
-            label,
-            input(ep[name], (v) => (ep[name] = v), type),
-            name === "base_url" ? "wide" : "",
-          ),
-        );
+      ]) {
+        const box = input(ep[name], (v) => (ep[name] = v), type);
+        box.dataset.configPath = `endpoints.${i}.${name}`;
+        form.append(field(label, box, name === "base_url" ? "wide" : ""));
+      }
       form.append(
         field(
           "Clear stored session key",
@@ -2012,10 +2067,19 @@ function renderConfig() {
     );
     root.append(form);
   }
+  updateSettingsState();
 }
 async function saveConfig() {
-  await json("config", "PUT", { config: configDraft });
+  if (!updateSettingsState()) return;
+  try { await json("config", "PUT", { config: configDraft }); }
+  catch (error) {
+    $("settings-errors").textContent = error.message;
+    $("save-config").disabled = true;
+    throw error;
+  }
   await refresh();
+  configBaseline = JSON.stringify(configDraft);
+  updateSettingsState();
   toast("Configuration saved.");
 }
 $("sample-search").oninput = () => {
@@ -2211,26 +2275,6 @@ function openGenerationPanel() {
 }
 $("close-generation-panel").onclick = () =>
   ($("generation-panel").hidden = true);
-$("generation-panel-header").onmousedown = (e) => {
-  if (e.target.closest("button")) return;
-  const panel = $("generation-panel"),
-    r = panel.getBoundingClientRect(),
-    dx = e.clientX - r.left,
-    dy = e.clientY - r.top;
-  const move = (m) => {
-    panel.style.right = "auto";
-    panel.style.left =
-      Math.max(0, Math.min(innerWidth - 60, m.clientX - dx)) + "px";
-    panel.style.top =
-      Math.max(0, Math.min(innerHeight - 40, m.clientY - dy)) + "px";
-  };
-  const up = () => {
-    document.removeEventListener("mousemove", move);
-    document.removeEventListener("mouseup", up);
-  };
-  document.addEventListener("mousemove", move);
-  document.addEventListener("mouseup", up);
-};
 function toggleMenu(name) {
   const open = $(name + "-menu").hidden;
   closeMenus();
@@ -2457,7 +2501,7 @@ document.querySelectorAll(".resizer").forEach((handle) => {
   });
 });
 $("edit-tags").onclick = () => {
-  configTab = "conditions";
+  configTab = "endpoints";
   openSettings();
 };
 $("settings-button").onclick = () => {
@@ -2477,14 +2521,6 @@ $("generate-one").onclick = action(async () => {
   if (hasPendingChanges()) await compileSample(true);
   // Starting is explicit so the user can select a scenario and request limit.
   $("scenario-type").focus();
-});
-$("scenario-start").onclick = action(async () => {
-  if (hasPendingChanges()) await compileSample(true);
-  await json("scenarios/run", "POST", {
-    scenario: $("scenario-type").value,
-    max_parallel: Number($("scenario-parallel").value),
-  });
-  await refresh();
 });
 $("view-generation-draft").onclick = action(async () => {
   const listing = await json("state?" + new URLSearchParams({ selected_id: state.status.draft_id, limit: "1" }));
@@ -2509,10 +2545,12 @@ $("stop-run").onclick = action(async () => {
   if (selected >= 0 && !hasPendingChanges()) await selectSample(selected, true);
 });
 $("pause-run").onclick = action(async () => {
-  await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
+  if (!state.status.running) {
+    if (hasPendingChanges()) await compileSample(true);
+    await json("scenarios/run", "POST", {scenario: $("scenario-type").value});
+  } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
 });
-$("export-button").onclick = () => $("export-dialog").showModal();
 $("close-export").onclick = () => $("export-dialog").close();
 $("download-export").onclick = action(async () => {
   if (hasPendingChanges()) await compileSample(true);

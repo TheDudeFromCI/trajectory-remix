@@ -15,8 +15,8 @@ Invalid YAML, missing prompts, unknown fields, invalid schemas, unknown roles,
 unknown dependencies, and dependency cycles fail startup with an explanation.
 Restart Remix to load edited scenarios. No Python scenario scripts are executed.
 
-Open **Edit → Generation → Single Sample**, choose a scenario, set the maximum
-simultaneous LLM calls (default **1**), and select **Generate single sample**.
+Open **Edit → Generation → Single Sample**, choose a scenario, configure the maximum simultaneous LLM calls (default **1**) and retry attempts
+in Generation Settings, and select **Start**.
 Configure endpoint URLs, models, completion limits, timeouts, and credentials in
 Generation Settings first. YAML step `endpoint` values refer to these endpoint IDs;
 the example uses `generator` and `validator`. Structured model outputs use Pydantic
@@ -24,7 +24,7 @@ AI's typed model interface with prompted JSON and schema validation, so provider
 Providers must support OpenAI-compatible streaming chat completions.
 
 The nonmodal progress panel shows active step names, completed step counts, and
-colored logs: output, information, success, warning, and error. Total steps expand
+colored chronological logs: complete output blocks, information, success, warning, and error. Internal model thinking is omitted. Copy Output copies the full log; Export Log downloads a plain-text `.log` file. Logs and cumulative attempt counts survive starts and cancellation. Total steps expand
 as conversation iterations are entered, so the bar is a step count rather than a
 time estimate. The dashboard selects the first published draft and refreshes it
 as subsequent exchanges, validation, and repairs are committed. **View draft**
@@ -173,6 +173,7 @@ checks can reject it. Cancellation never triggers retry/fallback.
 Generated drafts carry `metadata.origin: automation`, selected context tags,
 role profiles, concept metadata, and a numeric `validation_level`:
 
+- **-3**: unfinished human-authored draft.
 - **0**: pending validation.
 - **1 / -1**: initial validation passed / failed.
 - **2 / -2**: optional frontier validation passed / failed.
@@ -184,7 +185,7 @@ The example runs initial validation only. To add a stronger validator, append a
 
 Use **Edit → Generation → Approve for training export** after human review.
 Content or metadata edits to automated samples invalidate previous evaluation and approval.
-Historical/human samples without an explicit level are treated as level 3. Both
+Human samples begin unfinished at level -3, including historical samples without an explicit level. Human review promotes them to 3; subsequent edits invalidate that approval. Both
 CLI token export and dashboard token export exclude levels other than 3, including
 explicitly selected pending samples. Project backups retain all samples.
 
@@ -199,3 +200,5 @@ recovery or rerunning individual saved steps is not implemented yet.
 The older task-list runner remains available for batch generation and existing
 single-task editing integrations. Single Sample uses YAML exclusively; no scenario
 folder means an explanatory message, never a silent fallback to legacy generation.
+
+Single-sample failures automatically retry with newly sampled scenario and role tags, up to `single_generation.max_attempts` (default 3). `single_generation.max_parallel` defaults to 1. Both settings are saved with the project. Failed samples remain reviewable; cancellation discards only the current provisional sample and retains the log.

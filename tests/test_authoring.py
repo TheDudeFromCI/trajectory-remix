@@ -69,7 +69,7 @@ async def test_trajectory_crud_metadata_and_save(studio, tmp_path):
     data = {"samples": list(DatasetStore(tmp_path / "project.kidra-dataset").samples)}
     assert saved["saved"] and saved["revision"] == studio[0].state.dataset["revision"]
     assert [s["id"] for s in data["samples"]] == ["empty", "copy"]
-    assert data["samples"][1]["metadata"] == {"title": "replaced"}
+    assert data["samples"][1]["metadata"] == {"title": "replaced", "validation_level": -3}
 
 
 async def test_demo_template_uses_configured_eos(studio):

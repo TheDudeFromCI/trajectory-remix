@@ -29,6 +29,10 @@ async def test_crud_compile_frame_export_roundtrip(client, tmp_path):
     assert p["windows"] and p["plan_id"]
     frame = (await client.get(f"/api/frame/{p['plan_id']}/2")).json()
     assert frame["tick"] == 2
+    assert s["metadata"]["validation_level"] == -3
+    assert (await client.post("/api/export", json={})).text == ""
+    await client.post("/api/samples/0/approve")
+    s = (await client.get("/api/samples/0")).json()
     export = await client.post("/api/export", json={"ticks_per_chunk": 16})
     records = [json.loads(s) for s in export.text.splitlines()]
     assert records[0]["format"] == "kidra-token-chunk/1"
@@ -139,6 +143,7 @@ async def test_session_guard_and_origin(client):
 
 async def test_export_is_all_or_nothing(client):
     bad = new_sample()
+    bad["metadata"]["validation_level"] = 3
     bad["replay"]["1"][0]["window"] = "missing"
     await client.post("/api/samples", json={"sample": bad})
     r = await client.post("/api/export", json={"ticks_per_chunk": 4})

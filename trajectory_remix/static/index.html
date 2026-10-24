@@ -230,13 +230,11 @@
         <span class="side-heading">GENERATION CONTROL</span>
         <button id="close-generation-panel" class="square" title="Close">×</button>
       </div>
-      <div class="floating-body">
-        <button id="export-button">Export tokens</button>
+      <div class="generation-layout">
+        <section class="generation-log"><div class="log-toolbar"><b>ACTIVITY</b><button id="copy-generation-log">Copy Output</button><button id="export-generation-log">Export Log</button></div><div id="activity-log"><small>No generation activity.</small></div></section>
+        <div class="generation-controls">
         <label for="scenario-type">Scenario</label>
         <select id="scenario-type"></select>
-        <label for="scenario-parallel">Maximum simultaneous LLM calls</label>
-        <input id="scenario-parallel" type="number" min="1" max="128" value="1" />
-        <button id="scenario-start">Generate single sample</button>
         <small id="scenario-hint"></small>
         <div class="run-status">
           <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
@@ -255,10 +253,9 @@
         <div class="side-heading subheading">CONDITIONS</div>
         <div id="selected-tags" class="tag-list"></div>
         <button id="edit-tags" class="text-button">
-          Edit tasks & conditions
+          Generation settings
         </button>
-        <div class="side-heading subheading">ACTIVITY</div>
-        <div id="activity-log"><small>No generation activity.</small></div>
+        </div>
       </div>
     </aside>
     <div id="toast" role="status" hidden></div>
@@ -315,12 +312,13 @@
         ><button data-config="conditions">Conditions</button
         ><button data-config="automatic">Automatic mode</button>
       </div>
+      <div id="settings-errors" role="alert"></div>
       <div id="config-content"></div>
       <div class="dialog-footer">
         <span
           >Keys stay in server memory; use environment variables for
           persistence.</span
-        ><button id="save-config" class="primary">Save configuration</button>
+        ><button id="save-config" class="primary" disabled>Save Changes</button>
       </div>
     </dialog>
     <dialog id="export-dialog">

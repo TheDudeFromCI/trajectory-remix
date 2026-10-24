@@ -830,18 +830,42 @@ assert.match($("sandbox-state").textContent, /"file_io_ticks": 2/);
 await click("generate-one");
 assert.equal($("generation-panel").hidden, false);
 assert.equal($("scenario-type").value, "user_problem");
-assert.equal($("scenario-parallel").value, "1");
-assert.equal($("scenario-start").disabled, false);
+assert.equal($("scenario-start"), null);
+assert.equal($("export-button"), null);
+assert.equal($("pause-run").textContent, "Start");
+assert.equal($("pause-run").disabled, false);
 assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
 assert.equal($("view-generation-draft").hidden, true);
 assert.equal($("stop-run").textContent, "Cancel");
 await click("close-generation-panel");
 assert.equal($("generation-panel").hidden, true);
+await click("settings-button");
+await w.document.querySelector('[data-config="endpoints"]').onclick();
+assert.equal($("save-config").disabled, true);
+const timeoutBox = w.document.querySelector('[data-config-path="endpoints.0.timeout"]');
+const urlBox = w.document.querySelector('[data-config-path="endpoints.0.base_url"]');
+urlBox.value = "http://localhost:9090/v1";
+urlBox.dispatchEvent(new w.Event("input", {bubbles:true}));
+timeoutBox.value = "999";
+timeoutBox.dispatchEvent(new w.Event("input", {bubbles:true}));
+assert.equal(timeoutBox.getAttribute("aria-invalid"), "true");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
+await click("settings-button");
+assert.equal(w.document.querySelector('[data-config-path="endpoints.0.base_url"]').value, "http://localhost:9090/v1");
+const fixedTimeout = w.document.querySelector('[data-config-path="endpoints.0.timeout"]');
+fixedTimeout.value = "120";
+fixedTimeout.dispatchEvent(new w.Event("input", {bubbles:true}));
+assert.equal(fixedTimeout.getAttribute("aria-invalid"), "false");
+assert.equal($("save-config").disabled, false);
+await click("save-config");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 107,
+    checks: 120,
     errors,
   }),
 );

@@ -306,7 +306,7 @@ async def test_rejected_validation_keeps_negative_level(compiler, tmp_path):
 def test_references_do_not_evaluate_code():
     assert resolve("${inputs.value}", {"inputs": {"value": 3}}) == 3
     assert resolve("hello ${inputs.value}", {}) == "hello ${inputs.value}"
-    assert training_eligible({"metadata": {}})
+    assert not training_eligible({"metadata": {}})
     assert not training_eligible({"metadata": {"origin": "automation"}})
 
 
@@ -505,3 +505,34 @@ async def test_validation_failure_can_take_yaml_fallback_without_promoting_sampl
     await finish(runner)
     assert runner.snapshot["steps"]["validate"]["state"] == "fallback"
     assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == -1
+
+
+async def test_failed_attempt_retries_and_manual_starts_preserve_log_and_counter(
+    compiler, tmp_path
+):
+    class Flaky(ScenarioClient):
+        failures = 2
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Invent") and self.failures:
+                self.failures -= 1
+                return {"content": "malformed output for debugging"}
+            result = await super().complete(endpoint, messages, tools)
+            result["content"] = (
+                "<think>private model reasoning</think>" + result["content"]
+            )
+            return result
+
+    app = app_for(tmp_path, compiler, Flaky())
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await finish(runner)
+    assert runner.status["attempts"] == 2
+    assert any("malformed output" in log["message"] for log in runner.logs)
+    assert not any("private model reasoning" in log["message"] for log in runner.logs)
+    assert runner.status["conditions"]["scenario"] == runner.context["scenario"]["tags"]
+    previous = list(runner.logs)
+    runner.start("user_problem")
+    await finish(runner)
+    assert runner.status["attempts"] == 3
+    assert list(runner.logs)[: len(previous)] == previous

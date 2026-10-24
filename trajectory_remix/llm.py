@@ -181,6 +181,15 @@ def default_config():
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("Config must be an object")
+    single = config.get("single_generation", {})
+    if not isinstance(single, dict):
+        raise ValueError("single_generation must be an object")
+    for key, default, maximum in (("max_parallel", 1, 128), ("max_attempts", 3, 100)):
+        if (
+            type(single.get(key, default)) is not int
+            or not 1 <= single.get(key, default) <= maximum
+        ):
+            raise ValueError(f"{key} must be an integer from 1 to {maximum}")
     if not isinstance(config.get("automatic", {}), dict) or not isinstance(
         config.get("clock", {}), dict
     ):
@@ -605,7 +614,11 @@ class SampleBuilder:
                 compiled = self.compiler.compile(self.sample)
                 self.next_tick = compiled["max_tick"] + 1
                 # Replay supplies the same actual output for every tool, including window writers.
-                outcome = next(c["outcome"] for c in compiled["tool_calls"] if c.get("window") == event["window"])
+                outcome = next(
+                    c["outcome"]
+                    for c in compiled["tool_calls"]
+                    if c.get("window") == event["window"]
+                )
                 tool_result = json.dumps(outcome, ensure_ascii=False)
                 messages.append(
                     {"role": "tool", "tool_call_id": call["id"], "content": tool_result}

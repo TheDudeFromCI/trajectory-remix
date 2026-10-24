@@ -449,7 +449,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/scenarios/run")
     async def start_scenario(request: Request):
         data = await body(request)
-        scenario_runner.start(data.get("scenario"), data.get("max_parallel", 1))
+        scenario_runner.start(data.get("scenario"), data.get("max_parallel"))
         generation_mode["scenario"] = True
         return {"ok": True}
 
