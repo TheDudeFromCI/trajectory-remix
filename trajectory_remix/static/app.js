@@ -274,6 +274,7 @@ function renderHistoryActions() {
 }
 function renderSamples() {
   const total = state.total ?? state.samples.length;
+  $("export-sample").disabled = selected < 0 || !sample;
   $("sample-page-label").textContent = total
     ? `${(state.offset || 0) + 1}–${Math.min((state.offset || 0) + SAMPLE_PAGE_SIZE, total)} of ${total}`
     : "0 results";
@@ -1276,8 +1277,10 @@ function buildEventCard(item, i) {
                     key,
                     parameters.properties[key].type.includes("null")
                       ? null
-                      : parameters.properties[key].enum?.[0] ??
-                        (parameters.properties[key].type === "number" ? 0 : ""),
+                      : (parameters.properties[key].enum?.[0] ??
+                        (parameters.properties[key].type === "number"
+                          ? 0
+                          : "")),
                   ]),
                 );
                 delete e.outcome;
@@ -1298,47 +1301,60 @@ function buildEventCard(item, i) {
         duration.min = "0";
         duration.step = "1";
         options.append(field("Duration (ticks)", duration));
-        if (!invisible) options.append(
-          field(
-            "Result delivery",
-            select(["instant", "stream"], e.delivery || "instant", (value) => {
-              e.delivery = value;
-              update();
-              renderEvents();
-            }),
-          ),
-          field(
-            "Custom request text",
-            checkbox("content" in e || "segments" in e, (value) => {
-              if (value) e.content = "";
-              else {
-                delete e.content;
-                delete e.segments;
-              }
-              update();
-              renderEvents();
-            }),
-          ),
-          field(
-            "Auto-generate post-result anchor",
-            checkbox("result-anchor" in e, (value) => {
-              if (value) {
-                const ids = [...JSON.stringify(eventDraft).matchAll(/\{N_TICK:(\d+)\}/g)]
-                  .map((match) => Number(match[1]));
-                ids.push(...eventDraft.map(({ event }) => event["result-anchor"])
-                  .filter(Number.isInteger));
-                e["result-anchor"] = Math.max(0, ...ids) + 1;
-              } else delete e["result-anchor"];
-              update();
-              renderEvents();
-            }),
-          ),
-        );
+        if (!invisible)
+          options.append(
+            field(
+              "Result delivery",
+              select(
+                ["instant", "stream"],
+                e.delivery || "instant",
+                (value) => {
+                  e.delivery = value;
+                  update();
+                  renderEvents();
+                },
+              ),
+            ),
+            field(
+              "Custom request text",
+              checkbox("content" in e || "segments" in e, (value) => {
+                if (value) e.content = "";
+                else {
+                  delete e.content;
+                  delete e.segments;
+                }
+                update();
+                renderEvents();
+              }),
+            ),
+            field(
+              "Auto-generate post-result anchor",
+              checkbox("result-anchor" in e, (value) => {
+                if (value) {
+                  const ids = [
+                    ...JSON.stringify(eventDraft).matchAll(/\{N_TICK:(\d+)\}/g),
+                  ].map((match) => Number(match[1]));
+                  ids.push(
+                    ...eventDraft
+                      .map(({ event }) => event["result-anchor"])
+                      .filter(Number.isInteger),
+                  );
+                  e["result-anchor"] = Math.max(0, ...ids) + 1;
+                } else delete e["result-anchor"];
+                update();
+                renderEvents();
+              }),
+            ),
+          );
         if (e.delivery === "stream") {
-          const rate = input(e["tokens-per-tick"] ?? 1, (value) => {
-            e["tokens-per-tick"] = value;
-            update();
-          }, "number");
+          const rate = input(
+            e["tokens-per-tick"] ?? 1,
+            (value) => {
+              e["tokens-per-tick"] = value;
+              update();
+            },
+            "number",
+          );
           rate.min = "1";
           rate.step = "1";
           options.append(field("Result tokens per tick", rate));
@@ -1363,7 +1379,13 @@ function buildEventCard(item, i) {
         }
         card.append(options);
         if ("result-anchor" in e) {
-          card.append(node("small", "hint", `Result complete: {N_TICK:${e["result-anchor"]}}`));
+          card.append(
+            node(
+              "small",
+              "hint",
+              `Result complete: {N_TICK:${e["result-anchor"]}}`,
+            ),
+          );
         }
         if (e.segments) {
           card.append(
@@ -2160,12 +2182,18 @@ function closeMenus() {
     $(name + "-menu").hidden = true;
     $(name + "-menu-button").setAttribute("aria-expanded", "false");
   }
+  $("export-menu").hidden = true;
+  $("export-menu-button").setAttribute("aria-expanded", "false");
   $("generation-menu").hidden = true;
   $("generation-menu-button").setAttribute("aria-expanded", "false");
 }
 $("generation-menu-button").onclick = () => {
   $("generation-menu").hidden = false;
   $("generation-menu-button").setAttribute("aria-expanded", "true");
+};
+$("export-menu-button").onclick = () => {
+  $("export-menu").hidden = false;
+  $("export-menu-button").setAttribute("aria-expanded", "true");
 };
 function openGenerationPanel() {
   closeMenus();
@@ -2201,6 +2229,24 @@ function toggleMenu(name) {
 }
 $("file-menu-button").onclick = () => toggleMenu("file");
 $("edit-menu-button").onclick = () => toggleMenu("edit");
+$("export-sample").onclick = action(async () => {
+  closeMenus();
+  if (selected < 0 || !sample) return;
+  if (hasPendingChanges()) await compileSample(true);
+  const name = String(sample.id || `trajectory-${selected + 1}`).replace(
+    /[^a-zA-Z0-9._-]+/g,
+    "_",
+  );
+  const blob = new Blob([JSON.stringify(sample, null, 2) + "\n"], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = node("a");
+  link.href = url;
+  link.download = `${name}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+});
 $("preferences-button").onclick = () => {
   closeMenus();
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();

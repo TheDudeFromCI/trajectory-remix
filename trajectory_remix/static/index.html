@@ -15,6 +15,12 @@
           <button id="file-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">File</button>
           <div id="file-menu" class="file-menu-popup" role="menu" hidden>
             <button id="import-button" role="menuitem">Import</button>
+            <div class="submenu">
+              <button id="export-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Export ▸</button>
+              <div id="export-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
+                <button id="export-sample" role="menuitem" disabled>Current Trajectory</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="file-menu">
