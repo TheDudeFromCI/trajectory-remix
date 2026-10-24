@@ -44,7 +44,7 @@ class Runner:
             return revision
 
     def start(self, single=False, task_ids=None, seed_index=None, validate=None):
-        if self.job and not self.job.done():
+        if (self.job and not self.job.done()) or (getattr(self, "scenario_runner", None) and self.scenario_runner.status["running"]):
             raise ValueError("Generation is already running")
         config = copy.deepcopy(self.state["config"])
         if validate is not None:
@@ -118,6 +118,7 @@ class Runner:
                                     )
                                 )
                             sample.setdefault("metadata", {})["validation"] = report
+                        sample.setdefault("metadata", {}).update(origin="automation", validation_level=1 if options.get("validate", True) else 0)
                         accepted = sample
                         break
                     except asyncio.CancelledError:

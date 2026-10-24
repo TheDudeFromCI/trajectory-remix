@@ -179,7 +179,7 @@ class TrajectoryCommands:
         raise CommandError(f"Trajectory not found: {sample_id}", "not_found")
 
     def _editable(self, expected_revision):
-        if self.runner.status["running"]:
+        if self.runner.status["running"] or (getattr(self.runner, "scenario_runner", None) and self.runner.scenario_runner.status["running"]):
             raise CommandError("Stop generation before editing the dataset", "busy")
         if (
             expected_revision is not None
@@ -190,6 +190,9 @@ class TrajectoryCommands:
             )
 
     def _commit(self, sample, index=None, validate=False):
+        from .dataset import invalidate_automation
+        if index is not None:
+            sample = invalidate_automation(copy.deepcopy(sample), self.state["samples"][index])
         sample = prepare_sample(
             sample, self.state["samples"][index] if index is not None else None
         )
@@ -789,6 +792,7 @@ class TrajectoryCommands:
             "revision": revision,
         }
         if semantic:
+            self._editable(None)
             sample = copy.deepcopy(self._find(sample_id)[1])
             builder = SampleBuilder(
                 self.compiler, copy.deepcopy(self.state["config"]), self.client

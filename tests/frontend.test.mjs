@@ -827,11 +827,21 @@ await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "hardware_l
 jump(lastPlan.max_tick);
 await waitFor(() => $("sandbox-state").textContent.includes('"file_io_ticks": 2'));
 assert.match($("sandbox-state").textContent, /"file_io_ticks": 2/);
+await click("generate-one");
+assert.equal($("generation-panel").hidden, false);
+assert.equal($("scenario-type").value, "user_problem");
+assert.equal($("scenario-parallel").value, "1");
+assert.equal($("scenario-start").disabled, false);
+assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
+assert.equal($("view-generation-draft").hidden, true);
+assert.equal($("stop-run").textContent, "Cancel");
+await click("close-generation-panel");
+assert.equal($("generation-panel").hidden, true);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 99,
+    checks: 107,
     errors,
   }),
 );

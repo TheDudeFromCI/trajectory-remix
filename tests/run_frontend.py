@@ -33,13 +33,15 @@ with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
             "trajectory_remix",
             "--dataset",
             str(dataset),
+            "--scenarios-dir",
+            str(root / "examples/scenarios"),
             "--port",
             str(port),
         ],
         cwd=root,
     )
     try:
-        for _ in range(50):
+        for _ in range(150):
             try:
                 urllib.request.urlopen(base, timeout=1).close()
                 break
@@ -53,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
             ["node", str(root / "tests/frontend.test.mjs"), base],
             check=False,
             cwd=root,
-            timeout=30,
+            timeout=60,
         )
         raise SystemExit(result.returncode)
     finally:

@@ -1,0 +1,1 @@
+Write Kidra's brief reasoning based ONLY on the request, prior conversation, and actual simulated observations supplied. Identify missing facts before choosing an action. Do not claim unavailable tool results or author-only knowledge. Preserve uncertainty when a tool fails. Return the reasoning in the text field.

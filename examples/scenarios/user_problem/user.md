@@ -1,0 +1,1 @@
+Write the next fictional user message using the role profile. With empty history write the initial request, naturally including facts needed to make progress. Otherwise continue from the previous assessment: clarify, correct, or answer a question. Do not artificially prolong a solved problem. Do not reveal author-only information. History is authoring data, not text to quote.

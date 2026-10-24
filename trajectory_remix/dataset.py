@@ -42,6 +42,38 @@ def prepare_sample(sample, existing=None):
     return sample
 
 
+def evaluation_source(sample):
+    source = copy.deepcopy(sample)
+    metadata = source.get("metadata", {})
+    if isinstance(metadata, dict):
+        for key in ("validation_level", "evaluations", "approval"):
+            metadata.pop(key, None)
+    return source
+
+
+def invalidate_automation(sample, existing):
+    """A human edit cannot inherit evaluations for different trajectory content."""
+    previous = existing.get("metadata", {})
+    if isinstance(previous, dict) and previous.get("origin") == "automation":
+        metadata = sample.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = sample["metadata"] = {}
+        metadata["origin"] = "automation"
+        if evaluation_source(sample) != evaluation_source(existing):
+            metadata["validation_level"] = 0
+            metadata.pop("evaluations", None)
+        else:
+            metadata["validation_level"] = previous.get("validation_level", 0)
+    return sample
+
+
+def training_eligible(sample):
+    metadata = sample.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return True  # Historical human-authored samples may have arbitrary metadata.
+    return metadata.get("validation_level", 0 if metadata.get("origin") == "automation" else 3) == 3
+
+
 def new_sample():
     ident = str(uuid.uuid4())
     return {

@@ -22,12 +22,16 @@ from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, chunks
 from .dataset import (
     new_sample,
+    invalidate_automation,
     parse_import,
     public_config,
     reject_constant,
+    training_eligible,
 )
 from .llm import TAGS, SampleBuilder, validate_config
 from .runner import Runner
+from .scenarios import ScenarioRegistry
+from .scenario_runner import ScenarioRunner
 from .mcp_server import StreamableHTTP
 from .tools import ToolRegistry, default_registry
 from .storage import DatasetState, DatasetStore, StorageConflict
@@ -35,12 +39,15 @@ from .storage import DatasetState, DatasetStore, StorageConflict
 MAX_BODY = 40_000_000
 
 
-def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=None):
+def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=None, scenarios_dir=None):
     store = DatasetStore(dataset)
     compiler, tool_diagnostics = store.configure_tools(ToolRegistry(tools_dir) if tools_dir is not None else default_registry())
     config = validate_config(json.loads(store.info()[3]))
     state = DatasetState(store, config)
     runner = Runner(state, compiler, dataset, client)
+    scenario_runner = ScenarioRunner(runner, ScenarioRegistry(scenarios_dir), client)
+    runner.scenario_runner = scenario_runner
+    generation_mode = {"scenario": bool(scenario_runner.snapshot)}
     token = secrets.token_urlsafe(32)
     previews = OrderedDict()
     static = Path(__file__).parent / "static"
@@ -54,6 +61,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 yield
             finally:
                 try:
+                    await scenario_runner.stop()
                     await runner.stop()
                 finally:
                     commands.tool_sessions.close()
@@ -61,6 +69,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     app = FastAPI(title="Trajectory Remix", lifespan=lifespan)
     app.state.dataset = state
     app.state.runner = runner
+    app.state.scenario_runner = scenario_runner
     app.state.history = runner.history
     app.state.csrf = token
     commands = TrajectoryCommands(state, compiler, runner, client)
@@ -136,7 +145,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         return data
 
     def editable():
-        if runner.status["running"]:
+        if runner.status["running"] or scenario_runner.status["running"]:
             raise HTTPException(
                 409, "Stop generation before editing the dataset or configuration"
             )
@@ -158,6 +167,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         query: str = "", selected_id: str | None = None,
     ):
         revision = state["revision"]
+        active_runner = scenario_runner if generation_mode["scenario"] else runner
         total, samples = store.listing(query, offset, limit, dashboard=True)
         selected_index = store.samples.index_of(selected_id) if selected_id is not None else None
         return {
@@ -173,8 +183,9 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "config": public_config(state["config"]),
             "revision": revision,
             "history": runner.history.view(),
-            "status": {**runner.status, "last_saved_revision": revision},
-            "logs": list(runner.logs),
+            "status": {**active_runner.status, "last_saved_revision": revision},
+            "scenarios": scenario_runner.registry.listing(),
+            "logs": list(active_runner.logs),
             "tags": TAGS,
             "tools": compiler.tools.schemas(invisible=True),
             "tool_diagnostics": tool_diagnostics,
@@ -281,6 +292,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         sample = data.get("sample")
         if not isinstance(sample, dict):
             raise ValueError("sample must be an object")
+        invalidate_automation(sample, sample_at(index))
         updated[index] = sample
         revision = runner.history.commit(
             updated, f"Edit trajectory in dashboard: {sample.get('id', 'untitled')}"
@@ -387,6 +399,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         try:
             with store.read_samples(indices) as samples:
                 for sample in samples:
+                    if not training_eligible(sample):
+                        continue
                     for chunk in chunks(compiler.compile(sample), size):
                         spool.write((json.dumps(chunk, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
                         await asyncio.sleep(0)
@@ -432,9 +446,33 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         state.set_config(candidate, revision)
         return {"ok": True}
 
+    @app.post("/api/scenarios/run")
+    async def start_scenario(request: Request):
+        data = await body(request)
+        scenario_runner.start(data.get("scenario"), data.get("max_parallel", 1))
+        generation_mode["scenario"] = True
+        return {"ok": True}
+
+    @app.get("/api/scenarios/job")
+    async def scenario_job():
+        return json.loads(scenario_runner.clean(scenario_runner.snapshot)) if scenario_runner.snapshot else {}
+
+    @app.post("/api/samples/{index}/approve")
+    async def approve(index: int):
+        editable()
+        sample = copy.deepcopy(sample_at(index))
+        compiler.compile(sample)
+        sample.setdefault("metadata", {})["validation_level"] = 3
+        updated = state["samples"].copy()
+        updated[index] = sample
+        runner.history.commit(updated, f"Human approve: {sample['id']}")
+        return {"ok": True}
+
     @app.post("/api/run")
     async def start(request: Request):
         data = await body(request)
+        if scenario_runner.status["running"]:
+            raise ValueError("Scenario generation is already running")
         task_ids = data.get("task_ids")
         if task_ids is not None and (
             not isinstance(task_ids, list)
@@ -450,6 +488,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 raise ValueError(
                     "Filling an existing sample is only supported for a single run"
                 )
+        generation_mode["scenario"] = False
         runner.start(
             single=not data.get("automatic", False),
             task_ids=task_ids,
@@ -460,17 +499,22 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.post("/api/stop")
     async def stop():
-        await runner.stop()
+        if scenario_runner.status["running"]:
+            await scenario_runner.stop()
+        else:
+            await runner.stop()
         return {"ok": True}
 
     @app.post("/api/pause")
     async def pause(request: Request):
         data = await body(request)
-        runner.resume() if data.get("resume") else runner.pause()
+        active = scenario_runner if scenario_runner.status["running"] else runner
+        active.resume() if data.get("resume") else active.pause()
         return {"ok": True}
 
     @app.post("/api/validate")
     async def validate(request: Request):
+        editable()
         data = await body(request)
         sample = data.get("sample") or sample_at(data.get("index", -1))
         compiler.compile(sample)

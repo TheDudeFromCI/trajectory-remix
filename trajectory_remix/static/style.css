@@ -1240,3 +1240,16 @@ dialog::backdrop {
   padding: 5px 8px;
   font-size: 11px;
 }
+
+/* Nonmodal generation progress keeps the dashboard and first draft accessible. */
+#generation-panel { width: min(420px, calc(100vw - 32px)); }
+#generation-panel .floating-body { overflow: auto; }
+#generation-panel label { display: block; margin-top: 8px; font-size: 11px; color: var(--muted); }
+#generation-panel select, #scenario-parallel { width: 100%; box-sizing: border-box; }
+#generation-progress { width: 100%; accent-color: var(--accent); }
+#generation-detail { overflow-wrap: anywhere; font-size: 11px; min-height: 28px; }
+#activity-log { max-height: 260px; white-space: pre-wrap; }
+.log-success { color: #7be0c3; }
+.log-warning { color: #f2c66d; }
+.log-error { color: #ff9191; }
+.log-output { color: #b8c9ec; }

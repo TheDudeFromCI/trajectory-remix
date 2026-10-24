@@ -1,0 +1,238 @@
+version: 1
+system_prompt: You are Kidra, a patient, competent coordinator. Use available observations
+  and ask for clarification when needed.
+description: A user problem with simulated tools, variable conversation length, draft
+  review, and repair.
+schemas:
+  Idea:
+    type: object
+    properties:
+      problem: &id001
+        type: string
+        minLength: 1
+      situation: *id001
+      success_criteria: *id001
+    required:
+    - problem
+    - situation
+    - success_criteria
+    additionalProperties: false
+  Solution:
+    type: object
+    properties:
+      answer: *id001
+      verification: *id001
+    required:
+    - answer
+    - verification
+    additionalProperties: false
+  Message:
+    type: object
+    properties:
+      text: *id001
+    required:
+    - text
+    additionalProperties: false
+  ToolPlan:
+    type: object
+    properties:
+      calls:
+        type: array
+        maxItems: 8
+        items:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            properties:
+              tool: *id001
+              arguments:
+                type: object
+              outcome:
+                type: object
+            required:
+            - tool
+            - arguments
+            additionalProperties: false
+    required:
+    - calls
+    additionalProperties: false
+  Assessment:
+    type: object
+    properties:
+      resolved:
+        type: boolean
+      next_exchange:
+        type: string
+    required:
+    - resolved
+    - next_exchange
+    additionalProperties: false
+tags:
+  complexity:
+  - name: simple
+    description: A focused problem with few dependencies.
+  - name: complex
+    description: Several interacting constraints or dependent steps.
+  domain:
+  - name: coding
+  - name: planning
+  - name: mathematics
+roles:
+  user:
+    instructions: Write only the fictional user. Preserve their domain knowledge and
+      behavior naturally.
+    tags:
+      behavior:
+      - name: angry
+        description: Frustrated and willing to challenge an answer; not automatically
+          abusive.
+      - name: polite
+      - name: impatient
+      knowledge:
+      - name: novice
+      - name: expert
+      - name: confidently mistaken
+  kidra:
+    instructions: Kidra is patient, competent, direct, and helpful. Clarify missing
+      facts; never assume unseen tool results.
+steps:
+  idea:
+    uses: llm.generate
+    prompt: idea.md
+    needs: []
+    inputs:
+      requirements: Create a concrete user problem suitable for the virtual tool environment.
+      tags: ${scenario.tags}
+      user_profile: ${roles.user}
+    output_schema: Idea
+    retries: 1
+  novelty:
+    uses: remix.novelty
+    needs:
+    - idea
+    prompt: novelty.md
+    inputs:
+      idea: ${steps.idea.output}
+      idea_step: idea
+      threshold: 0.85
+    attempts: 3
+    fallback: true
+  solution:
+    uses: llm.generate
+    prompt: solution.md
+    needs:
+    - novelty
+    inputs:
+      problem: ${steps.novelty.output.problem}
+      success_criteria: ${steps.novelty.output.success_criteria}
+    output_schema: Solution
+    retries: 1
+  conversation:
+    uses: flow.repeat
+    needs:
+    - solution
+    max_iterations: 4
+    until: ${steps.assess.output.resolved}
+    history:
+      user: ${steps.user.output.text}
+      response: ${steps.answer.output.text}
+      assessment: ${steps.assess.output}
+    inputs:
+      idea: ${steps.novelty.output}
+      solution: ${steps.solution.output}
+    steps:
+      user:
+        uses: llm.generate
+        prompt: user.md
+        needs: []
+        inputs:
+          situation: ${inputs.idea.situation}
+          problem: ${inputs.idea.problem}
+          history: ${iteration.history}
+          round: ${iteration.index}
+        output_schema: Message
+        retries: 1
+        profile: user
+      message:
+        uses: remix.message
+        needs:
+        - user
+        inputs:
+          text: ${steps.user.output.text}
+      tools:
+        uses: llm.generate
+        prompt: tools.md
+        needs:
+        - message
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          tools: ${tools}
+        output_schema: ToolPlan
+        retries: 1
+      observations:
+        uses: remix.tools
+        needs:
+        - tools
+        inputs:
+          calls: ${steps.tools.output.calls}
+      reasoning:
+        uses: llm.generate
+        prompt: reasoning.md
+        needs:
+        - observations
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          observations: ${steps.observations.output.results}
+        output_schema: Message
+        retries: 1
+        profile: kidra
+      answer:
+        uses: llm.generate
+        prompt: answer.md
+        needs:
+        - reasoning
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          observations: ${steps.observations.output.results}
+          reasoning: ${steps.reasoning.output.text}
+        output_schema: Message
+        retries: 1
+        profile: kidra
+      draft:
+        uses: remix.draft
+        needs:
+        - answer
+        inputs:
+          reasoning: ${steps.reasoning.output.text}
+          response: ${steps.answer.output.text}
+      assess:
+        uses: llm.generate
+        prompt: assess.md
+        needs:
+        - draft
+        inputs:
+          success_criteria: ${inputs.idea.success_criteria}
+          solution: ${inputs.solution}
+          request: ${steps.user.output.text}
+          answer: ${steps.answer.output.text}
+          history: ${iteration.history}
+        output_schema: Assessment
+        retries: 1
+  validate:
+    uses: remix.validate
+    needs:
+    - conversation
+    endpoint: validator
+    prompt: validate.md
+    repair_prompt: repair.md
+    max_repairs: 2
+    inputs:
+      tags: ${scenario.tags}
+      roles: ${roles}
+      solution: ${steps.solution.output}
+    level: 1

@@ -1,3 +1,4 @@
+let lastGenerationDraft = null;
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
@@ -215,7 +216,11 @@ async function refresh(initial = false) {
       plan = null;
       renderReplay();
     }
-    if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
+    const draftJustArrived = next.status.draft_id && next.status.draft_id !== lastGenerationDraft;
+    if (draftJustArrived && !hasPendingChanges() && Number.isInteger(next.status.draft_index)) {
+      lastGenerationDraft = next.status.draft_id;
+      await selectSample(next.status.draft_index, true);
+    } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
       await selectSample(state.samples[state.samples.length - 1].index, true);
   } finally {
     pollBusy = false;
@@ -224,11 +229,35 @@ async function refresh(initial = false) {
 function renderStatus() {
   $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
+  const scenarioSelect = $("scenario-type");
+  const scenarioNames = (state.scenarios || []).map((item) => item.name);
+  if (Array.from(scenarioSelect.options).map((option) => option.value).join() !== scenarioNames.join()) {
+    const previous = scenarioSelect.value;
+    scenarioSelect.replaceChildren(...scenarioNames.map((name) => {
+      const option = node("option", "", name);
+      option.value = name;
+      return option;
+    }));
+    scenarioSelect.value = scenarioNames.includes(previous) ? previous : (scenarioNames[0] || "");
+  }
+  scenarioSelect.disabled = s.running;
+  $("scenario-parallel").disabled = s.running;
+  $("scenario-start").disabled = s.running || !scenarioNames.length;
+  $("scenario-hint").textContent = scenarioNames.length
+    ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
+    : "Start Remix with --scenarios-dir to load scenarios.";
+  $("generation-progress").max = Math.max(1, s.total || 1);
+  $("generation-progress").value = s.phase === "complete" ? Math.max(1, s.total || 1) : (s.completed || 0);
+  $("generation-detail").textContent = s.active?.length
+    ? s.active.join(" · ")
+    : (s.last_error || s.phase || "Ready");
+  $("view-generation-draft").hidden = !s.draft_id;
+  $("approve-sample").disabled = s.running || !sample;
   $("run-status").textContent = s.running
     ? s.paused
       ? "Paused"
-      : "Generating"
-    : "Idle";
+      : s.pause_requested ? "Pausing after active calls finish" : "Generating"
+    : (s.phase || "Idle");
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
@@ -241,7 +270,7 @@ function renderStatus() {
     "save-config",
   ])
     $(id).disabled = s.running;
-  $("pause-run").textContent = s.paused ? "Resume" : "Pause";
+  $("pause-run").textContent = s.paused || s.pause_requested ? "Resume" : "Pause";
   $("pause-run").disabled = !s.running;
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
@@ -253,10 +282,10 @@ function renderStatus() {
       .slice()
       .reverse()
       .map((log) => {
-        const row = node("div", "log-line");
+        const row = node("div", "log-line log-" + (log.level || "info"));
         row.append(
           node("time", "", new Date(log.time).toLocaleTimeString()),
-          document.createTextNode(log.message),
+          document.createTextNode((log.step ? `[${log.step}] ` : "") + log.message),
         );
         return row;
       }),
@@ -297,7 +326,7 @@ function renderSamples() {
         node(
           "small",
           "",
-          `${s.events} events${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
+          `${s.events} events · Validation ${s.validation_level ?? 3}${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
         ),
       );
       return b;
@@ -2446,7 +2475,26 @@ for (const b of document.querySelectorAll("[data-config]"))
 $("generate-one").onclick = action(async () => {
   openGenerationPanel();
   if (hasPendingChanges()) await compileSample(true);
-  await json("run", "POST", { automatic: false });
+  // Starting is explicit so the user can select a scenario and request limit.
+  $("scenario-type").focus();
+});
+$("scenario-start").onclick = action(async () => {
+  if (hasPendingChanges()) await compileSample(true);
+  await json("scenarios/run", "POST", {
+    scenario: $("scenario-type").value,
+    max_parallel: Number($("scenario-parallel").value),
+  });
+  await refresh();
+});
+$("view-generation-draft").onclick = action(async () => {
+  const listing = await json("state?" + new URLSearchParams({ selected_id: state.status.draft_id, limit: "1" }));
+  if (Number.isInteger(listing.selected_index)) await selectSample(listing.selected_index);
+  else toast("This draft is no longer available.");
+});
+$("approve-sample").onclick = action(async () => {
+  closeMenus();
+  if (hasPendingChanges()) await compileSample(true);
+  await json("samples/" + selected + "/approve", "POST");
   await refresh();
 });
 $("auto-start").onclick = action(async () => {
@@ -2461,7 +2509,7 @@ $("stop-run").onclick = action(async () => {
   if (selected >= 0 && !hasPendingChanges()) await selectSample(selected, true);
 });
 $("pause-run").onclick = action(async () => {
-  await json("pause", "POST", { resume: state.status.paused });
+  await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
 });
 $("export-button").onclick = () => $("export-dialog").showModal();

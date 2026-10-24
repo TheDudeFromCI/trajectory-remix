@@ -1,0 +1,1 @@
+Write Kidra's next response based ONLY on the request, prior conversation, reasoning, and actual simulated observations supplied. Ask a focused clarification when necessary; otherwise solve the request. Do not claim unavailable tool results or author-only knowledge. Preserve uncertainty when a tool fails. Return only the user-facing response in the text field.

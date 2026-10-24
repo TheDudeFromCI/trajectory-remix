@@ -8,6 +8,7 @@ from tokenizers import Tokenizer
 
 from .compiler import Compiler, chunks
 from .storage import DatasetStore
+from .dataset import training_eligible
 
 
 def main(argv=None):
@@ -33,6 +34,7 @@ def main(argv=None):
     if not initializing:
         from .mcp_server import browser_origin
 
+        parser.add_argument("--scenarios-dir", type=Path, help="External folder containing scenario folders with flow.yaml and Markdown prompts")
         parser.add_argument("--tools-dir", type=Path, help="Folder of custom Python tool modules")
         parser.add_argument("--port", type=int, default=8765)
         parser.add_argument(
@@ -79,6 +81,8 @@ def main(argv=None):
                     count = 0
                     with store.read_samples() as samples:
                         for sample in samples:
+                            if not training_eligible(sample):
+                                continue
                             for chunk in chunks(compiler.compile(sample), args.chunk_ticks):
                                 stream.write(json.dumps(chunk, ensure_ascii=False) + "\n")
                             count += 1
@@ -97,7 +101,7 @@ def main(argv=None):
 
         print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
         uvicorn.run(
-            create_app(args.dataset, mcp_allowed_origins=args.mcp_allow_origin, tools_dir=args.tools_dir),
+            create_app(args.dataset, mcp_allowed_origins=args.mcp_allow_origin, tools_dir=args.tools_dir, scenarios_dir=args.scenarios_dir),
             host="127.0.0.1",
             port=args.port,
             log_level="warning",
