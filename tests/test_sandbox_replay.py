@@ -240,7 +240,6 @@ def test_tool_window_can_be_reused_and_explicitly_opened_at_zero(compiler, sampl
 @pytest.mark.parametrize("extra,match", [
     ({"delivery": "bad"}, "delivery must"),
     ({"delivery": "stream", "tokens-per-tick": 0}, "Expected integer"),
-    ({"delivery": "stream", "content": "<tool><|eos|>"}, "cannot close"),
     ({"content": "x", "segments": [{"text": "y"}]}, "exactly one"),
 ])
 def test_invalid_request_streams(compiler, sample, extra, match):

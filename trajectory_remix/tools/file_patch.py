@@ -5,7 +5,7 @@ from ._protocol import ToolError
 from .runtime import WindowProperties
 
 name = "file_patch"
-description = "Replace one unique text occurrence in a virtual file."
+description = "Apply exact text edits atomically. Supply old/new or an edits array of old/new pairs, applied in order. Each old must match exactly once. Optional expected_version detects stale edits."
 schema = {
     "type": "object",
     "properties": {
@@ -13,8 +13,29 @@ schema = {
         "old": {"type": "string"},
         "new": {"type": "string"},
         "expected_version": {"type": "string"},
+        "edits": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old": {"type": "string", "minLength": 1},
+                    "new": {"type": "string"},
+                },
+                "required": ["old", "new"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["path", "old", "new"],
+    "required": ["path"],
+    "oneOf": [
+        {"required": ["old", "new"], "not": {"required": ["edits"]}},
+        {
+            "required": ["edits"],
+            "not": {"anyOf": [{"required": ["old"]}, {"required": ["new"]}]},
+        },
+    ],
     "additionalProperties": False,
 }
 
@@ -23,11 +44,14 @@ def _run(runtime, args, windows):
     path = runtime.path(args["path"])
     if path not in runtime.files:
         raise ToolError(f"Virtual file not found: {path}")
-    if not args["old"] or runtime.files[path].count(args["old"]) != 1:
-        raise ToolError("Patch old text must match exactly once")
+    content = runtime.files[path]
+    for edit in args.get("edits", [args]):
+        if not edit["old"] or content.count(edit["old"]) != 1:
+            raise ToolError("Patch old text must match exactly once")
+        content = content.replace(edit["old"], edit["new"], 1)
     return runtime.write_file(
         path,
-        runtime.files[path].replace(args["old"], args["new"], 1),
+        content,
         args.get("expected_version"),
     )
 

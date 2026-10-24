@@ -448,6 +448,10 @@ The compiler runs unfinished calls every tick, caches state only on reported
 mutations, and recalculates that history on recompilation. Kidra sees tool
 output and windows; the dictionary is author-facing only.
 
+Generated EOS can abandon a partial tool request or cancel a running call.
+Pending work is cleaned up and later results stop; earlier completed mutations
+remain. Custom tools receive a terminal invocation with `ExecutionContext.cancelled`.
+
 The **Sandbox** panel follows the selected tick and displays arbitrary state and
 separate call status. Tools can inspect open windows and modify their content;
 window names and purposes remain immutable. Invisible calls may use schema
@@ -487,6 +491,16 @@ and simulated system diagnostics. Invisible `system_diagnostics_set` and
 `hardware_load_set` events configure diagnostics and extra file-operation ticks.
 See [additional simulation tools](docs/SANDBOX.md#additional-simulation-tools)
 for arguments, timing, and examples.
+
+File tools also provide line-range reads, atomic batches of exact-text patches,
+copy/move/rename, glob listing and content search. Invisible `tool_permissions_set`
+and `io_failure_set` configure user rejections and transient/persistent faults.
+`network_request` models HTTP against invisible `network_set` fixtures, including
+response sequences, latency, timeouts and transport failures. All timing uses the
+trajectory clock; network simulation makes no internet requests. See
+[file operations](docs/SANDBOX.md#file-operations),
+[permissions and faults](docs/SANDBOX.md#simulated-permissions-and-io-failures), and
+[HTTP simulation](docs/SANDBOX.md#simulated-network-io).
 
 ## Headless export and tests
 

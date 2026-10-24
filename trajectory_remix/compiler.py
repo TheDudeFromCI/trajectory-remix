@@ -350,7 +350,8 @@ class Compiler:
                         raise CompileError("replace-content requires an append and a boolean", path)
                     item["replace_content"] = event["replace-content"]
                 if event["op"] in ("tool-call", "invisible-tool-call"):
-                    validate_call(event, path, self.tools)
+                    validate_call(event, path, self.tools,
+                                  validate_arguments=event["op"] == "invisible-tool-call")
                 if event["op"] == "invisible-tool-call":
                     prepared.append(item)
                     continue
@@ -400,10 +401,8 @@ class Compiler:
                     )
                     if event["op"] == "tool-call":
                         item["request_event"] = content_event
-                        if self.ids["eos"] in item["encoded"].ids:
-                            raise CompileError(
-                                "Tool request cannot close before its result", path
-                            )
+                        if self.ids["eos"] not in item["encoded"].ids:
+                            validate_call(event, path, self.tools)
                     for aid, boundary in item["encoded"].anchors:
                         if aid in owners:
                             raise CompileError(f"Duplicate anchor {aid}", path)
@@ -480,7 +479,9 @@ class Compiler:
             resolved[ident] = tick
             return tick
 
-        def resolve_items():
+        def resolve_items(*, invalidate=False):
+            if invalidate:
+                resolved.clear()
             for item in prepared:
                 item["tick"] = solve(item)
 

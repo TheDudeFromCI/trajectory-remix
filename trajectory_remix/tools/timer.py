@@ -5,6 +5,7 @@ from .runtime import execution_context
 from ._support import load_state
 from ._simulation import result, failure
 from ._clock import unix_time, now, elapsed_seconds
+from ._cancellation import remove_pending
 
 name = "timer"
 description = "Wait in simulated seconds at the trajectory tick_rate. timeout: seconds >=0; interval: seconds >0 and finite count. alarm: timezone-aware timestamp or at_tick; timeout_seconds defaults to 100. Explicit ticks/timeout_ticks are supported as alternatives. No host sleeping."
@@ -55,6 +56,8 @@ schema = {
 
 def run(args, state, windows):
     context = execution_context.get()
+    if context.cancelled:
+        return remove_pending(state, "timers", context.call_id)
     elapsed = context.elapsed - context.duration
     if elapsed < 0:
         return "", False, False

@@ -322,7 +322,7 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. The 30 built-in tools are local
+Always confirm current schemas with `list_simulated_tools`. The 38 built-in tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
@@ -332,10 +332,12 @@ simulations; a stored skill is text, not installed code.
 | `time_set` | All seven fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `timezone`; use `null` for seeded random values. Sets the synthetic clock exactly. Timezone accepts IANA names, UTC or ±HH:MM. See [clock rules](../docs/SANDBOX.md#setting-synthetic-time). |
 | `time_advance`                                    | Invisible-only: nonnegative `seconds`; prepare synthetic time without sleeping.                                                                                                    |
 | `file_write`                                      | `path`, `content`; save virtual UTF-8 text and return its version; optional `expected_version` prevents stale writes.                                              |
-| `file_read`                                       | `path`; read current content, or historical content with optional `version`.                                                                                       |
+| `file_read` | `path`; optional historical `version`, inclusive 1-based start_line/end_line, and line_numbers. |
 | `file_stat`                                       | `path`; return current version and byte size without its body.                                                                                                     |
-| `file_patch`                                      | `path`, `old`, `new`; replace exactly one nonempty unique occurrence; optional `expected_version`.                                                                 |
-| `file_list`, `file_delete`                        | List virtual paths with no arguments; delete a current file with `path`. Historical versions remain.                                                               |
+| `file_patch` | `path` with old/new or an atomic edits array of old/new pairs; each old matches once. Optional expected_version. |
+| `file_list`, `file_delete` | List sorted virtual paths, optionally filtered by glob; delete with path. Historical versions remain. |
+| `file_copy`, `file_move`, `file_rename` | source/destination; optional overwrite and source expected_version. Move and rename are atomic; all retain historical artifacts. |
+| `file_search` | query; optional regex, case_sensitive, glob, context_lines and max_results. Returns bounded line-numbered matches. |
 | `memory_save`, `memory_search`                    | Save `key`, `text`; search with `query`, returning up to eight lexical matches.                                                                                    |
 | `note_save`                                       | `key`, `text`, `status` (`todo`, `doing`, `blocked`, `done`); optional `owner`, `depends_on`, `blockers`, `acceptance_criteria`. The last three are string arrays. |
 | `note_list`, `note_delete`                        | List notes with no arguments; delete with `key`.                                                                                                                   |
@@ -350,6 +352,17 @@ simulations; a stored skill is text, not installed code.
 | `system_diagnostics` | Read simulated CPU, RAM, VRAM, core count, OS and architecture. No host measurements. |
 | `system_diagnostics_set` | Invisible-only partial updates to simulated diagnostics. Resource usage must fit totals. |
 | `hardware_load_set` | Invisible-only file_io_ticks and per-operation operation_ticks. New file calls sample additive latency once at dispatch. |
+| `tool_permissions_set` | Invisible-only permission policy: default allow/deny and ordered tool/path glob rules with decision and optional remaining/message. Simulate user rejection before dispatch. |
+| `io_failure_set` | Invisible-only rules for I/O faults by tool/path glob, code, optional remaining/message. Empty rules clears faults. |
+| `network_set` | Invisible-only HTTP routes with URL glob, method, optional request_body/request_headers, and sequential responses with status/headers/body, latency_seconds/error. Last response repeats. |
+| `network_request` | url; optional method, headers, body and timeout_seconds (default 30). Simulated fixtures only; no internet requests. HTTP errors are returned statuses; transport errors fail. |
+
+Generated EOS cancels the owning tool window. A request ending with EOS is never
+dispatched, so its arguments may be incomplete. For a running call, schedule a
+generate event containing EOS on that window. Phase-B work on the EOS tick can
+finish before closure; future execution/results stop, and pending registrations
+are cleaned up. Earlier mutations remain. A cancelled call's result-anchor
+captures its EOS tick. See [cancellation](../docs/SANDBOX.md#cancellation-with-eos).
 
 
 Optional note fields survive updates; clear them with empty strings/arrays. A

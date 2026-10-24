@@ -39,6 +39,7 @@ class ExecutionContext:
     seed: str = "2030-01-01T09:00:00+00:00"
     max_bytes: int = 2_000_000
     recorded_outcome: dict | None = None
+    cancelled: bool = False  # One final cleanup invocation after the owning window emits EOS.
 
     @property
     def elapsed(self):
@@ -366,6 +367,14 @@ class ToolRegistry:
         initialize(state, context.clock)
         token = execution_context.set(context)
         try:
+            permission_modified = False
+            if not context.invisible and not context.cancelled and context.elapsed == 0:
+                from ._access import permission
+
+                denied, permission_modified = permission(state, name, args)
+                if denied is not None:
+                    output, done, modified = denied
+                    return output, done, modified or initialized
             result = invoke(
                 tool,
                 args,
@@ -384,7 +393,7 @@ class ToolRegistry:
                 or type(modified) is not bool
             ):
                 raise ToolError(f"{name}: expected (str, bool, bool) from run")
-            return output, done, modified or initialized
+            return output, done, modified or initialized or permission_modified
         finally:
             execution_context.reset(token)
 

@@ -12,7 +12,7 @@ from .tools import ExecutionContext, ToolError, WindowProperties, tool_text
 MAX_TOOL_CALLS = 256
 
 
-def validate_call(event, path, registry):
+def validate_call(event, path, registry, *, validate_arguments=True):
     invisible = event["op"] == "invisible-tool-call"
     if invisible and set(event) - {
         "op",
@@ -35,7 +35,14 @@ def validate_call(event, path, registry):
         raise CompileError("tool-call arguments must be an object", path)
     integer(event.get("duration-ticks", 0), path)
     try:
-        registry.validate(event["tool"], event["arguments"], invisible)
+        if validate_arguments:
+            registry.validate(event["tool"], event["arguments"], invisible)
+        else:
+            from .tools.runtime import reject_invisible
+
+            tool = registry.check_visibility(event["tool"], invisible)
+            if not invisible:
+                reject_invisible(event["arguments"], tool.schema)
     except ToolError as error:
         raise CompileError(str(error), path) from error
 
@@ -227,8 +234,75 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
     if len(unresolved) > MAX_TOOL_CALLS:
         raise CompileError(f"Tool event limit exceeded ({MAX_TOOL_CALLS})")
     actions, by_path = [], {item["path"]: item for item in unresolved}
-    while unresolved or actions:
+    closures, last_runs = {}, {}
+
+    def update_closures():
+        closures.clear()
+        for candidate in items:
+            encoded = candidate.get("encoded")
+            if (
+                candidate["tick"] is not None
+                and candidate["event"]["op"] in ("generate", "tool-call")
+                and encoded is not None
+                and compiler.ids["eos"] in encoded.ids
+            ):
+                window = candidate["event"]["window"]
+                tick = (
+                    candidate["tick"]
+                    + encoded.ids.index(compiler.ids["eos"]) // candidate["rate"]
+                )
+                closures[window] = min(closures.get(window, tick), tick)
+
+    def closing_tick(window):
+        return closures.get(window)
+
+    def trim_results(call, end):
+        kept = []
+        for result in call["results"]:
+            if result["tick"] > end:
+                continue
+            if result["end"] > end:
+                encoded = result["encoded"]
+                count = (end - result["tick"] + 1) * result["rate"]
+                result["encoded"] = replace(
+                    encoded,
+                    text=compiler.tokenizer.decode(
+                        encoded.ids[:count], skip_special_tokens=False
+                    ),
+                    ids=encoded.ids[:count],
+                    offsets=encoded.offsets[:count],
+                    weights=encoded.weights[:count],
+                )
+                result["end"] = end
+            kept.append(result)
+        call["results"] = kept
+
+    def refresh_schedule():
         resolve_items()
+        # Closing an already-computed stream changes its final delivered token.
+        # Settle those anchors before dependent calls can be dispatched.
+        for _ in range(len(calls) + 1):
+            update_closures()
+            changed = False
+            for completed in calls:
+                if "end" not in completed or completed.get("invisible"):
+                    continue
+                close = closing_tick(completed["window"])
+                if close is None or completed["result_end"] <= close:
+                    continue
+                trim_results(completed, close)
+                completed["result_end"] = max(
+                    (result["end"] for result in completed["results"]), default=close
+                )
+                by_path[completed["path"]]["result_end"] = completed["result_end"]
+                changed = True
+            if not changed:
+                return
+            resolve_items(invalidate=True)
+        raise CompileError("Cyclic cancellation anchor dependency")
+
+    while unresolved or actions:
+        refresh_schedule()
         waiting = []
         for item in unresolved:
             if item["tick"] is None:
@@ -237,7 +311,8 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
             event = item["event"]
             invisible = event["op"] == "invisible-tool-call"
             start = item["tick"] + (0 if invisible else len(item["encoded"].ids))
-            if start + event.get("duration-ticks", 0) >= MAX_TICKS:
+            close = None if invisible else closing_tick(event["window"])
+            if start + event.get("duration-ticks", 0) >= MAX_TICKS and close is None:
                 raise CompileError("Tool completion exceeds tick limit", item["path"])
             call = {
                 "path": item["path"],
@@ -258,8 +333,31 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
                 ),
             }
             calls.append(call)
-            heapq.heappush(actions, (start, item["order"], call))
+            heapq.heappush(
+                actions,
+                (
+                    min(start, close) if close is not None else start,
+                    item["order"],
+                    call,
+                ),
+            )
         unresolved = waiting
+        # A late phase-B result can resolve a generated EOS on this same tick.
+        # Deliver cleanup before advancing any work to the next tick.
+        rescheduled = []
+        for at, order, active in actions:
+            if active["path"] not in last_runs:
+                request = by_path[active["path"]]
+                active["request_start"] = request["tick"]
+                active["start"] = request["tick"] + (
+                    0 if active.get("invisible") else len(request["encoded"].ids)
+                )
+                at = active["start"]
+            rescheduled.append(
+                (min(at, closures.get(active.get("window"), at)), order, active)
+            )
+        actions = rescheduled
+        heapq.heapify(actions)
         if not actions:
             raise CompileError("Cyclic anchor dependency", unresolved[0]["path"])
         tick, order, call = heapq.heappop(actions)
@@ -290,22 +388,41 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
             ]
 
         windows = WindowList(open_windows)
+        close = None if call.get("invisible") else closing_tick(call["window"])
+        cancelled = close is not None and close <= tick
+        call_context = replace(
+            context,
+            tick=tick,
+            start=call["start"],
+            duration=event.get("duration-ticks", 0),
+            call_id=call["path"],
+            invisible=call.get("invisible", False),
+            recorded_outcome=event.get("outcome"),
+        )
         try:
-            output, done, modified = compiler.tools.run_tick(
-                call["tool"],
-                call["arguments"],
-                state,
-                windows,
-                replace(
-                    context,
-                    tick=tick,
-                    start=call["start"],
-                    duration=event.get("duration-ticks", 0),
-                    call_id=call["path"],
-                    invisible=call.get("invisible", False),
-                    recorded_outcome=event.get("outcome"),
-                ),
-            )
+            if cancelled and (
+                tick < call["start"] or last_runs.get(call["path"]) == tick
+            ):
+                output, done, modified = "", False, False
+            else:
+                output, done, modified = compiler.tools.run_tick(
+                    call["tool"], call["arguments"], state, windows, call_context
+                )
+                last_runs[call["path"]] = tick
+            if cancelled and not done:
+                if tick >= call["start"]:
+                    # EOS is phase D; the final normal phase-B run at this tick stands.
+                    # A terminal run is cleanup only: its output is deliberately discarded.
+                    _, _, cleaned = compiler.tools.run_tick(
+                        call["tool"],
+                        call["arguments"],
+                        state,
+                        windows,
+                        replace(call_context, cancelled=True),
+                    )
+                    modified |= cleaned
+                done = True
+                call["cancelled"] = True
         except Exception as error:
             # An exception has no modified_state report, so its partial state is uncacheable.
             raise CompileError(
@@ -335,22 +452,35 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
                 if isinstance(outcome, dict) and type(outcome.get("ok")) is bool
                 else {"ok": True, "result": text}
             )
+            if call.get("cancelled"):
+                call["outcome"] = {"ok": False, "error": "Tool cancelled by window EOS"}
             if call.get("invisible") and not call["outcome"]["ok"]:
                 raise CompileError(
                     f"Invisible tool failed: {call['outcome'].get('error', '')}",
                     call["path"],
                 )
             if not call.get("invisible"):
-                if not call["outputs"]:
+                if not call["outputs"] and not call.get("cancelled"):
                     finish_result(item, call, tick, "")
-                item["result_end"] = max(result["end"] for result in call["results"])
+                if close is not None:
+                    trim_results(call, close)
+                item["result_end"] = max(
+                    (result["end"] for result in call["results"]), default=tick
+                )
+                if call.get("cancelled"):
+                    item["result_end"] = tick
                 call["result_end"] = item["result_end"]
                 if "result-anchor" in event:
                     call["result_anchor"] = event["result-anchor"]
         else:
             heapq.heappush(actions, (tick + 1, order, call))
+    refresh_schedule()
     calls.sort(key=lambda c: c["order"])
     for call in calls:
+        if not call.get("invisible"):
+            close = closing_tick(call["window"])
+            if close is not None:
+                trim_results(call, close)
         call.pop("order")
     return {"initial": initial, "snapshots": snapshots}, calls, writes
 
@@ -373,7 +503,9 @@ def tool_calls_frame(plan, tick):
                 for k, v in call.items()
                 if k not in ("outcome", "output", "outputs", "results")
             },
-            "status": "composing"
+            "status": "cancelled"
+            if call.get("cancelled") and tick >= call["end"]
+            else "composing"
             if tick < call["start"]
             else "running"
             if tick < call["end"]

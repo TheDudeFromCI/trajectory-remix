@@ -2,10 +2,18 @@
 
 from .runtime import execution_context
 from ._support import run_builtin
+from ._access import io_failure
+from ._cancellation import remove_pending
 
 
 def run_file_builtin(args, state, windows, operation, *, modifies=False):
     context = execution_context.get()
+    if context.cancelled:
+        return remove_pending(state, "file_io_pending", context.call_id)
+    if context.elapsed == 0:
+        failed = io_failure(state, operation.__module__.rsplit(".", 1)[-1], args)
+        if failed is not None:
+            return failed
     pending = state.get("file_io_pending", {})
     call = pending.get(context.call_id)
     modified = False

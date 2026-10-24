@@ -52,6 +52,30 @@ omit it. `ExecutionContext`, available through
 start tick, call ID, author metadata, and compatibility duration. It is optional;
 a tool can implement progress entirely within its arguments and sandbox state.
 
+## Cancellation with EOS
+
+Generated EOS closes a tool window even while composing a request or waiting for
+results ([issue #12](https://github.com/TheDudeFromCI/trajectory-remix/issues/12)).
+A request ending in EOS is abandoned: its structured arguments may be incomplete,
+and the tool never executes. To cancel a running call, schedule a `generate`
+event containing `<|eos|>` on its tool window. Other windows continue normally.
+
+Execution at that tick follows the normal phases: a phase-B operation or result
+already completed before phase-D EOS remains committed. A still-running tool
+receives one terminal cleanup invocation with
+`execution_context.get().cancelled == True`. It must return promptly, clean up
+its own registrations, and report `modified_state` normally. Its terminal output
+is discarded and the scheduler never runs that call again, even if it ignores
+cancellation. The 10-second deadline also applies to cleanup. Custom tools should
+check `cancelled` before performing ordinary work. Built-in timers, watchers,
+network requests, delayed file operations and subagents release pending state;
+cancelled subagent conversations retain their history with status `cancelled`.
+
+Cancellation does not undo earlier completed mutations or observations. Streaming
+results stop at the EOS tick, including results whose computation already
+finished. Cancelled calls have author-facing status `cancelled`; a cancelled
+call's `result-anchor` captures the EOS tick so dependent events can continue.
+
 ## Windows
 
 `windows` is a list of all currently open windows. Each `WindowProperties` has
@@ -275,7 +299,8 @@ The invisible hardware configuration tool accepts, for example:
  "arguments":{"file_io_ticks":5,"operation_ticks":{"file_read":2}}}
 ```
 
-The six primitive file tools (read, write, patch, delete, stat and list) then
+The ten file operations (read, write, patch, delete, stat, list, copy, move,
+rename and search) then
 sample their delay at dispatch: two extra ticks for reads and five for the
 others. Execution and mutations happen at the end of that delay. Existing
 `duration-ticks` is additive. Changing configuration does not alter in-flight
@@ -283,3 +308,107 @@ calls; set an operation override to zero to remove its latency. These settings
 simulate latency independently of reported CPU/RAM usage; no host load is
 created. Configuration tools are invisible-only and never appear among random
 `show_tools` additions.
+
+## File operations
+
+All paths are virtual POSIX paths; files never touch the host filesystem. Paths
+are normalized with a leading slash, and traversal/backslashes/NUL are rejected.
+The store contains text files; directories are implicit path prefixes.
+
+- `file_read` reads the whole current file by default. Optional `start_line` and
+  `end_line` are inclusive, 1-based ranges; `line_numbers: true` prefixes each
+  returned line. Ranged results include `total_lines`. Ranges past EOF are empty;
+  an explicitly reversed range fails. The same options work with historical
+  `version` reads. Newline characters are preserved.
+- `file_patch` already supports exact text replacement with `path`, `old`, `new`.
+  It also accepts `edits: [{"old":"...","new":"..."}, ...]` instead of old/new.
+  Edits apply in order to a working copy and commit atomically only if every old
+  text matches exactly once. Optional `expected_version` prevents stale edits.
+  `file_write` remains available for full replacement.
+- `file_copy`, `file_move`, and `file_rename` take `source` and `destination`.
+  Existing destinations fail unless `overwrite: true`; optional
+  `expected_version` checks the source. Move and rename have the same atomic
+  behavior. Historical versions at both paths remain available after transfers.
+- `file_list` optionally filters sorted paths with `glob`, such as `/src/*.py`.
+  `file_search` requires `query`, treats it as literal text by default, and
+  optionally accepts `regex`, `case_sensitive` (default true), `glob`,
+  `context_lines` (0–20), and `max_results` (default 100, maximum 1000). Matches
+  include path, 1-based line number, line text and surrounding lines, with a
+  `truncated` indicator. Matching is per line. Globs are case sensitive and `*`
+  can span path separators. Regex evaluation has the standard invocation timeout.
+
+## Simulated permissions and I/O failures
+
+The invisible `tool_permissions_set` replaces the current permission policy:
+
+```json
+{"op":"invisible-tool-call", "tool":"tool_permissions_set", "arguments":{
+  "default":"allow", "rules":[
+    {"tool":"file_write", "path":"/reports/*", "decision":"deny",
+     "remaining":1, "message":"User clicked Reject"}
+  ]}}
+```
+
+The first matching rule wins for each target. `tool` and `path` are case-sensitive
+globs, defaulting to any tool/target when omitted. `path` matches normalized
+`path`, `source`, `destination`, or an HTTP `url`; transfers need access to both
+endpoints. `remaining` limits the number of dispatches using a rule; omitted
+means persistent. Defaults allow access; `default: "deny"` creates an allowlist.
+Rejection returns a normal `Permission denied` tool error before execution,
+without file writes, requests, random draws or other tool side effects. Policy
+consumption itself is cached. Rules apply to newly dispatched calls; use EOS to
+stop a running call. Invisible author calls bypass permissions so setup and
+policy repair remain possible. File list/search omit paths denied for their
+respective tool names without consuming per-file rules. These are training
+simulation controls, not an isolation boundary for trusted custom Python code.
+
+The invisible `io_failure_set` replaces deterministic fault rules:
+
+```json
+{"op":"invisible-tool-call", "tool":"io_failure_set", "arguments":{"rules":[
+  {"tool":"file_*", "path":"/data/*", "code":"EIO", "remaining":1,
+   "message":"Disk temporarily unavailable"}
+]}}
+```
+
+Fault matching uses the same tool/path globs. The first matching rule is sampled
+once at dispatch, after permission checks and before I/O side effects or latency.
+It applies to all ten file operations, `file_watch` and `network_request`,
+including invisible calls. Codes such as `EIO`, `ENOSPC`, `EACCES`, `ETIMEDOUT`, or
+`ECONNRESET` are author-selected labels. Omit `remaining` to keep failing, or
+use one failure then let retries succeed. `{"rules":[]}` clears faults. Failed
+operations leave files intact and do not consume network fixture responses.
+
+## Simulated network I/O
+
+`network_request` models HTTP with `url`, optional `method` (default GET),
+`headers`, `body`, and `timeout_seconds` (default 30 simulated seconds). It never
+uses host networking. Authors configure deterministic routes invisibly:
+
+```json
+{"op":"invisible-tool-call", "tool":"network_set", "arguments":{"routes":[
+  {"url":"https://example.test/api", "method":"POST", "request_body":"hello",
+   "responses":[
+     {"status":503, "body":"Try again", "latency_seconds":0.5},
+     {"status":200, "headers":{"Content-Type":"text/plain"}, "body":"Saved"}
+   ]}
+]}}
+```
+
+Routes match in order by method and URL glob, with optional exact request body
+and a subset of request headers (case-insensitive header names). Each dispatch
+consumes the next response; the last response repeats. Route replacement resets
+cursors while in-flight requests retain their sampled response. Unmatched URLs
+fail explicitly. Request URLs require HTTP/HTTPS, a host and no credentials.
+
+Responses contain status (default 200), headers and text body. HTTP errors such
+as 404/429/503 are successful transport results, letting Kidra interpret them.
+Optional `error` simulates `dns`, `connection_refused`, `connection_reset`, `tls`
+or `timeout`. Optional `latency_seconds` uses the same anchored tick clock as
+timers; clock jumps affect waiting requests. Transport failures and timeouts
+return tool errors; explicit fixture timeouts wait until the request deadline.
+At an exact latency/deadline tie the response wins. HEAD returns an empty body.
+There are no automatic retries or redirects. Fixtures and pending responses are
+bounded by the workbench byte budget. Idle requests do not add state snapshots.
+EOS cancellation releases pending responses; the dispatched fixture remains
+consumed. Use response sequences to teach retries, rate limiting and recovery.

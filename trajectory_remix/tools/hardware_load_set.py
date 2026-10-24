@@ -12,6 +12,10 @@ FILE_OPERATIONS = (
     "file_delete",
     "file_stat",
     "file_list",
+    "file_copy",
+    "file_move",
+    "file_rename",
+    "file_search",
 )
 schema = {
     "type": "object",

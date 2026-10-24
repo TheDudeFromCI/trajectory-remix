@@ -305,6 +305,8 @@ class BuiltinState:
 def run_builtin(args, state, windows, operation, *, modifies=False):
     """Adapt the built-in simulation helpers to the public tick protocol."""
     context = execution_context.get()
+    if context.cancelled:
+        return "", True, False
     if context.elapsed < context.duration:
         return "", False, False
     runtime = load_state(state)
@@ -328,6 +330,7 @@ def load_state(state):
         **context.clock, random_seed=context.seed, max_bytes=context.max_bytes
     )
     runtime.tick_rate = state.get("tick_rate", runtime.tick_rate)
+    runtime.tool_permissions = state.get("tool_permissions", {})
     if "clock" in state:
         runtime.restore(state)
     elif "clock_unix" in state:

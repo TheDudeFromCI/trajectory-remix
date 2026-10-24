@@ -36,6 +36,14 @@ schema = {
 
 def run(args, state, windows):
     context = execution_context.get()
+    if context.cancelled:
+        pending = state.get("subagent_runs", {})
+        cid = pending.pop(context.call_id, None)
+        if not pending:
+            state.pop("subagent_runs", None)
+        if cid is not None:
+            state["conversations"][cid]["status"] = "cancelled"
+        return "", True, cid is not None
     if "response" in args:
         state.setdefault("subagent_replies", {})[args["task"]] = {
             "ok": True,

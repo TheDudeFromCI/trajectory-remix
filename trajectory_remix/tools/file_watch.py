@@ -5,6 +5,8 @@ from .runtime import execution_context
 from ._support import load_state
 from ._simulation import result, failure
 from ._clock import unix_time, now, elapsed_seconds
+from ._access import io_failure
+from ._cancellation import remove_pending
 
 name = "file_watch"
 description = "Watch a virtual path for created, modified, or deleted content. Emits matching changes and finishes after count matches (default 1), or timeout_seconds (default 100 simulated seconds; timeout_ticks is an explicit alternative). Observes completed file changes once per logical tick, not host files."
@@ -30,6 +32,12 @@ schema = {
 
 def run(args, state, windows):
     context = execution_context.get()
+    if context.cancelled:
+        return remove_pending(state, "file_watchers", context.call_id)
+    if context.elapsed == 0:
+        failed = io_failure(state, name, args)
+        if failed is not None:
+            return failed
     if context.elapsed < context.duration:
         return "", False, False
     try:

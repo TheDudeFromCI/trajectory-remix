@@ -1130,6 +1130,9 @@ class TrajectoryCommands:
         controlling streamed results. auto_anchor assigns an unused result-anchor
         ID marking the final result token. Optional content
         or segments replace the canonical <tool> request and support anchors/NOOPs.
+        An EOS in request content abandons composition (arguments need not be
+        complete). Generated EOS on a running tool window cancels its active calls
+        and stops later observations. result-anchor then captures the EOS tick.
         Each tool runs every tick until is_done. Built-ins retain duration_ticks as
         a compatibility delay. outcome is legacy author data passed to the tool,
         rather than an output override. Save with save_dataset.
