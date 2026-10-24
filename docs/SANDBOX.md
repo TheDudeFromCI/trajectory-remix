@@ -165,8 +165,9 @@ Projects using the previous SQLite version are migrated additively on opening.
 ## Built-in simulation conventions
 
 The built-ins share their own clock and stores inside the otherwise opaque dict.
-Visible built-in calls increment their simulated call count and clock; invisible
-calls omit that automatic increment. Synthetic clock metadata remains
+The legacy clock/store tools increment their simulated call count and clock on
+visible calls; invisible calls omit that automatic increment. The calculator,
+random generator, timers, watchers and diagnostics do not implicitly advance time. Synthetic clock metadata remains
 `{"synthetic_clock":{"seed":"2030-01-01T09:00:00Z","seconds_per_call":1}}`.
 `time_set` accepts nullable local date/time fields and an IANA or fixed-offset
 zone; null fields are deterministic from the trajectory UUID and call count.
@@ -186,3 +187,70 @@ recognizes subagent names, and the built-in never invokes an LLM.
 MCP workbenches are isolated, ephemeral state dictionaries. Their call budgets
 and logs are session bookkeeping. Use executable trajectory calls for replayable
 state; recording workbench observations alone does not copy its dictionary.
+
+
+## Additional simulation tools
+
+`calculator({"expression":"sin(pi/2) + log(8, 2)"})` evaluates numerical
+expressions with the **simpleeval** library. Available functions include sin,
+cos, tan, asin, acos, atan, atan2, sqrt, log, log10, log2, exp, degrees,
+radians, floor, ceil, abs, round, min and max. Constants are pi, e and tau.
+Angles use radians. Expressions are limited to 4096 characters and 256 syntax
+nodes; strings, attributes, collections and non-finite results are rejected.
+Evaluation retains the normal per-invocation deadline.
+
+`random` accepts `kind: "int" | "bool" | "float" | "choice"`. Integer bounds
+are inclusive (default 0–100); float bounds default to 0–1. `choice` requires a
+nonempty `choices` array and can return structured JSON values. Each successful
+draw advances a counter stored under `random`; the trajectory UUID and counter
+seed the draw. Recompiling the same source reproduces its sequence. Failed
+requests do not consume a draw. These values are for simulation, not secrets.
+
+`timer` uses logical execution ticks without sleeping:
+
+- `{"mode":"timeout","ticks":5}` completes five ticks after dispatch.
+- `{"mode":"interval","ticks":3,"count":4}` emits at offsets 3, 6, 9 and 12,
+  then completes. Intervals must be positive and counts are finite (at most 1024).
+- `{"mode":"alarm","at_tick":100}` fires at or after tick 100.
+- `{"mode":"alarm","timestamp":"2030-01-01T09:10:00Z","timeout_ticks":500}`
+  waits for the synthetic clock to reach that timestamp. Authors must advance
+  the synthetic clock explicitly; replay ticks do not represent wall seconds.
+
+Alarms have a waiting limit of 1000 ticks by default. Intervals and timeouts are
+also subject to the trajectory's existing tick limit. Timer invocations are
+stateless, so idle ticks do not create state snapshots. Streamed observations
+queue in firing order; the result anchor still captures the last result token.
+
+`file_watch({"path":"/report.txt","events":["created","modified","deleted"],
+"count":3,"timeout_ticks":200})` captures the current file version at dispatch
+and emits subsequent matching changes until its count is met or it times out.
+Defaults are all three events, one match and 1000 ticks. It polls the virtual
+filesystem once per tick, comparing content hashes; it cannot observe transient
+changes that are reversed between polls. It sees writes only after their
+execution finishes, including delayed I/O. Calls follow stable source order: a
+mutation later in that order is observed on the watcher's next tick. Timestamp
+alarms follow the same rule for clock updates. Completed/timed-out watches
+remove their registration from state.
+
+`system_diagnostics` returns deterministic simulated values with
+`synthetic: true`: CPU usage percentage, core count and model, RAM/VRAM total
+and used bytes, GPU model, OS and architecture. Defaults describe a simulated
+8-core Linux system with 16 GiB RAM and 8 GiB VRAM; they never probe the host.
+The invisible `system_diagnostics_set` merges supplied fields, retaining omitted
+ones, and rejects RAM/VRAM usage exceeding the configured total.
+
+The invisible hardware configuration tool accepts, for example:
+
+```json
+{"op":"invisible-tool-call", "tool":"hardware_load_set",
+ "arguments":{"file_io_ticks":5,"operation_ticks":{"file_read":2}}}
+```
+
+The six primitive file tools (read, write, patch, delete, stat and list) then
+sample their delay at dispatch: two extra ticks for reads and five for the
+others. Execution and mutations happen at the end of that delay. Existing
+`duration-ticks` is additive. Changing configuration does not alter in-flight
+calls; set an operation override to zero to remove its latency. These settings
+simulate latency independently of reported CPU/RAM usage; no host load is
+created. Configuration tools are invisible-only and never appear among random
+`show_tools` additions.

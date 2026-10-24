@@ -320,7 +320,7 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. The 23 built-in tools are local
+Always confirm current schemas with `list_simulated_tools`. The 30 built-in tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
@@ -341,6 +341,14 @@ simulations; a stored skill is text, not installed code.
 | `subagent`                                        | `task`; optional `resume` and `artifacts`; author supplies the outcome separately. No real delegation occurs.                                                      |
 | `subagent_list`, `subagent_get`, `subagent_close` | List with no arguments; inspect/close with `conversationId`.                                                                                                       |
 | `runtime_status`                                  | No arguments; inspect synthetic clock, call count, TODO counts and conversation lifecycle summaries.                                                               |
+| `calculator` | `expression`; numeric math via simpleeval, including trigonometry, logarithms, roots and constants. Angles use radians. |
+| `random` | `kind`: int, bool, float, choice; optional min/max or required choices. Reproducible draws persisted in sandbox state. |
+| `timer` | `mode`: timeout/interval with ticks; intervals require finite count. Alarm uses at_tick or a timezone-aware synthetic timestamp. |
+| `file_watch` | `path`; optional events, count and timeout_ticks. Poll for completed virtual file changes and emit masked observations. |
+| `system_diagnostics` | Read simulated CPU, RAM, VRAM, core count, OS and architecture. No host measurements. |
+| `system_diagnostics_set` | Invisible-only partial updates to simulated diagnostics. Resource usage must fit totals. |
+| `hardware_load_set` | Invisible-only file_io_ticks and per-operation operation_ticks. New file calls sample additive latency once at dispatch. |
+
 
 Optional note fields survive updates; clear them with empty strings/arrays. A
 task cannot become `done` with blockers or missing/unfinished dependencies.

@@ -480,6 +480,13 @@ built-in conventions. The [MCP reference](docs/MCP.md) covers authoring commands
 or invisible executions. Frame and sandbox API responses keep `sandbox` and
 `tool_calls` separate so tool-owned keys never collide with scheduler metadata.
 
+The built-in selection also includes a `simpleeval` calculator, reproducible
+random draws, tick timers and synthetic-clock alarms, virtual file watchers,
+and simulated system diagnostics. Invisible `system_diagnostics_set` and
+`hardware_load_set` events configure diagnostics and extra file-operation ticks.
+See [additional simulation tools](docs/SANDBOX.md#additional-simulation-tools)
+for arguments, timing, and examples.
+
 ## Headless export and tests
 
 ```bash

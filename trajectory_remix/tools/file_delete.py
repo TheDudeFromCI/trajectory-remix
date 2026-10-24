@@ -1,6 +1,6 @@
 """Delete a virtual file."""
 
-from ._support import run_builtin
+from ._file_io import run_file_builtin
 from ._protocol import ToolError
 from .runtime import WindowProperties
 
@@ -25,4 +25,4 @@ def _run(runtime, args, windows):
 def run(
     args: dict, state: dict, windows: list[WindowProperties]
 ) -> tuple[str, bool, bool]:
-    return run_builtin(args, state, windows, _run, modifies=True)
+    return run_file_builtin(args, state, windows, _run, modifies=True)

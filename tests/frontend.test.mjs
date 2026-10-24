@@ -777,13 +777,55 @@ assert.doesNotMatch(shown, /"username"|"file_read"/);
 const extraCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "Randomly add additional tools").querySelector("input");
 extraCheck.checked = true;
 extraCheck.onchange();
-await waitFor(() => !w.document.title.startsWith("*"));
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"] === true);
 assert.equal(JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-additional-tools"], true);
+// New math, timer, and author-only load tools use the same actual editor flow.
+await click("add-tool-call");
+let mathCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+let mathSelect = mathCard.querySelector(".event-options select");
+assert(mathSelect.querySelector('option[value="calculator"]'));
+assert(!mathSelect.querySelector('option[value="hardware_load_set"]'));
+assert(!mathSelect.querySelector('option[value="system_diagnostics_set"]'));
+mathSelect.value = "calculator";
+mathSelect.onchange();
+mathCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const mathArgs = mathCard.querySelector('textarea[aria-label="arguments JSON"]');
+mathArgs.value = JSON.stringify({expression: "sin(pi / 2) + sqrt(9)"});
+mathArgs.oninput();
+await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "calculator"));
+assert.equal(lastPlan.tool_calls.find((call) => call.tool === "calculator").outcome.result.value, 4);
+await click("add-tool-call");
+let timerCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const timerSelect = timerCard.querySelector(".event-options select");
+timerSelect.value = "timer";
+timerSelect.onchange();
+timerCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const timerArgs = timerCard.querySelector('textarea[aria-label="arguments JSON"]');
+timerArgs.value = JSON.stringify({mode: "interval", ticks: 2, count: 2});
+timerArgs.oninput();
+await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "timer"));
+const interval = lastPlan.tool_calls.find((call) => call.tool === "timer");
+assert.equal(interval.outputs.length, 2);
+assert.equal(interval.end - interval.start, 4);
+await click("add-invisible-call");
+let loadCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const loadSelect = loadCard.querySelector(".event-options select");
+assert(loadSelect.querySelector('option[value="hardware_load_set"]'));
+loadSelect.value = "hardware_load_set";
+loadSelect.onchange();
+loadCard = [...w.document.querySelectorAll(".event-card")].at(-1);
+const loadArgs = loadCard.querySelector('textarea[aria-label="arguments JSON"]');
+loadArgs.value = JSON.stringify({file_io_ticks: 2});
+loadArgs.oninput();
+await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "hardware_load_set"));
+jump(lastPlan.max_tick);
+await waitFor(() => $("sandbox-state").textContent.includes('"file_io_ticks": 2'));
+assert.match($("sandbox-state").textContent, /"file_io_ticks": 2/);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 90,
+    checks: 98,
     errors,
   }),
 );
