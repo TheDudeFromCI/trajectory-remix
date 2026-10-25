@@ -135,7 +135,7 @@ async def test_stopped_draft_resumes_after_restart_without_regenerating_complete
     compiler, tmp_path
 ):
     fake = ScenarioClient()
-    fake.hold = "Validate the trajectory"
+    fake.hold = "Validate ONLY message framing"
     app = app_for(tmp_path, compiler, fake)
     runner = app.state.scenario_runner
     async with httpx.AsyncClient(
@@ -435,7 +435,10 @@ async def test_validation_repairs_are_visible_and_revalidated(compiler, tmp_path
                 data = json.loads(
                     messages[1]["content"].split("\nOutput JSON schema:")[0]
                 )
-                assert data["findings"] == ["Incorrect answer"]
+                assert data["findings"] == [
+                    f"[{name}] Incorrect answer"
+                    for name in ("layout", "tools", "reasoning", "correctness")
+                ]
                 return {"content": json.dumps({"replay": data["trajectory"]["replay"]})}
             self.valid = self.repaired
             return await super().complete(endpoint, messages, tools)
@@ -451,6 +454,11 @@ async def test_validation_repairs_are_visible_and_revalidated(compiler, tmp_path
         True,
     ]
     assert "validate.repair" in runner.snapshot["steps"]
+    # Even an unchanged repair is reviewed afresh by every focused check.
+    reviews = [
+        m for m in runner.client.messages if m[0]["content"].startswith("Validate")
+    ]
+    assert len(reviews) == 8
 
 
 async def test_transport_failure_does_not_reject_pending_draft(compiler, tmp_path):
@@ -887,3 +895,127 @@ async def test_validation_connection_failure_identifies_endpoint_url_and_model(
     assert "http://127.0.0.1:8080/v1" in message
     assert "local-model" in message
     assert any("Endpoint 'validator'" in log["message"] for log in runner.logs)
+
+
+async def test_one_failed_focused_check_blocks_promotion(compiler, tmp_path):
+    import shutil
+
+    class FocusedClient(ScenarioClient):
+        def __init__(self):
+            super().__init__()
+            self.reviewed = []
+
+        async def complete(self, endpoint, messages, tools=None):
+            prompt = messages[0]["content"]
+            if prompt.startswith("Validate"):
+                data = json.loads(
+                    messages[1]["content"].split("\nOutput JSON schema:")[0]
+                )
+                assert {
+                    "events",
+                    "windows",
+                    "anchors",
+                    "tool_calls",
+                    "diagnostics",
+                } <= data["compiled"].keys()
+                assert "evaluations" not in data["trajectory"]["metadata"]
+                assert "validation_level" not in data["trajectory"]["metadata"]
+                assert "files" in data["idea"]
+                self.reviewed.append(prompt)
+                valid = not prompt.startswith("Validate ONLY factual correctness")
+                return {
+                    "content": json.dumps(
+                        {
+                            "valid": valid,
+                            "feedback": [] if valid else ["Schedule is not unique"],
+                        }
+                    )
+                }
+            return await super().complete(endpoint, messages, tools)
+
+    root = tmp_path / "scenarios"
+    shutil.copytree(EXAMPLES, root)
+    path = root / "user_problem/flow.yaml"
+    flow = yaml.safe_load(path.read_text())
+    flow["steps"]["validate"]["max_repairs"] = 0
+    path.write_text(yaml.safe_dump(flow, sort_keys=False))
+    fake = FocusedClient()
+    app = app_for(tmp_path, compiler, fake, root)
+    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 5)
+    assert len(fake.reviewed) == 4
+    sample = app.state.dataset["samples"][0]
+    assert sample["metadata"]["validation_level"] == -1
+    report = sample["metadata"]["evaluations"][-1]["report"]
+    assert not report["valid"]
+    assert report["feedback"] == ["[correctness] Schedule is not unique"]
+    assert report["checks"]["layout"]["valid"]
+    assert not report["checks"]["correctness"]["valid"]
+
+
+async def test_focused_reviews_resume_without_repeating_completed_checks(
+    compiler, tmp_path
+):
+    fake = ScenarioClient()
+    fake.hold = "Validate ONLY reasoning quality"
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 5)
+    draft_id = runner.status["draft_id"]
+    assert "report" in runner.snapshot["steps"]["validate.checks.layout"]
+    await runner.stop()
+    restored = create_app(tmp_path / "project.sqlite", client=fake)
+    fake.hold = None
+    restored_runner = restored.state.scenario_runner
+    restored_runner.resume_saved(draft_id)
+    await finish(restored_runner)
+    reviews = [
+        m[0]["content"] for m in fake.messages if m[0]["content"].startswith("Validate")
+    ]
+    assert sum(p.startswith("Validate ONLY message framing") for p in reviews) == 1
+    assert sum(p.startswith("Validate ONLY tool use") for p in reviews) == 1
+    assert sum(p.startswith("Validate ONLY reasoning quality") for p in reviews) == 2
+    assert sum(p.startswith("Validate ONLY factual correctness") for p in reviews) == 1
+
+
+@pytest.mark.parametrize(
+    "checks",
+    [
+        {"bad.name": "review.md"},
+        {"review": "../../outside.md"},
+        {"review": "missing.md"},
+        {"review": ""},
+    ],
+)
+def test_focused_check_definitions_are_validated(tmp_path, checks):
+    root = write_scenario(
+        tmp_path, {"steps": {"review": {"uses": "remix.validate", "checks": checks}}}
+    )
+    with pytest.raises((ValueError, FileNotFoundError)):
+        ScenarioRegistry(root)
+
+
+async def test_single_prompt_validation_remains_supported(compiler, tmp_path):
+    root = write_scenario(
+        tmp_path,
+        {
+            "steps": {
+                "review": {
+                    "uses": "remix.validate",
+                    "prompt": "review.md",
+                    "endpoint": "validator",
+                }
+            }
+        },
+        {"review.md": "Validate this trajectory."},
+    )
+    fake = ScenarioClient()
+    app = app_for(tmp_path, compiler, fake, root)
+    runner = app.state.scenario_runner
+    runner.start("custom")
+    await finish(runner)
+    report = app.state.dataset["samples"][0]["metadata"]["evaluations"][0]["report"]
+    assert report == {"valid": True, "feedback": []}

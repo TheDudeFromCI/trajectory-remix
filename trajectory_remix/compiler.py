@@ -955,6 +955,38 @@ class Compiler:
             for w in windows.values()
             if w["close"] is None
         ]
+        # Use the actual expanded schemas (including randomized additions), and
+        # the normal visibility predicate so closed/replaced context cannot count.
+        shown = {
+            item["path"]: {
+                schema["function"]["name"]
+                for schema in json.loads(item["event"]["content"])
+            }
+            for item in prepared
+            if item.get("show_tools")
+        }
+        shown_rows = {
+            row["event"]: row
+            for row in rows
+            if row["event"] in shown and row["durable"]
+        }
+        for call in tool_calls:
+            if call.get("invisible"):
+                continue
+            query = {"tick": call["request_start"], "phase": "D"}
+            if not any(
+                call["tool"] in shown[path]
+                and visible_to(query, row, list(windows.values()))
+                for path, row in shown_rows.items()
+            ):
+                warnings.append(
+                    {
+                        "severity": "warning",
+                        "code": "tool_not_shown",
+                        "path": call["path"],
+                        "message": f"Tool '{call['tool']}' is used at tick {call['request_start']} without a visible show_tools listing. Add it to show_tools before the request.",
+                    }
+                )
         plan = {
             "sample_id": sample["id"],
             "trajectory_uuid": trajectory_uuid(sample),

@@ -51,6 +51,7 @@ class Step(Definition):
     until: str | None = None
     history: dict[str, Any] = Field(default_factory=dict)
     repair_prompt: str | None = None
+    checks: dict[str, str] = Field(default_factory=dict)
     max_repairs: int = Field(default=0, ge=0, le=5)
     level: Literal[1, 2] = 1
     attempts: int = Field(default=3, ge=1, le=10)
@@ -131,8 +132,17 @@ class Flow(Definition):
             if (
                 step.uses in ("llm.generate", "remix.novelty", "remix.validate")
                 and not step.prompt
+                and not (step.uses == "remix.validate" and step.checks)
             ):
                 raise ValueError(f"{name} needs a prompt")
+            if step.checks:
+                if step.uses != "remix.validate" or step.prompt:
+                    raise ValueError(
+                        "checks requires remix.validate and replaces prompt"
+                    )
+                for check, prompt in step.checks.items():
+                    if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", check) or not prompt:
+                        raise ValueError(f"Invalid validation check: {check}")
             if step.uses == "flow.repeat":
                 if not step.steps or not step.until:
                     raise ValueError(f"{name} needs steps and an until reference")
@@ -235,7 +245,11 @@ class Scenario:
 
         def collect(steps):
             for step in steps.values():
-                for filename in (step.prompt, step.repair_prompt):
+                for filename in (
+                    step.prompt,
+                    step.repair_prompt,
+                    *step.checks.values(),
+                ):
                     if filename:
                         target = (self.path / filename).resolve()
                         if (

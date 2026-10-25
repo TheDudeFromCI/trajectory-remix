@@ -1001,6 +1001,13 @@ class ScenarioRunner:
                     "Tool calls must be grouped into nonempty parallel batches"
                 )
             tick = str(self.builder.next_tick)
+            self.builder.sample["replay"].setdefault(tick, []).append(
+                {
+                    "op": "show_tools",
+                    "window": "system",
+                    "tools": sorted({call["tool"] for call in group}),
+                }
+            )
             windows = []
             for call in group:
                 if set(call) - {"tool", "arguments", "outcome"}:
@@ -1072,19 +1079,64 @@ class ScenarioRunner:
         for attempt in range(step.max_repairs + 1):
             self.status["phase"] = "validating" if attempt == 0 else "repairing"
             self.persist()
-            self.compiler.compile(draft)
-            report = await self.llm(
-                step, {**inputs, "trajectory": draft}, context, path, REPORT
-            )
+            plan = self.compiler.compile(draft)
+            source = evaluation_source(draft)
+            source_hash = hashlib.sha256(
+                json.dumps(source, sort_keys=True).encode()
+            ).hexdigest()
+            review_inputs = {
+                **inputs,
+                "trajectory": source,
+                "compiled": {
+                    key: plan[key]
+                    for key in (
+                        "events",
+                        "windows",
+                        "anchors",
+                        "tool_calls",
+                        "diagnostics",
+                    )
+                },
+            }
+            for diagnostic in plan["diagnostics"]:
+                self.log(diagnostic, "warning", path)
+            if step.checks:
+                reports = {}
+                for name, prompt in step.checks.items():
+                    check_path = path + ".checks." + name
+                    record = self.snapshot["steps"].setdefault(check_path, {})
+                    if record.get("validation_source_hash") == source_hash:
+                        result = record["report"]
+                    else:
+                        self.log(f"Checking {name}", "info", check_path)
+                        result = await self.llm(
+                            step, review_inputs, context, check_path, REPORT, prompt
+                        )
+                        record.update(validation_source_hash=source_hash, report=result)
+                        self.persist()
+                    reports[name] = result
+                    self.log(
+                        {"check": name, **result},
+                        "success" if result["valid"] else "error",
+                        check_path,
+                    )
+                report = {
+                    "valid": all(result["valid"] for result in reports.values()),
+                    "feedback": [
+                        f"[{name}] {finding}"
+                        for name, result in reports.items()
+                        for finding in result["feedback"]
+                    ],
+                    "checks": reports,
+                }
+            else:
+                report = await self.llm(step, review_inputs, context, path, REPORT)
             self.log(
                 {"validation": step.level, **report},
                 "success" if report["valid"] else "error",
                 path,
             )
             metadata = draft["metadata"]
-            source_hash = hashlib.sha256(
-                json.dumps(evaluation_source(draft), sort_keys=True).encode()
-            ).hexdigest()
             metadata.setdefault("evaluations", []).append(
                 {
                     "level": step.level,
@@ -1131,6 +1183,11 @@ class ScenarioRunner:
             candidate["replay"] = repair["replay"]
             candidate["metadata"]["validation_level"] = 0
             self.compiler.compile(candidate)
+            # Every repair gets a fresh review, even if it returned the same replay.
+            for name in step.checks:
+                self.snapshot["steps"].get(path + ".checks." + name, {}).pop(
+                    "validation_source_hash", None
+                )
             draft = candidate
             self.builder.sample = copy.deepcopy(draft)
             self.publish(draft)

@@ -258,11 +258,16 @@ steps:
     needs:
     - conversation
     endpoint: validator
-    prompt: validate.md
+    checks:
+      layout: validate-layout.md
+      tools: validate-tools.md
+      reasoning: validate-reasoning.md
+      correctness: validate-correctness.md
     repair_prompt: repair.md
     max_repairs: 2
     inputs:
       tags: ${scenario.tags}
       roles: ${roles}
       solution: ${steps.solution.output}
+      idea: ${steps.novelty.output}
     level: 1

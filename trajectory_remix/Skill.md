@@ -458,6 +458,9 @@ Always provide tools context before the agent uses tools, through a `show_tools`
 event (for example `{"op":"show_tools","window":"system","tools":["calculator"]}`).
 Do not assume a tool is available to Kidra merely because the authoring API can
 list or execute it.
+The compiler warns with `tool_not_shown` at the request event if the listing is
+missing from visible context. A listing added later, closed, or replaced does
+not count. Fix the warning before handing the trajectory off for review.
 
 ## Validate and hand off
 

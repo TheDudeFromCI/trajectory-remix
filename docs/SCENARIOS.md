@@ -140,7 +140,7 @@ coverage observer, fixed random seed, or promise of repeatable model output.
 | `remix.message` | Append framed `text` from `source: user` or generate a framed assistant message. |
 | `remix.tools` | Execute `calls` in the virtual simulator. Each inner list is an independent parallel batch; batches execute sequentially. Return actual simulator outcomes. |
 | `remix.draft` | Add optional `reasoning` and `response`, compile, close windows in the published copy, and atomically insert/update this run's draft at level 0. No other samples are available to the writer. |
-| `remix.validate` | Compile and evaluate the draft with `prompt`; `level` is 1 or 2. Optionally repair with `repair_prompt` up to `max_repairs`. Only the draft, findings, and authoring guide reach repair. |
+| `remix.validate` | Compile and evaluate the draft with `prompt` or named `checks`; `level` is 1 or 2. Every check must pass. Optionally repair with `repair_prompt` up to `max_repairs`. Only the draft, findings, and authoring guide reach repair. |
 | `remix.reject` | Reject the run with `inputs.reason`. Preserve an existing draft as rejected. |
 
 Novelty currently uses semantic model comparisons rather than a vector index. It
@@ -181,6 +181,53 @@ role profiles, concept metadata, and a numeric `validation_level`:
 The example runs initial validation only. To add a stronger validator, append a
 `remix.validate` step with `level: 2` and its endpoint; optional steps can use
 `when`. Deferred frontier review has no dedicated queue UI in this first version.
+
+For focused validation, replace `prompt` with a mapping of check names to
+Markdown files:
+
+```yaml
+  validate:
+    uses: remix.validate
+    needs: [draft]
+    endpoint: validator
+    checks:
+      layout: validate-layout.md
+      tools: validate-tools.md
+      reasoning: validate-reasoning.md
+      correctness: validate-correctness.md
+    repair_prompt: repair.md
+    max_repairs: 2
+    level: 1
+```
+
+Each check returns `{"valid": true, "feedback": []}` using the same report schema
+as single-prompt validation. Checks run in YAML order, respect pause/cancel and
+the global model request limit, and log their names and findings individually.
+Each receives the step's explicitly selected inputs, the trajectory without
+earlier verdicts, and a `compiled` summary containing resolved events, window
+lifetimes, anchors, actual tool calls/outcomes, and compiler diagnostics.
+They do not receive other checks' opinions. **Every check must pass** to promote
+the sample; one failed check retains the negative validation level even if the
+others pass. Named results are stored under the evaluation report's `checks`.
+Repairs receive findings prefixed with their check names and trigger all checks
+again. Completed checks are checkpointed against the exact reviewed content,
+so resuming after an API outage or restart does not repeat completed checks.
+Existing scenarios using one `prompt` remain supported.
+
+The bundled example checks attachments/window lifecycle, tools/causality,
+reasoning/role behavior, and factual correctness separately. Correctness review
+verifies the original problem and files independently of the reference answer.
+To adopt these checks in a copied external scenario, copy the updated flow and
+Markdown files into that folder and restart Remix.
+
+The compiler emits a nonfatal `tool_not_shown` warning with the request's event
+path when a visible tool is used without its schema in visible `show_tools`
+context. Same-tick input is available before generated requests; later listings,
+closed windows, and replaced context do not count. Random additional tools are
+checked against the actual expanded listing; invisible setup calls are exempt.
+Warnings appear in editor diagnostics and authoring API validation, and are
+included in generation review inputs and logs. The scenario writer adds the
+planned tools' schemas to system context when assembling each batch.
 
 Use **Edit → Generation → Approve for training export** after human review.
 Content or metadata edits to automated samples invalidate previous evaluation and approval.
