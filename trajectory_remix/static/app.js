@@ -2328,7 +2328,9 @@ function setDatasetPanelVisible(visible) {
   drawTimeline();
 }
 $("toggle-dataset-panel").onclick = () => {
-  setDatasetPanelVisible($("workspace").classList.contains("dataset-panel-hidden"));
+  setDatasetPanelVisible(
+    $("workspace").classList.contains("dataset-panel-hidden"),
+  );
   closeMenus();
 };
 $("export-sample").onclick = action(async () => {
