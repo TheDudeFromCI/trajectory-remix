@@ -253,7 +253,7 @@ def validate_config(config):
             raise ValueError("Task IDs must be nonempty and unique")
         task_ids.add(task["id"])
         if task.get("endpoint") not in seen:
-            raise ValueError(f"Unknown endpoint for task {task['id']}")
+            raise ValueError(f"Legacy task '{task['id']}' requires endpoint '{task.get('endpoint')}'. Add the endpoint or update the task configuration.")
         if task.get("kind") not in ("generate", "validate") or task.get(
             "layout", "messages"
         ) not in ("messages", "labeled", "json"):

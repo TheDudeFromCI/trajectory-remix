@@ -848,3 +848,42 @@ async def test_api_diagnostics_are_console_only_and_redact_credentials(
     assert secret not in caplog.text
     assert "[redacted]" in caplog.text
     assert not any("Connection dropped" in line["message"] for line in runner.logs)
+
+
+async def test_settings_missing_endpoint_names_scenario_and_step(compiler, tmp_path):
+    app = app_for(tmp_path, compiler, ScenarioClient())
+    config = copy.deepcopy(app.state.dataset["config"])
+    config["endpoints"] = [ep for ep in config["endpoints"] if ep["id"] != "validator"]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app),
+        base_url="http://testserver",
+        headers={"X-Remix-Token": app.state.csrf},
+    ) as client:
+        response = await client.put("/api/config", json={"config": config})
+    assert response.status_code == 422
+    assert (
+        "Scenario 'user_problem' requires endpoint 'validator'"
+        in response.json()["detail"]
+    )
+    assert "step 'validate'" in response.json()["detail"]
+    assert len(app.state.dataset["config"]["endpoints"]) == 2
+
+
+async def test_validation_connection_failure_identifies_endpoint_url_and_model(
+    compiler, tmp_path
+):
+    class Offline(ScenarioClient):
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Validate"):
+                raise httpx.ConnectError("offline")
+            return await super().complete(endpoint, messages, tools)
+
+    app = app_for(tmp_path, compiler, Offline())
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 5)
+    message = runner.status["last_error"]
+    assert "Endpoint 'validator'" in message
+    assert "http://127.0.0.1:8080/v1" in message
+    assert "local-model" in message
+    assert any("Endpoint 'validator'" in log["message"] for log in runner.logs)

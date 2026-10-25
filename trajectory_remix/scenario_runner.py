@@ -35,7 +35,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from .dataset import evaluation_source
 from .generation_stats import RequestStats
 from .llm import SampleBuilder
-from .scenarios import Flow, Scenario, resolve, sample_tags
+from .scenarios import Flow, Scenario, check_scenario_endpoints, resolve, sample_tags
 
 REPORT = {
     "type": "object",
@@ -196,16 +196,11 @@ class ScenarioRunner:
         self.config = copy.deepcopy(self.state["config"])
         self.endpoints = {e["id"]: e for e in self.config["endpoints"]}
 
-        def check_endpoints(steps):
-            for step in steps.values():
-                if (
-                    step.uses in ("llm.generate", "remix.validate", "remix.novelty")
-                    and step.endpoint not in self.endpoints
-                ):
-                    raise ValueError(f"Unknown scenario endpoint: {step.endpoint}")
-                check_endpoints(step.steps)
-
-        check_endpoints(self.scenario.flow.steps)
+        try:
+            check_scenario_endpoints(name, self.scenario.flow, self.config["endpoints"])
+        except ValueError as error:
+            self.log(str(error), "error")
+            raise
         self.limit = asyncio.Semaphore(max_parallel)
         self.first_prompts = {}
         self.first_prompt_paths = {}
@@ -717,6 +712,11 @@ class ScenarioRunner:
                 schema = schema or self.scenario.flow.schemas.get(step.output_schema)
                 data = json.dumps(inputs, ensure_ascii=False)
                 endpoint = self.endpoints[step.endpoint]
+                self.log(
+                    f"Model request → endpoint '{step.endpoint}' | {endpoint['base_url']} | model '{endpoint['model']}'",
+                    "info",
+                    path,
+                )
                 if schema:
                     instructions += (
                         "\nReturn JSON matching this schema:\n" + json.dumps(schema)
@@ -855,7 +855,7 @@ class ScenarioRunner:
                     self.clean(traceback.format_exc()),
                 )
                 raise ProviderFailure(
-                    f"Endpoint {step.endpoint}: {type(error).__name__}, HTTP {getattr(error, 'status_code', 'unavailable')}"
+                    f"Endpoint '{step.endpoint}' ({endpoint['base_url']}, model '{endpoint['model']}'): {type(error).__name__}, HTTP {getattr(error, 'status_code', 'unavailable')}"
                 ) from error
             finally:
                 timer.cancel()

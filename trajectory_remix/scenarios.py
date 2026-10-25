@@ -57,6 +57,26 @@ class Step(Definition):
     fallback: bool = True
 
 
+def check_scenario_endpoints(name, flow, endpoints):
+    available = {endpoint["id"] for endpoint in endpoints}
+
+    def check(steps, prefix=""):
+        for step_name, step in steps.items():
+            if step.when is False:
+                continue
+            path = prefix + step_name
+            if (
+                step.uses in ("llm.generate", "remix.validate", "remix.novelty")
+                and step.endpoint not in available
+            ):
+                raise ValueError(
+                    f"Scenario '{name}' requires endpoint '{step.endpoint}' (step '{path}'). Add that endpoint in Generation Settings or update flow.yaml."
+                )
+            check(step.steps, path + ".")
+
+    check(flow.steps)
+
+
 class Tag(Definition):
     name: str = Field(min_length=1)
     description: str = ""

@@ -30,7 +30,7 @@ from .dataset import (
 )
 from .llm import TAGS, SampleBuilder, validate_config
 from .runner import Runner
-from .scenarios import ScenarioRegistry
+from .scenarios import ScenarioRegistry, check_scenario_endpoints
 from .scenario_runner import ScenarioRunner
 from .mcp_server import StreamableHTTP
 from .tools import ToolRegistry, default_registry
@@ -432,7 +432,11 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         editable()
         data = await body(request)
         revision = state["revision"]
-        candidate = validate_config(data.get("config"))
+        incoming = data.get("config")
+        if isinstance(incoming, dict) and isinstance(incoming.get("endpoints"), list) and all(isinstance(ep, dict) and isinstance(ep.get("id"), str) for ep in incoming["endpoints"]):
+            for scenario in scenario_runner.registry.scenarios.values():
+                check_scenario_endpoints(scenario.name, scenario.flow, incoming["endpoints"])
+        candidate = validate_config(incoming)
         # A blank UI key preserves an existing in-memory key; explicit clear_key clears it.
         old = {e["id"]: e for e in state["config"]["endpoints"]}
         for endpoint in candidate["endpoints"]:
