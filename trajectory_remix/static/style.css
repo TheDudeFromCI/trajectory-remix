@@ -160,6 +160,11 @@ header {
   text-align: left;
   padding: 6px 8px;
 }
+.file-menu-popup .menu-check {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+}
 .file-menu-popup hr[role="separator"] {
   width: 100%;
   margin: 2px 0;
@@ -180,6 +185,13 @@ header {
       minmax(320px, 34%)
     );
   height: calc(100vh - 36px);
+}
+.workspace.dataset-panel-hidden {
+  grid-template-columns: minmax(0, 1fr) 0 var(--editor-w, minmax(320px, 34%));
+}
+.workspace.dataset-panel-hidden .sidebar,
+.workspace.dataset-panel-hidden [data-resize="sidebar"] {
+  display: none;
 }
 .resizer {
   position: relative;
@@ -1237,6 +1249,10 @@ dialog::backdrop {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(220px, 40vh) minmax(90px, 20vh);
     overflow: auto;
+  }
+  .workspace.dataset-panel-hidden {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(220px, 40vh);
   }
   .resizer-x {
     display: none;
