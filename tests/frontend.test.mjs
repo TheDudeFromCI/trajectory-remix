@@ -100,6 +100,38 @@ assert.match(
   /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
 );
 assert.match($("window-grid").textContent, /slot \d+/);
+// Each context window can be opened in a viewport-sized modal and restored.
+const expandedDialog = $("expanded-window-dialog");
+const initialWindowCount = w.document.querySelectorAll(".window-card").length;
+const initialWindow = $("window-grid").querySelector(".window-card");
+const initialWindowId = initialWindow.querySelector("strong").textContent;
+const expandControl = initialWindow.querySelector(".window-size-toggle");
+assert.equal(expandControl.textContent, "Expand");
+assert.equal(expandControl.getAttribute("aria-label"), `Expand context window ${initialWindowId}`);
+expandControl.onclick();
+assert.equal(expandedDialog.open, true);
+assert.equal($("window-grid").querySelectorAll(".window-card").length, initialWindowCount - 1);
+assert.equal(expandedDialog.querySelector(".window-card strong").textContent, initialWindowId);
+assert.equal(expandedDialog.querySelector(".window-size-toggle").textContent, "Shrink");
+// A replay re-render preserves the expanded window, including its scroll position.
+expandedDialog.querySelector(".window-content").scrollTop = 80;
+$("tick-number").value = "1";
+$("tick-number").onchange({ target: $("tick-number") });
+assert.equal(expandedDialog.open, true);
+assert.equal(expandedDialog.querySelector(".window-card strong").textContent, initialWindowId);
+assert.equal(expandedDialog.querySelector(".window-content").scrollTop, 80);
+$("tick-number").value = "0";
+$("tick-number").onchange({ target: $("tick-number") });
+expandedDialog.querySelector(".window-size-toggle").onclick();
+assert.equal(expandedDialog.open, false);
+assert.equal($("window-grid").querySelectorAll(".window-card").length, initialWindowCount);
+assert.equal($("window-grid").querySelector(".window-size-toggle").textContent, "Expand");
+// Native dialog closure (including Escape) must reset expansion state.
+$("window-grid").querySelector(".window-size-toggle").onclick();
+expandedDialog.close();
+expandedDialog.onclose();
+assert.equal(expandedDialog.open, false);
+assert.equal($("window-grid").querySelectorAll(".window-card").length, initialWindowCount);
 assert.equal($("sample-title"), null);
 assert.equal(w.document.querySelector(".tabbar"), null);
 assert.equal($("replay-view").querySelector("#dirty-indicator") !== null, true);

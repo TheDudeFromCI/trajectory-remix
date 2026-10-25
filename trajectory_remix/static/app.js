@@ -397,15 +397,31 @@ function setTick(value) {
   $("tick-scrubber").value = tick;
   renderReplay();
 }
+let expandedWindowId = null;
+function shrinkWindow() {
+  expandedWindowId = null;
+  const dialog = $("expanded-window-dialog");
+  if (dialog.open) dialog.close();
+  renderReplay();
+}
+// Escape and other native dialog closures must restore the replay grid.
+$("expanded-window-dialog").onclose = () => {
+  if (expandedWindowId !== null) shrinkWindow();
+};
 function renderReplay() {
   if (!sample) loadMetadata(null);
   const grid = $("window-grid");
+  const dialog = $("expanded-window-dialog");
+  const expandedScroll = dialog.querySelector(".window-content")?.scrollTop ?? 0;
   grid.replaceChildren();
+  dialog.replaceChildren();
   $("max-tick").textContent = plan?.max_tick || 0;
   $("tick-scrubber").max = plan?.max_tick || 0;
   $("tick-number").max = plan?.max_tick || 0;
   renderSandbox();
   if (!plan) {
+    expandedWindowId = null;
+    if (dialog.open) dialog.close();
     const empty = node("div", "empty");
     empty.append(
       node(
@@ -437,6 +453,7 @@ function renderReplay() {
       "window-card" + (closed ? " closed" : "") + (unopened ? " future" : ""),
     );
     const head = node("div", "window-head");
+    const isExpanded = expandedWindowId === w.id;
     const dot = node("span", "window-color");
     dot.style.background = colors[i % colors.length];
     head.append(
@@ -448,6 +465,25 @@ function renderReplay() {
         `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`,
       ),
     );
+    const resize = button(
+      isExpanded ? "Shrink" : "Expand",
+      () => {
+        if (isExpanded) {
+          shrinkWindow();
+        } else {
+          expandedWindowId = w.id;
+          renderReplay();
+          dialog.showModal();
+        }
+      },
+      "window-size-toggle",
+    );
+    resize.title = isExpanded ? "Shrink context window" : "Expand context window";
+    resize.setAttribute(
+      "aria-label",
+      `${isExpanded ? "Shrink" : "Expand"} context window ${w.id}`,
+    );
+    head.append(resize);
     const data = currentFrame?.windows?.[w.id];
     let content = data?.text || "";
     if (!showWindowHeaders)
@@ -464,8 +500,18 @@ function renderReplay() {
         `${count} cached tokens · opened ${w.open}${w.close !== null ? " · closed " + w.close : ""}`,
       ),
     );
-    grid.append(card);
+    if (isExpanded) {
+      dialog.append(card);
+      card.querySelector(".window-content").scrollTop = expandedScroll;
+    } else {
+      grid.append(card);
+    }
   });
+  // A hidden or removed window cannot remain in an expanded dialog.
+  if (expandedWindowId !== null && !dialog.querySelector(".window-card")) {
+    shrinkWindow();
+    return;
+  }
   $("open-count").textContent = active;
   drawTimeline();
   if (currentFrame?.tick !== tick) fetchFrame();
