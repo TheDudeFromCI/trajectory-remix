@@ -334,8 +334,36 @@ assert.equal(
   [...w.document.querySelectorAll("header .menu-trigger, header .menu-label")]
     .map((item) => item.textContent)
     .join(""),
-  "FileEditHelp",
+  "FileEditViewHelp",
 );
+const datasetSidebar = w.document.querySelector(".sidebar");
+const datasetResizer = w.document.querySelector('[data-resize="sidebar"]');
+assert.equal($("toggle-dataset-panel").getAttribute("role"), "menuitemcheckbox");
+assert.equal(datasetSidebar.hidden, false);
+assert.equal(datasetResizer.hidden, false);
+assert.equal($("dataset-panel-check").textContent, "✔");
+await click("view-menu-button");
+assert.equal($("view-menu").hidden, false);
+assert.equal($("view-menu-button").getAttribute("aria-expanded"), "true");
+await click("toggle-dataset-panel");
+assert.equal(datasetSidebar.hidden, true);
+assert.equal(datasetResizer.hidden, true);
+assert.equal($("workspace").classList.contains("dataset-panel-hidden"), true);
+assert.equal($("toggle-dataset-panel").getAttribute("aria-checked"), "false");
+assert.equal($("dataset-panel-check").textContent, "");
+assert.equal($("view-menu").hidden, true);
+assert.equal($("view-menu-button").getAttribute("aria-expanded"), "false");
+await click("view-menu-button");
+await click("toggle-dataset-panel");
+assert.equal(datasetSidebar.hidden, false);
+assert.equal(datasetResizer.hidden, false);
+assert.equal($("workspace").classList.contains("dataset-panel-hidden"), false);
+assert.equal($("toggle-dataset-panel").getAttribute("aria-checked"), "true");
+assert.equal($("dataset-panel-check").textContent, "✔");
+await click("view-menu-button");
+await click("edit-menu-button");
+assert.equal($("view-menu").hidden, true);
+assert.equal($("edit-menu").hidden, false);
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
 for (const id of ["generate-one", "validate-sample", "auto-start"])
