@@ -11,6 +11,7 @@ import json
 import math
 import random
 import re
+from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -24,6 +25,29 @@ WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")
 KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
 MAX_TICKS = 100_000
 MAX_ROWS = 500_000
+
+
+class FrameIndex:
+    """Server-side references to durable rows; implicit NOOPs need no replay work.
+
+    Kept outside the compiled plan so training exports and plan serialization stay
+    unchanged. Removal times remain on the original rows, including tool writes.
+    """
+
+    def __init__(self, plan):
+        self.rows = defaultdict(list)
+        self.ticks = defaultdict(list)
+        for row in plan["rows"]:
+            if row["durable"]:
+                self.rows[row["window"]].append(row)
+                self.ticks[row["window"]].append(row["tick"])
+
+    def through(self, tick, windows):
+        for window in windows:
+            rows = self.rows.get(window, ())
+            end = bisect_right(self.ticks.get(window, ()), tick)
+            for i in range(end):
+                yield rows[i]
 
 
 def window_names(sample):
@@ -474,7 +498,10 @@ class Compiler:
                     )
                 tick = captured["tick"] + delta
             if tick >= MAX_TICKS:
-                raise CompileError(f"Tick limit exceeded ({MAX_TICKS})", item["path"])
+                raise CompileError(
+                    f"Tick limit exceeded ({MAX_TICKS:,}); valid ticks are 0..{MAX_TICKS - 1:,}. "
+                    "Move events earlier or reduce anchor offsets/stream duration.", item["path"]
+                )
             resolving.remove(ident)
             resolved[ident] = tick
             return tick
@@ -499,7 +526,10 @@ class Compiler:
             offset = ((len(encoded.ids)-1)//rate if result["delivery"] == "stream" and encoded.ids else 0)
             end = tick + offset
             if end >= MAX_TICKS:
-                raise CompileError("Expanded stream exceeds tick limit", item["path"] + ".result")
+                raise CompileError(
+                    f"Expanded stream exceeds tick limit ({MAX_TICKS:,}); move the result earlier or reduce its duration.",
+                    item["path"] + ".result",
+                )
             call["results"].append({"event": result, "encoded": encoded,
                                     "tick": tick, "end": end, "rate": rate,
                                     "instant": result["delivery"] == "instant"})
@@ -611,7 +641,7 @@ class Compiler:
                     tick = start if item["instant"] else start + n // item["rate"]
                     if tick >= MAX_TICKS:
                         raise CompileError(
-                            "Expanded stream exceeds tick limit", item["path"]
+                            f"Expanded stream exceeds tick limit ({MAX_TICKS:,}); move the event earlier or reduce its duration.", item["path"]
                         )
                     end = tick
                     scheduled[tick].append(
@@ -657,7 +687,11 @@ class Compiler:
         def row(tick, phase, window, tid, w, durable, op, path, rank=0):
             idx = len(rows)
             if idx >= MAX_ROWS:
-                raise CompileError(f"Expanded row limit exceeded ({MAX_ROWS})")
+                raise CompileError(
+                    f"Expanded row limit exceeded ({MAX_ROWS:,} rows); "
+                    "rows include token records and implicit NOOPs for idle open windows. "
+                    "Close windows when their context is no longer needed or reduce the replay horizon."
+                )
             rows.append(
                 {
                     "index": idx,
@@ -830,7 +864,7 @@ class Compiler:
             self.tool_store.record_tool_compilation(sample, self.tools, plan)
         return plan
 
-    def frame(self, plan, tick):
+    def frame(self, plan, tick, *, index=None, windows=None):
         from .sandbox_replay import sandbox_frame, tool_calls_frame
 
         integer(tick, "tick")
@@ -838,7 +872,11 @@ class Compiler:
             raise CompileError("Tick exceeds trajectory end", "tick")
         cumulative = defaultdict(list)
         counts = defaultdict(int)
-        for r in plan["rows"]:
+        selected = {w["id"] for w in plan["windows"]} if windows is None else set(windows)
+        rows = plan["rows"] if index is None else index.through(tick, selected)
+        for r in rows:
+            if r["window"] not in selected:
+                continue
             if r["tick"] <= tick and r["durable"] and ("removed_at" not in r or tick < r["removed_at"]["tick"]):
                 counts[r["window"]] += 1
                 if r["token_id"] not in self.ids.values():
@@ -855,6 +893,7 @@ class Compiler:
                     "cached_tokens": counts[w["id"]],
                 }
                 for w in plan["windows"]
+                if w["id"] in selected
             },
         }
 

@@ -16,6 +16,15 @@
   loading, playback controls, event and JSON editing, marker diagnostics and
   task/endpoint/condition/automatic configuration surfaces, external MCP edits,
   and protection of pending browser edits during conflicts.
+  Large-preview checks compile over 50,000 rows from little source text, seek
+  forward/backward without fetching a row prefix, cross streamed-output and
+  content-replacement boundaries, buffer playback during a delayed range read,
+  and handle range-output limits and expired IDs without retry loops.
+  Python regressions compare indexed frames with canonical replay across EOS,
+  pending windows, sandbox completion and failed tool outcomes; verify MCP
+  range previews and paginated NOOP inspection; preserve loss/attention/export
+  records; and exercise cache reuse, row budgets, LRU eviction, idle expiry,
+  separate compilation/preview status, and unchanged compiler safety limits.
   They also exercise dataset Undo/Redo menu actions, keyboard shortcuts, and
   undoing a pending draft after it is persisted.
   Sandbox checks author a delayed file write, inspect its running duration, and

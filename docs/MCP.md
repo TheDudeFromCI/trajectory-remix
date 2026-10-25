@@ -469,11 +469,37 @@ retain display text and have zero live KV. Bounds are inclusive; `step` samples
 `start_tick`, `start_tick + step`, and so on through `end_tick`. `windows` filters
 the returned windows.
 
-Preview requests are bounded to 100 frames, 50,000 compiled rows and 4 MB of
-frame JSON. Narrow the tick range/filter windows to reduce output; split the
-trajectory if its compiled plan exceeds the row limit. List/history page sizes
+Preview requests are bounded to 100 frames and 4 MB of frame JSON, independently
+of the complete plan's row count. A trajectory above 50,000 rows can be inspected
+with a small range, including all context preceding that range. Narrow the tick
+range, increase `step`, or filter `windows` to reduce output. These filters do
+not remove historical context or change replay timing. Sandbox/tool history is
+still included, so a large sandbox can exceed the output budget even with a
+window filter; use `get_sandbox_state(include_calls=False)` to omit call logs.
+The compiler's 100,000-tick and 500,000-row safety limits remain in effect;
+expanded rows include implicit NOOPs for idle windows. List/history page sizes
 are bounded to 5,000 entries. Full source reads return untruncated sample JSON.
-The existing 40 MB request and compiler tick/row limits also apply.
+The existing 40 MB request limit also applies.
+
+Dashboard previews use the same compiled-plan cache as MCP inspection: at most
+six entries and 500,000 retained rows across entries, with 15-minute idle expiry.
+Within a dataset revision, unchanged source/tool definitions reuse compilation;
+edits receive a new plan ID. Revision invalidation preserves tool-dependency
+checks and pinning when a previously previewed draft is saved. The dashboard
+requests up to eight frames at a time (API maximum 16),
+retains only the current range, and falls back to a single frame if a range
+exceeds 4 MB. Seeking requests the selected tick directly. A missing cached ID
+returns an explicit expired-preview error; recompilation restores it.
+
+`POST /api/compile` returns `valid`, `plan_id`, `row_count`, compact timeline
+intervals/lifetimes and `preview.available`. It omits expanded `rows`, event
+text, tool arguments/results and sandbox history. An oversized timeline returns
+HTTP 200 with `valid: true`, `preview.available: false` and an actionable message;
+compiler errors still return diagnostics with HTTP 422.
+`GET /api/frames/{plan_id}?start_tick=N&end_tick=M` returns inclusive post-commit
+frames with at most 16 frames and 4 MB per response; `/api/frame/{plan_id}/{tick}`
+returns one bounded snapshot. Preview output limits return HTTP 413 with
+`code: "preview_limit"`, independently of compilation validity.
 
 ## Atomic batches and diffs
 
