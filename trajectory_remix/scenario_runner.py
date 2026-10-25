@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 import httpx
 import jsonschema
 from openai import APIError, AsyncOpenAI
-from pydantic_ai.exceptions import ModelHTTPError
+from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.messages import (
     ModelRequest,
     PartDeltaEvent,
@@ -808,7 +808,7 @@ class ScenarioRunner:
                 if schema:
                     jsonschema.validate(result, schema)
                 return result
-            except (httpx.HTTPError, APIError, ModelHTTPError) as error:
+            except (httpx.HTTPError, APIError, ModelAPIError) as error:
                 raise ProviderFailure(
                     f"Endpoint {step.endpoint}: {type(error).__name__}, HTTP {getattr(error, 'status_code', 'unavailable')}"
                 ) from error

@@ -698,14 +698,29 @@ async def test_unrelated_samples_edit_validate_and_state_changes_during_generati
     assert app.state.dataset["config"]["single_generation"]["api_retries"] == 4
 
 
-async def test_api_retry_budget_pauses_same_attempt_and_can_resume(compiler, tmp_path):
+@pytest.mark.parametrize("failure", ["connection", "model_api", "model_http"])
+@pytest.mark.parametrize("stage", ["idea", "validate"])
+async def test_api_retry_budget_pauses_same_attempt_and_can_resume(
+    compiler, tmp_path, failure, stage
+):
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+
     class APIClient(ScenarioClient):
         broken = True
         failures = 0
 
         async def complete(self, endpoint, messages, tools=None):
-            if self.broken:
+            fails_here = (
+                messages[0]["content"].startswith("Validate")
+                if stage == "validate"
+                else messages[0]["content"].startswith("Invent")
+            )
+            if self.broken and fails_here:
                 self.failures += 1
+                if failure == "model_api":
+                    raise ModelAPIError("local-model", "Service disconnected")
+                if failure == "model_http":
+                    raise ModelHTTPError(503, "local-model")
                 raise httpx.ConnectError("offline")
             return await super().complete(endpoint, messages, tools)
 
@@ -716,6 +731,10 @@ async def test_api_retry_budget_pauses_same_attempt_and_can_resume(compiler, tmp
     await asyncio.wait_for(runner.job, 5)
     assert fake.failures == 3  # initial request plus two API retries
     assert runner.status["phase"] == "api_paused"
+    assert runner.status["paused"]
+    assert not any(
+        "retrying with freshly sampled" in log["message"] for log in runner.logs
+    )
     assert runner.status["attempts"] == 1
     assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == 0
     fake.broken = False
