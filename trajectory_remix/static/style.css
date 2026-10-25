@@ -241,6 +241,14 @@ body.resizing iframe {
 .submenu:focus-within > .submenu-popup[hidden] {
   display: grid;
 }
+#set-state-menu-button:disabled + #set-state-menu {
+  display: none;
+}
+#set-state-menu [aria-checked="true"]::after {
+  content: "✔";
+  float: right;
+  margin-left: 14px;
+}
 .floating-panel {
   position: fixed;
   z-index: 15;

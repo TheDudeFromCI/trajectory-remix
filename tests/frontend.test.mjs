@@ -989,8 +989,13 @@ await waitFor(() => !$("activity-log").textContent, 5000);
 assert.equal(w.document.querySelectorAll("[data-validation-state]").length, 7);
 await w.document.querySelector('[data-validation-state="0"]').onclick();
 await waitFor(() => $("sample-list").textContent.includes("Pending"), 5000);
+assert.equal($("set-state-menu-button").disabled, false);
+await waitFor(() => w.document.querySelector('[data-validation-state="0"]').getAttribute("aria-checked") === "true", 5000);
+assert.equal(w.document.querySelectorAll('#set-state-menu [aria-checked="true"]').length, 1);
 await w.document.querySelector('[data-validation-state="3"]').onclick();
 await waitFor(() => $("sample-list").textContent.includes("Ready"), 5000);
+await waitFor(() => w.document.querySelector('[data-validation-state="3"]').getAttribute("aria-checked") === "true", 5000);
+assert.equal(w.document.querySelector('[data-validation-state="0"]').getAttribute("aria-checked"), "false");
 assert.equal($("resume-trajectory-generation").disabled, true);
 await click("preferences-button");
 assert.equal($("model-api-retries").value, "2");
@@ -1017,6 +1022,24 @@ confirmResult = true;
 await click("resume-trajectory-generation");
 assert.equal(resumeRequests, 3);
 w.fetch = beforeResumeFetch;
+const emptyStateResponse = await w.fetch("/api/state", {headers: {
+  "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+}});
+assert.equal(emptyStateResponse.ok, true);
+const emptyState = await emptyStateResponse.json();
+const beforeEmptyFetch = w.fetch;
+w.fetch = async (path, options) => {
+  if (String(path).startsWith("/api/state")) return new w.Response(JSON.stringify({
+    ...emptyState, samples: [], sample_count: 0, total: 0, selected_index: -1,
+    revision: emptyState.revision + 1,
+    status: {...emptyState.status, draft_id: null, draft_index: null},
+  }), {status: 200, headers: {"content-type": "application/json"}});
+  return beforeEmptyFetch(path, options);
+};
+await waitFor(() => $("set-state-menu-button").disabled, 5000);
+assert.equal($("set-state-menu").hidden, true);
+assert.equal(w.document.querySelectorAll('#set-state-menu [aria-checked="true"]').length, 0);
+assert.equal([...w.document.querySelectorAll("[data-validation-state]")].every(button => button.disabled), true);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({

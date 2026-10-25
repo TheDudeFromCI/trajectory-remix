@@ -225,6 +225,18 @@ async function refresh(initial = false) {
       await selectSample(state.samples[state.samples.length - 1].index, true);
   } finally {
     pollBusy = false;
+    renderValidationState();
+  }
+}
+function renderValidationState() {
+  $("set-state-menu-button").disabled = !sample;
+  if (!sample) $("set-state-menu").hidden = true;
+  const level = state?.samples.find(item => item.id === sample?.id)?.validation_level
+    ?? sample?.metadata?.validation_level ?? -3;
+  for (const button of document.querySelectorAll("[data-validation-state]")) {
+    button.disabled = !sample;
+    button.setAttribute("aria-checked", String(!!sample &&
+      Number(button.dataset.validationState) === level));
   }
 }
 function renderStatus() {
@@ -265,7 +277,7 @@ function renderStatus() {
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
   $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
-  for (const button of document.querySelectorAll("[data-validation-state]")) button.disabled = !sample;
+  renderValidationState();
   $("pause-run").textContent = !s.running ? (s.phase === "api_paused" ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
   $("pause-run").disabled = !s.running && !scenarioNames.length && !(s.phase === "api_paused" && s.draft_id);
   $("stop-run").disabled = !s.running;
@@ -393,6 +405,7 @@ async function selectSample(index, force = false) {
   sample = await response.json();
   sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
+  renderValidationState();
   $("sample-json").readOnly = state.status.running && sample.id === state.status.draft_id;
   $("resume-trajectory-generation").disabled = true;
   if (!$("sample-search").value)
@@ -464,6 +477,7 @@ async function compileSample(persist = true) {
     }
   } finally {
     compileBusy = false;
+    renderValidationState();
     renderHistoryActions();
   }
 }
@@ -2418,7 +2432,7 @@ $("settings-button").onclick = () => {
   openSettings();
 };
 $("status-button").onclick = openGenerationPanel;
-$("set-state-menu-button").onclick = () => { $("set-state-menu").hidden = false; };
+$("set-state-menu-button").onclick = () => { if (sample) $("set-state-menu").hidden = false; };
 for (const button of document.querySelectorAll("[data-validation-state]")) button.onclick = action(async () => {
   closeMenus(); $("set-state-menu").hidden = true;
   if (hasPendingChanges()) await compileSample(true);

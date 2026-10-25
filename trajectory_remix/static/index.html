@@ -42,15 +42,15 @@
             </div>
             <hr role="separator" />
             <div class="submenu">
-              <button id="set-state-menu-button" role="menuitem" aria-haspopup="menu">Set State ▸</button>
+              <button id="set-state-menu-button" role="menuitem" aria-haspopup="menu" disabled>Set State ▸</button>
               <div id="set-state-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
-                <button data-validation-state="-3" role="menuitem">Unfinished</button>
-                <button data-validation-state="-2" role="menuitem">Rejected</button>
-                <button data-validation-state="-1" role="menuitem">Unsuccessful</button>
-                <button data-validation-state="0" role="menuitem">Pending</button>
-                <button data-validation-state="1" role="menuitem">Candidate</button>
-                <button data-validation-state="2" role="menuitem">Validated</button>
-                <button data-validation-state="3" role="menuitem">Ready</button>
+                <button data-validation-state="-3" role="menuitemradio" aria-checked="false">Unfinished</button>
+                <button data-validation-state="-2" role="menuitemradio" aria-checked="false">Rejected</button>
+                <button data-validation-state="-1" role="menuitemradio" aria-checked="false">Unsuccessful</button>
+                <button data-validation-state="0" role="menuitemradio" aria-checked="false">Pending</button>
+                <button data-validation-state="1" role="menuitemradio" aria-checked="false">Candidate</button>
+                <button data-validation-state="2" role="menuitemradio" aria-checked="false">Validated</button>
+                <button data-validation-state="3" role="menuitemradio" aria-checked="false">Ready</button>
               </div>
             </div>
             <button id="duplicate" role="menuitem">Duplicate</button>
