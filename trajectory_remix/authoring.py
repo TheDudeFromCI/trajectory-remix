@@ -313,10 +313,20 @@ class TrajectoryCommands:
         }
 
     @command()
-    def get_authoring_guide(self):
-        """Read Skill.md: synthetic parallel authoring, available tools, timing, masks and review."""
+    def get_authoring_guide(
+        self,
+        topic: Literal["start", "first", "parallel", "edit", "sandbox", "tools", "reference"] = "start",
+    ):
+        """Read one short authoring lesson. Start here without arguments.
+
+        Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
+        sandbox (trajectory files), tools (starter tool selection). Request reference
+        explicitly for the complete Skill.md manual. No source or sandbox changes.
+        """
+        root = Path(__file__).parent
+        path = root / "Skill.md" if topic == "reference" else root / "guides" / f"{topic}.md"
         return {
-            "content": Path(__file__).with_name("Skill.md").read_text(encoding="utf-8")
+            "content": path.read_text(encoding="utf-8")
         }
 
     @command()
@@ -1285,12 +1295,14 @@ class TrajectoryCommands:
         expected_revision: Revision = None,
         outcome: dict | None = None,
     ):
-        """Execute a simulated Remix tool in a session, preserving its real outcome and state.
+        """Execute only in an ephemeral workbench; never changes a trajectory sandbox.
 
+        Use create_tool_call(sample_id, tick, ...) for executable trajectory events.
         Discover exact name/arguments with list_simulated_tools. Valid dispatched failures
         return outcome.ok=false and consume clock/budget. Invalid arguments do not execute.
         record_sample_id also appends the actual call/result in one tick-0 tool window
-        as one undoable source edit.
+        as one undoable source edit. Recording is text only; it does not copy workbench
+        state or schedule executable replay events.
         Recording requires a compilable sample (or empty draft) and stopped generation.
         A rejected recording leaves virtual state/log unchanged. For subagent, supply
         outcome={ok:true,result:{response:"authored reply",conversationId:"optional-id"}}
