@@ -126,10 +126,11 @@ Kidra cannot supply `username` in a visible chat call.
 
 ## Showing tools
 
-Add a **Show tools** event and select the tools to advertise using checkboxes:
+Open a dedicated window with `window-type: "tools"`, then add a **Show tools**
+event and select the tools to advertise using checkboxes:
 
 ```json
-{"op":"show_tools", "window":"system", "tools":["chat", "file_read"],
+{"op":"show_tools", "window":"tools", "tools":["chat", "file_read"],
  "randomly-add-additional-tools":true}
 ```
 
@@ -140,6 +141,8 @@ seeded by trajectory UUID and event position. Selected tools always remain.
 Recompiling unchanged source with the same registry gives the same selection.
 This advertises capabilities; it does not restrict the execution registry.
 MCP authors can insert it using `create_event`.
+Keep tool schemas out of the system prompt; putting `show_tools` there produces
+a nonfatal `tools_in_system` compiler warning.
 
 ## Custom Python tools
 

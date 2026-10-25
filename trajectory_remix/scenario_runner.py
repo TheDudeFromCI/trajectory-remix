@@ -918,10 +918,36 @@ class ScenarioRunner:
                 text = inputs["text"]
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("Message cannot be empty")
+                if not any(
+                    event["op"] == "open" and event.get("window") == "chat"
+                    for events in self.builder.sample["replay"].values()
+                    for event in events
+                ):
+                    self.builder.sample["replay"].setdefault(
+                        str(self.builder.next_tick), []
+                    ).append({"op": "open", "window": "chat", "window-type": "chat"})
+                if source == "assistant":
+                    delivery = self.simulate(
+                        {
+                            "calls": [
+                                [
+                                    {
+                                        "tool": "chat",
+                                        "arguments": {"content": text},
+                                    }
+                                ]
+                            ]
+                        }
+                    )
+                    if not delivery["results"][0]["outcome"].get("ok"):
+                        raise ValueError(
+                            "The chat tool failed to deliver the assistant reply"
+                        )
+                    return {"text": text}
                 self.builder.add_stream(
                     "chat",
-                    f"<|msg|>{'Kidra' if source == 'assistant' else 'User'}: {text}<|/msg|>\n",
-                    op="generate" if source == "assistant" else "append",
+                    f"<|msg|>User: {text}<|/msg|>\n",
+                    op="append",
                     source=source,
                 )
                 return {"text": text}
@@ -1001,10 +1027,18 @@ class ScenarioRunner:
                     "Tool calls must be grouped into nonempty parallel batches"
                 )
             tick = str(self.builder.next_tick)
+            if not any(
+                event["op"] == "open" and event.get("window") == "tools"
+                for events in self.builder.sample["replay"].values()
+                for event in events
+            ):
+                self.builder.sample["replay"].setdefault(tick, []).append(
+                    {"op": "open", "window": "tools", "window-type": "tools"}
+                )
             self.builder.sample["replay"].setdefault(tick, []).append(
                 {
                     "op": "show_tools",
-                    "window": "system",
+                    "window": "tools",
                     "tools": sorted({call["tool"] for call in group}),
                 }
             )
@@ -1075,6 +1109,9 @@ class ScenarioRunner:
         return {"id": draft["id"]}
 
     async def validate(self, step, inputs, context, path):
+        require_delivery = inputs.get("require_chat_delivery", False)
+        if type(require_delivery) is not bool:
+            raise ValueError("require_chat_delivery must be a boolean")
         draft = self.closed_draft()
         for attempt in range(step.max_repairs + 1):
             self.status["phase"] = "validating" if attempt == 0 else "repairing"
@@ -1131,6 +1168,22 @@ class ScenarioRunner:
                 }
             else:
                 report = await self.llm(step, review_inputs, context, path, REPORT)
+            if require_delivery:
+                delivery = self.chat_delivery_report(draft, plan)
+                self.log(
+                    {"delivery": delivery},
+                    "success" if delivery["valid"] else "error",
+                    path,
+                )
+                report = {
+                    **report,
+                    "valid": report["valid"] and delivery["valid"],
+                    "feedback": [
+                        *[f"[delivery] {finding}" for finding in delivery["feedback"]],
+                        *report["feedback"],
+                    ],
+                    "delivery": delivery,
+                }
             self.log(
                 {"validation": step.level, **report},
                 "success" if report["valid"] else "error",
@@ -1192,6 +1245,39 @@ class ScenarioRunner:
             self.builder.sample = copy.deepcopy(draft)
             self.publish(draft)
         return report
+
+    def chat_delivery_report(self, draft, plan):
+        """Check delivery in the compiled simulator, independently of LLM verdicts."""
+        feedback = [
+            f"{diagnostic['path']}: {diagnostic['message']}"
+            for diagnostic in plan["diagnostics"]
+            if diagnostic.get("code") == "direct_chat_generation"
+        ]
+        user_paths = {
+            f"replay[{key}][{index}]"
+            for key, events in draft["replay"].items()
+            for index, event in enumerate(events)
+            if event["op"] == "append"
+            and event.get("window") == "chat"
+            and event.get("source") == "user"
+        }
+        last_user_tick = max(
+            (event["end"] for event in plan["events"] if event["path"] in user_paths),
+            default=-1,
+        )
+        if not any(
+            call["tool"] == "chat"
+            and not call.get("invisible")
+            and not call.get("cancelled")
+            and call.get("outcome", {}).get("ok")
+            and call["arguments"].get("content", "").strip()
+            and call["request_start"] >= last_user_tick
+            for call in plan["tool_calls"]
+        ):
+            feedback.append(
+                "No successful, nonempty visible chat tool reply follows the latest user message."
+            )
+        return {"valid": not feedback, "feedback": feedback}
 
     def authoring_guide(self):
         from pathlib import Path

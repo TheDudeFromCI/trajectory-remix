@@ -104,7 +104,48 @@ async def test_example_single_and_multiple_turns_are_compilable_and_pending_huma
     assert sample["metadata"]["context_tags"]
     assert sample["metadata"]["roles"]["kidra"]["tags"] == {}
     plan = compiler.compile(sample)
-    assert len(plan["tool_calls"]) == 2
+    assert [call["tool"] for call in plan["tool_calls"]].count("calculator") == 2
+    replies = [call for call in plan["tool_calls"] if call["tool"] == "chat"]
+    assert len(replies) == 2
+    assert all(call["outcome"]["ok"] for call in replies)
+    assert all(call["arguments"] == {"content": "The answer is 4."} for call in replies)
+    assert not any(
+        d.get("code") in {"tool_not_shown", "tools_in_system", "direct_chat_generation"}
+        for d in plan["diagnostics"]
+    )
+    assert all(
+        event["window"] == "tools"
+        for events in sample["replay"].values()
+        for event in events
+        if event["op"] == "show_tools"
+    )
+    assert not any(
+        event["op"] == "generate"
+        and event["window"] == "chat"
+        and event["content"] != compiler.special["eos"]
+        for events in sample["replay"].values()
+        for event in events
+    )
+    # Request tokens are supervised; the actual message is inserted by the tool
+    # only when it dispatches, and that external observation is masked.
+    for call in replies:
+        before = compiler.frame(plan, call["start"] - 1)["windows"]["chat"]["text"]
+        after = compiler.frame(plan, call["end"])["windows"]["chat"]["text"]
+        assert (
+            after.count("Kidra: The answer is 4.")
+            == before.count("Kidra: The answer is 4.") + 1
+        )
+        request_rows = [
+            r for r in plan["rows"] if r["event"] == call["path"] + ".request"
+        ]
+        delivery_rows = [
+            r
+            for r in plan["rows"]
+            if r["window"] == "chat"
+            and r["event"].startswith(call["path"] + ".window.")
+        ]
+        assert request_rows and all(r["loss_weight"] > 0 for r in request_rows)
+        assert delivery_rows and all(r["loss_weight"] == 0 for r in delivery_rows)
     assert all(w["close"] is not None for w in plan["windows"])
     observations = [
         m[1]["content"]
@@ -783,7 +824,7 @@ async def test_resume_inside_conversation_does_not_duplicate_messages_or_tool_ca
         == 1
     )
     plan = compiler.compile(restored.state.dataset["samples"][0])
-    assert len(plan["tool_calls"]) == 1
+    assert [call["tool"] for call in plan["tool_calls"]] == ["calculator", "chat"]
 
 
 async def test_idea_identifier_allocates_free_suffix(compiler, tmp_path):
@@ -1019,3 +1060,171 @@ async def test_single_prompt_validation_remains_supported(compiler, tmp_path):
     await finish(runner)
     report = app.state.dataset["samples"][0]["metadata"]["evaluations"][0]["report"]
     assert report == {"valid": True, "feedback": []}
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "success",
+        "direct",
+        "missing",
+        "invisible",
+        "empty",
+        "failed",
+        "cancelled",
+        "later_user",
+    ],
+)
+def test_chat_delivery_requires_a_successful_visible_reply(
+    compiler, tmp_path, sample, kind
+):
+    sample["replay"]["0"].extend(
+        [
+            {"op": "open", "window": "chat", "window-type": "chat"},
+            {"op": "show_tools", "window": "a", "tools": ["chat"]},
+        ]
+    )
+    sample["replay"]["1"] = [
+        {
+            "op": "append",
+            "window": "chat",
+            "source": "user",
+            "content": "Hello",
+        }
+    ]
+    if kind == "direct":
+        sample["replay"]["2"] = [
+            {"op": "generate", "window": "chat", "content": "Kidra: Hello!"}
+        ]
+    elif kind != "missing":
+        sample["replay"]["2"] = [
+            {
+                "op": "invisible-tool-call" if kind == "invisible" else "tool-call",
+                "window": "send",
+                "tool": "chat",
+                "arguments": {"content": " " if kind == "empty" else "Hello!"},
+                "content": "x",
+            }
+        ]
+    if kind == "failed":
+        sample["replay"]["0"].append(
+            {
+                "op": "invisible-tool-call",
+                "tool": "tool_permissions_set",
+                "arguments": {"default": "deny"},
+            }
+        )
+    if kind == "invisible":
+        sample["replay"]["2"][0].pop("window")
+        sample["replay"]["2"][0].pop("content")
+    if kind == "cancelled":
+        sample["replay"]["2"][0]["content"] = "x" + compiler.special["eos"]
+    plan = compiler.compile(sample)
+    if kind == "later_user":
+        sample["replay"][str(plan["max_tick"] + 1)] = [
+            {
+                "op": "append",
+                "window": "chat",
+                "source": "user",
+                "content": "One more question?",
+            }
+        ]
+        plan = compiler.compile(sample)
+    runner = app_for(tmp_path, compiler, ScenarioClient()).state.scenario_runner
+    report = runner.chat_delivery_report(sample, plan)
+    assert report["valid"] == (kind == "success")
+    if kind == "direct":
+        assert any("directly into chat" in finding for finding in report["feedback"])
+
+
+async def test_missing_chat_delivery_overrides_a_positive_model_verdict(
+    compiler, tmp_path
+):
+    root = write_scenario(
+        tmp_path,
+        {
+            "steps": {
+                "user": {"uses": "remix.message", "inputs": {"text": "Hello"}},
+                "draft": {
+                    "uses": "remix.draft",
+                    "needs": ["user"],
+                    "inputs": {"reasoning": "I should greet the user."},
+                },
+                "review": {
+                    "uses": "remix.validate",
+                    "needs": ["draft"],
+                    "prompt": "review.md",
+                    "endpoint": "validator",
+                    "inputs": {"require_chat_delivery": True},
+                },
+            }
+        },
+        {"review.md": "Validate the trajectory."},
+    )
+    app = app_for(tmp_path, compiler, ScenarioClient(), root)
+    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner = app.state.scenario_runner
+    runner.start("custom")
+    await asyncio.wait_for(runner.job, 5)
+    assert runner.status["phase"] == "rejected"
+    sample = app.state.dataset["samples"][0]
+    assert sample["metadata"]["validation_level"] == -1
+    report = sample["metadata"]["evaluations"][-1]["report"]
+    assert not report["valid"]
+    assert not report["delivery"]["valid"]
+    assert any("[delivery]" in finding for finding in report["feedback"])
+
+
+async def test_repair_cannot_replace_chat_delivery_with_direct_generation(
+    compiler, tmp_path
+):
+    import shutil
+
+    class BadRepairClient(ScenarioClient):
+        repaired = False
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Repair ONLY"):
+                data = json.loads(
+                    messages[1]["content"].split("\nOutput JSON schema:")[0]
+                )
+                replay = copy.deepcopy(data["trajectory"]["replay"])
+                for events in list(replay.values()):
+                    for index, event in enumerate(events):
+                        if event["op"] == "tool-call" and event["tool"] == "chat":
+                            replay["0"].append(
+                                {
+                                    "op": "open",
+                                    "window": event["window"],
+                                    "window-type": "tool",
+                                }
+                            )
+                            events[index] = {
+                                "op": "generate",
+                                "window": "chat",
+                                "content": "Kidra: Hello!",
+                            }
+                self.repaired = True
+                return {"content": json.dumps({"replay": replay})}
+            self.valid = self.repaired
+            return await super().complete(endpoint, messages, tools)
+
+    root = tmp_path / "scenarios"
+    shutil.copytree(EXAMPLES, root)
+    path = root / "user_problem/flow.yaml"
+    flow = yaml.safe_load(path.read_text())
+    flow["steps"]["validate"]["max_repairs"] = 1
+    path.write_text(yaml.safe_dump(flow, sort_keys=False))
+    app = app_for(tmp_path, compiler, BadRepairClient(), root)
+    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 5)
+    assert runner.status["phase"] == "rejected"
+    sample = app.state.dataset["samples"][0]
+    evaluations = sample["metadata"]["evaluations"]
+    assert evaluations[0]["report"]["delivery"]["valid"]
+    report = evaluations[-1]["report"]
+    assert all(check["valid"] for check in report["checks"].values())
+    assert not report["valid"] and not report["delivery"]["valid"]
+    assert any("directly into chat" in finding for finding in report["feedback"])

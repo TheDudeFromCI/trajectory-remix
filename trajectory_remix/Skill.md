@@ -213,6 +213,14 @@ windows with meaningful `window-type` values. Tool calls create their tool windo
 from tick 0 automatically; reuse a tool window when its token streams do not
 overlap. Keep the total distinct windows within `get_session.max_window_slots`.
 
+Deliver Kidra's user-facing messages through a **visible `chat` tool call** with
+`arguments: {"content": "message body"}`, after listing `chat` with `show_tools`
+in a dedicated tools window. Keep tool schemas out of the system prompt.
+Generate the request in a tool window; the simulator inserts the framed message
+into the open chat window. Do not duplicate that result or substitute direct
+answer generation in chat. Private reasoning belongs in reasoning windows and
+must not become another user-facing draft of the same answer.
+
 These are author-side `create_tool_call` arguments for one specialist turn:
 
 ```json
@@ -461,12 +469,17 @@ limits, and phase visibility rules still apply. Use +1 when consuming a newly
 generated token or completed result, including each branch of a max expression.
 
 Always provide tools context before the agent uses tools, through a `show_tools`
-event (for example `{"op":"show_tools","window":"system","tools":["calculator"]}`).
+event in an open tools window (for example `{"op":"show_tools","window":"tools","tools":["calculator"]}`).
 Do not assume a tool is available to Kidra merely because the authoring API can
 list or execute it.
 The compiler warns with `tool_not_shown` at the request event if the listing is
 missing from visible context. A listing added later, closed, or replaced does
 not count. Fix the warning before handing the trajectory off for review.
+Use an explicit tools window with `window-type: "tools"` for schemas;
+`show_tools` in a system window produces a `tools_in_system` warning. Generating
+reply text directly in chat produces `direct_chat_generation`; EOS/NOOP control
+events are allowed there. These are advisory compiler diagnostics; inspect and
+resolve them before approving a training sample.
 
 ## Validate and hand off
 
@@ -503,7 +516,8 @@ to suit the requested training behavior rather than copying generic replies.
 
 ## Tool protocol and schema displays
 
-Use `create_event` with `{"op":"show_tools","window":"system","tools":["chat"]}`
+Open a dedicated window named `tools` with `window-type: "tools"`, then use
+`create_event` with `{"op":"show_tools","window":"tools","tools":["chat"]}`
 to append selected public schemas to an already open window. Set
 `randomly-add-additional-tools: true` to include deterministic extra distractor
 tools. Invisible arguments never appear in these schemas.

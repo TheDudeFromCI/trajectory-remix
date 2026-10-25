@@ -955,6 +955,32 @@ class Compiler:
             for w in windows.values()
             if w["close"] is None
         ]
+        for item in prepared:
+            event = item["event"]
+            window = event.get("window")
+            purpose = windows.get(window, {}).get("type")
+            if item.get("show_tools") and (window == "system" or purpose == "system"):
+                warnings.append(
+                    {
+                        "severity": "warning",
+                        "code": "tools_in_system",
+                        "path": item["path"],
+                        "message": "show_tools adds tool schemas to the system prompt. Put show_tools in a dedicated tools window instead.",
+                    }
+                )
+            if event["op"] == "generate" and (window == "chat" or purpose == "chat"):
+                text = item["encoded"].text
+                for token in self.special.values():
+                    text = text.replace(token, "")
+                if text.strip():
+                    warnings.append(
+                        {
+                            "severity": "warning",
+                            "code": "direct_chat_generation",
+                            "path": item["path"],
+                            "message": "Text is generated directly into chat. Send the reply with a visible chat tool call instead; generate only EOS/NOOP controls in the chat window.",
+                        }
+                    )
         # Use the actual expanded schemas (including randomized additions), and
         # the normal visibility predicate so closed/replaced context cannot count.
         shown = {

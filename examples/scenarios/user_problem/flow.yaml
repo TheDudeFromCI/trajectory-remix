@@ -266,6 +266,7 @@ steps:
     repair_prompt: repair.md
     max_repairs: 2
     inputs:
+      require_chat_delivery: true
       tags: ${scenario.tags}
       roles: ${roles}
       solution: ${steps.solution.output}

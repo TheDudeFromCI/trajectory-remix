@@ -752,9 +752,16 @@ calls. Visible event editing and `call_simulated_tool` reject such arguments.
 The old list of external mutation tools no longer restricts invisible calls.
 
 Insert selected public schemas using `create_event` with an event like
-`{"op":"show_tools","window":"system","tools":["chat"],"randomly-add-additional-tools":true}`.
-This is a masked text append to an already open window. The checkbox editor
+`{"op":"show_tools","window":"tools","tools":["chat"],"randomly-add-additional-tools":true}`.
+Open the dedicated tools window first with `window-type: "tools"`; keep schemas
+out of the system prompt. This is a masked text append to that window. The checkbox editor
 supports the same fields. See [the tool contract](SANDBOX.md) for custom Python
 modules, state snapshots, and external schema/hash dependencies.
+
+Compiler diagnostics warn about `show_tools` in a system window
+(`tools_in_system`) and reply text generated directly into chat
+(`direct_chat_generation`). Send replies through the visible `chat` tool;
+EOS/NOOP control events in chat are allowed. These warnings do not fail local
+compilation, and include the source event path for targeted repairs.
 
 Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.

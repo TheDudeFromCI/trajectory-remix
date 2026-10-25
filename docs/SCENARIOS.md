@@ -137,9 +137,9 @@ coverage observer, fixed random seed, or promise of repeatable model output.
 | `llm.generate` | Run a Markdown prompt with selected inputs, optional `profile`, and optional named `output_schema`. Without a schema, return text. |
 | `flow.repeat` | Run nested `steps` up to `max_iterations` (1–20), exiting when `until` resolves to true. Pass parent data through `inputs`. Unresolved exhaustion is a failure. |
 | `remix.novelty` | Compare an `idea` to existing concept summaries, in batches of 24, using the specified prompt. Human samples without concept metadata contribute user-input excerpts. Regenerate through `idea_step` up to `attempts`; use the least-similar candidate if `fallback` is true, except exact duplicates. Record relaxed novelty in metadata. |
-| `remix.message` | Append framed `text` from `source: user` or generate a framed assistant message. |
+| `remix.message` | Append framed `text` from `source: user`, or deliver `source: assistant` through a visible simulated `chat` tool call. Opens the chat window when needed and exposes the tool schema before sending. |
 | `remix.tools` | Execute `calls` in the virtual simulator. Each inner list is an independent parallel batch; batches execute sequentially. Return actual simulator outcomes. |
-| `remix.draft` | Add optional `reasoning` and `response`, compile, close windows in the published copy, and atomically insert/update this run's draft at level 0. No other samples are available to the writer. |
+| `remix.draft` | Add optional private `reasoning` and deliver `response` through `chat`, compile, close windows in the published copy, and atomically insert/update this run's draft at level 0. No other samples are available to the writer. |
 | `remix.validate` | Compile and evaluate the draft with `prompt` or named `checks`; `level` is 1 or 2. Every check must pass. Optionally repair with `repair_prompt` up to `max_repairs`. Only the draft, findings, and authoring guide reach repair. |
 | `remix.reject` | Reject the run with `inputs.reason`. Preserve an existing draft as rejected. |
 
@@ -197,6 +197,8 @@ Markdown files:
       correctness: validate-correctness.md
     repair_prompt: repair.md
     max_repairs: 2
+    inputs:
+      require_chat_delivery: true
     level: 1
 ```
 
@@ -214,6 +216,21 @@ again. Completed checks are checkpointed against the exact reviewed content,
 so resuming after an API outage or restart does not repeat completed checks.
 Existing scenarios using one `prompt` remain supported.
 
+With `inputs.require_chat_delivery: true` (enabled in the bundled example), a
+deterministic check also requires a successful, nonempty visible `chat` tool reply
+after the latest user message, and rejects assistant text generated directly into
+the chat window. This check can veto an LLM's positive verdict and is rerun after
+repairs; findings are logged, sent to repair, and stored in the report's `delivery`
+field. Invisible authored messages and failed/cancelled sends do not count as
+Kidra's delivery. This option is independent of whether validation uses one
+prompt or several checks.
+
+The answer prompt writes only the message body. The assembler supplies the
+`chat` call, supervises its request tokens, and lets the simulator append the
+framed result to chat with external-input masks. The information-gathering tool
+planner does not duplicate that final send. Private reasoning has its own prompt
+and must not contain a second user-facing answer.
+
 The bundled example checks attachments/window lifecycle, tools/causality,
 reasoning/role behavior, and factual correctness separately. Correctness review
 verifies the original problem and files independently of the reference answer.
@@ -227,7 +244,11 @@ closed windows, and replaced context do not count. Random additional tools are
 checked against the actual expanded listing; invisible setup calls are exempt.
 Warnings appear in editor diagnostics and authoring API validation, and are
 included in generation review inputs and logs. The scenario writer adds the
-planned tools' schemas to system context when assembling each batch.
+planned tools' schemas to a dedicated tools window when assembling each batch.
+The compiler also warns with `direct_chat_generation` for generated reply text
+in chat (EOS/NOOP controls are allowed), and `tools_in_system` for `show_tools`
+in a system window. These diagnostics include event paths and appear in both
+editor and MCP validation results without making compilation fail.
 
 Use **Edit → Generation → Approve for training export** after human review.
 Content or metadata edits to automated samples invalidate previous evaluation and approval.
