@@ -859,6 +859,62 @@ await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "hardware_l
 jump(lastPlan.max_tick);
 await waitFor(() => $("sandbox-state").textContent.includes('"file_io_ticks": 2'));
 assert.match($("sandbox-state").textContent, /"file_io_ticks": 2/);
+// Event and group collapse live in browser storage and never create trajectory edits.
+const collapseUuid = JSON.parse($("sample-json").value).uuid;
+const collapseKey = "trajectory-remix.event-collapse." + encodeURIComponent(collapseUuid);
+const countSampleWrites = () =>
+  requests.filter((r) => r.path.startsWith("/api/samples/") && r.options?.method === "PUT").length;
+const countCompiles = () => requests.filter((r) => r.path === "/api/compile").length;
+const initialWrites = countSampleWrites();
+const initialCompiles = countCompiles();
+const collapseCard = w.document.querySelector(".event-card");
+const wasCollapsed = collapseCard.classList.contains("collapsed");
+collapseCard.querySelector(".event-toggle").onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), !wasCollapsed);
+const collapsedPrefs = JSON.parse(w.localStorage.getItem(collapseKey));
+assert.equal(collapsedPrefs.events.includes(0), !wasCollapsed);
+assert.equal(w.document.title, "Trajectory Remix");
+await new Promise((resolve) => setTimeout(resolve, 300));
+assert.equal(countSampleWrites(), initialWrites);
+assert.equal(countCompiles(), initialCompiles);
+await $("sample-list").querySelector(".active").onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), !wasCollapsed);
+w.document.querySelector(".event-card .event-toggle").onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), wasCollapsed);
+await click("add-group");
+await waitFor(() => !w.document.title.startsWith("*") &&
+  JSON.parse($("sample-json").value).metadata.event_groups?.length > 0);
+const groupMetadata = JSON.parse($("sample-json").value).metadata.event_groups[0];
+assert.equal("collapsed" in groupMetadata, false);
+const groupWrites = countSampleWrites();
+const groupCompiles = countCompiles();
+w.document.querySelector(".event-group .event-toggle").onclick();
+assert.equal(w.document.querySelector(".event-group").classList.contains("collapsed"), true);
+assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupMetadata.id]);
+assert.equal(w.document.title, "Trajectory Remix");
+await new Promise((resolve) => setTimeout(resolve, 300));
+assert.equal(countSampleWrites(), groupWrites);
+assert.equal(countCompiles(), groupCompiles);
+await $("sample-list").querySelector(".active").onclick();
+assert.equal(w.document.querySelector(".event-group").classList.contains("collapsed"), true);
+assert.equal("collapsed_events" in JSON.parse($("sample-json").value).metadata, false);
+assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
+// Opening old samples migrates legacy metadata collapse flags to local storage.
+await w.document.querySelector('.tab[data-view="json"]').onclick();
+const legacy = JSON.parse($("sample-json").value);
+legacy.metadata.collapsed_events = [0];
+legacy.metadata.event_groups[0].collapsed = true;
+$("sample-json").value = JSON.stringify(legacy);
+$("sample-json").oninput();
+w.localStorage.removeItem(collapseKey);
+await w.document.querySelector('.tab[data-view="events"]').onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), true);
+assert.equal(w.document.querySelector(".event-group").classList.contains("collapsed"), true);
+assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).events, [0]);
+assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupMetadata.id]);
+await waitFor(() => !w.document.title.startsWith("*") &&
+  !("collapsed_events" in JSON.parse($("sample-json").value).metadata));
+assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
