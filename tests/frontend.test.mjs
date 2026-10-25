@@ -364,6 +364,7 @@ await click("view-menu-button");
 await click("edit-menu-button");
 assert.equal($("view-menu").hidden, true);
 assert.equal($("edit-menu").hidden, false);
+await click("edit-menu-button"); // Leave the existing menu tests in their initial closed state.
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
 for (const id of ["generate-one", "validate-sample", "auto-start"])
