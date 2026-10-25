@@ -1,5 +1,7 @@
 # Tools and sandbox state
 
+For a short file-setup exercise, call `get_authoring_guide(topic="sandbox")` or read [Sandbox setup](../trajectory_remix/guides/sandbox.md). The complete authoring reference is available through `get_authoring_guide(topic="reference")`.
+
 Every compilation creates a fresh Python dictionary, bootstrapped by the clock
 helper with the trajectory's `tick_rate` (10 tokens/s by default). Other keys are
 owned by tools. Tools own their state conventions; the compiler, training

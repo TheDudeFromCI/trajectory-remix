@@ -5,6 +5,10 @@ description: Author curated parallel training trajectories through the Trajector
 
 # Authoring parallel trajectories with MCP
 
+This is the full reference. For a smaller first task, use the
+[short starting guide](guides/start.md), or request `get_authoring_guide()`.
+Retrieve this complete manual explicitly with `topic: "reference"`.
+
 Use this workflow to write a proposed training example. You are the **author** of
 the entire scenario: the user, Kidra, the specialists, their replies and external
 activity. Kidra is the **coordinator being trained**. Keep those roles separate.
@@ -20,8 +24,10 @@ Built-in tools do not run code, launch workers or contact providers. Custom tool
 1. Call `get_session` for the current revision, tokenizer, special token spellings,
    generation status and window-slot budget. Stop source editing while generation
    is running; do not guess tokenizer spellings or numeric window slots.
-2. Call `get_authoring_guide` to read this file through MCP if you lack repository
-   access. Call `list_simulated_tools` for the current synthetic argument schemas.
+2. Call `get_authoring_guide(topic="reference")` to read this file through MCP if you lack repository
+   access. Request `topic="example"` from the same tool for the full build-graph
+   trajectory JSON in its `content` string. Call `list_simulated_tools` for
+   the current synthetic argument schemas.
 3. Use `create_trajectory` for a new draft, or `get_trajectory` and `list_events`
    before editing an existing one. Use `expected_revision` on edits. After changing
    event arrays, relist addresses: event indexes are zero-based and can shift.
@@ -481,6 +487,14 @@ not count. Fix the warning before handing the trajectory off for review.
 5. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
    requester. The UI can export source; the CLI can export training JSONL. Explain
    that this is a curated synthetic sample and report the checks actually done.
+
+The `examples/build-graph-analysis.json` trajectory is a complete
+example of invisible file setup, concurrent file tools, separate reasoning
+and chat generation, loss masks, and explicit EOS. MCP-only agents can fetch
+this full source JSON using `get_authoring_guide(topic="example")`. Parse the
+returned `content` string as JSON. This read does not import a trajectory
+into the current project. Study its event timing and window separation rather
+than treating the synthetic answer as verified code execution.
 
 `examples/persistent-agents.json` is a small synthetic source example of these
 mechanics. Extend the scenario's histories and timing

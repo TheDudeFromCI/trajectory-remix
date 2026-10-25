@@ -317,11 +317,26 @@ class TrajectoryCommands:
         }
 
     @command()
-    def get_authoring_guide(self):
-        """Read Skill.md: synthetic parallel authoring, available tools, timing, masks and review."""
-        return {
-            "content": Path(__file__).with_name("Skill.md").read_text(encoding="utf-8")
-        }
+    def get_authoring_guide(
+        self,
+        topic: Literal[
+            "start", "first", "parallel", "edit", "sandbox", "tools", "reference", "example"
+        ] = "start",
+    ):
+        """Read a short authoring lesson, complete reference, or example trajectory.
+
+        Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
+        sandbox (trajectory files), tools (starter tool selection), reference (full manual),
+        example (full build-graph JSON trajectory). No source or sandbox changes.
+        """
+        root = Path(__file__).parent
+        if topic == "reference":
+            path = root / "Skill.md"
+        elif topic == "example":
+            path = root / "build-graph-analysis.json"
+        else:
+            path = root / "guides" / f"{topic}.md"
+        return {"content": path.read_text(encoding="utf-8")}
 
     @command()
     def list_trajectories(
@@ -1308,12 +1323,14 @@ class TrajectoryCommands:
         expected_revision: Revision = None,
         outcome: dict | None = None,
     ):
-        """Execute a simulated Remix tool in a session, preserving its real outcome and state.
+        """Execute only in an ephemeral workbench; never changes a trajectory sandbox.
 
+        Use create_tool_call(sample_id, tick, ...) for executable trajectory events.
         Discover exact name/arguments with list_simulated_tools. Valid dispatched failures
         return outcome.ok=false and consume clock/budget. Invalid arguments do not execute.
         record_sample_id also appends the actual call/result in one tick-0 tool window
-        as one undoable source edit.
+        as one undoable source edit. Recording is text only; it does not copy workbench
+        state or schedule executable replay events.
         Recording requires a compilable sample (or empty draft) and stopped generation.
         A rejected recording leaves virtual state/log unchanged. For subagent, supply
         outcome={ok:true,result:{response:"authored reply",conversationId:"optional-id"}}
