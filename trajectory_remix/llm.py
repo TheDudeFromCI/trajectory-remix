@@ -210,6 +210,9 @@ def validate_config(config):
         ):
             raise ValueError("Endpoint IDs must be nonempty and unique")
         seen.add(ep["id"])
+        context_size = ep.get("context_size", 0)
+        if type(context_size) is not int or not 0 <= context_size <= 1_000_000_000:
+            raise ValueError("Endpoint context_size must be an integer between 0 (unknown) and 1000000000")
         for name in ("base_url", "api_key", "api_key_env"):
             if not isinstance(ep.get(name, ""), str):
                 raise ValueError(f"Endpoint {name} must be text")

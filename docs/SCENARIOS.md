@@ -202,3 +202,44 @@ single-task editing integrations. Single Sample uses YAML exclusively; no scenar
 folder means an explanatory message, never a silent fallback to legacy generation.
 
 Single-sample failures automatically retry with newly sampled scenario and role tags, up to `single_generation.max_attempts` (default 3). `single_generation.max_parallel` defaults to 1. Both settings are saved with the project. Failed samples remain reviewable; cancellation discards only the current provisional sample and retains the log.
+
+## Manual conditions and diagnostics
+
+Generation Settings contains global endpoint and execution settings; legacy Tasks
+and Conditions editors are removed. Scenario definitions and prompts remain in
+the external folder. The status panel builds tag selectors from the selected
+scenario's YAML pools. Randomization is on by default. Changing a selector turns
+it off; every displayed choice is then fixed across retries until randomization
+is enabled again. These controls are locked during a run. Clear Log clears only
+retained output, without cancelling a job or resetting counters. Unchanged logs
+retain their DOM nodes and scroll position; new output follows only when already
+at the bottom.
+
+Stage labels are Unfinished (-3), Rejected (-2), Unsuccessful (-1), Pending (0),
+Candidate (1), Validated (2), and Ready (3).
+
+Each model request logs its model, request count, elapsed time, observed time to
+first generated token, and provider-reported token usage when available. Prompt,
+completion, total, reasoning, and cache counters are never inferred from stream
+chunk counts. The status samples active requests every two seconds. Live tok/s
+uses changes in provider-reported completion counters between samples; average
+tok/s uses completion tokens divided by elapsed decode time after the first token.
+Providers reporting usage only at completion cannot supply a reliable live rate.
+Missing counters and timings are omitted rather than estimated.
+
+Endpoints may set `context_size` (tokens); zero means unknown. When both capacity
+and usage are known, the status displays current-request context usage. Usage
+excludes unrelated previous workflow requests because each prompt has a fresh
+context. The blue baseline is that endpoint's first request's prompt token count;
+it includes inputs, because providers do not separately count system instructions
+and tool schemas. Remaining used space is grey through 50%, yellow through 75%,
+and red above 75%. Hover for used percentage and counts.
+
+The included user_problem scenario now authors explicit `Idea.files` with virtual
+paths and contents. `remix.setup` initializes these through invisible simulated
+file writes before the conversation. Solution and user prompts share those
+facts, avoiding invented or missing documents and renamed task constraints.
+The tool prompt includes exact empty, parallel, and sequential JSON examples.
+A failed structured-output step receives its previous output and concrete error
+in `retry_feedback` on the next bounded retry; malformed output is still rejected
+rather than silently coerced into a different tool ordering.

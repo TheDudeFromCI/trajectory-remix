@@ -30,6 +30,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from .dataset import evaluation_source
+from .generation_stats import RequestStats
 from .llm import SampleBuilder
 from .scenarios import resolve, sample_tags
 
@@ -137,7 +138,9 @@ class ScenarioRunner:
         )
         self.persist()
 
-    def start(self, name, max_parallel=None, *, _retry=False, _schedule=True):
+    def start(
+        self, name, max_parallel=None, *, _retry=False, _schedule=True, tags=None
+    ):
         if not _retry and (self.status["running"] or self.legacy.status["running"]):
             raise ValueError("Generation is already running")
         if name not in self.registry.scenarios:
@@ -149,6 +152,34 @@ class ScenarioRunner:
         if type(max_parallel) is not int or not 1 <= max_parallel <= 128:
             raise ValueError("max_parallel must be an integer between 1 and 128")
         self.scenario = self.registry.scenarios[name]
+        if not _retry:
+            self.manual_tags = tags
+        pools = {
+            "scenario": self.scenario.flow.tags,
+            **{
+                role: profile.tags for role, profile in self.scenario.flow.roles.items()
+            },
+        }
+        chosen = {}
+        if self.manual_tags is not None:
+            if not isinstance(self.manual_tags, dict) or set(self.manual_tags) != set(
+                pools
+            ):
+                raise ValueError("Manual tags must specify every scenario/role scope")
+            for scope, dimensions in pools.items():
+                selected = self.manual_tags[scope]
+                if not isinstance(selected, dict) or set(selected) != set(dimensions):
+                    raise ValueError(
+                        f"Manual tags must specify every {scope} dimension"
+                    )
+                chosen[scope] = {}
+                for dimension, options in dimensions.items():
+                    option = next(
+                        (t for t in options if t.name == selected[dimension]), None
+                    )
+                    if option is None:
+                        raise ValueError(f"Unknown tag for {scope}.{dimension}")
+                    chosen[scope][dimension] = option.model_dump(exclude={"weight"})
         self.config = copy.deepcopy(self.state["config"])
         self.endpoints = {e["id"]: e for e in self.config["endpoints"]}
 
@@ -163,6 +194,8 @@ class ScenarioRunner:
 
         check_endpoints(self.scenario.flow.steps)
         self.limit = asyncio.Semaphore(max_parallel)
+        self.first_prompts = {}
+        self.status["metrics"] = {}
         self.resume_event.set()
         self.status.update(
             running=True,
@@ -173,20 +206,27 @@ class ScenarioRunner:
             total=0,
             active=[],
             draft_id=None,
+            model_requests=self.status.get("model_requests", 0),
             accepted=0,
             attempts=self.status["attempts"] + 1,
             scenario=name,
             last_error=None,
         )
         roles = {
-            name: {
+            role: {
                 "instructions": profile.instructions,
-                "tags": sample_tags(profile.tags),
+                "tags": chosen[role]
+                if self.manual_tags is not None
+                else sample_tags(profile.tags),
             }
-            for name, profile in self.scenario.flow.roles.items()
+            for role, profile in self.scenario.flow.roles.items()
         }
         self.context = {
-            "scenario": {"tags": sample_tags(self.scenario.flow.tags)},
+            "scenario": {
+                "tags": chosen["scenario"]
+                if self.manual_tags is not None
+                else sample_tags(self.scenario.flow.tags)
+            },
             "roles": roles,
             "steps": {},
             "tools": self.compiler.tools.schemas(),
@@ -383,7 +423,8 @@ class ScenarioRunner:
                     self.builder.next_tick,
                     self.builder.serial,
                 )
-                if step.uses in ("remix.message", "remix.tools", "remix.draft")
+                if step.uses
+                in ("remix.message", "remix.tools", "remix.draft", "remix.setup")
                 else None
             )
             try:
@@ -434,6 +475,14 @@ class ScenarioRunner:
                     raise Rejected(
                         f"{path} rejected after {attempt + 1} attempt(s)"
                     ) from error
+                inputs = {
+                    **inputs,
+                    "retry_feedback": {
+                        "error": record["detail"],
+                        "previous_output": record.get("last_output"),
+                        "instruction": "Correct this output to match the requested schema exactly; do not repeat the same formatting.",
+                    },
+                }
                 await self.gate()
 
     async def llm(self, step, inputs, context, path, schema=None, prompt=None):
@@ -443,6 +492,27 @@ class ScenarioRunner:
             self.status["active"].append(path)
             self.status["paused"] = False
             self.persist()
+            endpoint = self.endpoints[step.endpoint]
+            stats = RequestStats(endpoint["model"], endpoint.get("context_size", 0))
+            self.status["model_requests"] = self.status.get("model_requests", 0) + 1
+            active_stream = None
+
+            def sample_stats(final=False):
+                usage = active_stream.get().usage if active_stream is not None else None
+                if usage and usage.input_tokens:
+                    self.first_prompts.setdefault(step.endpoint, usage.input_tokens)
+                current = stats.sample(
+                    usage, final=final, baseline=self.first_prompts.get(step.endpoint)
+                )
+                self.status.setdefault("metrics", {})[path] = current
+                return current
+
+            async def ticker():
+                while True:
+                    sample_stats()
+                    await asyncio.sleep(2)
+
+            timer = asyncio.create_task(ticker())
             try:
                 instructions = self.scenario.prompts[prompt or step.prompt]
                 if step.profile:
@@ -503,7 +573,16 @@ class ScenarioRunner:
                             },
                             parameters,
                         ) as stream:
+                            active_stream = stream
                             async for event in stream:
+                                if (
+                                    isinstance(event, PartStartEvent)
+                                    and getattr(event.part, "content", None)
+                                ) or (
+                                    isinstance(event, PartDeltaEvent)
+                                    and getattr(event.delta, "content_delta", None)
+                                ):
+                                    stats.first_token()
                                 chunk = ""
                                 if isinstance(event, PartStartEvent) and isinstance(
                                     event.part, TextPart
@@ -541,6 +620,7 @@ class ScenarioRunner:
                 text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
                 if schema and text.startswith("```"):
                     text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+                self.snapshot["steps"].setdefault(path, {})["last_output"] = text
                 self.log(text, "output", path)
                 if schema:
                     result = json.loads(text)
@@ -554,6 +634,18 @@ class ScenarioRunner:
                     f"Endpoint {step.endpoint}: {type(error).__name__}, HTTP {getattr(error, 'status_code', 'unavailable')}"
                 ) from error
             finally:
+                timer.cancel()
+                await asyncio.gather(timer, return_exceptions=True)
+                metrics = sample_stats(final=True)
+                self.snapshot["steps"].setdefault(path, {})["metrics"] = metrics
+                self.log(
+                    {
+                        "generation_metadata": metrics,
+                        "model_requests": self.status["model_requests"],
+                    },
+                    "info",
+                    path,
+                )
                 self.status["active"].remove(path)
                 if self.status["pause_requested"] and not self.status["active"]:
                     self.status["paused"] = True
@@ -605,6 +697,22 @@ class ScenarioRunner:
                     source=source,
                 )
                 return {"text": text}
+            case "remix.setup":
+                for item in inputs["idea"].get("files", []):
+                    self.builder.sample["replay"].setdefault("0", []).append(
+                        {
+                            "op": "invisible-tool-call",
+                            "tool": "file_write",
+                            "arguments": {
+                                "path": item["path"],
+                                "content": item["content"],
+                            },
+                        }
+                    )
+                self.builder.next_tick = (
+                    self.compiler.compile(self.builder.sample)["max_tick"] + 1
+                )
+                return {"ready": True}
             case "remix.tools":
                 return self.simulate(inputs)
             case "remix.draft":

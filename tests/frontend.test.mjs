@@ -280,13 +280,9 @@ await click("status-button");
 assert.equal($("generation-panel").hidden, false);
 await click("edit-tags");
 assert($("settings-dialog").hasAttribute("open"));
-await w.document.querySelector('[data-config="tasks"]').onclick();
-assert.equal(
-  w.document.querySelectorAll("#config-content .config-card").length,
-  7,
-);
-await w.document.querySelector('[data-config="conditions"]').onclick();
-assert(w.document.querySelectorAll(".tag-picker button").length >= 40);
+assert.equal(w.document.querySelector('[data-config="tasks"]'), null);
+assert.equal(w.document.querySelector('[data-config="conditions"]'), null);
+assert.match($("settings-dialog").textContent, /Generation Settings/);
 await w.document.querySelector('[data-config="automatic"]').onclick();
 assert.match($("config-content").textContent, /Consecutive failure limit/);
 await click("save-config");
@@ -861,6 +857,39 @@ assert.equal($("save-config").disabled, false);
 await click("save-config");
 assert.equal($("save-config").disabled, true);
 await click("close-settings");
+const manualTag = $("scenario-tag-controls").querySelector("select");
+assert(manualTag);
+manualTag.value = manualTag.options[manualTag.options.length - 1].value;
+manualTag.onchange();
+assert.equal($("randomize-tags").checked, false);
+$("randomize-tags").checked = true;
+await click("export-generation-log");
+assert.equal(downloadedFilename, "generation.log");
+assert.equal(typeof await downloadedBlob.text(), "string");
+const actualFetch = w.fetch;
+let logFixture = [{time:"2026-10-25T00:00:00Z", level:"info", message:"Stable log entry"}];
+w.fetch = async (path, options) => {
+  const response = await actualFetch(path, options);
+  if (path.startsWith("/api/state?")) {
+    const data = await response.json(); data.logs = logFixture;
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+await waitFor(() => $("activity-log").textContent.includes("Stable log entry"), 5000);
+const retainedLogNode = $("activity-log").firstChild;
+const previousReads = completedStateReads;
+await waitFor(() => completedStateReads > previousReads, 5000);
+assert.equal($("activity-log").firstChild, retainedLogNode);
+Object.defineProperty($("activity-log"), "scrollHeight", {value:1000, configurable:true});
+Object.defineProperty($("activity-log"), "clientHeight", {value:100, configurable:true});
+$("activity-log").scrollTop = 100;
+logFixture = [...logFixture, {time:"2026-10-25T00:00:01Z", level:"info", message:"New log entry"}];
+await waitFor(() => $("activity-log").textContent.includes("New log entry"), 5000);
+assert.equal($("activity-log").scrollTop, 100);
+logFixture = [];
+await click("clear-generation-log");
+await waitFor(() => !$("activity-log").textContent, 5000);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({

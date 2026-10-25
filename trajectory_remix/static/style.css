@@ -1265,3 +1265,12 @@ dialog::backdrop {
 #settings-errors { color: #ff9191; white-space: pre-wrap; padding: 0 14px; }
 #config-content input[aria-invalid="true"] { border: 2px solid #ff6767; }
 @media (max-width: 650px) { .generation-layout { grid-template-columns: 1fr; grid-template-rows: 2fr 1fr; } }
+
+.context-meter { display: flex; background: #202938; height: 12px; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.context-meter span { display: block; height: 100%; }
+.context-base { background: #4396ed; }
+.request-metrics { font-size: 11px; margin-bottom: 8px; overflow-wrap: anywhere; }
+#scenario-tag-controls { border: 0; padding: 0; margin: 8px 0; }
+#scenario-tag-controls label { margin-bottom: 6px; }
+#randomize-tags { width: auto; }
+.log-toolbar { flex-wrap: wrap; }

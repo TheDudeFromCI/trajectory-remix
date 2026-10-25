@@ -40,6 +40,7 @@ class ScenarioClient:
             await self.release.wait()
         if prompt.startswith("Invent"):
             output = {
+                "files": [],
                 "problem": "What is 2 + 2?",
                 "situation": "A user needs arithmetic help.",
                 "success_criteria": "Answer 4",
@@ -344,6 +345,13 @@ async def test_pydantic_ai_streaming_uses_prompted_json_without_tool_permissions
                 "created": 1,
                 "model": "local-model",
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 5,
+                    "total_tokens": 55,
+                    "prompt_tokens_details": {"cached_tokens": 12},
+                    "completion_tokens_details": {"reasoning_tokens": 1},
+                },
             },
         ]
         return httpx.Response(
@@ -391,6 +399,11 @@ async def test_pydantic_ai_streaming_uses_prompted_json_without_tool_permissions
         runner.start("custom")
         await finish(runner)
     assert len(requests) == 1
+    usage = runner.snapshot["steps"]["text"]["metrics"]
+    assert usage["prompt_tokens"] == 50
+    assert usage["completion_tokens"] == 5
+    assert usage["cache_read_tokens"] == 12
+    assert usage["reasoning_tokens"] == 1
     assert runner.snapshot["steps"]["text"]["output"] == {"text": "Hello"}
     assert any(
         log["level"] == "output" and "Hello" in log["message"] for log in runner.logs
@@ -536,3 +549,86 @@ async def test_failed_attempt_retries_and_manual_starts_preserve_log_and_counter
     await finish(runner)
     assert runner.status["attempts"] == 3
     assert list(runner.logs)[: len(previous)] == previous
+
+
+async def test_manual_tags_are_validated_and_fixed_across_retries(compiler, tmp_path):
+    class Retry(ScenarioClient):
+        failures = 2
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Invent") and self.failures:
+                self.failures -= 1
+                return {"content": "invalid"}
+            return await super().complete(endpoint, messages, tools)
+
+    app = app_for(tmp_path, compiler, Retry())
+    runner = app.state.scenario_runner
+    flow = runner.registry.scenarios["user_problem"].flow
+    pools = {
+        "scenario": flow.tags,
+        **{name: role.tags for name, role in flow.roles.items()},
+    }
+    tags = {
+        scope: {
+            dimension: options[-1].name for dimension, options in dimensions.items()
+        }
+        for scope, dimensions in pools.items()
+    }
+    runner.start("user_problem", tags=tags)
+    await finish(runner)
+    assert runner.status["attempts"] == 2
+    assert {
+        scope: {dimension: tag["name"] for dimension, tag in dimensions.items()}
+        for scope, dimensions in runner.status["conditions"].items()
+    } == tags
+    bad = copy.deepcopy(tags)
+    bad["scenario"]["domain"] = "not in YAML"
+    with pytest.raises(ValueError, match="Unknown tag"):
+        runner.start("user_problem", tags=bad)
+
+
+async def test_retry_feedback_and_virtual_scenario_files(compiler, tmp_path):
+    class Client(ScenarioClient):
+        malformed = True
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Plan ONLY"):
+                data = json.loads(messages[1]["content"])
+                if self.malformed:
+                    self.malformed = False
+                    return {"content": '[["file_read"]]'}
+                assert "not of type" in data["retry_feedback"]["error"]
+                assert data["retry_feedback"]["previous_output"] == '[["file_read"]]'
+                return {
+                    "content": '{"calls":[[{"tool":"file_read","arguments":{"path":"notes.txt"}}]]}'
+                }
+            value = await super().complete(endpoint, messages, tools)
+            if messages[0]["content"].startswith("Invent"):
+                idea = json.loads(value["content"])
+                idea["files"] = [
+                    {"path": "notes.txt", "content": "Authoritative scenario facts"}
+                ]
+                value["content"] = json.dumps(idea)
+            return value
+
+    fake = Client()
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await finish(runner)
+    reasoning = next(
+        messages
+        for messages in fake.messages
+        if messages[0]["content"].startswith("Write Kidra")
+    )
+    assert "Authoritative scenario facts" in reasoning[1]["content"]
+    assert runner.status["attempts"] == 1
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app),
+        base_url="http://testserver",
+        headers={"X-Remix-Token": app.state.csrf},
+    ) as client:
+        assert (await client.post("/api/scenarios/log/clear")).status_code == 200
+    assert not runner.logs
+    assert runner.snapshot["logs"] == []
+    assert runner.status["attempts"] == 1

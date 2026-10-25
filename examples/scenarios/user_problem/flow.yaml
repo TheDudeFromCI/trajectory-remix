@@ -12,10 +12,26 @@ schemas:
         minLength: 1
       situation: *id001
       success_criteria: *id001
+      files:
+        type: array
+        maxItems: 12
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+              minLength: 1
+            content:
+              type: string
+          required:
+          - path
+          - content
+          additionalProperties: false
     required:
     - problem
     - situation
     - success_criteria
+    - files
     additionalProperties: false
   Solution:
     type: object
@@ -119,6 +135,12 @@ steps:
       threshold: 0.85
     attempts: 3
     fallback: true
+  environment:
+    uses: remix.setup
+    needs:
+    - novelty
+    inputs:
+      idea: ${steps.novelty.output}
   solution:
     uses: llm.generate
     prompt: solution.md
@@ -127,12 +149,15 @@ steps:
     inputs:
       problem: ${steps.novelty.output.problem}
       success_criteria: ${steps.novelty.output.success_criteria}
+      situation: ${steps.novelty.output.situation}
+      files: ${steps.novelty.output.files}
     output_schema: Solution
     retries: 1
   conversation:
     uses: flow.repeat
     needs:
     - solution
+    - environment
     max_iterations: 4
     until: ${steps.assess.output.resolved}
     history:
@@ -152,6 +177,7 @@ steps:
           problem: ${inputs.idea.problem}
           history: ${iteration.history}
           round: ${iteration.index}
+          files: ${inputs.idea.files}
         output_schema: Message
         retries: 1
         profile: user

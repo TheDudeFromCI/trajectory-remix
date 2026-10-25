@@ -1,4 +1,4 @@
-let lastGenerationDraft = null, configBaseline = null;
+let lastGenerationDraft = null, configBaseline = null, renderedLog = "", renderedTagScenario = "";
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
@@ -275,22 +275,68 @@ function renderStatus() {
   $("selected-tags").replaceChildren(
     ...Object.entries(s.conditions || {}).flatMap(([scope, tags]) => Object.entries(tags).map(([dimension, tag]) => node("span", "tag", `${scope} · ${dimension}: ${tag.name}${tag.description ? " — " + tag.description : ""}`))),
   );
-  const logBox = $("activity-log"), followLog = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
-  $("activity-log").replaceChildren(
-    ...state.logs
-      .slice()
-      .map((log) => {
-        const row = node("div", "log-line log-" + (log.level || "info"));
-        row.append(
-          node("time", "", new Date(log.time).toLocaleTimeString()),
-          document.createTextNode((log.step ? `[${log.step}] ` : "") + log.message),
-        );
-        return row;
-      }),
-  );
-  if (followLog) logBox.scrollTop = logBox.scrollHeight;
+  const logBox = $("activity-log"), logSignature = JSON.stringify(state.logs);
+  if (logSignature !== renderedLog) {
+    const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight <= 2;
+    const previous = renderedLog ? JSON.parse(renderedLog) : [];
+    const appendOnly = previous.length <= state.logs.length && previous.every((entry, i) => JSON.stringify(entry) === JSON.stringify(state.logs[i]));
+    if (!appendOnly) logBox.replaceChildren();
+    for (const log of state.logs.slice(appendOnly ? previous.length : 0)) {
+      const row = node("div", "log-line log-" + (log.level || "info"));
+      row.append(node("time", "", new Date(log.time).toLocaleTimeString()), document.createTextNode((log.step ? `[${log.step}] ` : "") + log.message));
+      logBox.append(row);
+    }
+    renderedLog = logSignature;
+    if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+  }
+  renderScenarioTags();
+  renderGenerationMetrics();
   updateSettingsState();
 }
+function renderScenarioTags() {
+  const scenario = state.scenarios?.find(item => item.name === $("scenario-type").value);
+  if (scenario && renderedTagScenario !== scenario.name) {
+    const controls = $("scenario-tag-controls"); controls.replaceChildren();
+    for (const [scope, dimensions] of Object.entries(scenario.tag_pools || {})) for (const [dimension, options] of Object.entries(dimensions)) {
+      const choice = select(options.map(tag => tag.name), options[0]?.name, () => { $("randomize-tags").checked = false; });
+      choice.dataset.scope = scope; choice.dataset.dimension = dimension;
+      controls.append(field(`${scope} · ${dimension}`, choice));
+    }
+    renderedTagScenario = scenario.name;
+    $("randomize-tags").checked = true;
+  }
+  $("scenario-tag-controls").disabled = state.status.running;
+  $("randomize-tags").disabled = state.status.running;
+}
+function selectedScenarioTags() {
+  if ($("randomize-tags").checked) return null;
+  const scenario = state.scenarios.find(item => item.name === $("scenario-type").value);
+  const result = Object.fromEntries(Object.keys(scenario.tag_pools || {}).map(scope => [scope, {}]));
+  for (const choice of $("scenario-tag-controls").querySelectorAll("select")) result[choice.dataset.scope][choice.dataset.dimension] = choice.value;
+  return result;
+}
+$("scenario-type").onchange = () => { renderScenarioTags(); };
+function renderGenerationMetrics() {
+  const root = $("generation-metrics"); root.replaceChildren();
+  const entries = Object.entries(state.status.metrics || {}).filter(([path]) => !state.status.active?.length || state.status.active.includes(path));
+  for (const [path, metric] of entries.slice(-4)) {
+    const row = node("div", "request-metrics");
+    const names = {prompt_tokens:"Prompt", completion_tokens:"Completion", reasoning_tokens:"Reasoning", cache_read_tokens:"Cache read", total_tokens:"Total", current_tokens_per_second:"Current tok/s", average_tokens_per_second:"Average tok/s", time_to_first_token_seconds:"TTFT (s)", generation_seconds:"Time (s)"};
+    row.append(node("b", "", `${path} · ${metric.model}`), node("div", "", Object.entries(names).filter(([key]) => metric[key] !== undefined).map(([key, label]) => `${label}: ${metric[key]}`).join(" · ")));
+    if (metric.context_size && metric.context_used_tokens !== undefined) {
+      const percent = 100 * metric.context_used_tokens / metric.context_size;
+      const bar = node("div", "context-meter"); bar.title = `${Math.round(percent)}% used (${metric.context_used_tokens}/${metric.context_size} tokens)`;
+      bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Model context usage"); bar.setAttribute("aria-valuenow", String(Math.min(100, Math.round(percent)))); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
+      const baseline = Math.min(metric.first_prompt_tokens || 0, metric.context_used_tokens, metric.context_size);
+      const base = node("span", "context-base"); base.style.width = `${100 * baseline / metric.context_size}%`; base.title = `${Math.round(percent)}% used. Blue: first request prompt (includes its inputs; not a separate measurement of system prompt and schemas)`;
+      const used = node("span", "context-used"); used.style.width = `${Math.max(0, Math.min(100, percent) - 100 * baseline / metric.context_size)}%`; used.style.background = percent <= 50 ? "#7b8799" : percent <= 75 ? "#e4bd56" : "#ef6b73";
+      bar.append(base, used); row.append(bar);
+    }
+    root.append(row);
+  }
+  root.append(node("small", "", `Model requests: ${state.status.model_requests || 0}. Token counters appear when reported by the provider.`));
+}
+$("clear-generation-log").onclick = action(async () => { await json("scenarios/log/clear", "POST"); await refresh(); });
 function renderHistoryActions() {
   for (const [id, direction] of [
     ["undo-edit", "undo"],
@@ -326,7 +372,7 @@ function renderSamples() {
         node(
           "small",
           "",
-          `${s.events} events · Validation ${s.validation_level ?? -3}${s.validation_level === 3 ? " · Done" : (s.validation_level ?? -3) === -3 ? " · Unfinished" : ""}${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
+          `${s.events} events · ${{"-3":"Unfinished","-2":"Rejected","-1":"Unsuccessful","0":"Pending","1":"Candidate","2":"Validated","3":"Ready"}[s.validation_level ?? -3] || "Unknown"}${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
         ),
       );
       return b;
@@ -1626,6 +1672,7 @@ function configIssues() {
     range(prefix + "temperature", ep.temperature, 0, 2);
     range(prefix + "max_tokens", ep.max_tokens, 1, 65536);
     range(prefix + "timeout", ep.timeout, 1, 600);
+    range(prefix + "context_size", ep.context_size ?? 0, 0, 1000000000, true);
   });
   const single = configDraft.single_generation;
   range("single_generation.max_parallel", single.max_parallel, 1, 128, true);
@@ -1690,7 +1737,7 @@ function renderConfig() {
       node(
         "div",
         "hint",
-        "Each task selects its own endpoint. Use a low-cost generator and a separate validator. Base URLs should include /v1.",
+        "Scenario steps select endpoints by ID. Configure generation and validation models here. Base URLs should include /v1. Context size 0 means unknown.",
       ),
     );
     configDraft.endpoints.forEach((ep, i) => {
@@ -1717,8 +1764,9 @@ function renderConfig() {
         ["temperature", "Temperature", "number"],
         ["max_tokens", "Max completion tokens", "number"],
         ["timeout", "Timeout (seconds)", "number"],
+        ["context_size", "Context size (tokens, 0 = unknown)", "number"],
       ]) {
-        const box = input(ep[name], (v) => (ep[name] = v), type);
+        const box = input(ep[name] ?? (name === "context_size" ? 0 : undefined), (v) => (ep[name] = v), type);
         box.dataset.configPath = `endpoints.${i}.${name}`;
         form.append(field(label, box, name === "base_url" ? "wide" : ""));
       }
@@ -1746,251 +1794,6 @@ function renderConfig() {
       }),
     );
   }
-  if (configTab === "tasks") {
-    root.append(
-      node(
-        "div",
-        "hint",
-        'Tasks run in the listed order. Each generation task fills one window stream. Visible windows can be ordered by entering comma-separated IDs; * includes all. Use explicit start expressions for concurrent streams. Validators return {"valid": boolean, "feedback": ["issue"]}.',
-      ),
-    );
-    configDraft.tasks.forEach((task, i) => {
-      const card = node("div", "config-card"),
-        top = node("div", "card-top");
-      top.append(
-        field(
-          task.id,
-          checkbox(task.enabled !== false, (v) => (task.enabled = v)),
-          "check",
-        ),
-      );
-      const buttons = node("div", "two-buttons");
-      buttons.append(
-        button("↑", () => {
-          if (i) {
-            [configDraft.tasks[i - 1], configDraft.tasks[i]] = [
-              task,
-              configDraft.tasks[i - 1],
-            ];
-            renderConfig();
-          }
-        }),
-        button("↓", () => {
-          if (i < configDraft.tasks.length - 1) {
-            [configDraft.tasks[i + 1], configDraft.tasks[i]] = [
-              task,
-              configDraft.tasks[i + 1],
-            ];
-            renderConfig();
-          }
-        }),
-        button(
-          "Remove",
-          () => {
-            configDraft.tasks.splice(i, 1);
-            renderConfig();
-          },
-          "danger-text",
-        ),
-      );
-      top.append(buttons);
-      const form = node("div", "form-grid");
-      form.append(
-        field(
-          "Task ID",
-          input(task.id, (v) => (task.id = v)),
-        ),
-        field(
-          "Task kind",
-          select(["generate", "validate"], task.kind, (v) => {
-            task.kind = v;
-            renderConfig();
-          }),
-        ),
-        field(
-          "Endpoint",
-          select(eps, task.endpoint, (v) => (task.endpoint = v)),
-        ),
-        field(
-          "Visible windows (ordered IDs)",
-          input(
-            (task.visible || ["*"]).join(", "),
-            (v) =>
-              (task.visible = v
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean)),
-          ),
-          "wide",
-        ),
-        field(
-          "Organization",
-          select(
-            [
-              ["messages", "Separate labeled messages"],
-              ["labeled", "Single labeled transcript"],
-              ["json", "Structured JSON"],
-            ],
-            task.layout || "messages",
-            (v) => (task.layout = v),
-          ),
-        ),
-      );
-      const prompt = node("textarea");
-      prompt.value = task.prompt;
-      prompt.oninput = () => (task.prompt = prompt.value);
-      form.append(field("Written task prompt", prompt, "wide"));
-      if (task.kind === "generate") {
-        form.append(
-          field(
-            "Target window",
-            input(task.window, (v) => (task.window = v)),
-          ),
-          field(
-            "Ownership",
-            select(
-              [
-                ["generate", "Kidra generated target"],
-                ["append", "External observation"],
-              ],
-              task.op || "generate",
-              (v) => (task.op = v),
-            ),
-          ),
-          field(
-            "Source / type",
-            input(task.source || "assistant", (v) => (task.source = v)),
-          ),
-          field(
-            "Start tick / expression",
-            input(task.start || "auto", (v) => (task.start = v)),
-          ),
-          field(
-            "Context cutoff tick (optional)",
-            input(task.visible_tick ?? "", (v) => {
-              if (v === "") delete task.visible_tick;
-              else task.visible_tick = Number(v);
-            }),
-          ),
-          field(
-            "Close after stream (EOS)",
-            checkbox(task.close, (v) => (task.close = v)),
-            "check",
-          ),
-          field(
-            "Allow sandbox tools",
-            checkbox(task.tools, (v) => (task.tools = v)),
-            "check",
-          ),
-        );
-        task.loss ??= { mask: "auto", weight: 1 };
-        form.append(
-          field(
-            "Loss mask",
-            select(
-              ["auto", "include", "exclude"],
-              task.loss.mask,
-              (v) => (task.loss.mask = v),
-            ),
-          ),
-          field(
-            "Loss weight",
-            input(
-              task.loss.weight ?? 1,
-              (v) => (task.loss.weight = v),
-              "number",
-            ),
-          ),
-        );
-      }
-      card.append(top, form);
-      if (task.kind === "generate")
-        card.append(
-          button(
-            "Run this task in current sample",
-            action(async () => {
-              await saveConfig();
-              if (selected < 0)
-                throw new Error("Select or create a sample first");
-              await json("run", "POST", {
-                automatic: false,
-                task_ids: [task.id],
-                seed_index: selected,
-                validate: false,
-              });
-              $("settings-dialog").close();
-              await refresh();
-            }),
-            "text-button",
-          ),
-        );
-      root.append(card);
-    });
-    root.append(
-      button("+ Add task", () => {
-        const id = "stream-" + (Date.now() % 100000);
-        configDraft.tasks.push({
-          id,
-          kind: "generate",
-          enabled: true,
-          endpoint: eps[0],
-          window: id,
-          op: "generate",
-          source: "assistant",
-          prompt: "Write the content for this stream.",
-          visible: ["*"],
-          layout: "messages",
-          start: "auto",
-          close: true,
-          tools: false,
-        });
-        renderConfig();
-      }),
-    );
-  }
-  if (configTab === "conditions") {
-    root.append(
-      node(
-        "div",
-        "hint",
-        "These conditions are included in every generation task. Add project-specific tags below.",
-      ),
-    );
-    const picker = node("div", "tag-picker");
-    for (const tag of [
-      ...new Set([...state.tags, ...(configDraft.tags || [])]),
-    ]) {
-      const b = button(
-        tag,
-        () => {
-          configDraft.tags ??= [];
-          configDraft.tags = configDraft.tags.includes(tag)
-            ? configDraft.tags.filter((t) => t !== tag)
-            : [...configDraft.tags, tag];
-          renderConfig();
-        },
-        configDraft.tags?.includes(tag) ? "selected" : "",
-      );
-      picker.append(b);
-    }
-    root.append(picker);
-    const custom = input("", () => {});
-    custom.placeholder = "Custom condition tag";
-    const wrap = node("div", "editor-toolbar");
-    wrap.style.marginTop = "10px";
-    wrap.append(
-      custom,
-      button("Add condition", () => {
-        if (custom.value.trim()) {
-          configDraft.tags = [
-            ...new Set([...(configDraft.tags || []), custom.value.trim()]),
-          ];
-          renderConfig();
-        }
-      }),
-    );
-    root.append(wrap);
-  }
   if (configTab === "automatic") {
     const a = configDraft.automatic,
       form = node("div", "form-grid");
@@ -1998,7 +1801,7 @@ function renderConfig() {
       node(
         "div",
         "hint",
-        "Limits count newly accepted samples. Max samples / attempts = 0 means unlimited. Regeneration reruns all selected tasks with validator or compiler feedback. A sandbox is destroyed after every candidate.",
+        "Global batch limits, tool budgets, and synthetic clock defaults. Single sample concurrency and retry limits are configured under Endpoints.",
       ),
     );
     for (const [key, label] of [
@@ -2547,7 +2350,7 @@ $("stop-run").onclick = action(async () => {
 $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    await json("scenarios/run", "POST", {scenario: $("scenario-type").value});
+    await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags()});
   } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
 });
@@ -2609,5 +2412,5 @@ setInterval(
       )
         await selectSample(selected, true);
     })(),
-  1500,
+  2000,
 );

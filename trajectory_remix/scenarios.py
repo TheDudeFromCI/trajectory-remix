@@ -32,6 +32,7 @@ class Step(Definition):
         "remix.novelty",
         "remix.message",
         "remix.tools",
+        "remix.setup",
         "remix.draft",
         "remix.validate",
         "remix.reject",
@@ -252,6 +253,21 @@ class ScenarioRegistry:
 
     def listing(self):
         return [
-            {"name": s.name, "description": s.flow.description}
+            {
+                "name": s.name,
+                "description": s.flow.description,
+                "tag_pools": {
+                    "scenario": {
+                        k: [t.model_dump() for t in v] for k, v in s.flow.tags.items()
+                    },
+                    **{
+                        role: {
+                            k: [t.model_dump() for t in v]
+                            for k, v in profile.tags.items()
+                        }
+                        for role, profile in s.flow.roles.items()
+                    },
+                },
+            }
             for s in self.scenarios.values()
         ]

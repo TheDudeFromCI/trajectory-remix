@@ -34,7 +34,7 @@
             <div class="submenu">
               <button id="generation-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Generation ▸</button>
               <div id="generation-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
-                <button id="settings-button" role="menuitem" title="Open the generation settings">Settings</button>
+                <button id="settings-button" role="menuitem" title="Open the generation settings">Generation Settings</button>
                 <button id="status-button" role="menuitem" title="Open the generation status panel">Status</button>
                 <button id="generate-one" role="menuitem">Single Sample</button>
                 <button id="approve-sample" role="menuitem">Approve for training export</button>
@@ -231,7 +231,7 @@
         <button id="close-generation-panel" class="square" title="Close">×</button>
       </div>
       <div class="generation-layout">
-        <section class="generation-log"><div class="log-toolbar"><b>ACTIVITY</b><button id="copy-generation-log">Copy Output</button><button id="export-generation-log">Export Log</button></div><div id="activity-log"><small>No generation activity.</small></div></section>
+        <section class="generation-log"><div class="log-toolbar"><b>ACTIVITY</b><button id="copy-generation-log">Copy Output</button><button id="export-generation-log">Export Log</button><button id="clear-generation-log">Clear Log</button></div><div id="activity-log"><small>No generation activity.</small></div></section>
         <div class="generation-controls">
         <label for="scenario-type">Scenario</label>
         <select id="scenario-type"></select>
@@ -240,6 +240,7 @@
           <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
         </div>
         <progress id="generation-progress" max="1" value="0" aria-label="Generation progress"></progress>
+        <div id="generation-metrics" aria-live="off"></div>
         <div id="generation-detail" role="status" aria-live="polite"></div>
         <button id="view-generation-draft" hidden>View draft</button>
         <div class="stat-grid">
@@ -251,7 +252,7 @@
           ><button id="stop-run" class="danger-text">Cancel</button>
         </div>
         <div class="side-heading subheading">CONDITIONS</div>
-        <div id="selected-tags" class="tag-list"></div>
+        <label><input id="randomize-tags" type="checkbox" checked /> Randomize tags each attempt</label><fieldset id="scenario-tag-controls"></fieldset><div id="selected-tags" class="tag-list"></div>
         <button id="edit-tags" class="text-button">
           Generation settings
         </button>
@@ -296,7 +297,7 @@
       <div class="dialog-header">
         <div>
           <div class="eyebrow">GENERATION PIPELINE</div>
-          <h2>Configuration</h2>
+          <h2>Generation Settings</h2>
         </div>
         <button
           id="close-settings"
@@ -308,8 +309,7 @@
       </div>
       <div class="config-tabs">
         <button class="active" data-config="endpoints">Endpoints</button
-        ><button data-config="tasks">Tasks</button
-        ><button data-config="conditions">Conditions</button
+
         ><button data-config="automatic">Automatic mode</button>
       </div>
       <div id="settings-errors" role="alert"></div>
