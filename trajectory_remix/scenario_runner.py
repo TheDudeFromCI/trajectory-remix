@@ -215,8 +215,9 @@ class ScenarioRunner:
             total=0,
             active=[],
             draft_id=None,
-            model_requests=self.status.get("model_requests", 0),
-            accepted=0,
+            model_requests=0,
+            completed_model_seconds=0,
+            total_model_seconds=0,
             attempts=self.status["attempts"] + 1,
             scenario=name,
             last_error=None,
@@ -376,7 +377,12 @@ class ScenarioRunner:
         self.manual_tags = self.snapshot.get("manual_tags")
         self.first_prompts = cp.get("first_prompts", {})
         self.first_prompt_paths = cp.get("first_prompt_paths", {})
+        cumulative = {
+            key: max(self.status.get(key, 0), self.snapshot["status"].get(key, 0))
+            for key in ("accepted", "attempts")
+        }
         self.status.update(self.snapshot["status"])
+        self.status.update(cumulative)
         self.status.update(
             running=True,
             phase="generating",
@@ -451,6 +457,8 @@ class ScenarioRunner:
             self.builder.sample["metadata"]["generation_phase"] = "complete"
             self.publish()
             self.status["phase"] = "complete"
+            if self.snapshot.get("validation_passed"):
+                self.status["accepted"] += 1
             self.log("Scenario complete", "success")
         except asyncio.CancelledError:
             self.status.update(phase="cancelled")
@@ -1205,10 +1213,10 @@ class ScenarioRunner:
             metadata["validation_level"] = (
                 step.level if report["valid"] else -step.level
             )
+            self.snapshot["validation_passed"] = report["valid"]
             self.publish(draft)
             if report["valid"]:
                 self.builder.sample = copy.deepcopy(draft)
-                self.status["accepted"] = 1
                 return report
             if attempt == step.max_repairs or not step.repair_prompt:
                 self.builder.sample = copy.deepcopy(draft)

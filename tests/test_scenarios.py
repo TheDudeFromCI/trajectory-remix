@@ -604,13 +604,29 @@ async def test_failed_attempt_retries_and_manual_starts_preserve_log_and_counter
     runner.start("user_problem")
     await finish(runner)
     assert runner.status["attempts"] == 2
+    assert runner.status["accepted"] == 1
+    # The first attempt's two malformed requests are not part of this sample.
+    assert runner.status["model_requests"] == len(runner.client.messages)
     assert any("malformed output" in log["message"] for log in runner.logs)
     assert not any("private model reasoning" in log["message"] for log in runner.logs)
     assert runner.status["conditions"]["scenario"] == runner.context["scenario"]["tags"]
     previous = list(runner.logs)
+    previous_requests = len(runner.client.messages)
+    runner.status["completed_model_seconds"] = 10000
+    runner.status["total_model_seconds"] = 10000
     runner.start("user_problem")
+    assert runner.status["accepted"] == 1
+    assert runner.status["model_requests"] == 0
+    assert runner.status["completed_model_seconds"] == 0
+    assert runner.status["total_model_seconds"] == 0
     await finish(runner)
     assert runner.status["attempts"] == 3
+    assert runner.status["accepted"] == 2
+    assert (
+        runner.status["model_requests"]
+        == len(runner.client.messages) - previous_requests
+    )
+    assert 0 < runner.status["total_model_seconds"] < 10000
     assert list(runner.logs)[: len(previous)] == previous
 
 
@@ -787,11 +803,16 @@ async def test_api_retry_budget_pauses_same_attempt_and_can_resume(
     )
     assert runner.status["attempts"] == 1
     assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == 0
+    previous_requests = runner.status["model_requests"]
+    previous_seconds = runner.status["total_model_seconds"]
     fake.broken = False
     runner.resume_saved(runner.status["draft_id"])
     await finish(runner)
     assert runner.status["attempts"] == 1
     assert runner.status["total_model_seconds"] > 0
+    assert runner.status["model_requests"] > previous_requests
+    assert runner.status["total_model_seconds"] >= previous_seconds
+    assert runner.status["accepted"] == 1
 
 
 async def test_resume_inside_conversation_does_not_duplicate_messages_or_tool_calls(
@@ -1228,3 +1249,80 @@ async def test_repair_cannot_replace_chat_delivery_with_direct_generation(
     assert all(check["valid"] for check in report["checks"].values())
     assert not report["valid"] and not report["delivery"]["valid"]
     assert any("directly into chat" in finding for finding in report["feedback"])
+
+
+async def test_resuming_older_attempt_keeps_cumulative_counts_and_its_own_metrics(
+    compiler, tmp_path
+):
+    fake = ScenarioClient()
+    fake.hold = "Validate ONLY reasoning quality"
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 5)
+    old_id = runner.status["draft_id"]
+    await runner.stop()
+    old_requests = runner.status["model_requests"]
+    old_seconds = runner.status["total_model_seconds"]
+    fake.hold = None
+    runner.start("user_problem")
+    await finish(runner)
+    assert runner.status["accepted"] == 1
+    assert runner.status["attempts"] == 2
+    restored = create_app(tmp_path / "project.sqlite", client=fake)
+    resumed = restored.state.scenario_runner
+    resumed.resume_saved(old_id)
+    assert resumed.status["accepted"] == 1
+    assert resumed.status["attempts"] == 2
+    assert resumed.status["model_requests"] == old_requests
+    assert resumed.status["total_model_seconds"] == old_seconds
+    await finish(resumed)
+    assert resumed.status["accepted"] == 2
+    assert resumed.status["attempts"] == 2
+    assert resumed.status["model_requests"] > old_requests
+
+
+@pytest.mark.parametrize("frontier_passes", [True, False])
+async def test_accepted_counts_completed_samples_once_not_validation_stages(
+    compiler, tmp_path, frontier_passes
+):
+    import shutil
+
+    class FrontierClient(ScenarioClient):
+        async def complete(self, endpoint, messages, tools=None):
+            if (
+                messages[0]["content"].startswith("Validate")
+                and '"frontier": true' in messages[1]["content"]
+            ):
+                self.entered.set()
+                await self.release.wait()
+                return {
+                    "content": json.dumps(
+                        {
+                            "valid": frontier_passes,
+                            "feedback": [] if frontier_passes else ["Incorrect"],
+                        }
+                    )
+                }
+            return await super().complete(endpoint, messages, tools)
+
+    root = tmp_path / "scenarios"
+    shutil.copytree(EXAMPLES, root)
+    path = root / "user_problem/flow.yaml"
+    flow = yaml.safe_load(path.read_text())
+    frontier = copy.deepcopy(flow["steps"]["validate"])
+    frontier.update(needs=["validate"], level=2, max_repairs=0)
+    frontier["inputs"]["frontier"] = True
+    flow["steps"]["frontier"] = frontier
+    path.write_text(yaml.safe_dump(flow, sort_keys=False))
+    fake = FrontierClient()
+    app = app_for(tmp_path, compiler, fake, root)
+    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 5)
+    assert runner.status["accepted"] == 0
+    fake.release.set()
+    await asyncio.wait_for(runner.job, 5)
+    assert runner.status["phase"] == ("complete" if frontier_passes else "rejected")
+    assert runner.status["accepted"] == int(frontier_passes)

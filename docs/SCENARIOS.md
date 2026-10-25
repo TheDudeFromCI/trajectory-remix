@@ -345,8 +345,14 @@ counts text tokens rather than stream fragments; it may differ from the endpoint
 model tokenizer. Context gauges are therefore also estimates during fallback.
 Real counters replace estimates when available. Current throughput and average
 throughput remain separate. Total model time in the status is the sum of request
-durations, including retries and resumed work; parallel calls contribute their
-individual durations, and paused time is excluded.
+durations for the current trajectory attempt, including API/content retries and
+resumed work; parallel calls contribute their individual durations, and paused
+time is excluded. Model requests and total model time reset when a fresh
+trajectory attempt starts, including automatic retries with a new trajectory.
+Pause/resume keeps that trajectory's counters. Attempts and accepted counts are
+cumulative across starts, failures, and restarts; accepted increments once when
+a generation finishes successfully after validation, not for each validation
+stage. Resuming an older checkpoint does not roll back these cumulative counts.
 
 The idea's `identifier` is a 3–4 word lowercase slug. Remix keeps its immutable
 UUID and allocates a readable dataset ID such as `python-code-review-37`, choosing
