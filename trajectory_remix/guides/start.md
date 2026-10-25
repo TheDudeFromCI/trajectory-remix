@@ -25,6 +25,11 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 For a first session, finish `first`, then `parallel`. The tiny greeting in `first`
 teaches event syntax; the parallel lesson teaches the intended coordination behavior.
 Request `topic: "reference"` only when you need the complete manual.
+For a complete example rather than a minimal guided exercise, call
+`get_example_trajectory` with no arguments. Its `sample` field contains
+the entire build-graph replay, including parallel file tools and
+invisible setup. This read does not import the sample or alter revisions.
+See [the example in the repository](../../examples/build-graph-analysis.json).
 
 ## 3. Use this editing loop
 

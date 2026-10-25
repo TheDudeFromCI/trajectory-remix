@@ -7,7 +7,8 @@ saves. The stdio bridge connects through the dashboard's guarded local API;
 HTTP requests use the same in-process dataset owner.
 
 Start with the [short agent guides](../trajectory_remix/guides/start.md), also
-available through `get_authoring_guide`. All sandbox tools are synthetic;
+available through `get_authoring_guide`. Call `get_example_trajectory` for a complete
+worked replay through MCP alone. All sandbox tools are synthetic;
 authors write specialist replies without running real subagents or code.
 
 ## Learn one task at a time
@@ -179,6 +180,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 | Tool | Purpose |
 | --- | --- |
 | `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns the complete Skill.md. |
+| `get_example_trajectory` | Return the complete, packaged build-graph replay JSON without importing it into the dataset. |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
 | `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
 | `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
@@ -227,6 +229,35 @@ and include a message, plus a code where applicable (`conflict`, `busy`,
 `not_found`, `invalid_arguments`, `unknown_tool`, `quota_exceeded`). Compilation errors include
 diagnostic paths. A failed `validate_trajectory` is a successful inspection:
 it returns `valid: false` with diagnostics.
+
+## Complete example trajectory
+
+The [build-graph analysis example](../examples/build-graph-analysis.json)
+is bundled with the Python package. Retrieve it without GitHub or local
+filesystem access by calling the read-only MCP tool:
+
+```json
+{"name": "get_example_trajectory", "arguments": {"name": "build-graph-analysis"}}
+```
+
+Omitting `name` is also supported. The response contains `name` and
+`sample`; `sample` is a full source JSON object, not a summary.
+Retrieval does not modify the project or increment the revision. To
+import it, pass that object as the `sample` argument to
+`create_trajectory`, optionally supplying an unused `sample_id`.
+
+The scenario uses seven invisible `file_write` calls at tick 0 to seed
+six virtual Python modules and `build_config.json`; a user request is
+appended at tick 1; two independent `file_list` and `file_read`
+operations run concurrently beginning at tick 2. Kidra's reasoning and
+chat are generated in separate windows, followed by explicit EOS events.
+The response is synthetic example text, not a code execution result.
+
+Compilation depends on the tokenizer used to generate the fixed
+start ticks. The repository's character-level demo tokenizer cannot
+reproduce the original generated-token durations without retiming.
+After importing into a project, run `validate_trajectory` with a
+compatible tokenizer and adjust scheduling if necessary.
 
 ## Editing rules
 

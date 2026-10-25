@@ -45,6 +45,7 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 tools = {tool.name: tool for tool in catalog.tools}
                 assert {
                     "get_authoring_guide",
+                    "get_example_trajectory",
                     "create_tool_call",
                     "get_sandbox_state",
                     "create_tool_session",
@@ -61,6 +62,16 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert not parallel.isError and "Verify overlap" in parallel.structuredContent["content"]
                 reference = await session.call_tool("get_authoring_guide", {"topic": "reference"})
                 assert not reference.isError and "Synthetic tool inventory" in reference.structuredContent["content"]
+                before_example = await session.call_tool("get_session", {})
+                example = await session.call_tool("get_example_trajectory", {})
+                assert not example.isError
+                assert example.structuredContent["name"] == "build-graph-analysis"
+                assert example.structuredContent["sample"]["schema-version"] == "1.0"
+                assert example.structuredContent["sample"]["replay"]["2"][0]["tool"] == "file_list"
+                assert tools["get_example_trajectory"].annotations.readOnlyHint
+                after_example = await session.call_tool("get_session", {})
+                assert after_example.structuredContent["revision"] == before_example.structuredContent["revision"]
+                assert after_example.structuredContent["sample_count"] == before_example.structuredContent["sample_count"]
                 assert tools["delete_event"].annotations.destructiveHint
                 assert (
                     tools["create_tool_call"].inputSchema["properties"]["invisible"][

@@ -316,6 +316,18 @@ class TrajectoryCommands:
         }
 
     @command()
+    def get_example_trajectory(
+        self, name: Literal["build-graph-analysis"] = "build-graph-analysis"
+    ):
+        """Return a complete bundled example without changing the active dataset.
+
+        Demonstrates invisible file setup, parallel tool calls, separate reasoning
+        and chat windows, and explicit EOS cleanup.
+        """
+        path = Path(__file__).with_name("build-graph-analysis.json")
+        return {"name": name, "sample": json.loads(path.read_text(encoding="utf-8"))}
+
+    @command()
     def list_trajectories(
         self, query: str = "", offset: Nonnegative = 0, limit: PageSize = 50
     ):

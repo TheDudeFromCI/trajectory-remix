@@ -25,7 +25,8 @@ Nothing in a sample runs code, launches a worker or contacts a subagent provider
    generation status and window-slot budget. Stop source editing while generation
    is running; do not guess tokenizer spellings or numeric window slots.
 2. Call `get_authoring_guide(topic="reference")` to read this file through MCP if you lack repository
-   access. Call `list_simulated_tools` for the current synthetic argument schemas.
+   access. Call `get_example_trajectory` for a complete authored build-graph
+   example. Call `list_simulated_tools` for the current synthetic argument schemas.
 3. Use `create_trajectory` for a new draft, or `get_trajectory` and `list_events`
    before editing an existing one. Use `expected_revision` on edits. After changing
    event arrays, relist addresses: event indexes are zero-based and can shift.
@@ -419,6 +420,14 @@ actually executed by Remix or as verification of the dataset's real quality.
 5. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
    requester. The UI can export source; the CLI can export training JSONL. Explain
    that this is a curated synthetic sample and report the checks actually done.
+
+The `examples/build-graph-analysis.json` trajectory is a complete
+example of invisible file setup, concurrent file tools, separate reasoning
+and chat generation, loss masks, and explicit EOS. MCP-only agents can fetch
+this full source JSON with the read-only `get_example_trajectory` tool. It
+does not import a trajectory into the current project. Study its event
+timing and window separation rather than treating the synthetic answer as
+verified code execution.
 
 `examples/persistent-agents.json` is a small synthetic source example of these
 mechanics. Extend the scenario's histories and timing
