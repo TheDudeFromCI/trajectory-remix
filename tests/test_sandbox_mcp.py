@@ -1,6 +1,7 @@
 from trajectory_remix.storage import DatasetStore
 import copy
 import json
+import pytest
 
 
 async def call(studio, command, **arguments):
@@ -29,8 +30,8 @@ async def test_scheduled_calls_share_source_history_and_reject_stale_edits(
     assert tool_call["end"] == tool_call["start"] + 50
     assert result["revision"] == 1 and result["saved"]
     old = await call(studio, "get_sandbox_state", sample_id="test", tick=tool_call["start"])
-    assert old["sandbox"]["files"] == {}
-    assert old["sandbox"]["tool_calls"][-1]["status"] == "running"
+    assert old["sandbox"].get("files", {}) == {}
+    assert old["tool_calls"][-1]["status"] == "running"
     current = await call(
         studio, "get_sandbox_state", sample_id="test", tick=tool_call["end"], include_calls=False
     )
@@ -113,10 +114,10 @@ async def test_scheduled_calls_compile_atomically_in_batches(studio):
     frames = await call(
         studio, "preview_snapshots", sample_id="test", start_tick=0, end_tick=4
     )
-    assert frames["frames"][0]["sandbox"]["files"] == {}
+    assert frames["frames"][0]["sandbox"].get("files", {}) == {}
     assert frames["frames"][4]["sandbox"]["files"] == {"/x": "old"}
     assert (
-        frames["frames"][4]["sandbox"]["tool_calls"][-1]["outcome"]["result"]["content"]
+        frames["frames"][4]["tool_calls"][-1]["outcome"]["result"]["content"]
         == "old"
     )
 
@@ -133,8 +134,8 @@ async def test_streamed_call_schema_history_and_shared_window(studio):
     assert first["tool_call"]["start"] == 5
     assert first["tool_call"]["end"] == 7
     composing = await call(studio, "get_sandbox_state", sample_id="test", tick=3)
-    assert composing["sandbox"]["tool_calls"][0]["status"] == "composing"
-    assert "outcome" not in composing["sandbox"]["tool_calls"][0]
+    assert composing["tool_calls"][0]["status"] == "composing"
+    assert "outcome" not in composing["tool_calls"][0]
     # Reusing the same window returns the newly scheduled call, not the first one.
     second = await call(
         studio, "create_tool_call", sample_id="test", tick="{N_TICK:2}+1",
@@ -191,7 +192,7 @@ async def test_invisible_mcp_edits_are_atomic_undoable_and_saved(studio, tmp_pat
     assert "window" not in scheduled["tool_call"]
     assert (await call(studio, "get_sandbox_state", sample_id="test", tick=99))[
         "sandbox"
-    ]["files"] == {}
+    ] == {"tick_rate": 10}
     assert (await call(studio, "get_sandbox_state", sample_id="test", tick=100))[
         "sandbox"
     ]["files"] == {"/subagent.py": "provided by coder"}

@@ -28,7 +28,7 @@ def encode(value):
 
 
 class DatasetStore:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -42,9 +42,26 @@ class DatasetStore:
                 row = db.execute("SELECT version,max_window_slots,slot_policy FROM project WHERE singleton=1").fetchone()
             except sqlite3.DatabaseError as error:
                 raise ValueError("Not an initialized Trajectory Remix project") from error
-            if row is None or row[0] != self.SCHEMA_VERSION:
+            if row is None or row[0] not in (3, self.SCHEMA_VERSION):
                 raise ValueError("Unsupported project schema; initialize a new project with its tokenizer and import trajectories")
             db.execute("PRAGMA journal_mode=WAL")
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS external_tools (
+                    name TEXT PRIMARY KEY, schema_json TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    available INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE IF NOT EXISTS tool_dependencies (
+                    trajectory_uuid TEXT NOT NULL REFERENCES samples(uuid) ON DELETE CASCADE,
+                    tool_name TEXT NOT NULL, schema_json TEXT NOT NULL, file_hash TEXT NOT NULL,
+                    PRIMARY KEY(trajectory_uuid, tool_name)
+                );
+                CREATE TABLE IF NOT EXISTS tool_compilations (
+                    trajectory_uuid TEXT PRIMARY KEY REFERENCES samples(uuid) ON DELETE CASCADE,
+                    source_hash TEXT NOT NULL, tools_hash TEXT NOT NULL,
+                    error TEXT, plan TEXT
+                );
+            """)
+            db.execute("UPDATE project SET version=?", (self.SCHEMA_VERSION,))
         self.max_window_slots, self.slot_policy = row[1], row[2]
         self.samples = SQLiteSamples(self)
 
@@ -120,16 +137,139 @@ class DatasetStore:
                 Path(str(path) + suffix).unlink(missing_ok=True)
             raise
 
-    def load_compiler(self):
+    def load_compiler(self, tools=None):
         from tokenizers import Tokenizer
         from .compiler import Compiler
 
         with self.connect() as db:
             tokenizer, special = db.execute("SELECT tokenizer,special_tokens FROM project WHERE singleton=1").fetchone()
         try:
-            return Compiler(Tokenizer.from_str(tokenizer), **json.loads(special), max_window_slots=self.max_window_slots, slot_policy=self.slot_policy)
+            return Compiler(Tokenizer.from_str(tokenizer), **json.loads(special), max_window_slots=self.max_window_slots, slot_policy=self.slot_policy, tools=tools, tool_store=self)
         except Exception as error:
             raise ValueError(f"Invalid project tokenizer: {error}") from error
+
+    def tool_names(self, sample, registry):
+        names = set()
+        replay = sample.get("replay", {})
+        if not isinstance(replay, dict):
+            return names
+        for group in replay.values():
+            if not isinstance(group, list):
+                continue
+            for event in group:
+                if not isinstance(event, dict):
+                    continue
+                if event.get("op") in ("tool-call", "invisible-tool-call") and isinstance(event.get("tool"), str):
+                    names.add(event["tool"])
+                elif event.get("op") == "show_tools":
+                    if isinstance(event.get("tools"), list):
+                        names.update(name for name in event["tools"] if isinstance(name, str))
+                    if event.get("randomly-add-additional-tools") is True:
+                        names.update(name for name, tool in registry.tools.items() if not tool.invisible)
+        return names
+
+    @staticmethod
+    def schema_text(schema):
+        return json.dumps(schema, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+    def verify_tool_dependencies(self, sample, registry):
+        from .compiler import CompileError
+        from .dataset import trajectory_uuid
+        from .tools import ToolError
+        names = self.tool_names(sample, registry)
+        with self.connect() as db:
+            previous = dict(db.execute("SELECT tool_name,schema_json FROM tool_dependencies WHERE trajectory_uuid=?", (trajectory_uuid(sample),)))
+        if any(isinstance(event, dict) and event.get("op") == "show_tools" and event.get("randomly-add-additional-tools") is True
+               for group in sample.get("replay", {}).values() if isinstance(group, list) for event in group):
+            names.update(previous)
+        for name in names:
+            try:
+                tool = registry.get(name)
+            except ToolError as error:
+                raise CompileError(str(error), "tools") from error
+            if name in previous and previous[name] != self.schema_text(tool.schema):
+                raise CompileError(f"Tool schema changed: {name}; repair the trajectory's tool dependency before recompiling", "tools")
+
+    def record_tool_compilation(self, sample, registry, plan):
+        from .dataset import trajectory_uuid
+        ident = trajectory_uuid(sample)
+        names = self.tool_names(sample, registry)
+        with self.connect() as db:
+            row = db.execute("SELECT source,content_hash FROM samples WHERE uuid=?", (ident,)).fetchone()
+            # Compiling an unsaved editor draft must not pin dependencies or replace a saved cache.
+            if row is None or hashlib.sha256(json.dumps(sample, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()).hexdigest() != row[1]:
+                return
+            old = {name for name, in db.execute("SELECT tool_name FROM tool_dependencies WHERE trajectory_uuid=?", (ident,))}
+            for name in old - names:
+                db.execute("DELETE FROM tool_dependencies WHERE trajectory_uuid=? AND tool_name=?", (ident, name))
+            for name in names:
+                tool = registry.get(name)
+                if tool.external or name in old:
+                    db.execute("INSERT INTO tool_dependencies VALUES(?,?,?,?) ON CONFLICT(trajectory_uuid,tool_name) DO UPDATE SET file_hash=excluded.file_hash",
+                               (ident, name, self.schema_text(tool.schema), tool.file_hash))
+            if any(registry.get(name).external for name in names):
+                try:
+                    cached_plan = encode(plan)
+                except (TypeError, ValueError):
+                    cached_plan = None
+                db.execute("INSERT OR REPLACE INTO tool_compilations VALUES(?,?,?,?,?)",
+                           (ident, row[1], registry.fingerprint, None, cached_plan))
+            else:
+                db.execute("DELETE FROM tool_compilations WHERE trajectory_uuid=?", (ident,))
+
+    def configure_tools(self, registry):
+        """Register startup files and recompile affected saved trajectories individually."""
+        from .compiler import CompileError
+        with self.connect() as db:
+            previous = {name: (schema, digest, available) for name, schema, digest, available in db.execute("SELECT * FROM external_tools")}
+            db.execute("UPDATE external_tools SET available=0")
+            for tool in registry.tools.values():
+                if tool.external:
+                    db.execute("INSERT OR REPLACE INTO external_tools VALUES(?,?,?,1)",
+                               (tool.name, self.schema_text(tool.schema), tool.file_hash))
+        current = {tool.name: (self.schema_text(tool.schema), tool.file_hash, 1) for tool in registry.tools.values() if tool.external}
+        changed = {name for name in previous.keys() | current.keys() if previous.get(name) != current.get(name)}
+        compiler = self.load_compiler(registry)
+        diagnostics = []
+        if not previous and not current:
+            return compiler, diagnostics
+        # Filter in SQLite; do not decode unrelated trajectories at startup.
+        tracked = sorted(previous.keys() | current.keys())
+        placeholders = ",".join("?" for _ in tracked)
+        def candidates():
+            with self.connect() as db:
+                yield from db.execute(f"""
+                    SELECT s.source, s.content_hash, c.source_hash, c.error
+                    FROM samples s LEFT JOIN tool_compilations c ON c.trajectory_uuid=s.uuid
+                    WHERE EXISTS (SELECT 1 FROM tool_dependencies d WHERE d.trajectory_uuid=s.uuid)
+                       OR EXISTS (
+                          SELECT 1 FROM json_each(CASE WHEN json_type(s.source,'$.replay')='object'
+                               THEN json_extract(s.source,'$.replay') ELSE '{{}}' END) g,
+                               json_each(CASE WHEN g.type='array' THEN g.value ELSE '[]' END) e
+                          WHERE e.type='object' AND (
+                             json_extract(e.value,'$.tool') IN ({placeholders}) OR
+                             json_extract(e.value,'$.op')='show_tools')
+                       )
+                """, tracked)
+        for raw, source_hash, cached_source, cached_error in candidates():
+            sample = json.loads(raw)
+            names = self.tool_names(sample, registry)
+            from .dataset import trajectory_uuid
+            ident = trajectory_uuid(sample)
+            with self.connect() as db:
+                dependencies = dict(db.execute("SELECT tool_name,file_hash FROM tool_dependencies WHERE trajectory_uuid=?", (ident,)))
+            stale_files = any(name in registry.tools and digest != registry.get(name).file_hash for name, digest in dependencies.items())
+            if not (names & changed or dependencies.keys() - registry.tools.keys() or stale_files or names & current.keys() and cached_source != source_hash):
+                if cached_error:
+                    diagnostics.append({"sample_id": sample.get("id"), "severity": "error", "path": "tools", "message": cached_error})
+                continue
+            try:
+                compiler.compile(sample)
+            except CompileError as error:
+                diagnostics.append({"sample_id": sample.get("id"), **error.diagnostic()})
+                with self.connect() as db:
+                    db.execute("INSERT OR REPLACE INTO tool_compilations VALUES(?,?,?,?,NULL)", (ident, source_hash, registry.fingerprint, str(error)))
+        return compiler, diagnostics
 
     @contextmanager
     def connect(self):
@@ -197,6 +337,29 @@ class DatasetStore:
                 event_count=excluded.event_count,window_count=excluded.window_count,
                 tag_count=excluded.tag_count,search=excluded.search
         """, (sample["uuid"], properties, encode(tags), events, len(window_names(sample)), len(tags), (str(sample.get("id", "")) + encode(metadata)).casefold()))
+        catalog = {name: (schema, digest) for name, schema, digest in db.execute("SELECT name,schema_json,file_hash FROM external_tools WHERE available=1")}
+        names = set()
+        if isinstance(replay, dict):
+            for group in replay.values():
+                if not isinstance(group, list):
+                    continue
+                for event in group:
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("op") in ("tool-call", "invisible-tool-call") and isinstance(event.get("tool"), str):
+                        names.add(event["tool"])
+                    elif event.get("op") == "show_tools":
+                        if isinstance(event.get("tools"), list):
+                            names.update(name for name in event["tools"] if isinstance(name, str))
+                        if event.get("randomly-add-additional-tools") is True:
+                            names.update(catalog)
+        for name, in db.execute("SELECT tool_name FROM tool_dependencies WHERE trajectory_uuid=?", (sample["uuid"],)).fetchall():
+            if name not in names:
+                db.execute("DELETE FROM tool_dependencies WHERE trajectory_uuid=? AND tool_name=?", (sample["uuid"], name))
+        for name in names & catalog.keys():
+            schema, digest = catalog[name]
+            db.execute("INSERT OR IGNORE INTO tool_dependencies VALUES(?,?,?,?)", (sample["uuid"], name, schema, digest))
+        db.execute("DELETE FROM tool_compilations WHERE trajectory_uuid=?", (sample["uuid"],))
         db.execute("DELETE FROM metadata_tags WHERE trajectory_uuid=?", (sample["uuid"],))
         db.executemany("INSERT INTO metadata_tags VALUES(?,?)", [(sample["uuid"], tag) for tag in tags])
 

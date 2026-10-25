@@ -101,7 +101,7 @@ def test_streamed_chat_request_waits_for_dispatch_and_completion(compiler, sampl
     plan = compiler.compile(sample)
     call = plan["tool_calls"][0]
     assert (call["request_start"], call["start"], call["end"]) == (1, 4, 6)
-    assert compiler.frame(plan, 2)["sandbox"]["tool_calls"][0]["status"] == "composing"
+    assert compiler.frame(plan, 2)["tool_calls"][0]["status"] == "composing"
     assert compiler.frame(plan, 5)["windows"]["chat"]["text"] == "<|cxt|>Window: 3\nPurpose: document<|/cxt|>"
     assert compiler.frame(plan, 6)["windows"]["chat"]["text"] == (
         "<|cxt|>Window: 3\nPurpose: document<|/cxt|>"
@@ -114,7 +114,7 @@ async def test_standalone_chat_error_and_schema_validation():
     with pytest.raises(ToolError, match='No window named "chat"'):
         await sandbox.call("chat", {"content": "Hello"})
     assert sandbox.calls == 1
-    with pytest.raises(ToolError, match="requires exactly"):
+    with pytest.raises(ToolError, match="required property|Additional properties"):
         await sandbox.call("chat", {"text": "Hello"})
     assert sandbox.calls == 1
 

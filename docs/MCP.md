@@ -6,9 +6,27 @@ running dashboard's command handlers, dataset, tokenizer, generation loop and
 saves. The stdio bridge connects through the dashboard's guarded local API;
 HTTP requests use the same in-process dataset owner.
 
-Start with the [short agent guides](../trajectory_remix/guides/start.md), also
-available through `get_authoring_guide`. All sandbox tools are synthetic;
-authors write specialist replies without running real subagents or code.
+Start with the [short agent guides](../trajectory_remix/guides/start.md), also available through `get_authoring_guide`. Built-in sandbox tools are synthetic; authors supply specialist replies. Custom Python tools are trusted modules configured by the server operator.
+
+## Learn one task at a time
+
+`get_authoring_guide()` returns a short starting page. Request one `topic` for
+the next task; it does not concatenate the lessons or load the entire manual:
+
+| Topic | Walkthrough |
+| --- | --- |
+| `first` | [Create a tiny trajectory; learn start ticks, token streams and closure](../trajectory_remix/guides/first.md) |
+| `parallel` | [Overlap independent specialist work and anchor dependent follow-ups](../trajectory_remix/guides/parallel.md) |
+| `edit` | [Repair wording and timing with targeted event edits](../trajectory_remix/guides/edit.md) |
+| `sandbox` | [Seed trajectory files and verify visible reads](../trajectory_remix/guides/sandbox.md) |
+| `tools` | [Choose a small starter tool set and defer advanced tools](../trajectory_remix/guides/tools.md) |
+| `reference` | [Complete Skill.md manual](../trajectory_remix/Skill.md) |
+
+Existing callers that need the full manual must now pass `topic: "reference"`;
+the response still contains `content`. Both transports support the same topics.
+Tool pruning is a client/agent configuration recommendation, not a server-side
+restriction. Batching, full-source replacement and ephemeral workbench execution
+remain available for advanced workflows.
 
 ## Learn one task at a time
 
@@ -243,12 +261,12 @@ false; allocate an unused post-result anchor ID and persist it as `result-anchor
 
 Set `invisible: true` for external sandbox activity and optionally supply `source`
 (for example `"user"` or `"coder"`). This creates `op: "invisible-tool-call"` in
-source. Invisible calls accept deterministic mutations only, without a `window`,
-request content, delivery settings, loss or recorded outcome. They produce no
-model rows, windows, anchors or exported tokens. They consume no Kidra call
-budget and do not advance the synthetic clock implicitly. The mutation commits
-at `tick + duration_ticks`; anchor expressions are supported. An invalid hidden
-mutation is an author-facing compile error, so it cannot silently disappear.
+source. Every registered tool may run invisibly, without a `window`, request
+content, delivery settings, loss or recorded outcome. Such calls have no model
+request/result tokens; tools may still write masked content into open windows.
+Built-ins skip implicit call-budget and clock increments for invisible calls.
+Hidden failures are author-facing compilation errors. Invisible schema arguments
+are accepted only in invisible trajectory calls.
 Compilation must succeed before one
 undoable source edit commits. It is also available inside `apply_batch`. Save
 immediately, as with other edits.
@@ -270,10 +288,10 @@ immediately, as with other edits.
 
 The tool window exists from tick 0. The `<tool>` request always emits one model
 token per tick starting at `tick`; execution starts on the next tick after its
-final token, and duration is measured from that dispatch. Before completion the
-old sandbox state remains visible. `delivery` controls `<tool_result>`: `instant`
-inserts the entire masked result at execution completion; `stream` delivers it
-from that tick at `tokens_per_tick`. Sandbox changes remain atomic at completion.
+final token. Unfinished tools run every tick and may update state or emit output
+on each invocation. Built-ins retain duration as a compatibility delay.
+`delivery` controls `<tool_result>`: `instant` inserts output at its invocation
+tick; `stream` queues it at `tokens_per_tick`. State changes occur when reported.
 Custom `content`/`segments` can include anchors
 and NOOPs to pause a request while a parallel call returns, then resume with its
 result. Omitted text produces a canonical request from `tool` and `arguments`;
@@ -283,12 +301,13 @@ phase-B anchor at `tool_call.result_end`, the final result token's tick. Use
 `{N_TICK:id}+1` to schedule follow-up calls or close the same tool window.
 Multiple calls can share an open tool window. Equal completions use stable
 replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
-tool failures become `{ok:false,error:...}` observations. Only `subagent` accepts
-a recorded `outcome`; compilation and inspection never repeat an LLM request.
+built-in failures become `{ok:false,error:...}` observations. The legacy recorded
+`outcome` is author-only context consumed by the built-in subagent; it never
+overrides a deterministic tool's actual result.
 
 `get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
-and `sandbox`, containing virtual `files`, `memory`, `notes`, `skills`, `clock`,
-`artifacts`, `conversations`, `calls` and started `tool_calls`. Invisible calls
+and the opaque `sandbox` dictionary, plus separate `tool_calls` when requested.
+The dictionary starts empty; tools own all of its keys. Invisible calls
 are marked `invisible: true` and include `source` in this author-facing history.
 Each visible call has resolved `request_start`, `result_end`, execution
 `start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
@@ -532,7 +551,7 @@ These commands use the same `Sandbox` dispatcher as trajectory generation:
   error observation. Scheduled `create_tool_call` events check the window at
   completion. `metadata.agent_name` supplies the speaker (default: Kidra), and
   `metadata.user_name` can store the user's name.
-- Synthetic clock: `time_now`, `time_advance`.
+- Synthetic clock: `time_now`, `time_advance`, `time_set`.
 - Virtual RAM filesystem: `file_write`, `file_read`, `file_list`, `file_delete`.
 - Versioned artifacts: `file_stat`, `file_patch`; writes return a `version`.
   `file_read` optionally accepts a pinned `version`, and writes/patches accept
@@ -553,7 +572,7 @@ availability. Create a workbench with `create_tool_session`, for example:
 {
   "session_id": "experiment",
   "clock_seed": "2030-01-01T09:00:00Z",
-  "seconds_per_call": 1,
+  "tick_rate": 10,
   "max_calls": 64
 }
 ```
@@ -580,10 +599,13 @@ Without `record_sample_id`, the call changes only the workbench. The response
 contains an interaction ID, the actual arguments, outcome and synthetic clock.
 `outcome.ok: false` represents an actual simulated failure (for example a missing
 file) and may also be recorded. Invalid arguments are rejected before execution.
-Every dispatched call, including reads and failed operations, consumes one call
-and advances synthetic time by `seconds_per_call`; `time_advance` additionally
-advances by its requested seconds. Source inspection with `get_tool_session`
-does not advance time or consume calls.
+Every dispatched workbench call consumes call budget and advances the workbench's
+logical tick (one tick for instant calls). Simulated elapsed seconds are derived
+from that tick and `tick_rate` (default 10 tokens/s), never from call count.
+`time_advance` additionally shifts the synthetic anchor by its requested seconds.
+Source inspection with `get_tool_session` does not advance ticks or consume calls. `time_set` replaces the clock with supplied
+local date/time fields, randomizing explicit nulls deterministically. All seven
+fields are required; see [synthetic time rules](SANDBOX.md#setting-synthetic-time).
 
 Recording appends supervised `<tool>` request text followed by masked
 `<tool_result>` content in the same tool window, open from tick 0. The response's
@@ -636,7 +658,7 @@ otherwise Remix assigns one. No model/provider request or real agent launch occu
 A missing outcome becomes a failed synthetic turn; malformed outcomes are rejected
 before workbench dispatch. Deterministic tools reject authored outcome overrides.
 For timestamped executable replay, supply the same outcome to `create_tool_call`.
-The generation tool loop does not advertise `subagent` or invoke nested providers;
+The generation tool loop advertises every public tool schema, including `subagent`; the built-in subagent does not invoke nested providers;
 authored seed conversations remain available for inspection by ordinary tools.
 
 Optional `artifacts` is an array of `{"path":"/code.py","version":"sha256:..."}`
@@ -703,3 +725,23 @@ tags and cached counts, with no replay payloads.
 and `limit`. It returns bounded value/count groups and total matching trajectories.
 Tag groups deduplicate repeated tags within each trajectory. Objects/arrays remain
 stored metadata but are not grouped as scalar values.
+
+
+## Generic tool protocol
+
+The sandbox is an opaque dictionary initialized with tick_rate (default 10 tokens/s). `get_sandbox_state`,
+`preview_snapshots`, and `/api/samples/{index}/sandbox/{tick}` keep `sandbox` and
+`tool_calls` separate. No store or clock key is guaranteed to exist. All tools
+use the same per-tick run protocol; unfinished tools can emit output and mutate
+state on multiple ticks. Built-in `duration_ticks` remains a compatibility delay.
+
+Any tool may be scheduled with `invisible: true`. Full author schemas may include
+properties marked `invisible`; these are allowed only in invisible trajectory
+calls. Visible event editing and `call_simulated_tool` reject such arguments.
+The old list of external mutation tools no longer restricts invisible calls.
+
+Insert selected public schemas using `create_event` with an event like
+`{"op":"show_tools","window":"system","tools":["chat"],"randomly-add-additional-tools":true}`.
+This is a masked text append to an already open window. The checkbox editor
+supports the same fields. See [the tool contract](SANDBOX.md) for custom Python
+modules, state snapshots, and external schema/hash dependencies.

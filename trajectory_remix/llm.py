@@ -6,18 +6,14 @@ import copy
 import json
 import os
 import uuid
-from time import monotonic
 from urllib.parse import urlparse
 
 import httpx
 
 from .compiler import KEY
-from .dataset import reject_constant
+from .dataset import reject_constant, trajectory_uuid
 from .tools import (
-    SCHEMAS,
     Sandbox,
-    chat_context,
-    tool_failure,
 )
 
 TAGS = [
@@ -166,7 +162,7 @@ def default_config():
         ],
         "tasks": tasks,
         "tags": ["competent", "software", "tool-use"],
-        "clock": {"seed": "2030-01-01T09:00:00+00:00", "seconds_per_call": 1},
+        "clock": {"seed": "2030-01-01T09:00:00+00:00", "tick_rate": 10},
         "automatic": {
             "max_samples": 10,
             "max_attempts": 30,
@@ -298,7 +294,7 @@ def validate_config(config):
             and not isinstance(config["clock"][name], str)
         ):
             raise ValueError("Clock seed must be an ISO timestamp string")
-    if set(config.get("clock", {})) - {"seed", "seconds_per_call"}:
+    if set(config.get("clock", {})) - {"seed", "seconds_per_call", "tick_rate"}:
         raise ValueError("Unknown clock setting")
     # Validate synthetic clock without invoking a tool.
     clock = Sandbox(**config.get("clock", {}))
@@ -333,6 +329,7 @@ def selected_windows(plan, compiler, task):
                 and r["tick"] >= task.get("_decision_tick", plan["max_tick"] + 1)
             )
             and r["durable"]
+            and ("removed_at" not in r or at < r["removed_at"]["tick"])
             and r["token_id"] not in compiler.ids.values()
         ]
         result.append(
@@ -547,13 +544,7 @@ class SampleBuilder:
             windows = []
         messages = assemble(windows, task, self.config.get("tags", []), feedback)
         self.log(f"Task {task['id']} → {endpoint['id']} / {endpoint['model']}")
-        # Synthetic delegation is authored through MCP/source outcomes, never a
-        # nested provider request from the generated coordinator.
-        schemas = (
-            [s for s in SCHEMAS if s["function"]["name"] != "subagent"]
-            if task.get("tools")
-            else None
-        )
+        schemas = self.compiler.tools.schemas() if task.get("tools") else None
         for turn in range(self.config.get("max_tool_rounds", 12) + 1):
             message = await self.client.complete(endpoint, messages, schemas)
             calls = message.get("tool_calls") or []
@@ -599,41 +590,22 @@ class SampleBuilder:
                 )
                 if not isinstance(args, dict):
                     raise ValueError("Tool arguments must be a JSON object")
-                started = monotonic()
-                try:
-                    context = {}
-                    if function.get("name") == "chat":
-                        windows = (
-                            self.compiler.compile(self.sample)["windows"]
-                            if self.sample["replay"] else []
-                        )
-                        context = chat_context(
-                            windows, self.sample.get("metadata")
-                        )
-                    result = await sandbox.call(function.get("name"), args, **context)
-                    outcome = {"ok": True, "result": result}
-                except (ValueError, KeyError, OverflowError) as e:
-                    outcome = tool_failure(e)
+                self.compiler.tools.validate(function.get("name"), args)
+                sandbox.calls += 1
                 event = {
                     "op": "tool-call",
                     "window": f"tool-result-{suffix}",
                     "tool": function.get("name"),
                     "arguments": args,
                     "delivery": "instant",
-                    "duration-ticks": int(monotonic() - started),
+                    "duration-ticks": 0,
                     "request-id": call["id"],
                 }
-                if event["tool"] == "subagent":
-                    event["outcome"] = outcome
                 self.sample["replay"].setdefault(str(self.next_tick), []).append(event)
                 compiled = self.compiler.compile(self.sample)
                 self.next_tick = compiled["max_tick"] + 1
-                if event["tool"] == "chat":
-                    # Return the same completion-time outcome replay will display.
-                    outcome = next(
-                        c["outcome"] for c in compiled["tool_calls"]
-                        if c["window"] == event["window"]
-                    )
+                # Replay supplies the same actual output for every tool, including window writers.
+                outcome = next(c["outcome"] for c in compiled["tool_calls"] if c.get("window") == event["window"])
                 tool_result = json.dumps(outcome, ensure_ascii=False)
                 messages.append(
                     {"role": "tool", "tool_call_id": call["id"], "content": tool_result}
@@ -689,12 +661,11 @@ class SampleBuilder:
                 if isinstance(metadata, dict)
                 else {}
             ),
+            random_seed=trajectory_uuid(self.sample),
             max_calls=self.config.get("max_tool_calls", 64),
+            registry=self.compiler.tools,
         )
         try:
-            if self.sample["replay"]:
-                plan = self.compiler.compile(self.sample)
-                sandbox.restore(self.compiler.frame(plan, plan["max_tick"])["sandbox"])
             tasks = [
                 t
                 for t in self.config["tasks"]

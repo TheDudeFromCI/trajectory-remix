@@ -29,15 +29,15 @@ async def test_allowlist_and_argument_validation():
     with pytest.raises(ToolError):
         await s.call("file_list", {"path": "/"})
     with pytest.raises(ToolError):
-        await s.call("time_advance", {"seconds": float("inf")})
+        await s.call("time_advance", {"seconds": float("inf")}, invisible=True)
 
 
 async def test_fake_clock():
     s = Sandbox(seed="2030-01-01T00:00:00Z", seconds_per_call=2)
-    assert (await s.call("time_now", {}))["timestamp"] == "2030-01-01T00:00:02+00:00"
-    assert (await s.call("time_advance", {"seconds": 8}))[
+    assert (await s.call("time_now", {}))["timestamp"] == "2030-01-01T00:00:00+00:00"
+    assert (await s.call("time_advance", {"seconds": 8}, invisible=True))[
         "timestamp"
-    ] == "2030-01-01T00:00:12+00:00"
+    ] == "2030-01-01T00:00:08.100000+00:00"
 
 
 async def test_rag_notes_and_skills():
@@ -76,9 +76,8 @@ async def test_subagent_uses_only_authored_replies():
         "conversationId": "conversation-1",
         "response": "Authored inspection",
     }
-    with pytest.raises(ToolError, match="authored outcome") as error:
+    with pytest.raises(ToolError, match="authored response") as error:
         await sandbox.call(
             "subagent", {"task": "Explain", "resume": result["conversationId"]}
         )
-    assert error.value.conversation_id == result["conversationId"]
-    assert sandbox.conversations[result["conversationId"]]["status"] == "failed"
+    assert sandbox.conversations[result["conversationId"]]["status"] == "ready"
