@@ -1195,18 +1195,6 @@ dialog::backdrop {
 #export-dialog {
   max-width: 640px;
 }
-#report-dialog {
-  max-width: 720px;
-}
-#validation-report {
-  padding: 12px;
-  white-space: pre-wrap;
-  font:
-    12px/1.7 ui-monospace,
-    monospace;
-  max-height: 65vh;
-  overflow: auto;
-}
 @media (max-width: 1250px) {
   .workspace {
     grid-template-columns: var(--sidebar-w, 190px) 0 minmax(0, 1fr) 0 var(

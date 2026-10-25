@@ -334,8 +334,9 @@ assert.equal(
 );
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
-for (const id of ["generate-one", "validate-sample", "auto-start"])
-  assert.equal($("generation-menu").contains($(id)), true);
+assert.equal($("generation-menu").contains($("generate-one")), true);
+for (const id of ["approve-sample", "validate-sample", "auto-start", "report-dialog"])
+  assert.equal($(id), null);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
 assert.equal($("edit-menu").contains($("preferences-button")), true);

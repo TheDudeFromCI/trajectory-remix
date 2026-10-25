@@ -260,11 +260,9 @@ function renderStatus() {
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
-  for (const id of ["generate-one", "auto-start"]) $(id).disabled = s.running;
+  $("generate-one").disabled = s.running;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
-  $("approve-sample").disabled = sampleLocked || !sample;
-  $("validate-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
   $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
   for (const button of document.querySelectorAll("[data-validation-state]")) button.disabled = !sample;
@@ -2260,24 +2258,6 @@ for (const name of ["file", "edit"])
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".file-menu")) closeMenus();
 });
-$("validate-sample").onclick = action(async () => {
-  closeMenus();
-  if (!sample) throw new Error("Select a sample first");
-  if (hasPendingChanges()) await compileSample(true);
-  $("validation-report").textContent = "Validating…";
-  $("report-dialog").showModal();
-  try {
-    $("validation-report").textContent = JSON.stringify(
-      await json("validate", "POST", { sample }),
-      null,
-      2,
-    );
-  } catch (e) {
-    $("validation-report").textContent = e.message;
-    throw e;
-  }
-});
-$("close-report").onclick = () => $("report-dialog").close();
 for (const b of document.querySelectorAll(".tab"))
   b.onclick = action(() => changeView(b.dataset.view));
 $("show-closed").onchange = renderReplay;
@@ -2478,18 +2458,6 @@ $("view-generation-draft").onclick = action(async () => {
   const listing = await json("state?" + new URLSearchParams({ selected_id: state.status.draft_id, limit: "1" }));
   if (Number.isInteger(listing.selected_index)) { await selectSample(listing.selected_index); $("generation-panel").hidden = true; }
   else toast("This draft is no longer available.");
-});
-$("approve-sample").onclick = action(async () => {
-  closeMenus();
-  if (hasPendingChanges()) await compileSample(true);
-  await json("samples/" + selected + "/approve", "POST");
-  await refresh();
-});
-$("auto-start").onclick = action(async () => {
-  openGenerationPanel();
-  if (hasPendingChanges()) await compileSample(true);
-  await json("run", "POST", { automatic: true });
-  await refresh();
 });
 $("stop-run").onclick = action(async () => {
   await json("stop", "POST");
