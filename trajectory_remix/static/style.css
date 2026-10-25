@@ -560,6 +560,11 @@ h2 {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+.window-size-toggle {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 10px;
+}
 .window-content {
   margin: 0;
   padding: 7px;
@@ -582,6 +587,41 @@ h2 {
   border-top: 1px solid #202c3b;
   font-size: 9px;
   letter-spacing: 0.4px;
+}
+.expanded-window-dialog {
+  width: calc(100vw - 24px);
+  width: calc(100dvw - 24px);
+  height: calc(100vh - 24px);
+  height: calc(100dvh - 24px);
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+  color: var(--text);
+}
+.expanded-window-dialog::backdrop {
+  background: rgba(4, 7, 12, 0.85);
+}
+.expanded-window-dialog .window-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  opacity: 1;
+}
+.expanded-window-dialog .window-head,
+.expanded-window-dialog .window-foot {
+  flex-shrink: 0;
+}
+.expanded-window-dialog .window-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
 }
 .empty {
   padding: 21px 10px;
