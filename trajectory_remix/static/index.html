@@ -15,7 +15,12 @@
           <button id="file-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">File</button>
           <div id="file-menu" class="file-menu-popup" role="menu" hidden>
             <button id="import-button" role="menuitem">Import</button>
-            <button id="file-save" role="menuitem">Save</button>
+            <div class="submenu">
+              <button id="export-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Export ▸</button>
+              <div id="export-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
+                <button id="export-sample" role="menuitem" disabled>Current Trajectory</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="file-menu">
@@ -80,6 +85,8 @@
             <input id="agent-name" placeholder="Kidra" />
             <label for="user-name">User name</label>
             <input id="user-name" placeholder="User" />
+            <label for="tick-rate">Tick rate (tokens/s)</label>
+            <input id="tick-rate" type="number" min="0" step="any" value="10" />
             <details id="metadata-details">
               <summary>All properties (JSON)</summary>
               <textarea id="metadata-json" spellcheck="false" aria-label="Metadata JSON">{}</textarea>
@@ -87,10 +94,8 @@
           </fieldset>
           <small id="metadata-status" role="status">Select a trajectory to edit its metadata.</small>
         </section>
-        <div class="sidebar-footer">
-          <small id="save-status">Unsaved session</small>
-        </div>
       </aside>
+      <div class="resizer resizer-x" data-resize="sidebar" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
       <main>
         <section id="replay-view" class="view replay-view">
           <div class="replay-toolbar">
@@ -110,7 +115,7 @@
             <div id="sandbox-state"></div>
           </details>
         </section>
-        <div id="diagnostics" class="diagnostics" hidden></div>
+        <div class="resizer resizer-y" data-resize="timeline" role="separator" aria-orientation="horizontal" aria-label="Resize timeline"></div>
         <section class="timeline-section">
           <div class="timeline-controls">
             <div class="transport">
@@ -178,6 +183,7 @@
           </div>
         </section>
       </main>
+      <div class="resizer resizer-x" data-resize="editor" role="separator" aria-orientation="vertical" aria-label="Resize editor panel"></div>
       <aside class="editor-panel" aria-label="Sample editor">
         <div class="editor-tabs" role="tablist" aria-label="Editor view">
           <button class="tab active" data-view="events" role="tab">Events</button
@@ -194,7 +200,9 @@
                 min="0"
                 step="0.01" /></label
             ><button id="add-event">+ Add event</button>
-            <button id="add-tool-call">+ Tool call</button>
+            <button id="add-group">+ Group</button>
+            <button id="add-show-tools">+ Show tools</button>
+              <button id="add-tool-call">+ Tool call</button>
             <button id="add-invisible-call">+ External activity</button>
           </div>
           <div class="hint">
@@ -205,6 +213,7 @@
             Changes are applied together.
           </div>
           <div id="event-list"></div>
+          <div id="diagnostics" class="diagnostics" hidden></div>
         </section>
         <section id="json-view" class="view editor-view" role="tabpanel" hidden>
           <textarea
@@ -266,22 +275,10 @@
           />
           <span>seconds</span>
         </div>
-        <label class="preferences-toggle" for="autosave-enabled">
-          <input id="autosave-enabled" type="checkbox" />
-          Autosave project
+        <label class="preferences-toggle" for="show-window-headers">
+          <input id="show-window-headers" type="checkbox" />
+          Show window headers in replay
         </label>
-        <label class="preferences-label" for="autosave-minutes">Save every</label>
-        <div class="preferences-delay">
-          <input
-            id="autosave-minutes"
-            type="number"
-            min="1"
-            max="120"
-            step="1"
-            required
-          />
-          <span>minutes</span>
-        </div>
         <div class="dialog-footer">
           <button id="cancel-preferences" type="button">Cancel</button>
           <button class="primary" type="submit">Save preferences</button>
@@ -347,6 +344,11 @@
         </button>
       </div>
     </dialog>
+    <dialog
+      id="expanded-window-dialog"
+      class="expanded-window-dialog"
+      aria-label="Expanded context window"
+    ></dialog>
     <dialog id="report-dialog">
       <div class="dialog-header">
         <h2>Validation report</h2>

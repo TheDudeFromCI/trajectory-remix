@@ -124,12 +124,9 @@ async def test_sandbox_lesson_seeds_replay_state_and_reads_it_visibly(studio):
 async def test_guide_is_available_without_repository_or_provider_access(studio):
     guide = (await command(studio, "get_authoring_guide", topic="reference"))["content"]
     definitions = (await command(studio, "list_simulated_tools"))["tools"]
-    assert f"All {len(DEFINITIONS)} tools" in guide
+    assert f"The {len(DEFINITIONS)} built-in tools" in guide
     assert all(f"`{name}`" in guide for name, _, _ in DEFINITIONS)
-    assert all(t["available"] for t in definitions)
-    assert next(t for t in definitions if t["function"]["name"] == "subagent")[
-        "requires_authored_outcome"
-    ]
+    assert all(t["available"] == (not t.get("invisible", False)) for t in definitions)
     assert not {"python_run", "subagent_wait", "subagent_cancel"} & {
         t["function"]["name"] for t in definitions
     }

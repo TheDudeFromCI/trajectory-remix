@@ -158,8 +158,8 @@ examples, validation options and limits.
 5. **Source JSON** supports the entire canonical schema, including segmented
    losses and optional metadata. **Apply & compile** saves the draft even if
    compilation fails, so errors can be repaired without losing the work.
-6. **Save** (Ctrl+S) applies pending browser edits and reports a checkpoint.
-   Applied edits and accepted generated trajectories already commit to SQLite.
+6. Browser drafts are committed to SQLite automatically after the compile delay;
+  applied edits and accepted generated trajectories are durable immediately.
 7. **Export tokens** exports the selected sample or whole dataset as chunked
    token JSONL. Every selected sample must compile before export begins.
 
@@ -452,159 +452,69 @@ credentials are not included in retained datasets. Generation locks dataset
 editing/configuration to prevent index races. Downloads and checkpoints remain
 available.
 
-## Tool sandbox
+## Tools and sandbox state
 
-Built-in tools run as an allowlisted capability interpreter over fresh RAM
-state. Model text is never executed. They cannot access host files, process
-execution, Docker, dynamic modules, URLs, or arbitrary networks. No eval, exec,
-subprocess or filesystem API is exposed through a tool.
+The sandbox is a tool-owned dictionary initialized with the trajectory tick rate
+(default 10 tokens/s). Each tool lives in
+its own module under `trajectory_remix/tools/` and defines a name, JSON argument
+schema, and `run(args, state, windows) -> (output, is_done, modified_state)`.
+The compiler runs unfinished calls every tick, caches state only on reported
+mutations, and recalculates that history on recompilation. Kidra sees tool
+output and windows; the dictionary is author-facing only.
 
-The **Sandbox** panel follows the selected replay tick. Inspect virtual file
-contents, memory, notes, skills, the synthetic clock, and running/completed/failed
-calls. Scrubbing backward restores earlier state. Editing or removing a call
-recomputes subsequent state and results; importing old tool-result text alone
-does not execute a tool or reconstruct its state.
+Generated EOS can abandon a partial tool request or cancel a running call.
+Pending work is cleaned up and later results stop; earlier completed mutations
+remain. Custom tools receive a terminal invocation with `ExecutionContext.cancelled`.
 
-**+ External activity** adds `invisible-tool-call` events that change the sandbox
-at a chosen tick without model tokens, windows or agent call-budget use. Use them
-for files created by a user or subagent. Persistent `subagent` calls return a
-`conversationId`; pass it as `resume` on follow-ups. Versioned artifacts, task
-dependencies and conversation/status inspection support coordinated work.
-See [sandbox coordination](docs/SANDBOX.md) and the
-[persistent-agent fixture](examples/persistent-agents.json) for examples and limits.
+The **Sandbox** panel follows the selected tick and displays arbitrary state and
+separate call status. Tools can inspect open windows and modify their content;
+window names and purposes remain immutable. Invisible calls may use schema
+properties marked `invisible`, which public schemas omit. For example, an
+invisible `chat` call can supply `username` to simulate a user message.
+Visible calls, including MCP calls, reject invisible arguments. Tools may declare
+`invisible = True` to restrict the entire tool to invisible calls; these tools
+never appear in public schemas or `show_tools`, including random additions.
 
-Schedule calls in Events or Source JSON, using numeric ticks or existing anchor
-expressions:
+**+ Show tools** adds a `show_tools` event. Check the tools whose public schemas
+should be appended to an open window. **Randomly add additional tools** adds a
+repeatable random selection of other tools for training diversity. Explicitly
+selected tools always remain included.
 
-```json
-{
-  "schema-version": "1.0",
-  "id": "sandbox-history",
-  "tick-policy": "external-first",
-  "replay": {
-    "0": [{"op": "tool-call", "window": "initial-write", "tool": "file_write",
-           "arguments": {"path": "/example.txt", "content": "old"},
-           "result-anchor": 1}],
-    "{N_TICK:1}+1": [{"op": "tool-call", "window": "updated-write", "tool": "file_write",
-             "arguments": {"path": "/example.txt", "content": "new"},
-             "duration-ticks": 25, "result-anchor": 2}],
-    "{N_TICK:2}+1": [{"op": "tool-call", "window": "read-result", "tool": "file_read",
-             "arguments": {"path": "/example.txt"}}]
-  }
-}
+Start with custom tools using:
+
+```bash
+python -m trajectory_remix --dataset project.sqlite --tools-dir ./custom-tools
 ```
 
-The first result anchor marks the initial write of `old`; the second marks the
-update to `new`. The final read starts composing after the update's result.
-Tools execute atomically at `start + duration-ticks`
-(default duration: zero). Reads observe state at completion. Equal completion
-ticks follow the compiler's stable replay order. Failures produce an error
-observation and retain any clock/call-budget effects of the attempted call.
-Tool windows are implicitly open from tick 0, with one BOS and idle NOOPs even
-before their first request. Each call generates a `<tool>` request and delivers
-the actual JSON outcome inside `<tool_result>` when execution completes.
-Requests use normal generation supervision; all results are excluded-loss
-external input. Use
-generated EOS to close the window after consuming its results. Multiple calls
-may reuse one open tool window; explicit opens must be at tick 0 with type `tool`.
+Remix loads every Python file in that folder as one uniquely named tool. SQLite
+records external names, schemas, hashes, and trajectory dependencies. Restarting
+with changed files recompiles affected trajectories. Missing tools and changed
+schemas produce compilation errors. Custom modules are trusted server-side
+Python; the built-in tools remain local simulations.
 
-Requests always generate one token per tick. Execution starts on the tick after
-the final request token; `duration-ticks` measures execution only.
-`delivery` controls the result: `"instant"` (the default) inserts the whole result
-at completion, while `"stream"` delivers it from completion at `tokens-per-tick`
-(default 1). Result streaming does not delay sandbox mutations.
-Omit `content`/`segments` to use the
-canonical `<tool>{"tool":...,"args":...}</tool>` request. Custom `content` or
-`segments` support the same anchors, NOOPs and loss controls as `generate`.
-The structured `tool` and `arguments` fields determine execution; custom text is
-the authored model transcript and should describe those arguments.
+See [the tool contract and custom module example](docs/SANDBOX.md) for timing,
+sparse caching, window writes, invisible arguments, schema compatibility, and
+built-in conventions. The [MCP reference](docs/MCP.md) covers authoring commands;
+`create_event` can insert `show_tools`, and `create_tool_call` schedules visible
+or invisible executions. Frame and sandbox API responses keep `sandbox` and
+`tool_calls` separate so tool-owned keys never collide with scheduler metadata.
 
-Set `result-anchor` to an unused nonnegative integer to capture the tick of the
-final result token, including the closing `</tool_result>` tag. The marker is
-metadata and adds no visible text or tokens. For example, `"result-anchor": 7`
-allows a later event at `"{N_TICK:7}+1"`. Anchors capture phase B; a generated
-event in another window may consume the full result at `"{N_TICK:7}"`, while
-open/append events require `+1` or later. The editor checkbox and the API/MCP
-`auto_anchor: true` option allocate an unused ID and save it in source JSON.
+The built-in selection also includes a `simpleeval` calculator, reproducible
+random draws, second-based timers and synthetic-clock alarms, virtual file watchers,
+and simulated system diagnostics. Invisible `system_diagnostics_set` and
+`hardware_load_set` events configure diagnostics and extra file-operation ticks.
+See [additional simulation tools](docs/SANDBOX.md#additional-simulation-tools)
+for arguments, timing, and examples.
 
-[The parallel-tools sample](examples/parallel-tools.json) pauses a file-write
-request halfway through its arguments using NOOPs, checks the clock in a second
-window, then resumes writing with the timestamp. Both windows exist from tick 0;
-the clock result is visible to the resumed request, while the pending write has
-not changed sandbox state. This uses a virtual file write in place of a database
-query because the built-in sandbox does not provide SQL.
-
-Generation records these executable events, including elapsed whole seconds as
-logical duration ticks (subsecond calls take zero ticks). Running a task in an
-existing sample restores its sandbox before extending it. Clock settings are
-stored in `metadata.synthetic_clock` (`seed`, `seconds_per_call`). Preview and
-export replay deterministic tools locally. A `subagent` event requires its
-recorded `outcome`, for example
-`{"ok":true,"result":{"conversationId":"coder","response":"Recorded answer"}}` or
-`{"ok":false,"error":"Failure reason"}`; replies are authored and never call an LLM.
-Other tools compute their outcomes and reject recorded overrides. Compiled
-previews expose `tool_calls` and a bounded delta history; frame responses include
-the selected tick's `sandbox` state without future results.
-
-| Tools | Behavior |
-|---|---|
-| `chat` | Takes `{"content":"Hello!"}` and appends `<\|msg\|>Kidra: Hello!<\|/msg\|>\n` to the window named `chat` at completion. Uses `metadata.agent_name` when specified. Returns an error observation if `chat` is missing or closed; it never opens that window automatically. |
-| `time_now`, `time_advance` | Per-sample synthetic ISO clock; configurable seed and automatic increment per call. No real sleeping. |
-| `file_write/read/list/delete`, `file_stat`, `file_patch` | Virtual UTF-8 files with immutable SHA-256 versions and optional stale-write protection; traversal, NUL and backslashes rejected. `/etc/x` is merely a virtual path. |
-| `memory_save/search` | Local lexical-overlap retrieval with top-8 results. RAG store is isolated; no embeddings service required. |
-| `note_save/list/delete` | Tasks/notes with todo, doing, blocked, done status, owners, dependencies, blockers and acceptance criteria. |
-| `skill_save/load/list` | Skill texts stored and retrieved within the sample only; not executed. |
-| `subagent` | Authored synthetic conversation with retained history; follow up using `resume`. Only explicitly referenced artifact versions are shared. No provider calls occur. |
-| `subagent_list/get/close`, `runtime_status` | Inspect retained conversations and task progress; close conversations to prevent further resumes. |
-
-For example, a trajectory with `"metadata":{"agent_name":"Nova","user_name":"Alex"}`
-can send a message with these replay events:
-
-```json
-{
-  "0": [{"op":"open","window":"chat","window-type":"chat"}],
-  "1": [{"op":"tool-call","window":"chat-result","tool":"chat",
-         "arguments":{"content":"Hi, Alex!"}}]
-}
-```
-
-This appends `<|msg|>Nova: Hi, Alex!<|/msg|>\n`. The result window contains the
-success or error observation. Chat messages are excluded-loss external input,
-visible at the completion tick before same-tick model output. Marker-looking
-argument text stays literal; model control tokens are escaped as data.
-
-2 MB total state and 200k characters per string; configurable bounded call and
-round budgets, with at most 256 replay tool events per sample. Inputs and tool names are strictly checked; unknown tools return
-errors. Results are actual simulation outcomes, not fabricated claims of real
-host actions. Live sandbox objects are destroyed in `finally` blocks on success,
-failure and cancellation; recorded replay events reconstruct their historical
-state for inspection. All sandbox tools, including subagents, are synthetic.
-Authors supply subagent replies; Remix does not execute code or launch agents.
-External execution logs must be curated into appropriately masked observations
-and invisible state changes before becoming training samples.
-
-For the complete parallel authoring workflow, read [Skill.md](trajectory_remix/Skill.md)
-or call `get_authoring_guide(topic="reference")` through MCP. It covers synthetic histories, scoped
-artifacts, parallel timing, masks, markers, TODOs and review.
-
-The HTTP service also enforces a random per-process session token on API calls,
-trusted local Host values, same-origin checks and a content security policy.
-It is a local single-user tool, not a multi-user/public hosting service.
-
-The existing MCP bridge also exposes `create_tool_call(sample_id, tick, tool,
-arguments, duration_ticks=0, window=null, outcome=null, position=null,
-expected_revision=null, delivery="instant", content=null, segments=null,
-loss=null, auto_anchor=false, tokens_per_tick=1, invisible=false, source=null)` and `get_sandbox_state(sample_id, tick,
-include_calls=true)`. Discover schemas with `list_simulated_tools`. Scheduled
-calls compile before committing one undoable edit, support `apply_batch` and
-revision guards, and save with `save_dataset`. Both commands operate on the
-running dashboard's trajectory sandbox. Workbench sessions and their recorded
-text observations remain separate from executable replay events. See
-[the MCP reference](docs/MCP.md#trajectory-sandbox-history).
-
-The dashboard's session-guarded API also provides `GET /api/tools`,
-`POST /api/samples/{index}/tool-calls` (same arguments; dashboard edits save with
-the usual checkpoint), and `GET /api/samples/{index}/sandbox/{tick}`.
+File tools also provide line-range reads, atomic batches of exact-text patches,
+copy/move/rename, glob listing and content search. Invisible `tool_permissions_set`
+and `io_failure_set` configure user rejections and transient/persistent faults.
+`network_request` models HTTP against invisible `network_set` fixtures, including
+response sequences, latency, timeouts and transport failures. All timing uses the
+trajectory clock; network simulation makes no internet requests. See
+[file operations](docs/SANDBOX.md#file-operations),
+[permissions and faults](docs/SANDBOX.md#simulated-permissions-and-io-failures), and
+[HTTP simulation](docs/SANDBOX.md#simulated-network-io).
 
 ## Headless export and tests
 
@@ -637,8 +547,8 @@ cancellation and failure limits. `docs/EXPORT.md` describes the training adapter
 | `dataset.py` | JSON import normalization, trajectory defaults and key removal. |
 | `storage.py` | SQLite storage, lazy reads, paginated metadata and sparse edits. |
 | `llm.py` | Config/task defaults, prompt organization, bounded HTTP, generation, validators. |
-| `tools.py` | Isolated RAM capability sandbox and tool schemas. |
-| `sandbox_replay.py` | Tool scheduling, recorded outcomes and historical sandbox deltas. |
+| `tools/` | Tool registry, tick protocol, and one module per built-in tool. |
+| `sandbox_replay.py` | Generic tick scheduling, window writes, and sparse state snapshots. |
 | `runner.py` | Background generation, retry/feedback, pause/stop, autosaves. |
 | `server.py` | Local API and dashboard serving. |
 | `static/` | Dependency-free dashboard, editor, timeline and configuration UI. |
