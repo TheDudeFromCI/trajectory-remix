@@ -182,39 +182,119 @@ The example runs initial validation only. To add a stronger validator, append a
 `remix.validate` step with `level: 2` and its endpoint; optional steps can use
 `when`. Deferred frontier review has no dedicated queue UI in this first version.
 
-For focused validation, replace `prompt` with a mapping of check names to
-Markdown files:
+For bounded validation, define each named check as an object. The bundled
+scenario uses these settings (the input paths select values from the validation
+step's `inputs`, not from arbitrary project data):
 
 ```yaml
   validate:
     uses: remix.validate
-    needs: [draft]
+    needs: [conversation]
     endpoint: validator
-    checks:
-      layout: validate-layout.md
-      tools: validate-tools.md
-      reasoning: validate-reasoning.md
-      correctness: validate-correctness.md
-    repair_prompt: repair.md
-    max_repairs: 2
     inputs:
+      idea: ${steps.novelty.output}
+      roles: ${roles}
       require_chat_delivery: true
+    checks:
+      layout:
+        prompt: validate-layout.md
+        view: layout
+        inputs: [idea.problem]
+        events_per_chunk: 10
+        overlap: 2
+        max_input_tokens: 6000
+        content_tokens: 800
+        context_rounds: 2
+      tools:
+        prompt: validate-tools.md
+        view: tools
+        inputs: [idea.problem]
+      reasoning:
+        prompt: validate-reasoning.md
+        view: reasoning
+        inputs: [roles]
+      correctness:
+        prompt: validate-correctness.md
+        view: correctness
+        inputs: [idea.problem, idea.success_criteria]
+    repair_prompt: repair-edits.md
+    repair_mode: edits
+    repair_max_input_tokens: 10000
+    repair_guides: [repair-notes.md]
+    max_repairs: 2
     level: 1
 ```
 
-Each check returns `{"valid": true, "feedback": []}` using the same report schema
-as single-prompt validation. Checks run in YAML order, respect pause/cancel and
-the global model request limit, and log their names and findings individually.
-Each receives the step's explicitly selected inputs, the trajectory without
-earlier verdicts, and a `compiled` summary containing resolved events, window
-lifetimes, anchors, actual tool calls/outcomes, and compiler diagnostics.
-They do not receive other checks' opinions. **Every check must pass** to promote
-the sample; one failed check retains the negative validation level even if the
-others pass. Named results are stored under the evaluation report's `checks`.
-Repairs receive findings prefixed with their check names and trigger all checks
-again. Completed checks are checkpointed against the exact reviewed content,
-so resuming after an API outage or restart does not repeat completed checks.
-Existing scenarios using one `prompt` remain supported.
+Object checks default to 10 units per group, overlap 2, a 6,000-token input
+budget, 800-token content fragments, and 2 additional context rounds. Settings
+are independent per check. `overlap` must be smaller than `events_per_chunk`.
+An input selector such as `idea.problem` selects that value only; selecting
+`idea` would include all its fields. No evaluation history is supplied.
+
+| View | Information supplied |
+| --- | --- |
+| `layout` | Event timing, purpose and lifecycle; user chat framing; attachment paths/sizes, without full file bodies or reasoning. |
+| `tools` | Requests, canonical simulator outcomes, relevant public tool schemas, chat and reasoning needed to assess causality. |
+| `reasoning` | Private reasoning and conversational behavior; no tool-result bundles or full source metadata. |
+| `correctness` | Original task inputs, user messages, authored file evidence, tool observations and prior replies in groups, with the complete final answer shared across passes. |
+
+Groups follow resolved timing. A review unit is a projected source event,
+simulator result, or text fragment. Large strings split losslessly, retaining
+source `event_id`, JSON-pointer `field` and character `offset`. Generated content
+fragments use compiled token offsets for their actual tick spans, including
+anchors and logical window references. Other derived fragments explicitly
+retain event-wide bounds; reviewers must not assume finer timing. Every unit is
+covered; adjacent groups overlap when space permits. If the token budget allows
+only one unit, scanning advances by one instead of looping forever.
+
+Each group includes a boundary manifest: open-window lifetimes, pending calls,
+visible tool names, and recent history IDs. These are context references, not
+invented semantic summaries. A reviewer can return
+`{"valid":false,"feedback":[],"context_requests":["window:tool-0"]}` or request a
+specific history unit ID. Evidence is supplied in a fresh, bounded request.
+Unknown IDs, exhausted context rounds, and evidence that cannot fit produce an
+explicit failure, never an approval based on unavailable context. Long-range
+semantic completeness still depends on the reviewer's evidence requests and
+judgment; overlapping groups alone are not a proof of correctness.
+
+Repeated long strings within a request are stored once in `content_pool`, with
+`text_ref` references. Payloads and output schemas use compact JSON separators;
+whitespace inside authored text, code and files remains intact. The input budget
+covers rendered instructions, selected data and the output schema, plus a
+128-token framing reserve, using the project tokenizer. Endpoint context size
+minus its configured completion allowance can reduce the effective budget.
+Shared context or a single unit that cannot fit fails with an actionable budget
+error rather than being silently truncated. Counts are estimates when the model
+uses a different tokenizer. Each group logs its size, budget, instruction and
+timeline token counts. `max_input_tokens` is also available on ordinary LLM and
+novelty steps. Novelty checks send concept summaries without authored file
+bodies and divide candidate batches to fit their configured input budget.
+
+Checks run in YAML order under the existing request limiter, pause and cancel
+controls. Group results are checkpointed against the exact reviewed content;
+resuming reuses completed groups. Every group and every check must pass for
+promotion. Exact duplicate findings are deduplicated; per-check results include
+the group count. Deterministic compiler findings for missing tool schemas,
+schemas in system context, or direct chat generation bypass LLM review and
+enter repair directly when `repair_mode: edits` is enabled.
+
+Targeted repairs receive failed groups, their findings, and only the selected
+Markdown `repair_guides`. They return `edits`, not an entire replay. Supported
+actions are `replace`, `delete`, `insert_before`, `insert_after` using an original
+source `event_id`, `append` at a tick expression, and `replace_text` using a
+JSON-pointer field plus an exact, unique `old` substring and replacement `new`.
+IDs remain stable within the edit batch despite insertions/deletions. Duplicate
+edits are removed; conflicting whole-event replacements fail. Edits apply to a
+copy, then the full candidate is compiled before publication. Completed repair
+group outputs survive interruption; after a repair every review runs afresh,
+even if edits were empty. Metadata and identity cannot be changed by this schema.
+
+Legacy `prompt: review.md`, string checks such as `tools: validate-tools.md`, and
+`repair_mode: replay` remain supported for custom scenarios and saved checkpoints.
+They retain the old whole-payload/full-replay behavior; migrate to object checks
+and edit repairs for bounded prompts. Refresh **all** copied example YAML and
+Markdown files and restart Remix to adopt the new defaults. Saved runs keep their
+original flow/prompts; start a fresh run to use newly edited scenario settings.
 
 With `inputs.require_chat_delivery: true` (enabled in the bundled example), a
 deterministic check also requires a successful, nonempty visible `chat` tool reply
@@ -297,9 +377,9 @@ live counters until real usage arrives. Unavailable timings are omitted.
 Endpoints may set `context_size` (tokens); zero means unknown. When both capacity
 and usage are known, the status displays current-request context usage. Usage
 excludes unrelated previous workflow requests because each prompt has a fresh
-context. The blue baseline is that endpoint's first request's prompt token count;
-it includes inputs, because providers do not separately count system instructions
-and tool schemas. Remaining used space is grey through 50%, yellow through 75%,
+context. The blue section estimates the **current** request's system instructions
+and output schema using the project tokenizer; task inputs are excluded. It is
+not the entire first request. Remaining used space is grey through 50%, yellow through 75%,
 and red above 75%. Hover for used percentage and counts.
 
 The included user_problem scenario now authors explicit `Idea.files` with virtual

@@ -130,6 +130,7 @@ steps:
     retries: 1
   novelty:
     uses: remix.novelty
+    max_input_tokens: 6000
     needs:
     - idea
     prompt: novelty.md
@@ -259,11 +260,42 @@ steps:
     - conversation
     endpoint: validator
     checks:
-      layout: validate-layout.md
-      tools: validate-tools.md
-      reasoning: validate-reasoning.md
-      correctness: validate-correctness.md
-    repair_prompt: repair.md
+      layout:
+        prompt: validate-layout.md
+        view: layout
+        inputs: [idea.problem]
+        events_per_chunk: 10
+        overlap: 2
+        max_input_tokens: 6000
+        content_tokens: 800
+      tools:
+        prompt: validate-tools.md
+        view: tools
+        inputs: [idea.problem]
+        events_per_chunk: 10
+        overlap: 2
+        max_input_tokens: 6000
+        content_tokens: 800
+      reasoning:
+        prompt: validate-reasoning.md
+        view: reasoning
+        inputs: [roles]
+        events_per_chunk: 10
+        overlap: 2
+        max_input_tokens: 6000
+        content_tokens: 800
+      correctness:
+        prompt: validate-correctness.md
+        view: correctness
+        inputs: [idea.problem, idea.success_criteria]
+        events_per_chunk: 10
+        overlap: 2
+        max_input_tokens: 6000
+        content_tokens: 800
+    repair_prompt: repair-edits.md
+    repair_mode: edits
+    repair_max_input_tokens: 10000
+    repair_guides: [repair-notes.md]
     max_repairs: 2
     inputs:
       require_chat_delivery: true

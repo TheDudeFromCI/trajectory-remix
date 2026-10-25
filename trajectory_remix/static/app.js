@@ -339,8 +339,8 @@ function renderGenerationMetrics() {
       const percent = 100 * metric.context_used_tokens / metric.context_size;
       const bar = node("div", "context-meter"); bar.title = `${Math.round(percent)}% used (${metric.context_used_tokens}/${metric.context_size} tokens)`;
       bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Model context usage"); bar.setAttribute("aria-valuenow", String(Math.min(100, Math.round(percent)))); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
-      const baseline = Math.min(metric.first_prompt_tokens || 0, metric.context_used_tokens, metric.context_size);
-      const base = node("span", "context-base"); base.style.width = `${100 * baseline / metric.context_size}%`; base.title = `${Math.round(percent)}% used. Blue: first request prompt (includes its inputs; not a separate measurement of system prompt and schemas)`;
+      const baseline = Math.min(metric.system_prompt_tokens_estimated ?? 0, metric.context_used_tokens, metric.context_size);
+      const base = node("span", "context-base"); base.style.width = `${100 * baseline / metric.context_size}%`; base.title = `${Math.round(percent)}% used. Blue: estimated current system instructions and output schema; excludes task inputs`;
       const used = node("span", "context-used"); used.style.width = `${Math.max(0, Math.min(100, percent) - 100 * baseline / metric.context_size)}%`; used.style.background = percent <= 50 ? "#7b8799" : percent <= 75 ? "#e4bd56" : "#ef6b73";
       bar.append(base, used); row.append(bar);
     } else { row.append(node("small", "", "Set this endpoint’s Context size in Generation Settings to show the context budget bar.")); }

@@ -25,6 +25,25 @@ class Failure(Definition):
     value: Any = None
 
 
+class ReviewCheck(Definition):
+    prompt: str = Field(min_length=1)
+    view: Literal["layout", "tools", "reasoning", "correctness"]
+    inputs: list[str] = Field(default_factory=list)
+    events_per_chunk: int = Field(default=10, ge=1, le=100)
+    overlap: int = Field(default=2, ge=0, le=99)
+    max_input_tokens: int = Field(default=6000, ge=512, le=100000)
+    content_tokens: int = Field(default=800, ge=64, le=8000)
+    context_rounds: int = Field(default=2, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def check_limits(self):
+        if self.overlap >= self.events_per_chunk:
+            raise ValueError("Review overlap must be smaller than events_per_chunk")
+        if self.content_tokens >= self.max_input_tokens:
+            raise ValueError("content_tokens must be smaller than max_input_tokens")
+        return self
+
+
 class Step(Definition):
     uses: Literal[
         "llm.generate",
@@ -43,6 +62,7 @@ class Step(Definition):
     profile: str | None = None
     endpoint: str = "generator"
     output_schema: str | None = None
+    max_input_tokens: int | None = Field(default=None, ge=512, le=100000)
     retries: int = Field(default=0, ge=0, le=5)
     on_failure: Failure = Field(default_factory=Failure)
     when: Any = True
@@ -51,7 +71,10 @@ class Step(Definition):
     until: str | None = None
     history: dict[str, Any] = Field(default_factory=dict)
     repair_prompt: str | None = None
-    checks: dict[str, str] = Field(default_factory=dict)
+    checks: dict[str, str | ReviewCheck] = Field(default_factory=dict)
+    repair_mode: Literal["replay", "edits"] = "replay"
+    repair_max_input_tokens: int = Field(default=8000, ge=512, le=100000)
+    repair_guides: list[str] = Field(default_factory=list)
     max_repairs: int = Field(default=0, ge=0, le=5)
     level: Literal[1, 2] = 1
     attempts: int = Field(default=3, ge=1, le=10)
@@ -248,7 +271,11 @@ class Scenario:
                 for filename in (
                     step.prompt,
                     step.repair_prompt,
-                    *step.checks.values(),
+                    *(
+                        c if isinstance(c, str) else c.prompt
+                        for c in step.checks.values()
+                    ),
+                    *step.repair_guides,
                 ):
                     if filename:
                         target = (self.path / filename).resolve()

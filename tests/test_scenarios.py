@@ -17,10 +17,23 @@ from trajectory_remix.storage import DatasetStore
 EXAMPLES = Path(__file__).parents[1] / "examples/scenarios"
 
 
-def app_for(tmp_path, compiler, client, scenarios=EXAMPLES):
+def app_for(tmp_path, compiler, client, scenarios=EXAMPLES, *, legacy_reviews=True):
     path = tmp_path / "project.sqlite"
     DatasetStore.initialize(path, compiler)
-    return create_app(path, client=client, scenarios_dir=scenarios)
+    app = create_app(path, client=client, scenarios_dir=scenarios)
+    # Historical lifecycle tests exercise the supported single-payload review
+    # contract. Bounded review integration has dedicated tests below.
+    if legacy_reviews:
+        from trajectory_remix.scenarios import ReviewCheck
+
+        for scenario in app.state.scenario_runner.registry.scenarios.values():
+            for step in scenario.flow.steps.values():
+                step.checks = {
+                    name: value.prompt if isinstance(value, ReviewCheck) else value
+                    for name, value in step.checks.items()
+                }
+                step.repair_mode = "replay"
+    return app
 
 
 class ScenarioClient:
@@ -152,7 +165,7 @@ async def test_example_single_and_multiple_turns_are_compilable_and_pending_huma
         for m in fake.messages
         if m[0]["content"].startswith("Write Kidra")
     ]
-    assert all('"ok": true' in message for message in observations)
+    assert all('"ok":true' in message.replace(" ", "") for message in observations)
     # Technical solving does not receive the user personality; the user does.
     solution = next(m for m in fake.messages if m[0]["content"].startswith("Solve"))
     assert "role profile" not in solution[0]["content"]
@@ -1292,7 +1305,7 @@ async def test_accepted_counts_completed_samples_once_not_validation_stages(
         async def complete(self, endpoint, messages, tools=None):
             if (
                 messages[0]["content"].startswith("Validate")
-                and '"frontier": true' in messages[1]["content"]
+                and json.loads(messages[1]["content"]).get("frontier") is True
             ):
                 self.entered.set()
                 await self.release.wait()
@@ -1326,3 +1339,270 @@ async def test_accepted_counts_completed_samples_once_not_validation_stages(
     await asyncio.wait_for(runner.job, 5)
     assert runner.status["phase"] == ("complete" if frontier_passes else "rejected")
     assert runner.status["accepted"] == int(frontier_passes)
+
+
+async def test_bundled_bounded_reviews_use_small_projected_prompts(compiler, tmp_path):
+    class BoundedClient(ScenarioClient):
+        reviews = 0
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Validate"):
+                self.reviews += 1
+                data = json.loads(messages[1]["content"])
+                assert "trajectory" not in data and "compiled" not in data
+                assert "events" in data and "boundary" in data
+                assert (
+                    sum(
+                        len(compiler.tokenizer.encode(m["content"]).ids)
+                        for m in messages
+                    )
+                    + 128
+                    <= 6000
+                )
+                assert "evaluations" not in data
+            return await super().complete(endpoint, messages, tools)
+
+    fake = BoundedClient()
+    runner = app_for(
+        tmp_path, compiler, fake, legacy_reviews=False
+    ).state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 15)
+    assert runner.status["phase"] == "complete", list(runner.logs)
+    assert fake.reviews >= 4
+    report = runner.builder.sample["metadata"]["evaluations"][-1]["report"]
+    assert all(item["groups"] > 0 for item in report["checks"].values())
+
+
+async def test_bounded_review_repairs_only_the_identified_text(compiler, tmp_path):
+    class EditClient(ScenarioClient):
+        repaired = False
+
+        async def complete(self, endpoint, messages, tools=None):
+            prompt = messages[0]["content"]
+            if prompt.startswith("Repair ONLY"):
+                data = json.loads(messages[1]["content"])
+                assert "trajectory" not in data and "authoring_guide" not in data
+                assert len(data["authoring_notes"]) < 1500
+                unit = next(
+                    u
+                    for u in data["review"]["events"]
+                    if u.get("data", {}).get("content")
+                    == "Adding two pairs yields four."
+                )
+                self.repaired = True
+                return {
+                    "content": json.dumps(
+                        {
+                            "edits": [
+                                {
+                                    "action": "replace_text",
+                                    "event_id": unit["event_id"],
+                                    "field": "/content",
+                                    "old": "Adding two pairs yields four.",
+                                    "new": "I should add the pairs and verify the total.",
+                                }
+                            ]
+                        }
+                    )
+                }
+            if prompt.startswith("Validate"):
+                data = json.loads(messages[1]["content"])
+                fail = (
+                    data["view"] == "reasoning"
+                    and not self.repaired
+                    and any(
+                        u.get("data", {}).get("content")
+                        == "Adding two pairs yields four."
+                        for u in data["events"]
+                    )
+                )
+                return {
+                    "content": json.dumps(
+                        {
+                            "valid": not fail,
+                            "feedback": ["Reasoning should be private working notes"]
+                            if fail
+                            else [],
+                        }
+                    )
+                }
+            return await super().complete(endpoint, messages, tools)
+
+    runner = app_for(
+        tmp_path, compiler, EditClient(), legacy_reviews=False
+    ).state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 15)
+    assert runner.status["phase"] == "complete", list(runner.logs)
+    assert "I should add the pairs" in json.dumps(runner.builder.sample["replay"])
+    assert [
+        call["tool"] for call in compiler.compile(runner.builder.sample)["tool_calls"]
+    ] == ["chat"]
+
+
+async def test_bounded_scan_resumes_completed_groups_without_new_calls(
+    compiler, tmp_path
+):
+    class ScanClient(ScenarioClient):
+        scans = 0
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Validate"):
+                self.scans += 1
+                if self.scans == 2:
+                    self.entered.set()
+                    await self.release.wait()
+            return await super().complete(endpoint, messages, tools)
+
+    fake = ScanClient()
+    app = app_for(tmp_path, compiler, fake, legacy_reviews=False)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 10)
+    ident = runner.status["draft_id"]
+    first = copy.deepcopy(runner.snapshot["steps"]["validate.checks.layout.groups.0"])
+    assert first["report"]["valid"]
+    await runner.stop()
+    restored = create_app(tmp_path / "project.sqlite", client=fake)
+    resumed = restored.state.scenario_runner
+    resumed.resume_saved(ident)
+    await asyncio.wait_for(resumed.job, 15)
+    assert resumed.status["phase"] == "complete", list(resumed.logs)
+    current = resumed.snapshot["steps"]["validate.checks.layout.groups.0"]
+    assert current["metrics"] == first["metrics"]
+    assert current["messages"] == first["messages"]
+
+
+async def test_review_context_request_retries_with_evidence(compiler, tmp_path):
+    class ContextClient(ScenarioClient):
+        requested = False
+        received = False
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Validate"):
+                data = json.loads(messages[1]["content"])
+                ids = {u["id"] for u in data["events"]}
+                older = [
+                    uid
+                    for values in data["boundary"]["history"].values()
+                    for uid in values
+                    if uid not in ids
+                ]
+                if older and not self.requested:
+                    self.requested = True
+                    self.requested_id = older[0]
+                    return {
+                        "content": json.dumps(
+                            {
+                                "valid": False,
+                                "feedback": [],
+                                "context_requests": [self.requested_id],
+                            }
+                        )
+                    }
+                if self.requested and self.requested_id in ids:
+                    self.received = True
+            return await super().complete(endpoint, messages, tools)
+
+    fake = ContextClient()
+    runner = app_for(
+        tmp_path, compiler, fake, legacy_reviews=False
+    ).state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 15)
+    assert runner.status["phase"] == "complete", list(runner.logs)
+    assert fake.requested and fake.received
+
+
+async def test_oversized_review_is_rejected_before_contacting_model(compiler, tmp_path):
+    class Forbidden:
+        async def complete(self, *args, **kwargs):
+            pytest.fail("An over-budget review must not contact the provider")
+
+    root = write_scenario(
+        tmp_path,
+        {
+            "steps": {
+                "user": {"uses": "remix.message", "inputs": {"text": "Hi"}},
+                "draft": {
+                    "uses": "remix.draft",
+                    "needs": ["user"],
+                    "inputs": {"response": "Hello"},
+                },
+                "review": {
+                    "uses": "remix.validate",
+                    "endpoint": "validator",
+                    "needs": ["draft"],
+                    "checks": {
+                        "layout": {
+                            "prompt": "review.md",
+                            "view": "layout",
+                            "max_input_tokens": 512,
+                            "content_tokens": 64,
+                        },
+                    },
+                },
+            }
+        },
+        {"review.md": "Validate " + "very detailed instructions " * 100},
+    )
+    runner = app_for(
+        tmp_path, compiler, Forbidden(), root, legacy_reviews=False
+    ).state.scenario_runner
+    runner.state["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner.start("custom")
+    await asyncio.wait_for(runner.job, 5)
+    assert runner.status["phase"] == "rejected"
+    assert runner.status["model_requests"] == 0
+    assert any("budget exceeded" in log["message"] for log in runner.logs)
+
+
+async def test_invalid_targeted_repair_is_not_published(compiler, tmp_path):
+    class InvalidRepair(ScenarioClient):
+        async def complete(self, endpoint, messages, tools=None):
+            prompt = messages[0]["content"]
+            if prompt.startswith("Repair ONLY"):
+                return {
+                    "content": json.dumps(
+                        {
+                            "edits": [
+                                {
+                                    "action": "append",
+                                    "tick": "0",
+                                    "event": {
+                                        "op": "generate",
+                                        "window": "missing",
+                                        "content": "x",
+                                    },
+                                }
+                            ]
+                        }
+                    )
+                }
+            if prompt.startswith("Validate"):
+                data = json.loads(messages[1]["content"])
+                valid = data["view"] != "reasoning"
+                return {
+                    "content": json.dumps(
+                        {
+                            "valid": valid,
+                            "feedback": [] if valid else ["Fix private notes"],
+                        }
+                    )
+                }
+            return await super().complete(endpoint, messages, tools)
+
+    app = app_for(tmp_path, compiler, InvalidRepair(), legacy_reviews=False)
+    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 15)
+    assert runner.status["phase"] == "rejected"
+    saved = app.state.dataset["samples"][0]
+    assert all(
+        event.get("window") != "missing"
+        for events in saved["replay"].values()
+        for event in events
+    )
+    compiler.compile(saved)

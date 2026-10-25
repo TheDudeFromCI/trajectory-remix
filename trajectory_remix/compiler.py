@@ -324,7 +324,7 @@ class Compiler:
             "op": "append",
             "window": event["window"],
             "source": "tools",
-            "content": json.dumps(schemas, ensure_ascii=False, indent=2),
+            "content": json.dumps(schemas, ensure_ascii=False, separators=(",", ":")),
             "delivery": "instant",
             "loss": {"mask": "exclude"},
         }
