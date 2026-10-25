@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
 const SHOW_HEADERS_KEY = "trajectory-remix.show-window-headers";
+const COLLAPSE_STATE_PREFIX = "trajectory-remix.event-collapse.";
 const SAMPLE_PAGE_SIZE = 100;
 let sampleOffset = 0,
   searchTimer;
@@ -436,6 +437,8 @@ async function compileSample(persist = true) {
       renderReplay();
       return;
     }
+    // Strip legacy UI state from the source, including Source JSON edits.
+    stripCollapseMetadata(sample);
     // Persist an invalid draft too: it must remain editable and downloadable.
     if (persist) {
       const result = await json("samples/" + selected, "PUT", {
@@ -475,15 +478,31 @@ function setTick(value) {
   $("tick-scrubber").value = tick;
   renderReplay();
 }
+let expandedWindowId = null;
+function shrinkWindow() {
+  expandedWindowId = null;
+  const dialog = $("expanded-window-dialog");
+  if (dialog.open) dialog.close();
+  renderReplay();
+}
+// Escape and other native dialog closures must restore the replay grid.
+$("expanded-window-dialog").onclose = () => {
+  if (expandedWindowId !== null) shrinkWindow();
+};
 function renderReplay() {
   if (!sample) loadMetadata(null);
   const grid = $("window-grid");
+  const dialog = $("expanded-window-dialog");
+  const expandedScroll = dialog.querySelector(".window-content")?.scrollTop ?? 0;
   grid.replaceChildren();
+  dialog.replaceChildren();
   $("max-tick").textContent = plan?.max_tick || 0;
   $("tick-scrubber").max = plan?.max_tick || 0;
   $("tick-number").max = plan?.max_tick || 0;
   renderSandbox();
   if (!plan) {
+    expandedWindowId = null;
+    if (dialog.open) dialog.close();
     const empty = node("div", "empty");
     empty.append(
       node(
@@ -515,6 +534,7 @@ function renderReplay() {
       "window-card" + (closed ? " closed" : "") + (unopened ? " future" : ""),
     );
     const head = node("div", "window-head");
+    const isExpanded = expandedWindowId === w.id;
     const dot = node("span", "window-color");
     dot.style.background = colors[i % colors.length];
     head.append(
@@ -526,6 +546,25 @@ function renderReplay() {
         `slot ${w.slot} · ${unopened ? "scheduled" : closed ? "closed" : w.type}`,
       ),
     );
+    const resize = button(
+      isExpanded ? "Shrink" : "Expand",
+      () => {
+        if (isExpanded) {
+          shrinkWindow();
+        } else {
+          expandedWindowId = w.id;
+          renderReplay();
+          dialog.showModal();
+        }
+      },
+      "window-size-toggle",
+    );
+    resize.title = isExpanded ? "Shrink context window" : "Expand context window";
+    resize.setAttribute(
+      "aria-label",
+      `${isExpanded ? "Shrink" : "Expand"} context window ${w.id}`,
+    );
+    head.append(resize);
     const data = currentFrame?.windows?.[w.id];
     let content = data?.text || "";
     if (!showWindowHeaders)
@@ -542,8 +581,18 @@ function renderReplay() {
         `${count} cached tokens · opened ${w.open}${w.close !== null ? " · closed " + w.close : ""}`,
       ),
     );
-    grid.append(card);
+    if (isExpanded) {
+      dialog.append(card);
+      card.querySelector(".window-content").scrollTop = expandedScroll;
+    } else {
+      grid.append(card);
+    }
   });
+  // A hidden or removed window cannot remain in an expanded dialog.
+  if (expandedWindowId !== null && !dialog.querySelector(".window-card")) {
+    shrinkWindow();
+    return;
+  }
   $("open-count").textContent = active;
   drawTimeline();
   if (currentFrame?.tick !== tick) fetchFrame();
@@ -766,6 +815,7 @@ function loadEvents() {
   if (!sample) return;
   eventDraft = [];
   eventGroups = [];
+  collapsedEvents = new WeakSet();
   selectedEvents.clear();
   for (const [key, events] of Object.entries(sample.replay || {})) {
     if (!Array.isArray(events)) continue;
@@ -779,8 +829,11 @@ function loadEvents() {
     !Array.isArray(savedColors)
       ? { ...savedColors }
       : {};
-  if (Array.isArray(sample.metadata?.collapsed_events))
-    for (const k of sample.metadata.collapsed_events)
+  // A saved browser preference takes precedence over legacy trajectory metadata.
+  const collapseState = loadCollapseState(sample);
+  const collapsedIndices = collapseState?.events ?? sample.metadata?.collapsed_events;
+  if (Array.isArray(collapsedIndices))
+    for (const k of collapsedIndices)
       if (eventDraft[k]) collapsedEvents.add(eventDraft[k]);
   if (Array.isArray(saved))
     for (const g of saved) {
@@ -788,11 +841,20 @@ function loadEvents() {
       eventGroups.push({
         id: g.id,
         name: String(g.name ?? ""),
-        collapsed: !!g.collapsed,
+        collapsed: collapseState
+          ? collapseState.groups.includes(g.id)
+          : !!g.collapsed,
       });
       for (const k of Array.isArray(g.events) ? g.events : [])
         if (eventDraft[k] && !eventDraft[k].group) eventDraft[k].group = g.id;
     }
+  // Migrate old preferences without triggering a trajectory edit or API write.
+  if (
+    !collapseState &&
+    (Array.isArray(sample.metadata?.collapsed_events) ||
+      (Array.isArray(saved) && saved.some((g) => g?.collapsed)))
+  )
+    saveCollapseState(eventDraft);
   $("sample-id").value = sample.id || "";
   $("noop-weight").value =
     sample.defaults?.["implicit-noop-loss-weight"] ?? 0.1;
@@ -897,12 +959,61 @@ function checkbox(value, onChange) {
   n.onchange = () => onChange(n.checked);
   return n;
 }
-const collapsedEvents = new WeakSet();
+let collapsedEvents = new WeakSet();
 // Window id -> color, kept so event borders match even before a compile.
 let windowColors = {};
-// Groups are editor-only; they are not saved into the sample.
+// Group membership and names persist; group collapse is browser-only.
 let eventGroups = [];
 const selectedEvents = new Set();
+function collapseStorageKey(trajectory = sample) {
+  const id = trajectory?.uuid || trajectory?.id;
+  return id ? COLLAPSE_STATE_PREFIX + encodeURIComponent(id) : null;
+}
+function loadCollapseState(trajectory) {
+  const key = collapseStorageKey(trajectory);
+  if (!key) return null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (!saved || !Array.isArray(saved.events) || !Array.isArray(saved.groups))
+      return null;
+    return {
+      events: saved.events.filter((i) => Number.isInteger(i) && i >= 0),
+      groups: saved.groups.filter((id) => typeof id === "string"),
+    };
+  } catch {
+    return null; // Storage can be blocked or contain invalid data.
+  }
+}
+function orderedEventItems() {
+  const byKey = {};
+  for (const item of eventDraft) (byKey[item.key] ??= []).push(item);
+  return Object.keys(byKey).flatMap((key) => byKey[key]);
+}
+function saveCollapseState(ordered = orderedEventItems()) {
+  const key = collapseStorageKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        events: ordered.flatMap((item, i) =>
+          collapsedEvents.has(item) ? [i] : [],
+        ),
+        groups: eventGroups.filter((group) => group.collapsed).map((group) => group.id),
+      }),
+    );
+  } catch {
+    // Editing continues normally when browser storage is unavailable.
+  }
+}
+function stripCollapseMetadata(trajectory) {
+  const metadata = trajectory?.metadata;
+  if (!metadata || typeof metadata !== "object") return;
+  delete metadata.collapsed_events;
+  if (Array.isArray(metadata.event_groups))
+    for (const group of metadata.event_groups)
+      if (group && typeof group === "object") delete group.collapsed;
+}
 let dragItems = [];
 let dragGroup = null;
 function insertMoved(moving, groupId, after) {
@@ -1015,7 +1126,7 @@ function renderGroup(group, cards) {
     group.collapsed ? "▸" : "▾",
     () => {
       group.collapsed = !group.collapsed;
-      setDirty();
+      saveCollapseState();
       renderEvents();
     },
     "event-toggle",
@@ -1120,7 +1231,7 @@ function buildEventCard(item, i) {
         () => {
           if (collapsed) collapsedEvents.delete(item);
           else collapsedEvents.add(item);
-          setDirty();
+          saveCollapseState();
           renderEvents();
         },
         "event-toggle",
@@ -1590,14 +1701,11 @@ function sampleFromEvents() {
   }
   // Group members are saved as indices in replay iteration order, matching loadEvents.
   const ordered = Object.keys(replay).flatMap((k) => byKey[k]);
+  saveCollapseState(ordered);
   let metadata = readMetadata();
   {
     delete metadata.collapsed_events;
     delete metadata.window_colors;
-    const collapsedIdx = ordered.flatMap((it, k) =>
-      collapsedEvents.has(it) ? [k] : [],
-    );
-    if (collapsedIdx.length) metadata.collapsed_events = collapsedIdx;
     const used = Object.fromEntries(
       ordered
         .filter((it) => windowColors[it.event.window])
@@ -1609,7 +1717,6 @@ function sampleFromEvents() {
       metadata.event_groups = eventGroups.map((g) => ({
         id: g.id,
         name: g.name,
-        collapsed: g.collapsed,
         events: ordered.flatMap((it, k) => (it.group === g.id ? [k] : [])),
       }));
   }

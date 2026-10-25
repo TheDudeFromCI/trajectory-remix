@@ -100,6 +100,38 @@ assert.match(
   /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
 );
 assert.match($("window-grid").textContent, /slot \d+/);
+// Each context window can be opened in a viewport-sized modal and restored.
+const expandedDialog = $("expanded-window-dialog");
+const initialWindowCount = w.document.querySelectorAll(".window-card").length;
+const initialWindow = $("window-grid").querySelector(".window-card");
+const initialWindowId = initialWindow.querySelector("strong").textContent;
+const expandControl = initialWindow.querySelector(".window-size-toggle");
+assert.equal(expandControl.textContent, "Expand");
+assert.equal(expandControl.getAttribute("aria-label"), `Expand context window ${initialWindowId}`);
+expandControl.onclick();
+assert.equal(expandedDialog.open, true);
+assert.equal($("window-grid").querySelectorAll(".window-card").length, initialWindowCount - 1);
+assert.equal(expandedDialog.querySelector(".window-card strong").textContent, initialWindowId);
+assert.equal(expandedDialog.querySelector(".window-size-toggle").textContent, "Shrink");
+// A replay re-render preserves the expanded window, including its scroll position.
+expandedDialog.querySelector(".window-content").scrollTop = 80;
+$("tick-number").value = "1";
+$("tick-number").onchange({ target: $("tick-number") });
+assert.equal(expandedDialog.open, true);
+assert.equal(expandedDialog.querySelector(".window-card strong").textContent, initialWindowId);
+assert.equal(expandedDialog.querySelector(".window-content").scrollTop, 80);
+$("tick-number").value = "0";
+$("tick-number").onchange({ target: $("tick-number") });
+expandedDialog.querySelector(".window-size-toggle").onclick();
+assert.equal(expandedDialog.open, false);
+assert.equal($("window-grid").querySelectorAll(".window-card").length, initialWindowCount);
+assert.equal($("window-grid").querySelector(".window-size-toggle").textContent, "Expand");
+// Native dialog closure (including Escape) must reset expansion state.
+$("window-grid").querySelector(".window-size-toggle").onclick();
+expandedDialog.close();
+expandedDialog.onclose();
+assert.equal(expandedDialog.open, false);
+assert.equal($("window-grid").querySelectorAll(".window-card").length, initialWindowCount);
 assert.equal($("sample-title"), null);
 assert.equal(w.document.querySelector(".tabbar"), null);
 assert.equal($("replay-view").querySelector("#dirty-indicator") !== null, true);
@@ -823,6 +855,62 @@ await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "hardware_l
 jump(lastPlan.max_tick);
 await waitFor(() => $("sandbox-state").textContent.includes('"file_io_ticks": 2'));
 assert.match($("sandbox-state").textContent, /"file_io_ticks": 2/);
+// Event and group collapse live in browser storage and never create trajectory edits.
+const collapseUuid = JSON.parse($("sample-json").value).uuid;
+const collapseKey = "trajectory-remix.event-collapse." + encodeURIComponent(collapseUuid);
+const countSampleWrites = () =>
+  requests.filter((r) => r.path.startsWith("/api/samples/") && r.options?.method === "PUT").length;
+const countCompiles = () => requests.filter((r) => r.path === "/api/compile").length;
+const initialWrites = countSampleWrites();
+const initialCompiles = countCompiles();
+const collapseCard = w.document.querySelector(".event-card");
+const wasCollapsed = collapseCard.classList.contains("collapsed");
+collapseCard.querySelector(".event-toggle").onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), !wasCollapsed);
+const collapsedPrefs = JSON.parse(w.localStorage.getItem(collapseKey));
+assert.equal(collapsedPrefs.events.includes(0), !wasCollapsed);
+assert.equal(w.document.title, "Trajectory Remix");
+await new Promise((resolve) => setTimeout(resolve, 300));
+assert.equal(countSampleWrites(), initialWrites);
+assert.equal(countCompiles(), initialCompiles);
+await $("sample-list").querySelector(".active").onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), !wasCollapsed);
+w.document.querySelector(".event-card .event-toggle").onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), wasCollapsed);
+await click("add-group");
+await waitFor(() => !w.document.title.startsWith("*") &&
+  JSON.parse($("sample-json").value).metadata.event_groups?.length > 0);
+const groupMetadata = JSON.parse($("sample-json").value).metadata.event_groups[0];
+assert.equal("collapsed" in groupMetadata, false);
+const groupWrites = countSampleWrites();
+const groupCompiles = countCompiles();
+w.document.querySelector(".event-group .event-toggle").onclick();
+assert.equal(w.document.querySelector(".event-group").classList.contains("collapsed"), true);
+assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupMetadata.id]);
+assert.equal(w.document.title, "Trajectory Remix");
+await new Promise((resolve) => setTimeout(resolve, 300));
+assert.equal(countSampleWrites(), groupWrites);
+assert.equal(countCompiles(), groupCompiles);
+await $("sample-list").querySelector(".active").onclick();
+assert.equal(w.document.querySelector(".event-group").classList.contains("collapsed"), true);
+assert.equal("collapsed_events" in JSON.parse($("sample-json").value).metadata, false);
+assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
+// Opening old samples migrates legacy metadata collapse flags to local storage.
+await w.document.querySelector('.tab[data-view="json"]').onclick();
+const legacy = JSON.parse($("sample-json").value);
+legacy.metadata.collapsed_events = [0];
+legacy.metadata.event_groups[0].collapsed = true;
+$("sample-json").value = JSON.stringify(legacy);
+$("sample-json").oninput();
+w.localStorage.removeItem(collapseKey);
+await w.document.querySelector('.tab[data-view="events"]').onclick();
+assert.equal(w.document.querySelector(".event-card").classList.contains("collapsed"), true);
+assert.equal(w.document.querySelector(".event-group").classList.contains("collapsed"), true);
+assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).events, [0]);
+assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupMetadata.id]);
+await waitFor(() => !w.document.title.startsWith("*") &&
+  !("collapsed_events" in JSON.parse($("sample-json").value).metadata));
+assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
 await click("generate-one");
 assert.equal($("generation-panel").hidden, false);
 assert.equal($("scenario-type").value, "user_problem");
