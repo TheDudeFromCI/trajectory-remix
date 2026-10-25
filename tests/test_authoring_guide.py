@@ -43,6 +43,21 @@ async def test_default_guide_is_short_and_topics_are_explicit(studio):
     assert (await command(studio, "get_session"))["revision"] == 0
 
 
+async def test_example_topic_returns_complete_json_without_modifying_dataset(studio):
+    before = await command(studio, "get_session")
+    response = await command(studio, "get_authoring_guide", topic="example")
+    sample = json.loads(response["content"])
+    assert sample["schema-version"] == "1.0"
+    assert sample["id"] == "8cb8c91f-b8a6-48e4-8abb-9cb9cb328264"
+    assert [event["tool"] for event in sample["replay"]["2"]] == [
+        "file_list", "file_read"
+    ]
+    assert [e["op"] for e in sample["replay"]["0"]].count("invisible-tool-call") == 7
+    after = await command(studio, "get_session")
+    assert after["revision"] == before["revision"]
+    assert after["sample_count"] == before["sample_count"]
+
+
 async def test_first_lesson_and_local_repairs_preserve_causality_and_closure(studio):
     await lesson(studio, "first")
     sid = "first-steps"

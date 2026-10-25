@@ -61,6 +61,18 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert not parallel.isError and "Verify overlap" in parallel.structuredContent["content"]
                 reference = await session.call_tool("get_authoring_guide", {"topic": "reference"})
                 assert not reference.isError and "Synthetic tool inventory" in reference.structuredContent["content"]
+                before_example = await session.call_tool("get_session", {})
+                example = await session.call_tool("get_authoring_guide", {"topic": "example"})
+                assert not example.isError
+                sample = json.loads(example.structuredContent["content"])
+                assert sample["schema-version"] == "1.0"
+                assert sample["replay"]["2"][0]["tool"] == "file_list"
+                assert sample["replay"]["2"][1]["tool"] == "file_read"
+                assert "get_example_trajectory" not in tools
+                assert tools["get_authoring_guide"].annotations.readOnlyHint
+                after_example = await session.call_tool("get_session", {})
+                assert after_example.structuredContent["revision"] == before_example.structuredContent["revision"]
+                assert after_example.structuredContent["sample_count"] == before_example.structuredContent["sample_count"]
                 assert tools["delete_event"].annotations.destructiveHint
                 assert (
                     tools["create_tool_call"].inputSchema["properties"]["invisible"][

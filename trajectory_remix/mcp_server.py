@@ -233,7 +233,8 @@ def create_mcp_server(bridge):
         instructions=(
             "Tools edit the running Trajectory Remix dashboard session. Read get_session "
             "and get_authoring_guide first for a short starting guide. Request one topic at a time; "
-            "topic=reference returns the full manual. Use sample IDs and expected_revision for edits. Events use current "
+            "topic=reference returns the full manual and topic=example returns the complete bundled "
+            "trajectory JSON without importing it. Use sample IDs and expected_revision for edits. Events use current "
             "tick keys and zero-based indexes; relist after insertion/deletion. Drafts may "
             "be invalid; validate_trajectory reports compiler errors and warnings. "
             "Prefer targeted event edits for small changes. Different start ticks can still overlap; "

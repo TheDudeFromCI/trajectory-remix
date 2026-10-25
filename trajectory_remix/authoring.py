@@ -315,19 +315,24 @@ class TrajectoryCommands:
     @command()
     def get_authoring_guide(
         self,
-        topic: Literal["start", "first", "parallel", "edit", "sandbox", "tools", "reference"] = "start",
+        topic: Literal[
+            "start", "first", "parallel", "edit", "sandbox", "tools", "reference", "example"
+        ] = "start",
     ):
-        """Read one short authoring lesson. Start here without arguments.
+        """Read a short authoring lesson, complete reference, or example trajectory.
 
         Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
-        sandbox (trajectory files), tools (starter tool selection). Request reference
-        explicitly for the complete Skill.md manual. No source or sandbox changes.
+        sandbox (trajectory files), tools (starter tool selection), reference (full manual),
+        example (full build-graph JSON trajectory). No source or sandbox changes.
         """
         root = Path(__file__).parent
-        path = root / "Skill.md" if topic == "reference" else root / "guides" / f"{topic}.md"
-        return {
-            "content": path.read_text(encoding="utf-8")
-        }
+        if topic == "reference":
+            path = root / "Skill.md"
+        elif topic == "example":
+            path = root / "build-graph-analysis.json"
+        else:
+            path = root / "guides" / f"{topic}.md"
+        return {"content": path.read_text(encoding="utf-8")}
 
     @command()
     def list_trajectories(
