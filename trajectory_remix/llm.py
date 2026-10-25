@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .compiler import KEY
+from .compiler import tick_terms
 from .dataset import reject_constant, trajectory_uuid
 from .tools import (
     Sandbox,
@@ -537,16 +537,15 @@ class SampleBuilder:
             plan = self.compiler.compile(self.sample)
             start = str(task.get("start", "auto"))
             if task.get("kind", "generate") == "generate" and start != "auto":
-                match = KEY.fullmatch(start)
-                if not match:
-                    raise ValueError("Invalid task start expression")
-                if start.isdigit():
-                    decision_tick = int(start)
-                else:
-                    anchor = plan["anchors"].get(match[1])
-                    if anchor is None:
-                        raise ValueError(f"Undefined task start anchor {match[1]}")
-                    decision_tick = anchor["tick"] + int(match[2] or 0)
+                values = []
+                for aid, delta in tick_terms(start):
+                    if aid is None:
+                        values.append(delta)
+                    else:
+                        anchor = plan["anchors"].get(str(aid))
+                        if anchor is None: raise ValueError(f"Undefined task start anchor {aid}")
+                        values.append(anchor["tick"] + delta)
+                decision_tick = max(values)
                 visibility["_decision_tick"] = decision_tick
                 visibility["visible_tick"] = min(
                     task.get("visible_tick", decision_tick),

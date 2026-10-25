@@ -52,6 +52,17 @@ information across active windows without merging those histories into a single
 stream. On a model forward pass, each generating window can emit one token;
 other windows may remain idle or receive external content.
 
+Close windows as soon as their useful context is no longer needed, rather than
+keeping every window until the final response or closing one while it is still
+being consulted. For tool results, keep the tool window open until the relevant
+facts have been transferred into reasoning; then generate EOS immediately if no
+remaining work needs the original result. Keep reasoning windows open until their
+consumers have used them.
+
+Reasoning can run in parallel in multiple windows. Analyze independent files,
+constraints, or subtasks concurrently rather than serializing all thought through
+one reasoning window. Each branch must still respect observation availability.
+
 Give each window one coherent purpose. For example, keep the system prompt,
 current user request, working reasoning, user-visible chat and each attached
 document in separate windows. Put each tool interaction in a tool window of its
@@ -68,6 +79,14 @@ as "use the result in Window 7" identifies a specific context, not a vague
 reference to earlier text. Never invent numeric window IDs: obtain the configured
 slots and special tokens from `get_session` and use logical markers in source.
 A window's purpose (`window-type`) and its identity are different things.
+
+### File attachments
+
+Put each user file attachment in its own window; do not paste file contents into
+the user's chat message. Open attachment windows in the same tick as that chat
+message, append the external content with the proper mask, and retain them while
+their context is needed. Virtual files accessed through file tools remain a
+separate simulator capability.
 
 ### Ticks, generation and external appends
 
@@ -418,6 +437,27 @@ You may author simulated test results as part of the fictional scenario, provide
 the specialist has the relevant context and the reported result is consistent
 with the supplied artifacts. Do not present those authored results as tests
 actually executed by Remix or as verification of the dataset's real quality.
+
+## Anchor-based scheduling and tool context
+
+Always use tick anchors instead of hard-coded offsets except trivial initial
+input timing (for example, a user message at tick 1). Anchors are invisible and
+may be placed anywhere in a content block, including mid-sentence:
+`I should check what 2123*1565{N_TICK:17} is before proceeding.` Start the
+calculator request at `{N_TICK:17}+1` while independent reasoning continues.
+Parallelize useful work; do not wait for the entire reasoning block to finish
+before issuing an already-justified tool request.
+
+To join multiple branches use `max({N_TICK:7}+1, {N_TICK:8}+1)`. This waits for
+all referenced anchors and preserves dependencies when text lengths change.
+Nested maxima and numeric operands are supported; cycles, missing anchors, tick
+limits, and phase visibility rules still apply. Use +1 when consuming a newly
+generated token or completed result, including each branch of a max expression.
+
+Always provide tools context before the agent uses tools, through a `show_tools`
+event (for example `{"op":"show_tools","window":"system","tools":["calculator"]}`).
+Do not assume a tool is available to Kidra merely because the authoring API can
+list or execute it.
 
 ## Validate and hand off
 

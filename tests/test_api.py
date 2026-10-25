@@ -85,11 +85,16 @@ async def test_tool_authoring_history_and_atomic_rejection(client):
     assert call["start"] > call["request_start"] == 150
     assert call["end"] == call["start"] + 50
     old = (await client.get(f"/api/samples/0/sandbox/{call['start']}")).json()
-    assert old["sandbox"] == {"tick_rate": 10} and old["tool_calls"][-1]["status"] == "running"
-    assert (await client.get(f"/api/samples/0/sandbox/{call['end']}")).json()["sandbox"]["files"] == {
-        "/x": "new"
-    }
-    assert (await client.get(f"/api/samples/0/sandbox/{call['end'] + 1}")).status_code == 422
+    assert (
+        old["sandbox"] == {"tick_rate": 10}
+        and old["tool_calls"][-1]["status"] == "running"
+    )
+    assert (await client.get(f"/api/samples/0/sandbox/{call['end']}")).json()[
+        "sandbox"
+    ]["files"] == {"/x": "new"}
+    assert (
+        await client.get(f"/api/samples/0/sandbox/{call['end'] + 1}")
+    ).status_code == 422
     assert (await client.get("/api/samples/1/sandbox/0")).status_code == 404
 
 
@@ -166,3 +171,33 @@ async def test_malformed_sample_remains_editable(client):
     restored = (await client.get("/api/samples/0")).json()
     assert restored.pop("uuid")
     assert restored == s
+
+
+async def test_endpoint_probe_uses_unsaved_model_without_saving_settings(
+    compiler, tmp_path
+):
+    class Probe:
+        calls = []
+
+        async def complete(self, endpoint, messages, tools=None):
+            self.calls.append(endpoint)
+            return {"content": "OK"}
+
+    from trajectory_remix.llm import default_config
+
+    fake = Probe()
+    path = tmp_path / "probe.sqlite"
+    DatasetStore.initialize(path, compiler)
+    app = create_app(path, client=fake)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app),
+        base_url="http://testserver",
+        headers={"X-Remix-Token": app.state.csrf},
+    ) as c:
+        endpoint = default_config()["endpoints"][0]
+        endpoint["model"] = "unsaved-model"
+        result = await c.post("/api/endpoints/test", json={"endpoint": endpoint})
+        assert result.status_code == 200
+        assert result.json()["model"] == "unsaved-model"
+        assert fake.calls[-1]["model"] == "unsaved-model"
+        assert app.state.dataset["config"]["endpoints"][0]["model"] == "local-model"

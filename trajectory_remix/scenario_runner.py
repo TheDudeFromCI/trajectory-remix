@@ -6,8 +6,10 @@ import asyncio
 import copy
 import hashlib
 import json
+import logging
 import os
 import re
+import traceback
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
@@ -288,6 +290,31 @@ class ScenarioRunner:
         if _schedule:
             self.job = asyncio.create_task(self.run(name, max_parallel))
 
+    def assign_identifier(self, proposed):
+        words = re.findall(r"[a-z0-9]+", str(proposed).lower())[:4]
+        if not words:
+            raise ValueError("Idea identifier needs words")
+        base = "-".join(words)
+        current = self.builder.sample["id"]
+        if current.rsplit("-", 1)[0] == base and current.rsplit("-", 1)[-1].isdigit():
+            return
+        suffix = 1
+        while self.state.store.samples.index_of(f"{base}-{suffix}") is not None:
+            suffix += 1
+        ident = f"{base}-{suffix}"
+        previous = self.builder.sample["id"]
+        self.builder.sample["id"] = ident
+        if self.expected_draft is not None:
+            draft = copy.deepcopy(self.expected_draft)
+            draft["id"] = ident
+            samples = self.state["samples"].copy()
+            index = self.state.store.samples.index_of(previous)
+            samples[index] = draft
+            self.history.commit(samples, f"Name generated trajectory: {ident}")
+            self.expected_draft = draft
+            self.status.update(draft_id=ident, draft_index=index)
+        self.persist()
+
     def locked(self, sample_id):
         return self.status["running"] and sample_id == self.status.get("draft_id")
 
@@ -302,7 +329,7 @@ class ScenarioRunner:
             and bool(metadata.get("generation_job"))
         )
 
-    def resume_saved(self, sample_id):
+    def resume_saved(self, sample_id, *, confirm_edited=False):
         if self.status["running"] or self.legacy.status["running"]:
             raise ValueError("Generation already running")
         if not self.can_resume(sample_id):
@@ -315,21 +342,25 @@ class ScenarioRunner:
             ).fetchone()
         if row is None:
             raise ValueError("Generation checkpoint not found")
-        self.snapshot = json.loads(row[0])
+        saved = json.loads(row[0])
         if (
-            self.snapshot.get("tool_fingerprint", self.compiler.tools.fingerprint)
+            saved.get("tool_fingerprint", self.compiler.tools.fingerprint)
             != self.compiler.tools.fingerprint
-            or self.snapshot.get("tokenizer_fingerprint", self.compiler.fingerprint)
+            or saved.get("tokenizer_fingerprint", self.compiler.fingerprint)
             != self.compiler.fingerprint
         ):
             raise ValueError(
                 "Tokenizer or tools changed since checkpoint; refusing an inconsistent resume"
             )
-        cp = self.snapshot["checkpoint"]
-        if sample != cp["expected_draft"]:
+        cp = saved["checkpoint"]
+        if confirm_edited:
+            cp["expected_draft"] = copy.deepcopy(sample)
+            cp["sample"]["id"] = sample["id"]
+        if sample != cp["expected_draft"] and not confirm_edited:
             raise ValueError(
                 "Trajectory edited since checkpoint; resume would overwrite edits"
             )
+        self.snapshot = saved
         self.scenario = object.__new__(Scenario)
         self.scenario.flow = Flow.model_validate(self.snapshot["flow"])
         self.scenario.prompts = self.snapshot["prompts"]
@@ -807,8 +838,22 @@ class ScenarioRunner:
                     result = text
                 if schema:
                     jsonschema.validate(result, schema)
+                if (
+                    path == "idea"
+                    and isinstance(result, dict)
+                    and result.get("identifier")
+                ):
+                    self.assign_identifier(result["identifier"])
                 return result
             except (httpx.HTTPError, APIError, ModelAPIError) as error:
+                # Console-only diagnostics, with configured credentials redacted.
+                logging.getLogger(__name__).error(
+                    "Model API failure at %s (%s / %s):\n%s",
+                    path,
+                    step.endpoint,
+                    endpoint["model"],
+                    self.clean(traceback.format_exc()),
+                )
                 raise ProviderFailure(
                     f"Endpoint {step.endpoint}: {type(error).__name__}, HTTP {getattr(error, 'status_code', 'unavailable')}"
                 ) from error
@@ -1151,4 +1196,6 @@ class ScenarioRunner:
             )
             self.builder.sample["metadata"]["novelty_relaxed"] = True
         self.builder.sample["metadata"]["concept"] = idea
+        if idea.get("identifier"):
+            self.assign_identifier(idea["identifier"])
         return idea

@@ -20,7 +20,7 @@ from typing import Annotated, Literal, get_type_hints
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
-from .compiler import ANCHOR, KEY, CompileError
+from .compiler import ANCHOR, CompileError, valid_tick, shift_tick
 from .dataset import new_sample, prepare_sample
 from .llm import SampleBuilder
 from .metadata import MetadataFilter
@@ -266,7 +266,7 @@ class TrajectoryCommands:
         return group[event_index]
 
     def _insert(self, sample, tick, event, position):
-        if not KEY.fullmatch(tick):
+        if not valid_tick(tick):
             raise CommandError("tick must be an integer string or {N_TICK:n}+offset")
         replay = self._replay(sample)
         group = replay.setdefault(tick, [])
@@ -614,16 +614,10 @@ class TrajectoryCommands:
             raise CommandError("Choose to_tick or tick_offset")
         target = to_tick if to_tick is not None else tick
         if tick_offset is not None:
-            match = KEY.fullmatch(tick)
-            if not match:
-                raise CommandError("Cannot offset an invalid tick key; specify to_tick")
-            base = int(tick) if tick.isdigit() else int(match[2] or 0)
-            shifted = base + tick_offset
-            if shifted < 0:
-                raise CommandError("Tick/anchor offset cannot become negative")
-            target = (
-                str(shifted) if tick.isdigit() else f"{{N_TICK:{match[1]}}}+{shifted}"
-            )
+            try:
+                target = shift_tick(tick, tick_offset)
+            except ValueError as error:
+                raise CommandError(str(error)) from error
         event = self._remove(sample, tick, event_index)
         address = self._insert(sample, target, event, position)
         return {**self._commit(sample, index, validate), **address}

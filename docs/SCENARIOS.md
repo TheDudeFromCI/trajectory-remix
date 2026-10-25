@@ -279,3 +279,21 @@ Real counters replace estimates when available. Current throughput and average
 throughput remain separate. Total model time in the status is the sum of request
 durations, including retries and resumed work; parallel calls contribute their
 individual durations, and paused time is excluded.
+
+The idea's `identifier` is a 3–4 word lowercase slug. Remix keeps its immutable
+UUID and allocates a readable dataset ID such as `python-code-review-37`, choosing
+the first unused numeric suffix. The progress tooltip shows completed/total steps.
+Tag selectors are hidden while randomization is on. View Draft is at the bottom
+of the controls and closes the status window after selecting the draft.
+
+Endpoint Test sends a small completion request using the form's current values
+and existing session credentials where appropriate, without saving changes.
+Resuming edited checkpoint content requires explicit confirmation that generation
+may replace those edits; declining leaves the saved job intact. Full model API
+exception traces are printed to the server console with configured credentials
+redacted, and are excluded from generation output logs.
+
+Replay scheduling accepts `max({N_TICK:7}+1, {N_TICK:8}+1)` and nested maxima to
+join independent branches. The compiler waits for all dependencies and preserves
+cycle, undefined-anchor, tick-limit, and same-tick visibility checks. Authoring
+offsets distribute over operands rather than detaching anchors.

@@ -27,11 +27,15 @@ schemas:
           - path
           - content
           additionalProperties: false
+      identifier:
+        type: string
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+){2,3}$
     required:
     - problem
     - situation
     - success_criteria
     - files
+    - identifier
     additionalProperties: false
   Solution:
     type: object

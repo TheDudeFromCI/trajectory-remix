@@ -707,3 +707,5 @@ Insert selected public schemas using `create_event` with an event like
 This is a masked text append to an already open window. The checkbox editor
 supports the same fields. See [the tool contract](SANDBOX.md) for custom Python
 modules, state snapshots, and external schema/hash dependencies.
+
+Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.

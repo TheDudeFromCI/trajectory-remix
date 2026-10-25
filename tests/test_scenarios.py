@@ -40,6 +40,7 @@ class ScenarioClient:
             await self.release.wait()
         if prompt.startswith("Invent"):
             output = {
+                "identifier": "python-math-example",
                 "files": [],
                 "problem": "What is 2 + 2?",
                 "situation": "A user needs arithmetic help.",
@@ -775,3 +776,75 @@ async def test_resume_inside_conversation_does_not_duplicate_messages_or_tool_ca
     )
     plan = compiler.compile(restored.state.dataset["samples"][0])
     assert len(plan["tool_calls"]) == 1
+
+
+async def test_idea_identifier_allocates_free_suffix(compiler, tmp_path):
+    app = app_for(tmp_path, compiler, ScenarioClient())
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await finish(runner)
+    assert runner.status["draft_id"] == "python-math-example-1"
+    runner.start("user_problem")
+    await finish(runner)
+    assert runner.status["draft_id"] == "python-math-example-2"
+    assert (
+        app.state.dataset["samples"][0]["uuid"]
+        != app.state.dataset["samples"][1]["uuid"]
+    )
+
+
+async def test_edited_checkpoint_requires_explicit_confirmation(compiler, tmp_path):
+    fake = ScenarioClient()
+    fake.hold = "Invent"
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 3)
+    await runner.stop()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app),
+        base_url="http://testserver",
+        headers={"X-Remix-Token": app.state.csrf},
+    ) as client:
+        sample = (await client.get("/api/samples/0")).json()
+        sample["metadata"]["title"] = "Edited after stopping"
+        sample["id"] = "renamed-after-stopping"
+        assert (
+            await client.put("/api/samples/0", json={"sample": sample})
+        ).status_code == 200
+        response = await client.post(
+            "/api/scenarios/resume", json={"sample_id": sample["id"]}
+        )
+        assert response.status_code == 409
+        assert response.json()["confirmation_required"]
+        fake.release.set()
+        assert (
+            await client.post(
+                "/api/scenarios/resume",
+                json={"sample_id": sample["id"], "confirm_edited": True},
+            )
+        ).status_code == 200
+        await finish(runner)
+
+
+async def test_api_diagnostics_are_console_only_and_redact_credentials(
+    compiler, tmp_path, caplog
+):
+    from pydantic_ai.exceptions import ModelAPIError
+
+    secret = "test-private-credential"
+
+    class Broken:
+        async def complete(self, *args):
+            raise ModelAPIError("local-model", f"Connection dropped: {secret}")
+
+    app = app_for(tmp_path, compiler, Broken())
+    app.state.dataset["config"]["endpoints"][0]["api_key"] = secret
+    app.state.dataset["config"].setdefault("single_generation", {})["api_retries"] = 0
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 5)
+    assert "Connection dropped" in caplog.text
+    assert secret not in caplog.text
+    assert "[redacted]" in caplog.text
+    assert not any("Connection dropped" in line["message"] for line in runner.logs)

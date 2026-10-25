@@ -460,9 +460,39 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         if scenario_runner.status["running"] and scenario_runner.status["paused"] and data.get("sample_id") == scenario_runner.status["draft_id"]:
             scenario_runner.resume()
         else:
-            scenario_runner.resume_saved(data.get("sample_id"))
+            try:
+                scenario_runner.resume_saved(data.get("sample_id"), confirm_edited=data.get("confirm_edited") is True)
+            except ValueError as error:
+                if "edited since checkpoint" in str(error):
+                    return JSONResponse({"detail": str(error), "confirmation_required": True}, status_code=409)
+                raise
         generation_mode["scenario"] = True
         return {"ok": True}
+
+    @app.post("/api/endpoints/test")
+    async def test_endpoint(request: Request):
+        data = await body(request)
+        candidate = copy.deepcopy(state["config"])
+        endpoint = data.get("endpoint")
+        candidate["endpoints"] = [endpoint]
+        candidate["tasks"] = []
+        validate_config(candidate)
+        endpoint = copy.deepcopy(endpoint)
+        stored = next((e for e in state["config"]["endpoints"] if e["id"] == endpoint["id"]), {})
+        if not endpoint.get("api_key") and not endpoint.get("clear_key"):
+            endpoint["api_key"] = stored.get("api_key", "")
+        from .llm import LLMClient
+        try:
+            if scenario_runner.status["running"]:
+                async with scenario_runner.limit:
+                    response = await (client or LLMClient()).complete(endpoint, [{"role": "user", "content": "Reply with OK."}])
+            else:
+                response = await (client or LLMClient()).complete(endpoint, [{"role": "user", "content": "Reply with OK."}])
+            if not response.get("content"):
+                raise ValueError("Endpoint returned no text")
+            return {"ok": True, "model": endpoint["model"]}
+        except Exception as error:
+            return JSONResponse({"detail": f"Endpoint test failed: {scenario_runner.clean(str(error)) if isinstance(error, ValueError) else type(error).__name__}"}, status_code=422)
 
     @app.post("/api/preferences")
     async def preferences(request: Request):

@@ -831,6 +831,13 @@ assert.equal($("export-button"), null);
 assert.equal($("pause-run").textContent, "Start");
 assert.equal($("pause-run").disabled, false);
 assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
+assert.match($("generation-progress").title, /steps complete/);
+assert.equal($("scenario-tag-controls").hidden, true);
+$("randomize-tags").checked = false; $("randomize-tags").onchange();
+assert.equal($("scenario-tag-controls").hidden, false);
+$("randomize-tags").checked = true; $("randomize-tags").onchange();
+assert.equal($("scenario-tag-controls").hidden, true);
+assert.equal($("view-generation-draft").parentElement.lastElementChild.id, "view-generation-draft");
 assert.equal($("view-generation-draft").hidden, true);
 assert.equal($("stop-run").textContent, "Cancel");
 await click("close-generation-panel");
@@ -903,6 +910,24 @@ await $("preferences-form").onsubmit({preventDefault(){}});
 await click("preferences-button");
 assert.equal($("model-api-retries").value, "1");
 await click("cancel-preferences");
+const beforeResumeFetch = w.fetch;
+let resumeRequests = 0;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/resume") {
+    resumeRequests++;
+    const confirmed = JSON.parse(options.body).confirm_edited;
+    return new w.Response(JSON.stringify(confirmed ? {ok:true} : {detail:"Trajectory edited since checkpoint", confirmation_required:true}), {status:confirmed ? 200 : 409, headers:{"content-type":"application/json"}});
+  }
+  return beforeResumeFetch(path, options);
+};
+confirmResult = false;
+await click("resume-trajectory-generation");
+assert.equal(resumeRequests, 1);
+assert.match(confirmationMessage, /replace those edits/);
+confirmResult = true;
+await click("resume-trajectory-generation");
+assert.equal(resumeRequests, 3);
+w.fetch = beforeResumeFetch;
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({

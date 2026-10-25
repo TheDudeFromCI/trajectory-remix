@@ -245,6 +245,7 @@ function renderStatus() {
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
     : "Start Remix with --scenarios-dir to load scenarios.";
   $("generation-progress").max = Math.max(1, s.total || 1);
+  $("generation-progress").title = `${s.completed || 0}/${s.total || 0} steps complete`;
   $("generation-progress").value = s.phase === "complete" ? Math.max(1, s.total || 1) : (s.completed || 0);
   $("generation-detail").textContent = s.active?.length
     ? s.active.join(" · ")
@@ -303,6 +304,7 @@ function renderScenarioTags() {
     renderedTagScenario = scenario.name;
     $("randomize-tags").checked = true;
   }
+  $("scenario-tag-controls").hidden = $("randomize-tags").checked;
   $("scenario-tag-controls").disabled = state.status.running;
   $("randomize-tags").disabled = state.status.running;
 }
@@ -313,6 +315,7 @@ function selectedScenarioTags() {
   for (const choice of $("scenario-tag-controls").querySelectorAll("select")) result[choice.dataset.scope][choice.dataset.dimension] = choice.value;
   return result;
 }
+$("randomize-tags").onchange = () => renderScenarioTags();
 $("scenario-type").onchange = () => { renderScenarioTags(); };
 function renderGenerationMetrics() {
   const root = $("generation-metrics"); root.replaceChildren();
@@ -1777,7 +1780,13 @@ function renderConfig() {
           "check",
         ),
       );
-      card.append(top, form);
+      const result = node("small", "endpoint-test-result");
+      top.append(button("Test endpoint", action(async () => {
+        result.textContent = "Testing…";
+        try { const answer = await json("endpoints/test", "POST", {endpoint: ep}); result.textContent = `Connected: ${answer.model}`; }
+        catch (error) { result.textContent = error.message; }
+      })));
+      card.append(top, form, result);
       root.append(card);
     });
     root.append(
@@ -2329,10 +2338,19 @@ for (const button of document.querySelectorAll("[data-validation-state]")) butto
   await json("samples/" + selected + "/state", "POST", {level: Number(button.dataset.validationState)});
   await refresh();
 });
+async function resumeGeneration(id) {
+  const response = await fetch("/api/scenarios/resume", {method: "POST", headers: {"Content-Type":"application/json", "X-Remix-Token": document.querySelector('meta[name="remix-token"]').content}, body: JSON.stringify({sample_id:id})});
+  const result = await response.json();
+  if (result.confirmation_required) {
+    if (!confirm("This trajectory was edited since its checkpoint. Continue from the saved generation checkpoint and replace those edits?")) return false;
+    await json("scenarios/resume", "POST", {sample_id:id, confirm_edited:true});
+  } else if (!response.ok) throw new Error(result.detail);
+  return true;
+}
 $("resume-trajectory-generation").onclick = action(async () => {
   closeMenus();
   if (hasPendingChanges()) await compileSample(true);
-  await json("scenarios/resume", "POST", {sample_id: sample.id});
+  await resumeGeneration(sample.id);
   openGenerationPanel(); await refresh();
 });
 
@@ -2351,7 +2369,7 @@ $("generate-one").onclick = action(async () => {
 });
 $("view-generation-draft").onclick = action(async () => {
   const listing = await json("state?" + new URLSearchParams({ selected_id: state.status.draft_id, limit: "1" }));
-  if (Number.isInteger(listing.selected_index)) await selectSample(listing.selected_index);
+  if (Number.isInteger(listing.selected_index)) { await selectSample(listing.selected_index); $("generation-panel").hidden = true; }
   else toast("This draft is no longer available.");
 });
 $("approve-sample").onclick = action(async () => {
@@ -2374,7 +2392,7 @@ $("stop-run").onclick = action(async () => {
 $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    if (state.status.phase === "api_paused") await json("scenarios/resume", "POST", {sample_id: state.status.draft_id});
+    if (state.status.phase === "api_paused") await resumeGeneration(state.status.draft_id);
     else await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags()});
   } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
