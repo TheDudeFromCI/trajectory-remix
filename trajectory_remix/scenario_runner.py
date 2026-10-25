@@ -166,11 +166,20 @@ class ScenarioRunner:
         self.persist()
 
     def start(
-        self, name, max_parallel=None, *, _retry=False, _schedule=True, tags=None
+        self,
+        name,
+        max_parallel=None,
+        *,
+        _retry=False,
+        _schedule=True,
+        tags=None,
+        batch_size=1,
     ):
         if not _retry and (self.status["running"] or self.legacy.status["running"]):
             raise ValueError("Generation is already running")
-        if name not in self.registry.scenarios:
+        if type(batch_size) is not int or not 1 <= batch_size <= 1000:
+            raise ValueError("batch_size must be an integer between 1 and 1000")
+        if not _retry and name not in self.registry.scenarios:
             raise ValueError("Unknown scenario; start Remix with --scenarios-dir")
         if max_parallel is None:
             max_parallel = (
@@ -178,8 +187,8 @@ class ScenarioRunner:
             )
         if type(max_parallel) is not int or not 1 <= max_parallel <= 128:
             raise ValueError("max_parallel must be an integer between 1 and 128")
-        self.scenario = self.registry.scenarios[name]
         if not _retry:
+            self.scenario = self.registry.scenarios[name]
             self.manual_tags = tags
         pools = {
             "scenario": self.scenario.flow.tags,
@@ -215,15 +224,28 @@ class ScenarioRunner:
         except ValueError as error:
             self.log(str(error), "error")
             raise
-        self.limit = asyncio.Semaphore(max_parallel)
+        if not _retry:
+            self.limit = asyncio.Semaphore(max_parallel)
         self.first_prompts = {}
         self.first_prompt_paths = {}
         self.status["metrics"] = {}
-        self.resume_event.set()
+        if not _retry:
+            self.status["batch"] = {
+                "id": str(uuid.uuid4()),
+                "target": batch_size,
+                "completed": 0,
+                "attempts": 0,
+                "attempt_limit": batch_size
+                * self.config.get("single_generation", {}).get("max_attempts", 3),
+                "state": "running",
+            }
+            self.resume_event.set()
+        self.status["batch"]["attempts"] += 1
+        paused = not self.resume_event.is_set()
         self.status.update(
             running=True,
-            paused=False,
-            pause_requested=False,
+            paused=paused,
+            pause_requested=paused,
             phase="generating",
             completed=0,
             total=0,
@@ -260,6 +282,7 @@ class ScenarioRunner:
             origin="automation",
             validation_level=0,
             scenario=name,
+            generation_batch=self.status["batch"]["id"],
             context_tags=self.context["scenario"]["tags"],
             roles=roles,
         )
@@ -373,6 +396,9 @@ class ScenarioRunner:
         self.snapshot = saved
         self.scenario = object.__new__(Scenario)
         self.scenario.flow = Flow.model_validate(self.snapshot["flow"])
+        self.scenario.name = self.snapshot["status"].get(
+            "scenario", sample["metadata"].get("scenario")
+        )
         self.scenario.prompts = self.snapshot["prompts"]
         self.context = self.snapshot["context"]
         self.context["steps"] = {}
@@ -410,7 +436,9 @@ class ScenarioRunner:
         self.limit = asyncio.Semaphore(self.snapshot.get("max_parallel", 1))
         self.resume_event.set()
         self.log("Resuming saved generation checkpoint; completed steps will be reused")
-        self.job = asyncio.create_task(self.run_attempt())
+        self.job = asyncio.create_task(
+            self.run(self.scenario.name, self.snapshot.get("max_parallel", 1))
+        )
 
     async def gate(self):
         if not self.resume_event.is_set():
@@ -437,29 +465,69 @@ class ScenarioRunner:
                 pass
 
     async def run(self, name, max_parallel):
-        maximum = self.config.get("single_generation", {}).get("max_attempts", 3)
+        batch = self.status.setdefault(
+            "batch",
+            {
+                "id": str(uuid.uuid4()),
+                "target": 1,
+                "completed": 0,
+                "attempts": 1,
+                "attempt_limit": self.config.get("single_generation", {}).get(
+                    "max_attempts", 3
+                ),
+                "state": "running",
+            },
+        )
+        batch["state"] = "running"
         try:
-            for attempt in range(maximum):
+            while True:
+                await self.gate()
                 await self.run_attempt()
-                if (
-                    self.status["phase"] not in ("error", "rejected")
-                    or attempt + 1 == maximum
-                ):
+                if self.status["phase"] == "api_paused":
+                    batch["state"] = "paused"
+                    return
+                if self.status["phase"] == "complete":
+                    batch["completed"] += 1
+                    self.log(
+                        f"Batch progress: {batch['completed']}/{batch['target']} completed; {batch['attempts']}/{batch['attempt_limit']} attempts",
+                        "success",
+                    )
+                elif self.status["phase"] not in ("error", "rejected"):
+                    return
+                if batch["completed"] >= batch["target"]:
+                    batch["state"] = "complete"
+                    return
+                if batch["attempts"] >= batch["attempt_limit"]:
+                    batch["state"] = "exhausted"
+                    self.log(
+                        f"Attempt limit reached: {batch['completed']}/{batch['target']} trajectories completed",
+                        "warning",
+                    )
                     return
                 self.status["running"] = True
-                self.log(
-                    "Attempt failed; retrying with freshly sampled conditions",
-                    "warning",
-                )
-                await asyncio.sleep(0.1)
-                await self.gate()
+                if self.status["phase"] in ("error", "rejected"):
+                    self.log(
+                        "Attempt failed; retrying with freshly sampled conditions",
+                        "warning",
+                    )
+                # Publish the next planning checkpoint before yielding. A pause or
+                # shutdown between samples must still leave a resumable trajectory.
                 self.start(name, max_parallel, _retry=True, _schedule=False)
+                await self.gate()
+                await asyncio.sleep(0.1)
         except asyncio.CancelledError:
+            batch["state"] = "cancelled"
             self.status.update(
                 running=False, phase="cancelled", paused=False, pause_requested=False
             )
             self.log("Generation stopped; log retained", "warning")
             raise
+        except Exception as error:  # noqa: BLE001 — retain a visible stopped batch on setup failure
+            batch["state"] = "error"
+            self.status.update(
+                running=False, phase="error", last_error=self.clean(str(error))
+            )
+            self.log(self.status["last_error"], "error")
         finally:
             self.persist()
 

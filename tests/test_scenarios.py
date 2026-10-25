@@ -365,6 +365,7 @@ async def test_rejected_validation_keeps_negative_level(compiler, tmp_path):
     flow["steps"]["validate"]["level"] = 2
     path.write_text(yaml.safe_dump(flow))
     app = app_for(tmp_path, compiler, ScenarioClient(valid=False), root)
+    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
     runner = app.state.scenario_runner
     runner.start("user_problem")
     await asyncio.wait_for(runner.job, 5)

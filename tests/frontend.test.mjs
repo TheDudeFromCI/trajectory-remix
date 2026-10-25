@@ -335,6 +335,7 @@ assert.equal(
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
 assert.equal($("generation-menu").contains($("generate-one")), true);
+assert.equal($("generation-menu").contains($("generate-batch")), true);
 for (const id of ["approve-sample", "validate-sample", "auto-start", "report-dialog"])
   assert.equal($(id), null);
 await click("edit-menu-button");
@@ -912,7 +913,10 @@ assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupM
 await waitFor(() => !w.document.title.startsWith("*") &&
   !("collapsed_events" in JSON.parse($("sample-json").value).metadata));
 assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
+await click("generate-batch");
+assert.equal($("generation-count").value, "10");
 await click("generate-one");
+assert.equal($("generation-count").value, "1");
 assert.equal($("generation-panel").hidden, false);
 assert.equal($("scenario-type").value, "user_problem");
 assert.equal($("scenario-start"), null);
@@ -922,6 +926,41 @@ assert.equal($("pause-run").disabled, false);
 assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
 assert.match($("generation-progress").title, /steps complete/);
 assert.equal($("scenario-tag-controls").hidden, true);
+const beforeBatchStartFetch = w.fetch;
+let batchStartBody;
+let batchQueryRequested = false;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/run") {
+    batchStartBody = JSON.parse(options.body);
+    return new w.Response(JSON.stringify({ok:true}), {status:200, headers:{"content-type":"application/json"}});
+  }
+  if (String(path).startsWith("/api/state?")) {
+    const url = new URL(path, base);
+    if (url.searchParams.get("query") === "test-batch") {
+      batchQueryRequested = true;
+      url.searchParams.set("query", "");
+    }
+    const response = await beforeBatchStartFetch(url.pathname + url.search, options);
+    const data = await response.json();
+    data.status.batch = {id:"test-batch", target:3, completed:3, attempts:3, attempt_limit:9, state:"complete"};
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return beforeBatchStartFetch(path, options);
+};
+$("generation-count").value = "3";
+await click("pause-run");
+assert.equal(batchStartBody.batch_size, 3);
+assert.equal(batchStartBody.scenario, "user_problem");
+assert.match($("batch-progress").textContent, /3\/3 completed/);
+await click("view-generation-batch");
+assert.equal($("sample-search").value, "test-batch");
+assert.equal(batchQueryRequested, true);
+assert.equal($("generation-panel").hidden, true);
+w.fetch = beforeBatchStartFetch;
+$("sample-search").value = "";
+$("sample-search").oninput();
+await waitFor(() => $("view-generation-batch").hidden, 5000);
+$("generation-count").value = "1";
 $("randomize-tags").checked = false; $("randomize-tags").onchange();
 assert.equal($("scenario-tag-controls").hidden, false);
 $("randomize-tags").checked = true; $("randomize-tags").onchange();

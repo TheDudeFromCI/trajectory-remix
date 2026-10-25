@@ -38,6 +38,42 @@ discards unfinished output, and retains the planning trajectory and checkpoint.
 Only that active trajectory is locked against source edits; unrelated samples
 remain editable and validatable. Explicit Set State overrides are available at any time.
 
+## Batch creation
+
+Use **Edit → Generation → Batch**, choose a scenario and set **Trajectories to
+create** (1–1,000), then press **Start**. Single Sample opens the same panel with
+a count of 1; Batch defaults to 10. Trajectories run sequentially through the
+same YAML flow, under the shared LLM request limit. Each completed sample is
+available immediately for review; the batch does not approve samples for export.
+
+The batch targets the requested number of successfully completed workflows.
+Failed attempts remain in the dataset for inspection and do not fulfill the
+target. The total attempt budget is the target multiplied by Generation
+Settings' **Maximum attempts per single sample**; exhausting that budget stops
+with a partial-result summary. A YAML failure fallback that intentionally lets
+a workflow finish counts as completed; the sample still retains its validation
+state and only Ready (3) samples export. Attempts/accepted remain cumulative;
+model request/time counters still describe only the current trajectory attempt.
+
+Batch progress shows completed/target and used/allowed attempts. **View Batch**
+closes the panel and filters the dashboard to this batch, including failed
+attempts. Clear the dashboard search to see other samples. A searchable
+`metadata.generation_batch` ID groups the samples. Browsing an earlier sample
+while generation runs keeps that selection instead of jumping to every new
+draft; View Draft returns to the active one. Only the active draft is read-only.
+
+Random conditions are resampled for each new trajectory attempt; manually chosen
+tags remain fixed across the batch. Pause waits for current model calls, cancel
+keeps completed samples and the unfinished checkpoint, and exhausted API retries
+pause the batch without spending a new trajectory attempt. Select the unfinished
+planning trajectory and use **Resume Trajectory Generation** to finish it and
+continue the remaining batch, including after restarting the server. The saved
+flow/prompts also allow continuation without the external scenario folder.
+
+The existing `POST /api/scenarios/run` accepts `batch_size` (default 1). Invalid
+counts are rejected before creating a draft. Batch state is persisted with the
+current generation checkpoint; no legacy batch/task runner is involved.
+
 ## Flow format
 
 ```yaml

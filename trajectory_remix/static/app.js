@@ -183,6 +183,7 @@ async function refresh(initial = false) {
       next.revision !== state.revision ||
       next.offset !== state.offset ||
       next.query !== state.query;
+    const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
     state = next;
     renderStatus();
     if (changed || initial) renderSamples();
@@ -218,11 +219,12 @@ async function refresh(initial = false) {
       renderReplay();
     }
     const draftJustArrived = next.status.draft_id && next.status.draft_id !== lastGenerationDraft;
-    if (draftJustArrived && !hasPendingChanges() && Number.isInteger(next.status.draft_index)) {
+    if (draftJustArrived && !hasPendingChanges() && Number.isInteger(next.status.draft_index) && followDraft) {
       lastGenerationDraft = next.status.draft_id;
       await selectSample(next.status.draft_index, true);
     } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
       await selectSample(state.samples[state.samples.length - 1].index, true);
+    if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
   } finally {
     pollBusy = false;
     renderValidationState();
@@ -254,6 +256,13 @@ function renderStatus() {
     scenarioSelect.value = scenarioNames.includes(previous) ? previous : (scenarioNames[0] || "");
   }
   scenarioSelect.disabled = s.running;
+  $("generation-count").disabled = s.running;
+  const batch = s.batch;
+  if (batch && (s.running || s.phase === "api_paused")) $("generation-count").value = String(batch.target);
+  $("batch-progress").hidden = !batch || batch.target <= 1;
+  const batchState = s.running && s.paused ? "paused" : s.pause_requested ? "pausing" : batch?.state;
+  $("batch-progress").textContent = batch ? `${batch.completed}/${batch.target} completed · ${batch.attempts}/${batch.attempt_limit} attempts · ${batchState}` : "";
+  $("view-generation-batch").hidden = !batch || batch.target <= 1;
   $("scenario-hint").textContent = scenarioNames.length
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
     : "Start Remix with --scenarios-dir to load scenarios.";
@@ -273,6 +282,7 @@ function renderStatus() {
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
   $("generate-one").disabled = s.running;
+  $("generate-batch").disabled = s.running;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
@@ -2465,8 +2475,26 @@ for (const b of document.querySelectorAll("[data-config]"))
 $("generate-one").onclick = action(async () => {
   openGenerationPanel();
   if (hasPendingChanges()) await compileSample(true);
+  $("generation-count").value = "1";
   // Starting is explicit so the user can select a scenario and request limit.
   $("scenario-type").focus();
+});
+$("generate-batch").onclick = action(async () => {
+  openGenerationPanel();
+  if (hasPendingChanges()) await compileSample(true);
+  $("generation-count").value = "10";
+  $("generation-count").focus();
+});
+$("view-generation-batch").onclick = action(async () => {
+  if (!state.status.batch) return;
+  if (hasPendingChanges()) await compileSample(true);
+  $("sample-search").value = state.status.batch.id;
+  sampleOffset = 0;
+  const listing = await json("state?" + new URLSearchParams({query: state.status.batch.id, offset: "0", limit: String(SAMPLE_PAGE_SIZE)}));
+  lastGenerationDraft = listing.status.draft_id;
+  if (listing.samples.length) await selectSample(listing.samples[0].index, true);
+  await refresh();
+  $("generation-panel").hidden = true;
 });
 $("view-generation-draft").onclick = action(async () => {
   const listing = await json("state?" + new URLSearchParams({ selected_id: state.status.draft_id, limit: "1" }));
@@ -2482,7 +2510,11 @@ $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
     if (state.status.phase === "api_paused") await resumeGeneration(state.status.draft_id);
-    else await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags()});
+    else {
+      const count = $("generation-count");
+      if (!count.reportValidity()) return;
+      await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags(), batch_size: Number(count.value)});
+    }
   } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
 });

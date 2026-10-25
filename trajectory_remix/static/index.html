@@ -38,6 +38,7 @@
                 <button id="resume-trajectory-generation" role="menuitem" disabled>Resume Trajectory Generation</button>
                 <button id="status-button" role="menuitem" title="Open the generation status panel">Status</button>
                 <button id="generate-one" role="menuitem">Single Sample</button>
+                <button id="generate-batch" role="menuitem">Batch</button>
               </div>
             </div>
             <hr role="separator" />
@@ -246,6 +247,9 @@
         <label for="scenario-type">Scenario</label>
         <select id="scenario-type"></select>
         <small id="scenario-hint"></small>
+        <label for="generation-count">Trajectories to create</label>
+        <input id="generation-count" type="number" min="1" max="1000" step="1" value="1" required />
+        <small id="batch-progress" role="status" hidden></small>
         <div class="run-status">
           <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
         </div>
@@ -265,6 +269,7 @@
         <button id="edit-tags" class="text-button">
           Generation settings
         </button>
+        <button id="view-generation-batch" hidden>View Batch</button>
         <button id="view-generation-draft" hidden>View Draft</button>
         </div>
       </div>
