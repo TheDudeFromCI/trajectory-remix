@@ -7,7 +7,7 @@ saves. The stdio bridge connects through the dashboard's guarded local API;
 HTTP requests use the same in-process dataset owner.
 
 Start with the [short agent guides](../trajectory_remix/guides/start.md), also
-available through `get_authoring_guide`. Call `get_example_trajectory` for a complete
+available through `get_authoring_guide`. Request `topic: "example"` for a complete
 worked replay through MCP alone. All sandbox tools are synthetic;
 authors write specialist replies without running real subagents or code.
 
@@ -24,6 +24,7 @@ the next task; it does not concatenate the lessons or load the entire manual:
 | `sandbox` | [Seed trajectory files and verify visible reads](../trajectory_remix/guides/sandbox.md) |
 | `tools` | [Choose a small starter tool set and defer advanced tools](../trajectory_remix/guides/tools.md) |
 | `reference` | [Complete Skill.md manual](../trajectory_remix/Skill.md) |
+| `example` | [Complete build-graph trajectory JSON](../examples/build-graph-analysis.json) |
 
 Existing callers that need the full manual must now pass `topic: "reference"`;
 the response still contains `content`. Both transports support the same topics.
@@ -179,8 +180,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 
 | Tool | Purpose |
 | --- | --- |
-| `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns the complete Skill.md. |
-| `get_example_trajectory` | Return the complete, packaged build-graph replay JSON without importing it into the dataset. |
+| `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns Skill.md and `example` returns the complete build-graph JSON trajectory. |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
 | `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
 | `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
@@ -234,17 +234,18 @@ it returns `valid: false` with diagnostics.
 
 The [build-graph analysis example](../examples/build-graph-analysis.json)
 is bundled with the Python package. Retrieve it without GitHub or local
-filesystem access by calling the read-only MCP tool:
+filesystem access through the existing read-only guide tool:
 
 ```json
-{"name": "get_example_trajectory", "arguments": {"name": "build-graph-analysis"}}
+{"name": "get_authoring_guide", "arguments": {"topic": "example"}}
 ```
 
-Omitting `name` is also supported. The response contains `name` and
-`sample`; `sample` is a full source JSON object, not a summary.
-Retrieval does not modify the project or increment the revision. To
-import it, pass that object as the `sample` argument to
-`create_trajectory`, optionally supplying an unused `sample_id`.
+The response contains `content`, a string holding the full source JSON
+trajectory, not a summary or a Markdown guide. Parse `content` as JSON
+to obtain the sample object. Retrieval does not modify the project or
+increment the revision. To import it, pass that parsed object as the
+`sample` argument to `create_trajectory`, optionally supplying an
+unused `sample_id`. Omitting `topic` still returns the short starting guide.
 
 The scenario uses seven invisible `file_write` calls at tick 0 to seed
 six virtual Python modules and `build_config.json`; a user request is

@@ -37,7 +37,7 @@ The [complete build-graph example](examples/build-graph-analysis.json) preloads
 six virtual Python modules and a configuration using invisible tools, issues two
 independent file tools concurrently, and generates separate reasoning and chat
 streams before closing its windows. Import it through the dashboard or retrieve
-it through MCP with `get_example_trajectory`. Its fixed tick positions were
+it through MCP with `get_authoring_guide(topic="example")`. Its fixed tick positions were
 authored for another tokenizer; the included character-level demo tokenizer
 will not reproduce its generation durations without retiming.
 
@@ -107,10 +107,11 @@ Request one lesson at a time with `topic`: `first`, `parallel`, `edit`, `sandbox
 or `tools`. The [starting guide](trajectory_remix/guides/start.md) links each
 walkthrough; [starter tool selection](trajectory_remix/guides/tools.md) recommends
 which tools to expose before introducing batching, full JSON and workbenches.
-For a complete worked replay, use `get_example_trajectory`; this read-only MCP
-tool returns the build-graph source JSON without changing the active project.
+For a complete worked replay, use `get_authoring_guide(topic="example")`.
+Its `content` field contains the full build-graph source as JSON text, without
+changing the active project.
 
-Both transports expose the same 43 tools for trajectory creation, bundled examples, full JSON inspection,
+Both transports expose the same 42 tools for trajectory creation, bundled examples, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
