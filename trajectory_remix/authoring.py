@@ -178,8 +178,8 @@ class TrajectoryCommands:
                 return index, sample
         raise CommandError(f"Trajectory not found: {sample_id}", "not_found")
 
-    def _editable(self, expected_revision):
-        if self.runner.status["running"] or (getattr(self.runner, "scenario_runner", None) and self.runner.scenario_runner.status["running"]):
+    def _editable(self, expected_revision, sample_id=None):
+        if self.runner.status["running"] or (getattr(self.runner, "scenario_runner", None) and self.runner.scenario_runner.locked(sample_id)):
             raise CommandError("Stop generation before editing the dataset", "busy")
         if (
             expected_revision is not None
@@ -190,6 +190,7 @@ class TrajectoryCommands:
             )
 
     def _commit(self, sample, index=None, validate=False):
+        self._editable(None, self.state["samples"][index]["id"] if index is not None else sample.get("id"))
         from .dataset import invalidate_automation
         if index is not None:
             sample = invalidate_automation(copy.deepcopy(sample), self.state["samples"][index])
@@ -244,7 +245,7 @@ class TrajectoryCommands:
         }
 
     def _draft(self, sample_id, expected_revision):
-        self._editable(expected_revision)
+        self._editable(expected_revision, sample_id)
         index, sample = self._find(sample_id)
         return index, copy.deepcopy(sample)
 
@@ -792,12 +793,17 @@ class TrajectoryCommands:
             "revision": revision,
         }
         if semantic:
-            self._editable(None)
+            self._editable(None, sample_id)
             sample = copy.deepcopy(self._find(sample_id)[1])
             builder = SampleBuilder(
                 self.compiler, copy.deepcopy(self.state["config"]), self.client
             )
-            result["semantic"] = await builder.validators(sample)
+            scenario = getattr(self.runner, "scenario_runner", None)
+            if scenario and scenario.status["running"]:
+                async with scenario.limit:
+                    result["semantic"] = await builder.validators(sample)
+            else:
+                result["semantic"] = await builder.validators(sample)
             result["valid"] = result["semantic"]["valid"]
         return result
 
@@ -1075,6 +1081,23 @@ class TrajectoryCommands:
         """
         return self.history.view(include_changes)
 
+    def _check_history_lock(self, direction, steps):
+        scenario = getattr(self.runner, "scenario_runner", None)
+        if scenario is None or not scenario.status["running"]:
+            return
+        source = self.history.undo_stack if direction == "undo" else self.history.redo_stack
+        preview = self.state["samples"].copy()
+        for entry in reversed(source[-steps:]):
+            for operation in entry["inverse" if direction == "undo" else "forward"]:
+                index = int(operation["path"].lstrip("/"))
+                if operation["op"] != "add" and scenario.locked(preview[index]["id"]):
+                    raise CommandError("History action changes the active trajectory", "busy")
+                if operation.get("value", {}).get("id") == scenario.status["draft_id"]:
+                    raise CommandError("History action changes the active trajectory", "busy")
+                if operation["op"] == "add": preview.insert(index, operation["value"])
+                elif operation["op"] == "remove": del preview[index]
+                else: preview[index] = operation["value"]
+
     @command(write=True, destructive=True)
     def undo_edits(
         self,
@@ -1083,6 +1106,7 @@ class TrajectoryCommands:
     ):
         """Undo source edits as one revision change. Stop generation first; the undo commits immediately."""
         self._editable(expected_revision)
+        self._check_history_lock("undo", steps)
         return self.history.restore("undo", steps)
 
     @command(write=True, destructive=True)
@@ -1093,6 +1117,7 @@ class TrajectoryCommands:
     ):
         """Reapply undone source edits. A new source edit discards the redo branch."""
         self._editable(expected_revision)
+        self._check_history_lock("redo", steps)
         return self.history.restore("redo", steps)
 
     @command()
@@ -1308,7 +1333,7 @@ class TrajectoryCommands:
         recorder = None
         context = None
         if record_sample_id is not None:
-            self._editable(expected_revision)
+            self._editable(expected_revision, record_sample_id)
             _, sample = self._find(record_sample_id)
             windows = []
             if any(sample.get("replay", {}).values()):

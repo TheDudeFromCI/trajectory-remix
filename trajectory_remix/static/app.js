@@ -250,7 +250,6 @@ function renderStatus() {
     ? s.active.join(" · ")
     : (s.last_error || s.phase || "Ready");
   $("view-generation-draft").hidden = !s.draft_id;
-  $("approve-sample").disabled = s.running || !sample;
   $("run-status").textContent = s.running
     ? s.paused
       ? "Paused"
@@ -259,17 +258,16 @@ function renderStatus() {
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
-  for (const id of [
-    "generate-one",
-    "auto-start",
-    "new-sample",
-    "delete-sample",
-    "import-button",
-    "save-config",
-  ])
-    $(id).disabled = s.running;
-  $("pause-run").textContent = !s.running ? "Start" : s.paused || s.pause_requested ? "Resume" : "Pause";
-  $("pause-run").disabled = !s.running && !scenarioNames.length;
+  for (const id of ["generate-one", "auto-start"]) $(id).disabled = s.running;
+  const sampleLocked = s.running && sample?.id === s.draft_id;
+  $("delete-sample").disabled = sampleLocked || !sample;
+  $("approve-sample").disabled = sampleLocked || !sample;
+  $("validate-sample").disabled = sampleLocked || !sample;
+  $("sample-json").readOnly = sampleLocked;
+  $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
+  for (const button of document.querySelectorAll("[data-validation-state]")) button.disabled = !sample;
+  $("pause-run").textContent = !s.running ? (s.phase === "api_paused" ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
+  $("pause-run").disabled = !s.running && !scenarioNames.length && !(s.phase === "api_paused" && s.draft_id);
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
   $("selected-tags").replaceChildren(
@@ -322,7 +320,7 @@ function renderGenerationMetrics() {
   for (const [path, metric] of entries.slice(-4)) {
     const row = node("div", "request-metrics");
     const names = {prompt_tokens:"Prompt", completion_tokens:"Completion", reasoning_tokens:"Reasoning", cache_read_tokens:"Cache read", total_tokens:"Total", current_tokens_per_second:"Current tok/s", average_tokens_per_second:"Average tok/s", time_to_first_token_seconds:"TTFT (s)", generation_seconds:"Time (s)"};
-    row.append(node("b", "", `${path} · ${metric.model}`), node("div", "", Object.entries(names).filter(([key]) => metric[key] !== undefined).map(([key, label]) => `${label}: ${metric[key]}`).join(" · ")));
+    row.append(node("b", "", `${path} · ${metric.model}${metric.token_source === "estimated" ? " · estimated tokens" : ""}`), node("div", "", Object.entries(names).filter(([key]) => metric[key] !== undefined).map(([key, label]) => `${label}: ${metric[key]}`).join(" · ")));
     if (metric.context_size && metric.context_used_tokens !== undefined) {
       const percent = 100 * metric.context_used_tokens / metric.context_size;
       const bar = node("div", "context-meter"); bar.title = `${Math.round(percent)}% used (${metric.context_used_tokens}/${metric.context_size} tokens)`;
@@ -331,10 +329,10 @@ function renderGenerationMetrics() {
       const base = node("span", "context-base"); base.style.width = `${100 * baseline / metric.context_size}%`; base.title = `${Math.round(percent)}% used. Blue: first request prompt (includes its inputs; not a separate measurement of system prompt and schemas)`;
       const used = node("span", "context-used"); used.style.width = `${Math.max(0, Math.min(100, percent) - 100 * baseline / metric.context_size)}%`; used.style.background = percent <= 50 ? "#7b8799" : percent <= 75 ? "#e4bd56" : "#ef6b73";
       bar.append(base, used); row.append(bar);
-    }
+    } else { row.append(node("small", "", "Set this endpoint’s Context size in Generation Settings to show the context budget bar.")); }
     root.append(row);
   }
-  root.append(node("small", "", `Model requests: ${state.status.model_requests || 0}. Token counters appear when reported by the provider.`));
+  root.append(node("small", "", `Model requests: ${state.status.model_requests || 0} · Total model time: ${(state.status.total_model_seconds || 0).toFixed(1)} s. Stream token estimates are used until provider counters arrive.`));
 }
 $("clear-generation-log").onclick = action(async () => { await json("scenarios/log/clear", "POST"); await refresh(); });
 function renderHistoryActions() {
@@ -343,7 +341,7 @@ function renderHistoryActions() {
     ["redo-edit", "redo"],
   ]) {
     const available = state?.history?.[direction] || [];
-    $(id).disabled = state?.status.running || compileBusy || !available.length;
+    $(id).disabled = (state?.status.running && !state.status.draft_id) || compileBusy || !available.length;
     $(id).title = available[0]?.label || `Nothing to ${direction}`;
   }
 }
@@ -393,6 +391,8 @@ async function selectSample(index, force = false) {
   sample = await response.json();
   sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
+  $("sample-json").readOnly = state.status.running && sample.id === state.status.draft_id;
+  $("resume-trajectory-generation").disabled = true;
   if (!$("sample-search").value)
     sampleOffset = Math.floor(index / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
   setDirty(false);
@@ -1698,7 +1698,7 @@ function updateSettingsState() {
   }
   $("settings-errors").textContent = Object.entries(issues).map(([path, message]) => `${path}: ${message}`).join("\n");
   const valid = !Object.keys(issues).length;
-  $("save-config").disabled = !valid || JSON.stringify(configDraft) === configBaseline || state.status.running;
+  $("save-config").disabled = !valid || JSON.stringify(configDraft) === configBaseline;
   return valid;
 }
 $("config-content").addEventListener("input", () => updateSettingsState());
@@ -1715,7 +1715,7 @@ $("export-generation-log").onclick = () => {
 function openSettings() {
   if (!configDraft) {
     configDraft = structuredClone(state.config);
-    configDraft.single_generation ??= {max_parallel: 1, max_attempts: 3};
+    configDraft.single_generation = {max_parallel: 1, max_attempts: 3, ...configDraft.single_generation};
     configBaseline = JSON.stringify(configDraft);
   }
   $("settings-dialog").showModal();
@@ -1731,7 +1731,7 @@ function renderConfig() {
   root.replaceChildren();
   const eps = configDraft.endpoints.map((e) => e.id);
   if (configTab === "endpoints") {
-    configDraft.single_generation ??= {max_parallel: 1, max_attempts: 3};
+    configDraft.single_generation = {max_parallel: 1, max_attempts: 3, ...configDraft.single_generation};
     root.append(field("Maximum simultaneous LLM calls", Object.assign(input(configDraft.single_generation.max_parallel, v => configDraft.single_generation.max_parallel = v, "number"), {id: "scenario-parallel"})), field("Maximum attempts per single sample", input(configDraft.single_generation.max_attempts, v => configDraft.single_generation.max_attempts = v, "number")));
     root.append(
       node(
@@ -2061,6 +2061,7 @@ function closeMenus() {
   }
   $("export-menu").hidden = true;
   $("export-menu-button").setAttribute("aria-expanded", "false");
+  $("set-state-menu").hidden = true;
   $("generation-menu").hidden = true;
   $("generation-menu-button").setAttribute("aria-expanded", "false");
 }
@@ -2108,6 +2109,7 @@ $("preferences-button").onclick = () => {
   closeMenus();
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
   $("show-window-headers").checked = showWindowHeaders;
+  $("model-api-retries").value = state.config.single_generation?.api_retries ?? 2;
   $("preferences-dialog").showModal();
 };
 $("close-preferences").onclick = () => $("preferences-dialog").close();
@@ -2117,6 +2119,14 @@ $("preferences-form").onsubmit = action(async (event) => {
   const delaySeconds = Number($("auto-compile-delay").value);
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0.1 || delaySeconds > 60)
     throw new Error("Compile delay must be between 0.1 and 60 seconds.");
+  const apiRetries = Number($("model-api-retries").value);
+  if (!Number.isInteger(apiRetries) || apiRetries < 0 || apiRetries > 20) throw new Error("API retries must be an integer from 0 to 20.");
+  if (apiRetries !== (state.config.single_generation?.api_retries ?? 2)) {
+    await json("preferences", "POST", {api_retries: apiRetries});
+    if (configDraft) { configDraft.single_generation ??= {}; configDraft.single_generation.api_retries = apiRetries; }
+    if (configBaseline) { const baseline = JSON.parse(configBaseline); baseline.single_generation ??= {}; baseline.single_generation.api_retries = apiRetries; configBaseline = JSON.stringify(baseline); }
+    await refresh();
+  }
   const delayMs = Math.round(delaySeconds * 1000);
   localStorage.setItem(AUTO_COMPILE_DELAY_KEY, String(delayMs));
   autoCompileDelayMs = delayMs;
@@ -2312,6 +2322,20 @@ $("settings-button").onclick = () => {
   openSettings();
 };
 $("status-button").onclick = openGenerationPanel;
+$("set-state-menu-button").onclick = () => { $("set-state-menu").hidden = false; };
+for (const button of document.querySelectorAll("[data-validation-state]")) button.onclick = action(async () => {
+  closeMenus(); $("set-state-menu").hidden = true;
+  if (hasPendingChanges()) await compileSample(true);
+  await json("samples/" + selected + "/state", "POST", {level: Number(button.dataset.validationState)});
+  await refresh();
+});
+$("resume-trajectory-generation").onclick = action(async () => {
+  closeMenus();
+  if (hasPendingChanges()) await compileSample(true);
+  await json("scenarios/resume", "POST", {sample_id: sample.id});
+  openGenerationPanel(); await refresh();
+});
+
 $("close-settings").onclick = () => $("settings-dialog").close();
 $("save-config").onclick = action(saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
@@ -2350,7 +2374,8 @@ $("stop-run").onclick = action(async () => {
 $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags()});
+    if (state.status.phase === "api_paused") await json("scenarios/resume", "POST", {sample_id: state.status.draft_id});
+    else await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags()});
   } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
 });

@@ -144,8 +144,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             raise HTTPException(422, "Request must be a JSON object")
         return data
 
-    def editable():
-        if runner.status["running"] or scenario_runner.status["running"]:
+    def editable(sample_id=None):
+        if runner.status["running"] or scenario_runner.locked(sample_id):
             raise HTTPException(
                 409, "Stop generation before editing the dataset or configuration"
             )
@@ -180,6 +180,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "limit": limit,
             "query": query,
             "selected_index": selected_index,
+            "can_resume_generation": scenario_runner.can_resume(selected_id),
             "config": public_config(state["config"]),
             "revision": revision,
             "history": runner.history.view(),
@@ -242,7 +243,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.post("/api/samples/{index}/tool-calls")
     async def add_tool_call(index: int, request: Request):
-        editable()
+        editable(sample_at(index)["id"])
         data = await body(request)
         at = data.get("tick")
         if type(at) not in (int, str):
@@ -277,7 +278,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.put("/api/samples/{index}")
     async def update_sample(index: int, request: Request):
-        editable()
+        editable(sample_at(index)["id"])
         data = await body(request)
         updated = state["samples"].copy()
         sample_at(index)
@@ -301,7 +302,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.delete("/api/samples/{index}")
     async def delete_sample(index: int, expected_revision: int | None = Query(None, ge=0)):
-        editable()
+        editable(sample_at(index)["id"])
         updated = state["samples"].copy()
         if expected_revision is not None:
             updated.revision = expected_revision
@@ -453,6 +454,56 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         generation_mode["scenario"] = True
         return {"ok": True}
 
+    @app.post("/api/scenarios/resume")
+    async def resume_generation(request: Request):
+        data = await body(request)
+        if scenario_runner.status["running"] and scenario_runner.status["paused"] and data.get("sample_id") == scenario_runner.status["draft_id"]:
+            scenario_runner.resume()
+        else:
+            scenario_runner.resume_saved(data.get("sample_id"))
+        generation_mode["scenario"] = True
+        return {"ok": True}
+
+    @app.post("/api/preferences")
+    async def preferences(request: Request):
+        data = await body(request)
+        value = data.get("api_retries")
+        if type(value) is not int or not 0 <= value <= 20:
+            raise ValueError("API retries must be an integer from 0 to 20")
+        config = copy.deepcopy(state["config"])
+        config.setdefault("single_generation", {})["api_retries"] = value
+        state.set_config(config, state["revision"])
+        return {"ok": True}
+
+    @app.post("/api/samples/{index}/state")
+    async def set_sample_state(index: int, request: Request):
+        data = await body(request)
+        level = data.get("level")
+        if type(level) is not int or level not in range(-3, 4):
+            raise ValueError("Unknown validation state")
+        sample = copy.deepcopy(sample_at(index))
+        if not isinstance(sample.get("metadata"), dict):
+            sample["metadata"] = {}
+        sample.setdefault("metadata", {})["validation_level"] = level
+        updated = state["samples"].copy()
+        updated[index] = sample
+        runner.history.commit(updated, f"Set state: {sample['id']} → {level}")
+        if sample["id"] == scenario_runner.status.get("draft_id") and hasattr(scenario_runner, "builder"):
+            scenario_runner.expected_draft = copy.deepcopy(sample)
+            scenario_runner.state_override = level
+            scenario_runner.builder.sample["metadata"]["validation_level"] = level
+            scenario_runner.persist()
+        else:
+            job_id = sample["metadata"].get("generation_job")
+            if job_id:
+                with store.connect() as db:
+                    row = db.execute("SELECT snapshot FROM generation_jobs WHERE id=?", (job_id,)).fetchone()
+                    if row:
+                        saved = json.loads(row[0]); saved["checkpoint"]["expected_draft"] = sample
+                        saved["checkpoint"]["state_override"] = level
+                        db.execute("UPDATE generation_jobs SET snapshot=? WHERE id=?", (json.dumps(saved), job_id))
+        return {"ok": True}
+
     @app.post("/api/scenarios/log/clear")
     async def clear_generation_log():
         scenario_runner.logs.clear()
@@ -466,7 +517,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.post("/api/samples/{index}/approve")
     async def approve(index: int):
-        editable()
+        editable(sample_at(index)["id"])
         sample = copy.deepcopy(sample_at(index))
         compiler.compile(sample)
         sample.setdefault("metadata", {})["validation_level"] = 3
@@ -521,11 +572,14 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.post("/api/validate")
     async def validate(request: Request):
-        editable()
         data = await body(request)
         sample = data.get("sample") or sample_at(data.get("index", -1))
+        editable(sample.get("id"))
         compiler.compile(sample)
         builder = SampleBuilder(compiler, copy.deepcopy(state["config"]), client)
+        if scenario_runner.status["running"]:
+            async with scenario_runner.limit:
+                return await builder.validators(sample)
         return await builder.validators(sample)
 
     @app.middleware("http")

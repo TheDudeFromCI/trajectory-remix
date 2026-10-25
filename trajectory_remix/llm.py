@@ -184,6 +184,8 @@ def validate_config(config):
     single = config.get("single_generation", {})
     if not isinstance(single, dict):
         raise ValueError("single_generation must be an object")
+    if type(single.get("api_retries", 2)) is not int or not 0 <= single.get("api_retries", 2) <= 20:
+        raise ValueError("api_retries must be an integer from 0 to 20")
     for key, default, maximum in (("max_parallel", 1, 128), ("max_attempts", 3, 100)):
         if (
             type(single.get(key, default)) is not int

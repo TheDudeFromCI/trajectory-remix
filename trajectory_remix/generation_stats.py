@@ -1,10 +1,13 @@
-"""Provider-reported counters only; stream fragments are never treated as tokens."""
+"""Prefer provider counters; estimate accumulated stream text with an offline tokenizer."""
 
+import re
 import time
+
+from pydantic_ai.usage import RequestUsage
 
 
 class RequestStats:
-    def __init__(self, model, context_size=0):
+    def __init__(self, model, context_size=0, tokenizer=None):
         self.started = time.monotonic()
         self.first = None
         self.model = model
@@ -12,6 +15,23 @@ class RequestStats:
         self.usage = None
         self.previous = None
         self.current = None
+        self.prompt = ""
+        self.output = ""
+        self.reasoning = ""
+        self.previous_source = None
+        self.inline_reasoning = ""
+        self.tokenizer = tokenizer
+
+    def count(self, text):
+        if self.tokenizer is not None:
+            return len(self.tokenizer.encode(text, add_special_tokens=False).ids)
+        return len(re.findall(r"\w+|[^\w\s]", text))
+
+    def estimate(self, prompt, output, reasoning=""):
+        self.prompt, self.output, self.reasoning = prompt, output, reasoning
+        self.inline_reasoning = "".join(
+            re.findall(r"<think>(.*?)(?:</think>|$)", output, flags=re.DOTALL)
+        )
 
     def first_token(self):
         if self.first is None:
@@ -28,6 +48,32 @@ class RequestStats:
         if self.first is not None:
             result["time_to_first_token_seconds"] = round(self.first - self.started, 3)
         u = self.usage
+        estimated = bool(self.prompt) and (
+            u is None or not u.input_tokens or not u.output_tokens
+        )
+        if estimated:
+            u = RequestUsage(
+                input_tokens=(
+                    u.input_tokens if u and u.input_tokens else self.count(self.prompt)
+                ),
+                output_tokens=(
+                    u.output_tokens
+                    if u and u.output_tokens
+                    else self.count(self.output + self.reasoning)
+                ),
+                cache_read_tokens=u.cache_read_tokens if u else 0,
+                details=dict(u.details) if u else {},
+            )
+            if (
+                self.reasoning or self.inline_reasoning
+            ) and "reasoning_tokens" not in u.details:
+                u.details["reasoning_tokens"] = self.count(
+                    self.reasoning + self.inline_reasoning
+                )
+        result["token_source"] = "estimated" if estimated else "provider"
+        if result["token_source"] != self.previous_source:
+            self.previous, self.current = None, None
+        self.previous_source = result["token_source"]
         if u is not None and (u.input_tokens or u.output_tokens):
             result.update(
                 prompt_tokens=u.input_tokens,

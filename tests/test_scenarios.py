@@ -130,7 +130,7 @@ async def test_example_single_and_multiple_turns_are_compilable_and_pending_huma
     )
 
 
-async def test_first_draft_selectable_during_validation_and_cancel_discards_it(
+async def test_stopped_draft_resumes_after_restart_without_regenerating_completed_steps(
     compiler, tmp_path
 ):
     fake = ScenarioClient()
@@ -158,8 +158,21 @@ async def test_first_draft_selectable_during_validation_and_cancel_discards_it(
         assert (await client.post("/api/samples/0/approve")).status_code == 409
         assert (await client.post("/api/stop")).status_code == 200
         assert runner.status["phase"] == "cancelled"
-        assert len(app.state.dataset["samples"]) == 0
+        assert len(app.state.dataset["samples"]) == 1
         assert not fake.release.is_set()
+        fake.release.set()
+        restored = create_app(tmp_path / "project.sqlite", client=fake)
+        restored_runner = restored.state.scenario_runner
+        restored_runner.resume_saved(draft["id"])
+        await finish(restored_runner)
+        assert (
+            sum(
+                messages[0]["content"].startswith("Invent")
+                for messages in fake.messages
+            )
+            == 1
+        )
+        assert not restored_runner.can_resume(draft["id"])
 
 
 async def test_pause_finishes_current_call_and_blocks_next_request(compiler, tmp_path):
@@ -450,7 +463,7 @@ async def test_transport_failure_does_not_reject_pending_draft(compiler, tmp_pat
     runner = app.state.scenario_runner
     runner.start("user_problem")
     await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == "error"
+    assert runner.status["phase"] == "api_paused"
     assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == 0
 
 
@@ -632,3 +645,114 @@ async def test_retry_feedback_and_virtual_scenario_files(compiler, tmp_path):
     assert not runner.logs
     assert runner.snapshot["logs"] == []
     assert runner.status["attempts"] == 1
+
+
+async def test_unrelated_samples_edit_validate_and_state_changes_during_generation(
+    compiler, tmp_path
+):
+    fake = ScenarioClient()
+    fake.hold = "Invent"
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 3)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app),
+        base_url="http://testserver",
+        headers={"X-Remix-Token": app.state.csrf},
+    ) as client:
+        assert (await client.post("/api/samples", json={})).status_code == 200
+        unrelated = (await client.get("/api/samples/1")).json()
+        unrelated["metadata"]["title"] = "Editable"
+        assert (
+            await client.put("/api/samples/1", json={"sample": unrelated})
+        ).status_code == 200
+        assert (
+            await app.state.commands.call(
+                "validate_trajectory", {"sample_id": unrelated["id"]}
+            )
+        )["valid"]
+        await app.state.commands.call(
+            "update_trajectory_metadata",
+            {
+                "sample_id": unrelated["id"],
+                "patch": {"metadata": {"title": "Agent edited"}},
+            },
+        )
+        await app.state.commands.call("undo_edits", {})
+        await app.state.commands.call("redo_edits", {})
+        active = (await client.get("/api/samples/0")).json()
+        assert (
+            await client.put("/api/samples/0", json={"sample": active})
+        ).status_code == 409
+        for level in range(-3, 4):
+            assert (
+                await client.post("/api/samples/0/state", json={"level": level})
+            ).status_code == 200
+        assert (
+            await client.post("/api/preferences", json={"api_retries": 4})
+        ).status_code == 200
+    fake.release.set()
+    await finish(runner)
+    assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == 3
+    assert app.state.dataset["config"]["single_generation"]["api_retries"] == 4
+
+
+async def test_api_retry_budget_pauses_same_attempt_and_can_resume(compiler, tmp_path):
+    class APIClient(ScenarioClient):
+        broken = True
+        failures = 0
+
+        async def complete(self, endpoint, messages, tools=None):
+            if self.broken:
+                self.failures += 1
+                raise httpx.ConnectError("offline")
+            return await super().complete(endpoint, messages, tools)
+
+    fake = APIClient()
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(runner.job, 5)
+    assert fake.failures == 3  # initial request plus two API retries
+    assert runner.status["phase"] == "api_paused"
+    assert runner.status["attempts"] == 1
+    assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == 0
+    fake.broken = False
+    runner.resume_saved(runner.status["draft_id"])
+    await finish(runner)
+    assert runner.status["attempts"] == 1
+    assert runner.status["total_model_seconds"] > 0
+
+
+async def test_resume_inside_conversation_does_not_duplicate_messages_or_tool_calls(
+    compiler, tmp_path
+):
+    fake = ScenarioClient(tools=True)
+    fake.hold = "Write Kidra's next response"
+    app = app_for(tmp_path, compiler, fake)
+    runner = app.state.scenario_runner
+    runner.start("user_problem")
+    await asyncio.wait_for(fake.entered.wait(), 5)
+    ident = runner.status["draft_id"]
+    await runner.stop()
+    fake.release.set()
+    restored = create_app(tmp_path / "project.sqlite", client=fake)
+    resumed = restored.state.scenario_runner
+    resumed.resume_saved(ident)
+    await finish(resumed)
+    assert (
+        sum(
+            messages[0]["content"].startswith("Plan ONLY") for messages in fake.messages
+        )
+        == 1
+    )
+    assert (
+        sum(
+            messages[0]["content"].startswith("Write the next fictional")
+            for messages in fake.messages
+        )
+        == 1
+    )
+    plan = compiler.compile(restored.state.dataset["samples"][0])
+    assert len(plan["tool_calls"]) == 1

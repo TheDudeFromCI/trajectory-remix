@@ -890,6 +890,19 @@ assert.equal($("activity-log").scrollTop, 100);
 logFixture = [];
 await click("clear-generation-log");
 await waitFor(() => !$("activity-log").textContent, 5000);
+assert.equal(w.document.querySelectorAll("[data-validation-state]").length, 7);
+await w.document.querySelector('[data-validation-state="0"]').onclick();
+await waitFor(() => $("sample-list").textContent.includes("Pending"), 5000);
+await w.document.querySelector('[data-validation-state="3"]').onclick();
+await waitFor(() => $("sample-list").textContent.includes("Ready"), 5000);
+assert.equal($("resume-trajectory-generation").disabled, true);
+await click("preferences-button");
+assert.equal($("model-api-retries").value, "2");
+$("model-api-retries").value = "1";
+await $("preferences-form").onsubmit({preventDefault(){}});
+await click("preferences-button");
+assert.equal($("model-api-retries").value, "1");
+await click("cancel-preferences");
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({

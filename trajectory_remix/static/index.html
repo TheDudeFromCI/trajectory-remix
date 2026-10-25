@@ -35,6 +35,7 @@
               <button id="generation-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Generation ▸</button>
               <div id="generation-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
                 <button id="settings-button" role="menuitem" title="Open the generation settings">Generation Settings</button>
+                <button id="resume-trajectory-generation" role="menuitem" disabled>Resume Trajectory Generation</button>
                 <button id="status-button" role="menuitem" title="Open the generation status panel">Status</button>
                 <button id="generate-one" role="menuitem">Single Sample</button>
                 <button id="approve-sample" role="menuitem">Approve for training export</button>
@@ -43,6 +44,18 @@
               </div>
             </div>
             <hr role="separator" />
+            <div class="submenu">
+              <button id="set-state-menu-button" role="menuitem" aria-haspopup="menu">Set State ▸</button>
+              <div id="set-state-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
+                <button data-validation-state="-3" role="menuitem">Unfinished</button>
+                <button data-validation-state="-2" role="menuitem">Rejected</button>
+                <button data-validation-state="-1" role="menuitem">Unsuccessful</button>
+                <button data-validation-state="0" role="menuitem">Pending</button>
+                <button data-validation-state="1" role="menuitem">Candidate</button>
+                <button data-validation-state="2" role="menuitem">Validated</button>
+                <button data-validation-state="3" role="menuitem">Ready</button>
+              </div>
+            </div>
             <button id="duplicate" role="menuitem">Duplicate</button>
             <button id="delete-sample" class="danger-text" role="menuitem">Delete</button>
           </div>
@@ -283,6 +296,7 @@
           />
           <span>seconds</span>
         </div>
+        <label>Model API retries (before pausing)<input id="model-api-retries" type="number" min="0" max="20" value="2" /></label>
         <label class="preferences-toggle" for="show-window-headers">
           <input id="show-window-headers" type="checkbox" />
           Show window headers in replay

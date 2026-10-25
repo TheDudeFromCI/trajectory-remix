@@ -40,3 +40,16 @@ def test_end_only_usage_does_not_invent_live_rate():
     assert final["total_tokens"] == 30
     assert "current_tokens_per_second" not in final
     assert "time_to_first_token_seconds" not in final
+
+
+def test_stream_estimates_enable_context_meter_then_yield_to_provider(compiler):
+    stats = RequestStats("local", 1000, compiler.tokenizer)
+    stats.estimate("System prompt and request", "Generated output", "reasoning")
+    estimate = stats.sample()
+    assert estimate["token_source"] == "estimated"
+    assert estimate["prompt_tokens"] > 0
+    assert estimate["completion_tokens"] > 0
+    assert estimate["context_used_tokens"] == estimate["total_tokens"]
+    reported = stats.sample(RequestUsage(input_tokens=100, output_tokens=20))
+    assert reported["token_source"] == "provider"
+    assert reported["total_tokens"] == 120

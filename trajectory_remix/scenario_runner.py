@@ -10,6 +10,7 @@ import os
 import re
 import uuid
 from collections import deque
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import httpx
@@ -32,7 +33,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from .dataset import evaluation_source
 from .generation_stats import RequestStats
 from .llm import SampleBuilder
-from .scenarios import resolve, sample_tags
+from .scenarios import Flow, Scenario, resolve, sample_tags
 
 REPORT = {
     "type": "object",
@@ -121,6 +122,16 @@ class ScenarioRunner:
         if self.snapshot is None:
             return
         self.snapshot.update(status=copy.deepcopy(self.status), logs=list(self.logs))
+        if hasattr(self, "builder"):
+            self.snapshot["checkpoint"] = {
+                "sample": self.builder.sample,
+                "next_tick": self.builder.next_tick,
+                "serial": self.builder.serial,
+                "expected_draft": self.expected_draft,
+                "state_override": getattr(self, "state_override", None),
+                "first_prompts": getattr(self, "first_prompts", {}),
+                "first_prompt_paths": getattr(self, "first_prompt_paths", {}),
+            }
         with self.state.store.connect() as db:
             db.execute(
                 "INSERT OR REPLACE INTO generation_jobs VALUES (?,?)",
@@ -195,6 +206,7 @@ class ScenarioRunner:
         check_endpoints(self.scenario.flow.steps)
         self.limit = asyncio.Semaphore(max_parallel)
         self.first_prompts = {}
+        self.first_prompt_paths = {}
         self.status["metrics"] = {}
         self.resume_event.set()
         self.status.update(
@@ -254,6 +266,7 @@ class ScenarioRunner:
             **{role: profile["tags"] for role, profile in roles.items()},
         }
         self.expected_draft = None
+        self.state_override = None
         self.snapshot = {
             "id": str(uuid.uuid4()),
             "flow": self.scenario.flow.model_dump(),
@@ -263,9 +276,95 @@ class ScenarioRunner:
             "status": self.status,
             "logs": [],
         }
+        self.snapshot["tool_fingerprint"] = self.compiler.tools.fingerprint
+        self.snapshot["tokenizer_fingerprint"] = self.compiler.fingerprint
+        self.snapshot["max_parallel"] = max_parallel
+        self.snapshot["manual_tags"] = self.manual_tags
+        self.builder.sample["metadata"].update(
+            generation_phase="planning", generation_job=self.snapshot["id"]
+        )
+        self.publish()
         self.log(f"Starting {name}; maximum concurrent LLM calls: {max_parallel}")
         if _schedule:
             self.job = asyncio.create_task(self.run(name, max_parallel))
+
+    def locked(self, sample_id):
+        return self.status["running"] and sample_id == self.status.get("draft_id")
+
+    def can_resume(self, sample_id):
+        index = self.state.store.samples.index_of(sample_id) if sample_id else None
+        if index is None:
+            return False
+        metadata = self.state["samples"][index].get("metadata", {})
+        return (
+            isinstance(metadata, dict)
+            and metadata.get("generation_phase") == "planning"
+            and bool(metadata.get("generation_job"))
+        )
+
+    def resume_saved(self, sample_id):
+        if self.status["running"] or self.legacy.status["running"]:
+            raise ValueError("Generation already running")
+        if not self.can_resume(sample_id):
+            raise ValueError("Select a trajectory still in planning")
+        sample = self.state["samples"][self.state.store.samples.index_of(sample_id)]
+        with self.state.store.connect() as db:
+            row = db.execute(
+                "SELECT snapshot FROM generation_jobs WHERE id=?",
+                (sample["metadata"]["generation_job"],),
+            ).fetchone()
+        if row is None:
+            raise ValueError("Generation checkpoint not found")
+        self.snapshot = json.loads(row[0])
+        if (
+            self.snapshot.get("tool_fingerprint", self.compiler.tools.fingerprint)
+            != self.compiler.tools.fingerprint
+            or self.snapshot.get("tokenizer_fingerprint", self.compiler.fingerprint)
+            != self.compiler.fingerprint
+        ):
+            raise ValueError(
+                "Tokenizer or tools changed since checkpoint; refusing an inconsistent resume"
+            )
+        cp = self.snapshot["checkpoint"]
+        if sample != cp["expected_draft"]:
+            raise ValueError(
+                "Trajectory edited since checkpoint; resume would overwrite edits"
+            )
+        self.scenario = object.__new__(Scenario)
+        self.scenario.flow = Flow.model_validate(self.snapshot["flow"])
+        self.scenario.prompts = self.snapshot["prompts"]
+        self.context = self.snapshot["context"]
+        self.context["steps"] = {}
+        self.config = copy.deepcopy(self.state["config"])
+        self.endpoints = {e["id"]: e for e in self.config["endpoints"]}
+        self.builder = SampleBuilder(self.compiler, self.config)
+        self.builder.sample, self.builder.next_tick, self.builder.serial = (
+            cp["sample"],
+            cp["next_tick"],
+            cp["serial"],
+        )
+        self.expected_draft, self.state_override = (
+            cp["expected_draft"],
+            cp.get("state_override"),
+        )
+        self.manual_tags = self.snapshot.get("manual_tags")
+        self.first_prompts = cp.get("first_prompts", {})
+        self.first_prompt_paths = cp.get("first_prompt_paths", {})
+        self.status.update(self.snapshot["status"])
+        self.status.update(
+            running=True,
+            phase="generating",
+            paused=False,
+            pause_requested=False,
+            active=[],
+            last_error=None,
+            metrics={},
+        )
+        self.logs = deque(self.snapshot["logs"])
+        self.limit = asyncio.Semaphore(self.snapshot.get("max_parallel", 1))
+        self.resume_event.set()
+        self.log("Resuming saved generation checkpoint; completed steps will be reused")
+        self.job = asyncio.create_task(self.run_attempt())
 
     async def gate(self):
         if not self.resume_event.is_set():
@@ -323,30 +422,26 @@ class ScenarioRunner:
             await self.execute(self.scenario.flow.steps, self.context)
             if not self.status["draft_id"]:
                 raise Rejected("Scenario completed without publishing a draft")
+            self.builder.sample["metadata"]["generation_phase"] = "complete"
+            self.publish()
             self.status["phase"] = "complete"
             self.log("Scenario complete", "success")
         except asyncio.CancelledError:
-            # Cancel removes this run's provisional sample, but never someone else's edit.
-            index = (
-                self.state.store.samples.index_of(self.status["draft_id"])
-                if self.status["draft_id"]
-                else None
-            )
-            if (
-                index is not None
-                and self.state["samples"][index] == self.expected_draft
-            ):
-                samples = self.state["samples"].copy()
-                del samples[index]
-                self.history.commit(samples, "Cancel provisional scenario draft")
-            self.status.update(phase="cancelled", draft_id=None)
+            self.status.update(phase="cancelled")
             self.log(
-                "Cancelled; generated sample and in-flight output discarded", "warning"
+                "Stopped; checkpoint and trajectory retained for resume", "warning"
             )
             raise
+        except ProviderFailure as error:
+            self.status.update(phase="api_paused", last_error=str(error))
+            self.log(
+                "Model API unavailable; generation paused without rejecting the attempt",
+                "warning",
+            )
         except Rejected as error:
             if self.status["draft_id"]:
                 rejected = copy.deepcopy(self.expected_draft)
+                rejected["metadata"]["generation_phase"] = "rejected"
                 rejected["metadata"]["validation_level"] = min(
                     -1, rejected["metadata"].get("validation_level", 0)
                 )
@@ -371,13 +466,19 @@ class ScenarioRunner:
             self.log(self.status["last_error"], "error")
         finally:
             self.status.update(
-                running=False, paused=False, pause_requested=False, active=[]
+                running=False,
+                paused=self.status["phase"] == "api_paused",
+                pause_requested=False,
+                active=[],
             )
             self.persist()
 
     async def execute(self, steps, context, prefix=""):
         pending, done = dict(steps), set()
-        self.status["total"] += len(steps)
+        known = set(self.snapshot.get("known_steps", []))
+        known.update(prefix + name for name in steps)
+        self.snapshot["known_steps"] = sorted(known)
+        self.status["total"] = len(known)
         while pending:
             await self.gate()
             ready = [(n, s) for n, s in pending.items() if set(s.needs) <= done]
@@ -400,22 +501,30 @@ class ScenarioRunner:
                 context["steps"][name] = {"output": output}
                 done.add(name)
                 pending.pop(name)
-                self.status["completed"] += 1
+                self.status["completed"] = sum(
+                    record.get("state") in ("complete", "fallback", "skipped")
+                    for record in self.snapshot["steps"].values()
+                )
             self.persist()
         return context["steps"]
 
     async def execute_step(self, name, step, context, path):
         await self.gate()
+        cached = self.snapshot["steps"].get(path)
+        if cached and cached.get("state") in ("complete", "fallback", "skipped"):
+            return copy.deepcopy(cached.get("output"))
         when = resolve(step.when, context)
         if type(when) is not bool:
             raise ValueError(f"{path}: when must resolve to a boolean")
         if not when:
+            self.snapshot["steps"][path] = {"state": "skipped", "output": None}
             self.log("Skipped", "info", path)
             return None
         inputs = resolve(step.inputs, context)
         record = {"inputs": inputs, "state": "running"}
         self.snapshot["steps"][path] = record
         self.log(f"{path}: {step.uses}", step=path)
+        api_failures = 0
         for attempt in range(step.retries + 1):
             checkpoint = (
                 (
@@ -428,7 +537,23 @@ class ScenarioRunner:
                 else None
             )
             try:
-                result = await self.dispatch(step, inputs, context, path)
+                while True:
+                    try:
+                        result = await self.dispatch(step, inputs, context, path)
+                        break
+                    except ProviderFailure:
+                        if api_failures >= self.state["config"].get(
+                            "single_generation", {}
+                        ).get("api_retries", 2):
+                            raise
+                        api_failures += 1
+                        self.log(
+                            f"Model API retry {api_failures}; attempt unchanged",
+                            "warning",
+                            path,
+                        )
+                        await self.gate()
+                        await asyncio.sleep(0.1)
                 record.update(state="complete", output=result)
                 self.log(f"{path}: complete", "success", path)
                 return result
@@ -458,9 +583,9 @@ class ScenarioRunner:
                     "error",
                     path,
                 )
+                if isinstance(error, ProviderFailure):
+                    raise
                 if attempt == step.retries:
-                    if isinstance(error, ProviderFailure):
-                        raise
                     if step.on_failure.action == "fallback":
                         fallback = resolve(step.on_failure.value, context)
                         if step.output_schema:
@@ -485,26 +610,65 @@ class ScenarioRunner:
                 }
                 await self.gate()
 
+    @asynccontextmanager
+    async def model_slot(self):
+        while True:
+            await self.gate()
+            await self.limit.acquire()
+            if self.resume_event.is_set():
+                break
+            self.limit.release()
+        try:
+            yield
+        finally:
+            self.limit.release()
+
     async def llm(self, step, inputs, context, path, schema=None, prompt=None):
-        await self.gate()
-        async with self.limit:
-            await self.gate()  # A request queued before Pause must not start afterward.
+        async with self.model_slot():
             self.status["active"].append(path)
             self.status["paused"] = False
             self.persist()
             endpoint = self.endpoints[step.endpoint]
-            stats = RequestStats(endpoint["model"], endpoint.get("context_size", 0))
+            stats = RequestStats(
+                endpoint["model"],
+                endpoint.get("context_size", 0),
+                self.compiler.tokenizer,
+            )
             self.status["model_requests"] = self.status.get("model_requests", 0) + 1
             active_stream = None
+            streamed_text, streamed_reasoning, prompt_text = "", "", ""
 
             def sample_stats(final=False):
                 usage = active_stream.get().usage if active_stream is not None else None
-                if usage and usage.input_tokens:
-                    self.first_prompts.setdefault(step.endpoint, usage.input_tokens)
+                self.first_prompt_paths.setdefault(step.endpoint, path)
+                if (
+                    usage
+                    and usage.input_tokens
+                    and self.first_prompt_paths[step.endpoint] == path
+                ):
+                    self.first_prompts[step.endpoint] = usage.input_tokens
+                stats.estimate(prompt_text, streamed_text, streamed_reasoning)
                 current = stats.sample(
                     usage, final=final, baseline=self.first_prompts.get(step.endpoint)
                 )
+                if current.get("prompt_tokens"):
+                    self.first_prompts.setdefault(
+                        step.endpoint, current["prompt_tokens"]
+                    )
+                    if "context_size" in current:
+                        current["first_prompt_tokens"] = self.first_prompts[
+                            step.endpoint
+                        ]
                 self.status.setdefault("metrics", {})[path] = current
+                self.status["total_model_seconds"] = round(
+                    self.status.get("completed_model_seconds", 0)
+                    + sum(
+                        m.get("generation_seconds", 0)
+                        for key, m in self.status.get("metrics", {}).items()
+                        if key in self.status["active"]
+                    ),
+                    3,
+                )
                 return current
 
             async def ticker():
@@ -526,6 +690,7 @@ class ScenarioRunner:
                     instructions += (
                         "\nReturn JSON matching this schema:\n" + json.dumps(schema)
                     )
+                prompt_text = instructions + "\n" + data
                 messages = [
                     {"role": "system", "content": instructions},
                     {"role": "user", "content": data},
@@ -537,6 +702,7 @@ class ScenarioRunner:
                     # Injected clients use identical rendered messages and request boundaries.
                     message = await self.client.complete(endpoint, messages)
                     text = message.get("content", "")
+                    streamed_text = text
 
                 else:
                     key = (
@@ -593,6 +759,19 @@ class ScenarioRunner:
                                 ):
                                     chunk = event.delta.content_delta
                                 text += chunk
+                                streamed_text = text
+                                if isinstance(event, PartStartEvent) and not isinstance(
+                                    event.part, TextPart
+                                ):
+                                    streamed_reasoning += (
+                                        getattr(event.part, "content", "") or ""
+                                    )
+                                elif isinstance(
+                                    event, PartDeltaEvent
+                                ) and not isinstance(event.delta, TextPartDelta):
+                                    streamed_reasoning += (
+                                        getattr(event.delta, "content_delta", "") or ""
+                                    )
                                 if len(text) > 4_000_000:
                                     raise ValueError("Model output exceeds 4 MB")
                             if stream.get().finish_reason in (
@@ -637,6 +816,10 @@ class ScenarioRunner:
                 timer.cancel()
                 await asyncio.gather(timer, return_exceptions=True)
                 metrics = sample_stats(final=True)
+                self.status["completed_model_seconds"] = (
+                    self.status.get("completed_model_seconds", 0)
+                    + metrics["generation_seconds"]
+                )
                 self.snapshot["steps"].setdefault(path, {})["metrics"] = metrics
                 self.log(
                     {
@@ -820,6 +1003,8 @@ class ScenarioRunner:
     def publish(self, draft=None):
         draft = draft or self.closed_draft()
         self.compiler.compile(draft)
+        if self.state_override is not None:
+            draft["metadata"]["validation_level"] = self.state_override
         samples = self.state["samples"].copy()
         index = self.state.store.samples.index_of(draft["id"])
         if self.expected_draft is not None:

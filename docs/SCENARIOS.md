@@ -34,10 +34,9 @@ reopened through Generation → Status without stopping the run.
 **Pause** lets active model calls finish and prevents queued/new calls and later
 steps from starting. With concurrency greater than one, all active calls finish.
 **Resume** continues at the next boundary. **Cancel** cancels active requests,
-discards unfinished output, and removes this run's provisional trajectory. It
-never overwrites or deletes a draft that another process has changed. Source
-editing and approval are disabled during generation; selection, replay, inspection,
-and downloads remain available.
+discards unfinished output, and retains the planning trajectory and checkpoint.
+Only that active trajectory is locked against source edits; unrelated samples
+remain editable and validatable. Explicit Set State overrides are available at any time.
 
 ## Flow format
 
@@ -194,14 +193,14 @@ logs are inspectable through authenticated `GET /api/scenarios/job`. Jobs are
 persisted in the project's `generation_jobs` table independently of training data;
 credentials are redacted from retained snapshots and logs. Reloading the browser
 retains pause/progress state. After a server restart, unfinished jobs are marked
-interrupted and their published drafts remain pending/reviewable. Automatic
-recovery or rerunning individual saved steps is not implemented yet.
+interrupted; select a planning trajectory and use Resume Trajectory Generation
+to recover its checkpoint. Individual arbitrary step reruns are not exposed.
 
 The older task-list runner remains available for batch generation and existing
 single-task editing integrations. Single Sample uses YAML exclusively; no scenario
 folder means an explanatory message, never a silent fallback to legacy generation.
 
-Single-sample failures automatically retry with newly sampled scenario and role tags, up to `single_generation.max_attempts` (default 3). `single_generation.max_parallel` defaults to 1. Both settings are saved with the project. Failed samples remain reviewable; cancellation discards only the current provisional sample and retains the log.
+Single-sample failures automatically retry with newly sampled scenario and role tags, up to `single_generation.max_attempts` (default 3). `single_generation.max_parallel` defaults to 1. Both settings are saved with the project. Failed samples remain reviewable; cancellation retains the planning trajectory, checkpoint, and log.
 
 ## Manual conditions and diagnostics
 
@@ -222,10 +221,10 @@ Each model request logs its model, request count, elapsed time, observed time to
 first generated token, and provider-reported token usage when available. Prompt,
 completion, total, reasoning, and cache counters are never inferred from stream
 chunk counts. The status samples active requests every two seconds. Live tok/s
-uses changes in provider-reported completion counters between samples; average
+uses changes in provider-reported or explicitly estimated stream token counters between samples; average
 tok/s uses completion tokens divided by elapsed decode time after the first token.
-Providers reporting usage only at completion cannot supply a reliable live rate.
-Missing counters and timings are omitted rather than estimated.
+When providers report usage only at completion, stream token estimates supply
+live counters until real usage arrives. Unavailable timings are omitted.
 
 Endpoints may set `context_size` (tokens); zero means unknown. When both capacity
 and usage are known, the status displays current-request context usage. Usage
@@ -243,3 +242,40 @@ The tool prompt includes exact empty, parallel, and sequential JSON examples.
 A failed structured-output step receives its previous output and concrete error
 in `retry_feedback` on the next bounded retry; malformed output is still rejected
 rather than silently coerced into a different tool ordering.
+
+## Checkpointed resume and API recovery
+
+Every attempt has a planning trajectory and a persisted generation checkpoint from
+startup. Stop discards the unfinished model response, retaining the trajectory,
+completed step outputs, flow/prompt snapshot, and simulator source. Select that
+trajectory and use **Edit → Generation → Resume Trajectory Generation**, including
+after a server restart. Completed steps are reused; the interrupted step is run
+again. A paused live run can also resume through that menu. Completed/rejected
+attempts are no longer planning trajectories and cannot use generation resume.
+Resume checks that the saved trajectory, tools, and tokenizer still match; it
+refuses to overwrite content edited since the checkpoint. Snapshot credentials
+are redacted; endpoint configuration and credentials are read afresh on resume.
+
+**Preferences → Model API retries** configures 0–20 extra requests (default 2)
+following an API failure. After those retries, the same generation attempt enters
+API-paused state rather than being rejected or automatically replaced. Fix the
+endpoint in Generation Settings and use Resume. API pauses do not increment the
+generation-attempt count. Ordinary malformed-content/quality failures retain their
+separate workflow retry policy.
+
+Only the active trajectory is locked against source edits. Other trajectories
+remain editable, validatable, creatable, and deletable through the dashboard and
+MCP. History operations are allowed when their changes do not touch the active
+trajectory. **Edit → Set State** assigns any of the seven validation states,
+including during generation; an explicit active-run state override survives later
+machine writes. The generation phase and validation state remain separate.
+
+Provider token counters remain preferred. Until counters are reported, tokenizing
+the accumulated output/reasoning stream and rendered prompt with the project's
+embedded tokenizer supplies explicitly labelled estimates. This works offline and
+counts text tokens rather than stream fragments; it may differ from the endpoint's
+model tokenizer. Context gauges are therefore also estimates during fallback.
+Real counters replace estimates when available. Current throughput and average
+throughput remain separate. Total model time in the status is the sum of request
+durations, including retries and resumed work; parallel calls contribute their
+individual durations, and paused time is excluded.
