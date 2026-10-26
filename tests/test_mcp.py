@@ -59,6 +59,10 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 )
                 parallel = await session.call_tool("get_authoring_guide", {"topic": "parallel"})
                 assert not parallel.isError and "Verify overlap" in parallel.structuredContent["content"]
+                search_guide = await session.call_tool("get_authoring_guide", {"topic": "search"})
+                assert not search_guide.isError and "## Wildcards" in search_guide.structuredContent["content"]
+                assert "topic=search" in initialized.instructions
+                assert "query" in tools["list_trajectories"].inputSchema["properties"]
                 reference = await session.call_tool("get_authoring_guide", {"topic": "reference"})
                 assert not reference.isError and "Synthetic tool inventory" in reference.structuredContent["content"]
                 before_example = await session.call_tool("get_session", {})
@@ -98,6 +102,12 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "get_trajectory", {"sample_id": "from-mcp"}
                 )
                 assert result.structuredContent["sample"]["replay"]
+                found = await session.call_tool("list_trajectories", {
+                    "query": '@name:from-* @windows:>0 -"impossible phrase"',
+                })
+                assert not found.isError and found.structuredContent["total"] == 1
+                bad_query = await session.call_tool("list_trajectories", {"query": "python |"})
+                assert bad_query.isError and "Invalid search query" in bad_query.structuredContent["detail"]
                 report = await session.call_tool(
                     "validate_trajectory", {"sample_id": "from-mcp"}
                 )

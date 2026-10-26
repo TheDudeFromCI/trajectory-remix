@@ -9,6 +9,12 @@ This is the full reference. For a smaller first task, use the
 [short starting guide](guides/start.md), or request `get_authoring_guide()`.
 Retrieve this complete manual explicitly with `topic: "reference"`.
 
+Find existing trajectories with `list_trajectories(query=...)`. Its query language
+supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
+`#tags`, and `@name`, `@uuid`, `@windows`, `@uses_tool` properties. Read
+[the search guide](guides/search.md) with `get_authoring_guide(topic="search")`
+for examples and precise matching rules.
+
 Use this workflow to write a proposed training example. You are the **author** of
 the entire scenario: the user, Kidra, the specialists, their replies and external
 activity. Kidra is the **coordinator being trained**. Keep those roles separate.

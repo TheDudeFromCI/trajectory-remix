@@ -67,9 +67,20 @@
         <input
           id="sample-search"
           class="search"
-          placeholder="Filter samples…"
-          aria-label="Filter samples"
+          placeholder="Search text, #tags, @properties…"
+          aria-label="Search trajectories"
+          aria-describedby="search-help search-error"
         />
+        <div id="search-error" class="search-error" role="status" hidden></div>
+        <details id="search-help" class="search-help">
+          <summary>Search syntax</summary>
+          <p>Spaces mean AND. Use <code>|</code> for OR, <code>-</code> to exclude,
+            <code>( )</code> to group, and <code>*</code> for wildcards.</p>
+          <p><code>python -(math complex)</code><br />
+            <code>#coding @windows:&gt;5</code><br />
+            <code>@name:parallel-window-* @uses_tool:file_*</code></p>
+          <a href="/search-guide" target="_blank" rel="noopener">Full search guide</a>
+        </details>
         <div id="sample-list"></div>
         <div class="sample-pagination" aria-label="Sample pages">
           <button id="sample-page-prev" aria-label="Previous sample page">Previous</button>

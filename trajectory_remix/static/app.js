@@ -75,6 +75,7 @@ async function api(path, method = "GET", body) {
       e = { detail: `HTTP ${res.status}` };
     }
     const error = new Error(e.detail || "Request failed");
+    error.status = res.status;
     error.diagnostics = e.diagnostics;
     throw error;
   }
@@ -172,7 +173,24 @@ async function refresh(initial = false) {
       query: $("sample-search").value,
     });
     if (sample?.id) params.set("selected_id", sample.id);
-    const next = await json("state?" + params);
+    let next;
+    try {
+      next = await json("state?" + params);
+    } catch (error) {
+      if (error.status !== 422) throw error;
+      $("search-error").textContent = error.message;
+      $("search-error").hidden = false;
+      $("sample-search").setAttribute("aria-invalid", "true");
+      $("sample-list").replaceChildren();
+      $("sample-page-label").textContent = "Invalid query";
+      $("sample-page-prev").disabled = true;
+      $("sample-page-next").disabled = true;
+      return;
+    }
+    const searchWasInvalid = !$("search-error").hidden;
+    $("search-error").hidden = true;
+    $("search-error").textContent = "";
+    $("sample-search").removeAttribute("aria-invalid");
     if (next.total > 0 && sampleOffset >= next.total) {
       sampleOffset =
         Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
@@ -184,7 +202,7 @@ async function refresh(initial = false) {
       next.query !== state.query;
     state = next;
     renderStatus();
-    if (changed || initial) renderSamples();
+    if (changed || initial || searchWasInvalid) renderSamples();
     if (initial && state.samples.length)
       await selectSample(state.samples[0].index, true);
     if (
