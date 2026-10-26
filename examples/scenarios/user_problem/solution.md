@@ -1,0 +1,1 @@
+Solve the proposed problem and identify concrete verification. Establish scenario facts and the intended outcome. Do not invent live external facts. This is author-only ground truth, never an observation Kidra has automatically received. Use the supplied situation and file contents as authoritative facts; do not invent unseen documents or modify constraints.

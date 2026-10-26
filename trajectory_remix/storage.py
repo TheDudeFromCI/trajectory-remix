@@ -463,13 +463,13 @@ class DatasetStore:
             db.execute("BEGIN")
             total = db.execute(f"SELECT count(*) FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid {clause}", args).fetchone()[0] if clause else db.execute("SELECT sample_count FROM project").fetchone()[0]
             attributes_column = "NULL" if dashboard else "s.attributes"
-            properties_column = "NULL" if dashboard else "m.properties"
+            properties_column = "json_extract(m.properties, '$.validation_level')" if dashboard else "m.properties"
             rows = db.execute(f"SELECT s.position,s.sample_id,{attributes_column},m.event_count,m.tags,{properties_column},s.uuid FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid {clause} ORDER BY s.position LIMIT ? OFFSET ?", [*args, limit, offset])
             result = []
             for position, ident, attributes, events, tags, properties, ident_uuid in rows:
                 if dashboard:
                     index = db.execute("SELECT count(*) FROM samples WHERE position < ?", (position,)).fetchone()[0] if query else offset + len(result)
-                    result.append({"index": index, "id": ident if ident is not None else "untitled", "uuid": ident_uuid, "events": events, "tags": json.loads(tags)})
+                    result.append({"index": index, "id": ident if ident is not None else "untitled", "uuid": ident_uuid, "events": events, "tags": json.loads(tags), "validation_level": properties if properties is not None else -3})
                 else:
                     item = json.loads(attributes)
                     if properties is not None:

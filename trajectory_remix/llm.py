@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .compiler import KEY
+from .compiler import tick_terms
 from .dataset import reject_constant, trajectory_uuid
 from .tools import (
     Sandbox,
@@ -181,6 +181,17 @@ def default_config():
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("Config must be an object")
+    single = config.get("single_generation", {})
+    if not isinstance(single, dict):
+        raise ValueError("single_generation must be an object")
+    if type(single.get("api_retries", 2)) is not int or not 0 <= single.get("api_retries", 2) <= 20:
+        raise ValueError("api_retries must be an integer from 0 to 20")
+    for key, default, maximum in (("max_parallel", 1, 128), ("max_attempts", 3, 100)):
+        if (
+            type(single.get(key, default)) is not int
+            or not 1 <= single.get(key, default) <= maximum
+        ):
+            raise ValueError(f"{key} must be an integer from 1 to {maximum}")
     if not isinstance(config.get("automatic", {}), dict) or not isinstance(
         config.get("clock", {}), dict
     ):
@@ -201,6 +212,9 @@ def validate_config(config):
         ):
             raise ValueError("Endpoint IDs must be nonempty and unique")
         seen.add(ep["id"])
+        context_size = ep.get("context_size", 0)
+        if type(context_size) is not int or not 0 <= context_size <= 1_000_000_000:
+            raise ValueError("Endpoint context_size must be an integer between 0 (unknown) and 1000000000")
         for name in ("base_url", "api_key", "api_key_env"):
             if not isinstance(ep.get(name, ""), str):
                 raise ValueError(f"Endpoint {name} must be text")
@@ -239,7 +253,7 @@ def validate_config(config):
             raise ValueError("Task IDs must be nonempty and unique")
         task_ids.add(task["id"])
         if task.get("endpoint") not in seen:
-            raise ValueError(f"Unknown endpoint for task {task['id']}")
+            raise ValueError(f"Legacy task '{task['id']}' requires endpoint '{task.get('endpoint')}'. Add the endpoint or update the task configuration.")
         if task.get("kind") not in ("generate", "validate") or task.get(
             "layout", "messages"
         ) not in ("messages", "labeled", "json"):
@@ -523,16 +537,15 @@ class SampleBuilder:
             plan = self.compiler.compile(self.sample)
             start = str(task.get("start", "auto"))
             if task.get("kind", "generate") == "generate" and start != "auto":
-                match = KEY.fullmatch(start)
-                if not match:
-                    raise ValueError("Invalid task start expression")
-                if start.isdigit():
-                    decision_tick = int(start)
-                else:
-                    anchor = plan["anchors"].get(match[1])
-                    if anchor is None:
-                        raise ValueError(f"Undefined task start anchor {match[1]}")
-                    decision_tick = anchor["tick"] + int(match[2] or 0)
+                values = []
+                for aid, delta in tick_terms(start):
+                    if aid is None:
+                        values.append(delta)
+                    else:
+                        anchor = plan["anchors"].get(str(aid))
+                        if anchor is None: raise ValueError(f"Undefined task start anchor {aid}")
+                        values.append(anchor["tick"] + delta)
+                decision_tick = max(values)
                 visibility["_decision_tick"] = decision_tick
                 visibility["visible_tick"] = min(
                     task.get("visible_tick", decision_tick),
@@ -605,7 +618,11 @@ class SampleBuilder:
                 compiled = self.compiler.compile(self.sample)
                 self.next_tick = compiled["max_tick"] + 1
                 # Replay supplies the same actual output for every tool, including window writers.
-                outcome = next(c["outcome"] for c in compiled["tool_calls"] if c.get("window") == event["window"])
+                outcome = next(
+                    c["outcome"]
+                    for c in compiled["tool_calls"]
+                    if c.get("window") == event["window"]
+                )
                 tool_result = json.dumps(outcome, ensure_ascii=False)
                 messages.append(
                     {"role": "tool", "tool_call_id": call["id"], "content": tool_result}

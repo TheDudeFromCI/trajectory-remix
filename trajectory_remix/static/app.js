@@ -1,3 +1,4 @@
+let lastGenerationDraft = null, configBaseline = null, renderedLog = "", renderedTagScenario = "";
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
 const AUTO_COMPILE_DELAY_KEY = "trajectory-remix.auto-compile-delay";
@@ -200,6 +201,7 @@ async function refresh(initial = false) {
       next.revision !== state.revision ||
       next.offset !== state.offset ||
       next.query !== state.query;
+    const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
     state = next;
     renderStatus();
     if (changed || initial || searchWasInvalid) renderSamples();
@@ -234,60 +236,154 @@ async function refresh(initial = false) {
       plan = null;
       renderReplay();
     }
-    if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
+    const draftJustArrived = next.status.draft_id && next.status.draft_id !== lastGenerationDraft;
+    if (draftJustArrived && !hasPendingChanges() && Number.isInteger(next.status.draft_index) && followDraft) {
+      lastGenerationDraft = next.status.draft_id;
+      await selectSample(next.status.draft_index, true);
+    } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
       await selectSample(state.samples[state.samples.length - 1].index, true);
+    if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
   } finally {
     pollBusy = false;
+    renderValidationState();
+  }
+}
+function renderValidationState() {
+  $("set-state-menu-button").disabled = !sample;
+  if (!sample) $("set-state-menu").hidden = true;
+  const level = state?.samples.find(item => item.id === sample?.id)?.validation_level
+    ?? sample?.metadata?.validation_level ?? -3;
+  for (const button of document.querySelectorAll("[data-validation-state]")) {
+    button.disabled = !sample;
+    button.setAttribute("aria-checked", String(!!sample &&
+      Number(button.dataset.validationState) === level));
   }
 }
 function renderStatus() {
   $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
+  const scenarioSelect = $("scenario-type");
+  const scenarioNames = (state.scenarios || []).map((item) => item.name);
+  if (Array.from(scenarioSelect.options).map((option) => option.value).join() !== scenarioNames.join()) {
+    const previous = scenarioSelect.value;
+    scenarioSelect.replaceChildren(...scenarioNames.map((name) => {
+      const option = node("option", "", name);
+      option.value = name;
+      return option;
+    }));
+    scenarioSelect.value = scenarioNames.includes(previous) ? previous : (scenarioNames[0] || "");
+  }
+  scenarioSelect.disabled = s.running;
+  $("generation-count").disabled = s.running;
+  const batch = s.batch;
+  if (batch && (s.running || s.phase === "api_paused")) $("generation-count").value = String(batch.target);
+  $("batch-progress").hidden = !batch || batch.target <= 1;
+  const batchState = s.running && s.paused ? "paused" : s.pause_requested ? "pausing" : batch?.state;
+  $("batch-progress").textContent = batch ? `${batch.completed}/${batch.target} completed · ${batch.attempts}/${batch.attempt_limit} attempts · ${batchState}` : "";
+  $("view-generation-batch").hidden = !batch || batch.target <= 1;
+  $("scenario-hint").textContent = scenarioNames.length
+    ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
+    : "Start Remix with --scenarios-dir to load scenarios.";
+  $("generation-progress").max = Math.max(1, s.total || 1);
+  $("generation-progress").title = `${s.completed || 0}/${s.total || 0} steps complete`;
+  $("generation-progress").value = s.phase === "complete" ? Math.max(1, s.total || 1) : (s.completed || 0);
+  $("generation-detail").textContent = s.active?.length
+    ? s.active.join(" · ")
+    : (s.last_error || s.phase || "Ready");
+  $("view-generation-draft").hidden = !s.draft_id;
   $("run-status").textContent = s.running
     ? s.paused
       ? "Paused"
-      : "Generating"
-    : "Idle";
+      : s.pause_requested ? "Pausing after active calls finish" : "Generating"
+    : (s.phase || "Idle");
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
-  for (const id of [
-    "generate-one",
-    "auto-start",
-    "new-sample",
-    "delete-sample",
-    "import-button",
-    "save-config",
-  ])
-    $(id).disabled = s.running;
-  $("pause-run").textContent = s.paused ? "Resume" : "Pause";
-  $("pause-run").disabled = !s.running;
+  $("generate-one").disabled = s.running;
+  $("generate-batch").disabled = s.running;
+  const sampleLocked = s.running && sample?.id === s.draft_id;
+  $("delete-sample").disabled = sampleLocked || !sample;
+  $("sample-json").readOnly = sampleLocked;
+  $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
+  renderValidationState();
+  $("pause-run").textContent = !s.running ? (s.phase === "api_paused" ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
+  $("pause-run").disabled = !s.running && !scenarioNames.length && !(s.phase === "api_paused" && s.draft_id);
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
   $("selected-tags").replaceChildren(
-    ...(state.config.tags || []).map((t) => node("span", "tag", t)),
+    ...Object.entries(s.conditions || {}).flatMap(([scope, tags]) => Object.entries(tags).map(([dimension, tag]) => node("span", "tag", `${scope} · ${dimension}: ${tag.name}${tag.description ? " — " + tag.description : ""}`))),
   );
-  $("activity-log").replaceChildren(
-    ...state.logs
-      .slice()
-      .reverse()
-      .map((log) => {
-        const row = node("div", "log-line");
-        row.append(
-          node("time", "", new Date(log.time).toLocaleTimeString()),
-          document.createTextNode(log.message),
-        );
-        return row;
-      }),
-  );
+  const logBox = $("activity-log"), logSignature = JSON.stringify(state.logs);
+  if (logSignature !== renderedLog) {
+    const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight <= 2;
+    const previous = renderedLog ? JSON.parse(renderedLog) : [];
+    const appendOnly = previous.length <= state.logs.length && previous.every((entry, i) => JSON.stringify(entry) === JSON.stringify(state.logs[i]));
+    if (!appendOnly) logBox.replaceChildren();
+    for (const log of state.logs.slice(appendOnly ? previous.length : 0)) {
+      const row = node("div", "log-line log-" + (log.level || "info"));
+      row.append(node("time", "", new Date(log.time).toLocaleTimeString()), document.createTextNode((log.step ? `[${log.step}] ` : "") + log.message));
+      logBox.append(row);
+    }
+    renderedLog = logSignature;
+    if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+  }
+  renderScenarioTags();
+  renderGenerationMetrics();
+  updateSettingsState();
 }
+function renderScenarioTags() {
+  const scenario = state.scenarios?.find(item => item.name === $("scenario-type").value);
+  if (scenario && renderedTagScenario !== scenario.name) {
+    const controls = $("scenario-tag-controls"); controls.replaceChildren();
+    for (const [scope, dimensions] of Object.entries(scenario.tag_pools || {})) for (const [dimension, options] of Object.entries(dimensions)) {
+      const choice = select(options.map(tag => tag.name), options[0]?.name, () => { $("randomize-tags").checked = false; });
+      choice.dataset.scope = scope; choice.dataset.dimension = dimension;
+      controls.append(field(`${scope} · ${dimension}`, choice));
+    }
+    renderedTagScenario = scenario.name;
+    $("randomize-tags").checked = true;
+  }
+  $("scenario-tag-controls").hidden = $("randomize-tags").checked;
+  $("scenario-tag-controls").disabled = state.status.running;
+  $("randomize-tags").disabled = state.status.running;
+}
+function selectedScenarioTags() {
+  if ($("randomize-tags").checked) return null;
+  const scenario = state.scenarios.find(item => item.name === $("scenario-type").value);
+  const result = Object.fromEntries(Object.keys(scenario.tag_pools || {}).map(scope => [scope, {}]));
+  for (const choice of $("scenario-tag-controls").querySelectorAll("select")) result[choice.dataset.scope][choice.dataset.dimension] = choice.value;
+  return result;
+}
+$("randomize-tags").onchange = () => renderScenarioTags();
+$("scenario-type").onchange = () => { renderScenarioTags(); };
+function renderGenerationMetrics() {
+  const root = $("generation-metrics"); root.replaceChildren();
+  const entries = Object.entries(state.status.metrics || {}).filter(([path]) => !state.status.active?.length || state.status.active.includes(path));
+  for (const [path, metric] of entries.slice(-4)) {
+    const row = node("div", "request-metrics");
+    const names = {prompt_tokens:"Prompt", completion_tokens:"Completion", reasoning_tokens:"Reasoning", cache_read_tokens:"Cache read", total_tokens:"Total", current_tokens_per_second:"Current tok/s", average_tokens_per_second:"Average tok/s", time_to_first_token_seconds:"TTFT (s)", generation_seconds:"Time (s)"};
+    row.append(node("b", "", `${path} · ${metric.model}${metric.token_source === "estimated" ? " · estimated tokens" : ""}`), node("div", "", Object.entries(names).filter(([key]) => metric[key] !== undefined).map(([key, label]) => `${label}: ${metric[key]}`).join(" · ")));
+    if (metric.context_size && metric.context_used_tokens !== undefined) {
+      const percent = 100 * metric.context_used_tokens / metric.context_size;
+      const bar = node("div", "context-meter"); bar.title = `${Math.round(percent)}% used (${metric.context_used_tokens}/${metric.context_size} tokens)`;
+      bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Model context usage"); bar.setAttribute("aria-valuenow", String(Math.min(100, Math.round(percent)))); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
+      const baseline = Math.min(metric.system_prompt_tokens_estimated ?? 0, metric.context_used_tokens, metric.context_size);
+      const base = node("span", "context-base"); base.style.width = `${100 * baseline / metric.context_size}%`; base.title = `${Math.round(percent)}% used. Blue: estimated current system instructions and output schema; excludes task inputs`;
+      const used = node("span", "context-used"); used.style.width = `${Math.max(0, Math.min(100, percent) - 100 * baseline / metric.context_size)}%`; used.style.background = percent <= 50 ? "#7b8799" : percent <= 75 ? "#e4bd56" : "#ef6b73";
+      bar.append(base, used); row.append(bar);
+    } else { row.append(node("small", "", "Set this endpoint’s Context size in Generation Settings to show the context budget bar.")); }
+    root.append(row);
+  }
+  root.append(node("small", "", `Model requests: ${state.status.model_requests || 0} · Total model time: ${(state.status.total_model_seconds || 0).toFixed(1)} s. Stream token estimates are used until provider counters arrive.`));
+}
+$("clear-generation-log").onclick = action(async () => { await json("scenarios/log/clear", "POST"); await refresh(); });
 function renderHistoryActions() {
   for (const [id, direction] of [
     ["undo-edit", "undo"],
     ["redo-edit", "redo"],
   ]) {
     const available = state?.history?.[direction] || [];
-    $(id).disabled = state?.status.running || compileBusy || !available.length;
+    $(id).disabled = (state?.status.running && !state.status.draft_id) || compileBusy || !available.length;
     $(id).title = available[0]?.label || `Nothing to ${direction}`;
   }
 }
@@ -316,7 +412,7 @@ function renderSamples() {
         node(
           "small",
           "",
-          `${s.events} events${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
+          `${s.events} events · ${{"-3":"Unfinished","-2":"Rejected","-1":"Unsuccessful","0":"Pending","1":"Candidate","2":"Validated","3":"Ready"}[s.validation_level ?? -3] || "Unknown"}${s.tags.length ? " · " + s.tags.slice(0, 2).join(", ") : ""}`,
         ),
       );
       return b;
@@ -337,6 +433,9 @@ async function selectSample(index, force = false) {
   sample = await response.json();
   sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
+  renderValidationState();
+  $("sample-json").readOnly = state.status.running && sample.id === state.status.draft_id;
+  $("resume-trajectory-generation").disabled = true;
   if (!$("sample-search").value)
     sampleOffset = Math.floor(index / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
   setDirty(false);
@@ -406,6 +505,7 @@ async function compileSample(persist = true) {
     }
   } finally {
     compileBusy = false;
+    renderValidationState();
     renderHistoryActions();
   }
 }
@@ -1709,8 +1809,65 @@ async function download(path, filename, method = "GET", body) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+function configIssues() {
+  const errors = {};
+  const range = (path, value, lo, hi, integer = false) => {
+    if (!Number.isFinite(value) || value < lo || value > hi || (integer && !Number.isInteger(value))) errors[path] = `Must be ${integer ? "an integer " : ""}between ${lo} and ${hi}.`;
+  };
+  configDraft.endpoints.forEach((ep, i) => {
+    const prefix = `endpoints.${i}.`;
+    for (const key of ["id", "model"]) if (!ep[key]?.trim()) errors[prefix + key] = "Required.";
+    if (configDraft.endpoints.some((other, j) => j !== i && other.id === ep.id)) errors[prefix + "id"] = "Endpoint IDs must be unique.";
+    try { const url = new URL(ep.base_url); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw Error(); } catch { errors[prefix + "base_url"] = "Enter an HTTP(S) URL without credentials, query, or fragment."; }
+    range(prefix + "temperature", ep.temperature, 0, 2);
+    range(prefix + "max_tokens", ep.max_tokens, 1, 65536);
+    range(prefix + "timeout", ep.timeout, 1, 600);
+    range(prefix + "context_size", ep.context_size ?? 0, 0, 1000000000, true);
+  });
+  const single = configDraft.single_generation;
+  range("single_generation.max_parallel", single.max_parallel, 1, 128, true);
+  range("single_generation.max_attempts", single.max_attempts, 1, 100, true);
+  for (const [key, lo, hi] of [["max_samples",0,100000],["max_attempts",0,1000000],["autosave_every",1,10000],["regenerations",0,10],["max_consecutive_failures",1,1000],["delay_seconds",0.1,3600]]) range("automatic." + key, configDraft.automatic[key], lo, hi, key !== "delay_seconds");
+  range("max_tool_calls", configDraft.max_tool_calls, 1, 256, true);
+  range("max_tool_rounds", configDraft.max_tool_rounds, 1, 32, true);
+  return errors;
+}
+function updateSettingsState() {
+  if (!configDraft) return false;
+  const issues = configIssues();
+  for (const box of $("config-content").querySelectorAll("input")) {
+    if (!box.dataset.configPath) {
+      const label = box.closest("label")?.textContent || box.parentElement?.textContent || "";
+      const keys = {"Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Maximum new samples":"automatic.max_samples", "Maximum candidate attempts":"automatic.max_attempts", "Autosave every N accepted":"automatic.autosave_every", "Regenerations per attempt":"automatic.regenerations", "Consecutive failure limit":"automatic.max_consecutive_failures", "Delay between attempts (s)":"automatic.delay_seconds", "Tool calls per sample":"max_tool_calls", "Tool rounds per task":"max_tool_rounds"};
+      for (const [name, path] of Object.entries(keys)) if (label.includes(name)) box.dataset.configPath = path;
+    }
+    const message = issues[box.dataset.configPath] || "";
+    box.setCustomValidity(message);
+    box.setAttribute("aria-invalid", String(!!message));
+    box.title = message;
+  }
+  $("settings-errors").textContent = Object.entries(issues).map(([path, message]) => `${path}: ${message}`).join("\n");
+  const valid = !Object.keys(issues).length;
+  $("save-config").disabled = !valid || JSON.stringify(configDraft) === configBaseline;
+  return valid;
+}
+$("config-content").addEventListener("input", () => updateSettingsState());
+$("config-content").addEventListener("change", () => updateSettingsState());
+function generationLogText() {
+  return state.logs.map(log => `${log.time} [${log.level || "info"}]${log.step ? " " + log.step : ""}\n${log.message}`).join("\n\n");
+}
+$("copy-generation-log").onclick = action(async () => { await navigator.clipboard.writeText(generationLogText()); toast("Output copied."); });
+$("export-generation-log").onclick = () => {
+  const url = URL.createObjectURL(new Blob([generationLogText()], {type: "text/plain"}));
+  const link = node("a"); link.href = url; link.download = "generation.log"; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+};
 function openSettings() {
-  configDraft = structuredClone(state.config);
+  if (!configDraft) {
+    configDraft = structuredClone(state.config);
+    configDraft.single_generation = {max_parallel: 1, max_attempts: 3, ...configDraft.single_generation};
+    configBaseline = JSON.stringify(configDraft);
+  }
   $("settings-dialog").showModal();
   renderConfig();
 }
@@ -1724,11 +1881,13 @@ function renderConfig() {
   root.replaceChildren();
   const eps = configDraft.endpoints.map((e) => e.id);
   if (configTab === "endpoints") {
+    configDraft.single_generation = {max_parallel: 1, max_attempts: 3, ...configDraft.single_generation};
+    root.append(field("Maximum simultaneous LLM calls", Object.assign(input(configDraft.single_generation.max_parallel, v => configDraft.single_generation.max_parallel = v, "number"), {id: "scenario-parallel"})), field("Maximum attempts per single sample", input(configDraft.single_generation.max_attempts, v => configDraft.single_generation.max_attempts = v, "number")));
     root.append(
       node(
         "div",
         "hint",
-        "Each task selects its own endpoint. Use a low-cost generator and a separate validator. Base URLs should include /v1.",
+        "Scenario steps select endpoints by ID. Configure generation and validation models here. Base URLs should include /v1. Context size 0 means unknown.",
       ),
     );
     configDraft.endpoints.forEach((ep, i) => {
@@ -1755,14 +1914,12 @@ function renderConfig() {
         ["temperature", "Temperature", "number"],
         ["max_tokens", "Max completion tokens", "number"],
         ["timeout", "Timeout (seconds)", "number"],
-      ])
-        form.append(
-          field(
-            label,
-            input(ep[name], (v) => (ep[name] = v), type),
-            name === "base_url" ? "wide" : "",
-          ),
-        );
+        ["context_size", "Context size (tokens, 0 = unknown)", "number"],
+      ]) {
+        const box = input(ep[name] ?? (name === "context_size" ? 0 : undefined), (v) => (ep[name] = v), type);
+        box.dataset.configPath = `endpoints.${i}.${name}`;
+        form.append(field(label, box, name === "base_url" ? "wide" : ""));
+      }
       form.append(
         field(
           "Clear stored session key",
@@ -1770,7 +1927,13 @@ function renderConfig() {
           "check",
         ),
       );
-      card.append(top, form);
+      const result = node("small", "endpoint-test-result");
+      top.append(button("Test endpoint", action(async () => {
+        result.textContent = "Testing…";
+        try { const answer = await json("endpoints/test", "POST", {endpoint: ep}); result.textContent = `Connected: ${answer.model}`; }
+        catch (error) { result.textContent = error.message; }
+      })));
+      card.append(top, form, result);
       root.append(card);
     });
     root.append(
@@ -1787,251 +1950,6 @@ function renderConfig() {
       }),
     );
   }
-  if (configTab === "tasks") {
-    root.append(
-      node(
-        "div",
-        "hint",
-        'Tasks run in the listed order. Each generation task fills one window stream. Visible windows can be ordered by entering comma-separated IDs; * includes all. Use explicit start expressions for concurrent streams. Validators return {"valid": boolean, "feedback": ["issue"]}.',
-      ),
-    );
-    configDraft.tasks.forEach((task, i) => {
-      const card = node("div", "config-card"),
-        top = node("div", "card-top");
-      top.append(
-        field(
-          task.id,
-          checkbox(task.enabled !== false, (v) => (task.enabled = v)),
-          "check",
-        ),
-      );
-      const buttons = node("div", "two-buttons");
-      buttons.append(
-        button("↑", () => {
-          if (i) {
-            [configDraft.tasks[i - 1], configDraft.tasks[i]] = [
-              task,
-              configDraft.tasks[i - 1],
-            ];
-            renderConfig();
-          }
-        }),
-        button("↓", () => {
-          if (i < configDraft.tasks.length - 1) {
-            [configDraft.tasks[i + 1], configDraft.tasks[i]] = [
-              task,
-              configDraft.tasks[i + 1],
-            ];
-            renderConfig();
-          }
-        }),
-        button(
-          "Remove",
-          () => {
-            configDraft.tasks.splice(i, 1);
-            renderConfig();
-          },
-          "danger-text",
-        ),
-      );
-      top.append(buttons);
-      const form = node("div", "form-grid");
-      form.append(
-        field(
-          "Task ID",
-          input(task.id, (v) => (task.id = v)),
-        ),
-        field(
-          "Task kind",
-          select(["generate", "validate"], task.kind, (v) => {
-            task.kind = v;
-            renderConfig();
-          }),
-        ),
-        field(
-          "Endpoint",
-          select(eps, task.endpoint, (v) => (task.endpoint = v)),
-        ),
-        field(
-          "Visible windows (ordered IDs)",
-          input(
-            (task.visible || ["*"]).join(", "),
-            (v) =>
-              (task.visible = v
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean)),
-          ),
-          "wide",
-        ),
-        field(
-          "Organization",
-          select(
-            [
-              ["messages", "Separate labeled messages"],
-              ["labeled", "Single labeled transcript"],
-              ["json", "Structured JSON"],
-            ],
-            task.layout || "messages",
-            (v) => (task.layout = v),
-          ),
-        ),
-      );
-      const prompt = node("textarea");
-      prompt.value = task.prompt;
-      prompt.oninput = () => (task.prompt = prompt.value);
-      form.append(field("Written task prompt", prompt, "wide"));
-      if (task.kind === "generate") {
-        form.append(
-          field(
-            "Target window",
-            input(task.window, (v) => (task.window = v)),
-          ),
-          field(
-            "Ownership",
-            select(
-              [
-                ["generate", "Kidra generated target"],
-                ["append", "External observation"],
-              ],
-              task.op || "generate",
-              (v) => (task.op = v),
-            ),
-          ),
-          field(
-            "Source / type",
-            input(task.source || "assistant", (v) => (task.source = v)),
-          ),
-          field(
-            "Start tick / expression",
-            input(task.start || "auto", (v) => (task.start = v)),
-          ),
-          field(
-            "Context cutoff tick (optional)",
-            input(task.visible_tick ?? "", (v) => {
-              if (v === "") delete task.visible_tick;
-              else task.visible_tick = Number(v);
-            }),
-          ),
-          field(
-            "Close after stream (EOS)",
-            checkbox(task.close, (v) => (task.close = v)),
-            "check",
-          ),
-          field(
-            "Allow sandbox tools",
-            checkbox(task.tools, (v) => (task.tools = v)),
-            "check",
-          ),
-        );
-        task.loss ??= { mask: "auto", weight: 1 };
-        form.append(
-          field(
-            "Loss mask",
-            select(
-              ["auto", "include", "exclude"],
-              task.loss.mask,
-              (v) => (task.loss.mask = v),
-            ),
-          ),
-          field(
-            "Loss weight",
-            input(
-              task.loss.weight ?? 1,
-              (v) => (task.loss.weight = v),
-              "number",
-            ),
-          ),
-        );
-      }
-      card.append(top, form);
-      if (task.kind === "generate")
-        card.append(
-          button(
-            "Run this task in current sample",
-            action(async () => {
-              await saveConfig();
-              if (selected < 0)
-                throw new Error("Select or create a sample first");
-              await json("run", "POST", {
-                automatic: false,
-                task_ids: [task.id],
-                seed_index: selected,
-                validate: false,
-              });
-              $("settings-dialog").close();
-              await refresh();
-            }),
-            "text-button",
-          ),
-        );
-      root.append(card);
-    });
-    root.append(
-      button("+ Add task", () => {
-        const id = "stream-" + (Date.now() % 100000);
-        configDraft.tasks.push({
-          id,
-          kind: "generate",
-          enabled: true,
-          endpoint: eps[0],
-          window: id,
-          op: "generate",
-          source: "assistant",
-          prompt: "Write the content for this stream.",
-          visible: ["*"],
-          layout: "messages",
-          start: "auto",
-          close: true,
-          tools: false,
-        });
-        renderConfig();
-      }),
-    );
-  }
-  if (configTab === "conditions") {
-    root.append(
-      node(
-        "div",
-        "hint",
-        "These conditions are included in every generation task. Add project-specific tags below.",
-      ),
-    );
-    const picker = node("div", "tag-picker");
-    for (const tag of [
-      ...new Set([...state.tags, ...(configDraft.tags || [])]),
-    ]) {
-      const b = button(
-        tag,
-        () => {
-          configDraft.tags ??= [];
-          configDraft.tags = configDraft.tags.includes(tag)
-            ? configDraft.tags.filter((t) => t !== tag)
-            : [...configDraft.tags, tag];
-          renderConfig();
-        },
-        configDraft.tags?.includes(tag) ? "selected" : "",
-      );
-      picker.append(b);
-    }
-    root.append(picker);
-    const custom = input("", () => {});
-    custom.placeholder = "Custom condition tag";
-    const wrap = node("div", "editor-toolbar");
-    wrap.style.marginTop = "10px";
-    wrap.append(
-      custom,
-      button("Add condition", () => {
-        if (custom.value.trim()) {
-          configDraft.tags = [
-            ...new Set([...(configDraft.tags || []), custom.value.trim()]),
-          ];
-          renderConfig();
-        }
-      }),
-    );
-    root.append(wrap);
-  }
   if (configTab === "automatic") {
     const a = configDraft.automatic,
       form = node("div", "form-grid");
@@ -2039,7 +1957,7 @@ function renderConfig() {
       node(
         "div",
         "hint",
-        "Limits count newly accepted samples. Max samples / attempts = 0 means unlimited. Regeneration reruns all selected tasks with validator or compiler feedback. A sandbox is destroyed after every candidate.",
+        "Global batch limits, tool budgets, and synthetic clock defaults. Single sample concurrency and retry limits are configured under Endpoints.",
       ),
     );
     for (const [key, label] of [
@@ -2108,10 +2026,19 @@ function renderConfig() {
     );
     root.append(form);
   }
+  updateSettingsState();
 }
 async function saveConfig() {
-  await json("config", "PUT", { config: configDraft });
+  if (!updateSettingsState()) return;
+  try { await json("config", "PUT", { config: configDraft }); }
+  catch (error) {
+    $("settings-errors").textContent = error.message;
+    $("save-config").disabled = true;
+    throw error;
+  }
   await refresh();
+  configBaseline = JSON.stringify(configDraft);
+  updateSettingsState();
   toast("Configuration saved.");
 }
 $("sample-search").oninput = () => {
@@ -2290,6 +2217,7 @@ function closeMenus() {
   }
   $("export-menu").hidden = true;
   $("export-menu-button").setAttribute("aria-expanded", "false");
+  $("set-state-menu").hidden = true;
   $("generation-menu").hidden = true;
   $("generation-menu-button").setAttribute("aria-expanded", "false");
 }
@@ -2307,26 +2235,6 @@ function openGenerationPanel() {
 }
 $("close-generation-panel").onclick = () =>
   ($("generation-panel").hidden = true);
-$("generation-panel-header").onmousedown = (e) => {
-  if (e.target.closest("button")) return;
-  const panel = $("generation-panel"),
-    r = panel.getBoundingClientRect(),
-    dx = e.clientX - r.left,
-    dy = e.clientY - r.top;
-  const move = (m) => {
-    panel.style.right = "auto";
-    panel.style.left =
-      Math.max(0, Math.min(innerWidth - 60, m.clientX - dx)) + "px";
-    panel.style.top =
-      Math.max(0, Math.min(innerHeight - 40, m.clientY - dy)) + "px";
-  };
-  const up = () => {
-    document.removeEventListener("mousemove", move);
-    document.removeEventListener("mouseup", up);
-  };
-  document.addEventListener("mousemove", move);
-  document.addEventListener("mouseup", up);
-};
 function toggleMenu(name) {
   const open = $(name + "-menu").hidden;
   closeMenus();
@@ -2357,6 +2265,7 @@ $("preferences-button").onclick = () => {
   closeMenus();
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
   $("show-window-headers").checked = showWindowHeaders;
+  $("model-api-retries").value = state.config.single_generation?.api_retries ?? 2;
   $("preferences-dialog").showModal();
 };
 $("close-preferences").onclick = () => $("preferences-dialog").close();
@@ -2366,6 +2275,14 @@ $("preferences-form").onsubmit = action(async (event) => {
   const delaySeconds = Number($("auto-compile-delay").value);
   if (!Number.isFinite(delaySeconds) || delaySeconds < 0.1 || delaySeconds > 60)
     throw new Error("Compile delay must be between 0.1 and 60 seconds.");
+  const apiRetries = Number($("model-api-retries").value);
+  if (!Number.isInteger(apiRetries) || apiRetries < 0 || apiRetries > 20) throw new Error("API retries must be an integer from 0 to 20.");
+  if (apiRetries !== (state.config.single_generation?.api_retries ?? 2)) {
+    await json("preferences", "POST", {api_retries: apiRetries});
+    if (configDraft) { configDraft.single_generation ??= {}; configDraft.single_generation.api_retries = apiRetries; }
+    if (configBaseline) { const baseline = JSON.parse(configBaseline); baseline.single_generation ??= {}; baseline.single_generation.api_retries = apiRetries; configBaseline = JSON.stringify(baseline); }
+    await refresh();
+  }
   const delayMs = Math.round(delaySeconds * 1000);
   localStorage.setItem(AUTO_COMPILE_DELAY_KEY, String(delayMs));
   autoCompileDelayMs = delayMs;
@@ -2383,24 +2300,6 @@ for (const name of ["file", "edit"])
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".file-menu")) closeMenus();
 });
-$("validate-sample").onclick = action(async () => {
-  closeMenus();
-  if (!sample) throw new Error("Select a sample first");
-  if (hasPendingChanges()) await compileSample(true);
-  $("validation-report").textContent = "Validating…";
-  $("report-dialog").showModal();
-  try {
-    $("validation-report").textContent = JSON.stringify(
-      await json("validate", "POST", { sample }),
-      null,
-      2,
-    );
-  } catch (e) {
-    $("validation-report").textContent = e.message;
-    throw e;
-  }
-});
-$("close-report").onclick = () => $("report-dialog").close();
 for (const b of document.querySelectorAll(".tab"))
   b.onclick = action(() => changeView(b.dataset.view));
 $("show-closed").onchange = renderReplay;
@@ -2553,7 +2452,7 @@ document.querySelectorAll(".resizer").forEach((handle) => {
   });
 });
 $("edit-tags").onclick = () => {
-  configTab = "conditions";
+  configTab = "endpoints";
   openSettings();
 };
 $("settings-button").onclick = () => {
@@ -2561,6 +2460,29 @@ $("settings-button").onclick = () => {
   openSettings();
 };
 $("status-button").onclick = openGenerationPanel;
+$("set-state-menu-button").onclick = () => { if (sample) $("set-state-menu").hidden = false; };
+for (const button of document.querySelectorAll("[data-validation-state]")) button.onclick = action(async () => {
+  closeMenus(); $("set-state-menu").hidden = true;
+  if (hasPendingChanges()) await compileSample(true);
+  await json("samples/" + selected + "/state", "POST", {level: Number(button.dataset.validationState)});
+  await refresh();
+});
+async function resumeGeneration(id) {
+  const response = await fetch("/api/scenarios/resume", {method: "POST", headers: {"Content-Type":"application/json", "X-Remix-Token": document.querySelector('meta[name="remix-token"]').content}, body: JSON.stringify({sample_id:id})});
+  const result = await response.json();
+  if (result.confirmation_required) {
+    if (!confirm("This trajectory was edited since its checkpoint. Continue from the saved generation checkpoint and replace those edits?")) return false;
+    await json("scenarios/resume", "POST", {sample_id:id, confirm_edited:true});
+  } else if (!response.ok) throw new Error(result.detail);
+  return true;
+}
+$("resume-trajectory-generation").onclick = action(async () => {
+  closeMenus();
+  if (hasPendingChanges()) await compileSample(true);
+  await resumeGeneration(sample.id);
+  openGenerationPanel(); await refresh();
+});
+
 $("close-settings").onclick = () => $("settings-dialog").close();
 $("save-config").onclick = action(saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
@@ -2571,14 +2493,32 @@ for (const b of document.querySelectorAll("[data-config]"))
 $("generate-one").onclick = action(async () => {
   openGenerationPanel();
   if (hasPendingChanges()) await compileSample(true);
-  await json("run", "POST", { automatic: false });
-  await refresh();
+  $("generation-count").value = "1";
+  // Starting is explicit so the user can select a scenario and request limit.
+  $("scenario-type").focus();
 });
-$("auto-start").onclick = action(async () => {
+$("generate-batch").onclick = action(async () => {
   openGenerationPanel();
   if (hasPendingChanges()) await compileSample(true);
-  await json("run", "POST", { automatic: true });
+  $("generation-count").value = "10";
+  $("generation-count").focus();
+});
+$("view-generation-batch").onclick = action(async () => {
+  if (!state.status.batch) return;
+  if (hasPendingChanges()) await compileSample(true);
+  const query = `@batch:${state.status.batch.id}`;
+  $("sample-search").value = query;
+  sampleOffset = 0;
+  const listing = await json("state?" + new URLSearchParams({query, offset: "0", limit: String(SAMPLE_PAGE_SIZE)}));
+  lastGenerationDraft = listing.status.draft_id;
+  if (listing.samples.length) await selectSample(listing.samples[0].index, true);
   await refresh();
+  $("generation-panel").hidden = true;
+});
+$("view-generation-draft").onclick = action(async () => {
+  const listing = await json("state?" + new URLSearchParams({ selected_id: state.status.draft_id, limit: "1" }));
+  if (Number.isInteger(listing.selected_index)) { await selectSample(listing.selected_index); $("generation-panel").hidden = true; }
+  else toast("This draft is no longer available.");
 });
 $("stop-run").onclick = action(async () => {
   await json("stop", "POST");
@@ -2586,10 +2526,17 @@ $("stop-run").onclick = action(async () => {
   if (selected >= 0 && !hasPendingChanges()) await selectSample(selected, true);
 });
 $("pause-run").onclick = action(async () => {
-  await json("pause", "POST", { resume: state.status.paused });
+  if (!state.status.running) {
+    if (hasPendingChanges()) await compileSample(true);
+    if (state.status.phase === "api_paused") await resumeGeneration(state.status.draft_id);
+    else {
+      const count = $("generation-count");
+      if (!count.reportValidity()) return;
+      await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags(), batch_size: Number(count.value)});
+    }
+  } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   await refresh();
 });
-$("export-button").onclick = () => $("export-dialog").showModal();
 $("close-export").onclick = () => $("export-dialog").close();
 $("download-export").onclick = action(async () => {
   if (hasPendingChanges()) await compileSample(true);
@@ -2648,5 +2595,5 @@ setInterval(
       )
         await selectSample(selected, true);
     })(),
-  1500,
+  2000,
 );

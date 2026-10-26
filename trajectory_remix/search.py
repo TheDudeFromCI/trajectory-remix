@@ -6,6 +6,11 @@ import fnmatch
 import re
 from functools import lru_cache
 
+STATES = {
+    "unfinished": -3, "rejected": -2, "unsuccessful": -1,
+    "pending": 0, "candidate": 1, "validated": 2, "ready": 3,
+}
+
 
 class SearchSyntaxError(ValueError):
     def __init__(self, message):
@@ -163,10 +168,15 @@ class SearchQuery:
             return ("tag", value[1:])
         if value.startswith("@"):
             name, separator, value = value[1:].partition(":")
-            if name not in ("name", "uuid", "windows", "uses_tool"):
-                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, or @uses_tool")
+            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch"):
+                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, or @batch")
             if not separator or not value:
                 raise SearchSyntaxError(f"supply a value after @{name}:")
+            if name == "state":
+                levels = {str(level): level for level in STATES.values()}
+                if value not in STATES and value not in levels:
+                    raise SearchSyntaxError("@state requires unfinished, rejected, unsuccessful, pending, candidate, validated, ready, or a level from -3 to 3")
+                return ("state", STATES[value] if value in STATES else levels[value])
             if name == "windows":
                 match = re.fullmatch(r"(>=|<=|!=|=|>|<)?([0-9]+)", value)
                 if not match:
@@ -194,6 +204,10 @@ class SearchQuery:
                 args.append(node[2])
                 return f"m.window_count {node[1]} ?"
             args.append(node[1])
+            if kind == "state":
+                return "COALESCE(json_extract(m.properties, '$.validation_level'), -3) = ?"
+            if kind == "batch":
+                return "search_glob(?, json_extract(m.properties, '$.generation_batch'))"
             if kind == "text":
                 return "search_text(?, m.search)" if "*" in node[1] else "instr(m.search, ?) > 0"
             if kind in ("name", "uuid"):
@@ -226,6 +240,13 @@ class SearchQuery:
                 return glob_match(node[1], sample.get("id"))
             if kind == "uuid":
                 return glob_match(node[1], trajectory_uuid(sample))
+            if kind in ("state", "batch"):
+                metadata = sample.get("metadata")
+                metadata = metadata if isinstance(metadata, dict) else {}
+                if kind == "state":
+                    level = metadata.get("validation_level")
+                    return (level if level is not None else -3) == node[1]
+                return glob_match(node[1], metadata.get("generation_batch"))
             if kind == "tag":
                 metadata = sample.get("metadata")
                 tags = metadata.get("tags", []) if isinstance(metadata, dict) else []

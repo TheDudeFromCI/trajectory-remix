@@ -8,12 +8,22 @@ description: Author curated parallel training trajectories through the Trajector
 This is the full reference. For a smaller first task, use the
 [short starting guide](guides/start.md), or request `get_authoring_guide()`.
 Retrieve this complete manual explicitly with `topic: "reference"`.
+Before reviewing or repairing, read [the review checklist](guides/review.md)
+using `get_authoring_guide(topic="review")`.
 
 Find existing trajectories with `list_trajectories(query=...)`. Its query language
 supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
-`#tags`, and `@name`, `@uuid`, `@windows`, `@uses_tool` properties. Read
+`#tags`, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch` properties. Read
 [the search guide](guides/search.md) with `get_authoring_guide(topic="search")`
 for examples and precise matching rules.
+
+For "review five candidate trajectories", call
+`list_trajectories(query="@state:candidate", limit=5)`. Add `@batch:<batch-id>`
+when a batch is specified. Filter before fetching replay content; do not list
+every trajectory and check its state manually. Fetch only the matching samples
+you will review. Compiler diagnostics use `validate_trajectory(semantic=false)`;
+`semantic=true` contacts configured model API endpoints, independently of the
+reviewing agent's subscription.
 
 Use this workflow to write a proposed training example. You are the **author** of
 the entire scenario: the user, Kidra, the specialists, their replies and external
@@ -28,8 +38,9 @@ Built-in tools do not run code, launch workers or contact providers. Custom tool
 ## Connect and discover
 
 1. Call `get_session` for the current revision, tokenizer, special token spellings,
-   generation status and window-slot budget. Stop source editing while generation
-   is running; do not guess tokenizer spellings or numeric window slots.
+   generation status and window-slot budget. Only the current generation draft
+   is read-only; unrelated samples remain editable. Do not guess tokenizer
+   spellings or numeric window slots.
 2. Call `get_authoring_guide(topic="reference")` to read this file through MCP if you lack repository
    access. Request `topic="example"` from the same tool for the full build-graph
    trajectory JSON in its `content` string. Call `list_simulated_tools` for
@@ -64,6 +75,26 @@ information across active windows without merging those histories into a single
 stream. On a model forward pass, each generating window can emit one token;
 other windows may remain idle or receive external content.
 
+Close windows as soon as their useful context is no longer needed, rather than
+keeping every window until the final response or closing one while it is still
+being consulted. For tool results, keep the tool window open until the relevant
+facts have been transferred into reasoning; then generate EOS immediately if no
+remaining work needs the original result. Keep reasoning windows open until their
+consumers have used them.
+
+Do not call `file_read` to make an already-visible file available to Kidra:
+all open Kidra windows already participate in global attention. A read or file
+listing needs additional information, such as an unseen file, a changed version,
+or directory metadata. Invisible sandbox files are not automatically visible.
+For every closure, check the entire downstream generation interval, including
+composition of a `chat` request. Closing at its start can remove evidence needed
+for later tokens. A sufficient summary retained elsewhere can permit earlier
+closure; a promise to remember facts cannot.
+
+Reasoning can run in parallel in multiple windows. Analyze independent files,
+constraints, or subtasks concurrently rather than serializing all thought through
+one reasoning window. Each branch must still respect observation availability.
+
 Give each window one coherent purpose. For example, keep the system prompt,
 current user request, working reasoning, user-visible chat and each attached
 document in separate windows. Put each tool interaction in a tool window of its
@@ -80,6 +111,14 @@ as "use the result in Window 7" identifies a specific context, not a vague
 reference to earlier text. Never invent numeric window IDs: obtain the configured
 slots and special tokens from `get_session` and use logical markers in source.
 A window's purpose (`window-type`) and its identity are different things.
+
+### File attachments
+
+Put each user file attachment in its own window; do not paste file contents into
+the user's chat message. Open attachment windows in the same tick as that chat
+message, append the external content with the proper mask, and retain them while
+their context is needed. Virtual files accessed through file tools remain a
+separate simulator capability.
 
 ### Ticks, generation and external appends
 
@@ -199,6 +238,14 @@ Open the named `chat` window before using the synthetic `chat` tool. Open reason
 windows with meaningful `window-type` values. Tool calls create their tool windows
 from tick 0 automatically; reuse a tool window when its token streams do not
 overlap. Keep the total distinct windows within `get_session.max_window_slots`.
+
+Deliver Kidra's user-facing messages through a **visible `chat` tool call** with
+`arguments: {"content": "message body"}`, after listing `chat` with `show_tools`
+in a dedicated tools window. Keep tool schemas out of the system prompt.
+Generate the request in a tool window; the simulator inserts the framed message
+into the open chat window. Do not duplicate that result or substitute direct
+answer generation in chat. Private reasoning belongs in reasoning windows and
+must not become another user-facing draft of the same answer.
 
 These are author-side `create_tool_call` arguments for one specialist turn:
 
@@ -431,6 +478,35 @@ the specialist has the relevant context and the reported result is consistent
 with the supplied artifacts. Do not present those authored results as tests
 actually executed by Remix or as verification of the dataset's real quality.
 
+## Anchor-based scheduling and tool context
+
+Always use tick anchors instead of hard-coded offsets except trivial initial
+input timing (for example, a user message at tick 1). Anchors are invisible and
+may be placed anywhere in a content block, including mid-sentence:
+`I should check what 2123*1565{N_TICK:17} is before proceeding.` Start the
+calculator request at `{N_TICK:17}+1` while independent reasoning continues.
+Parallelize useful work; do not wait for the entire reasoning block to finish
+before issuing an already-justified tool request.
+
+To join multiple branches use `max({N_TICK:7}+1, {N_TICK:8}+1)`. This waits for
+all referenced anchors and preserves dependencies when text lengths change.
+Nested maxima and numeric operands are supported; cycles, missing anchors, tick
+limits, and phase visibility rules still apply. Use +1 when consuming a newly
+generated token or completed result, including each branch of a max expression.
+
+Always provide tools context before the agent uses tools, through a `show_tools`
+event in an open tools window (for example `{"op":"show_tools","window":"tools","tools":["calculator"]}`).
+Do not assume a tool is available to Kidra merely because the authoring API can
+list or execute it.
+The compiler warns with `tool_not_shown` at the request event if the listing is
+missing from visible context. A listing added later, closed, or replaced does
+not count. Fix the warning before handing the trajectory off for review.
+Use an explicit tools window with `window-type: "tools"` for schemas;
+`show_tools` in a system window produces a `tools_in_system` warning. Generating
+reply text directly in chat produces `direct_chat_generation`; EOS/NOOP control
+events are allowed there. These are advisory compiler diagnostics; inspect and
+resolve them before approving a training sample.
+
 ## Validate and hand off
 
 1. Call `validate_trajectory` with its default `semantic: false`. This compiles
@@ -447,7 +523,14 @@ actually executed by Remix or as verification of the dataset's real quality.
 4. Confirm TODOs, reviews, clarifications, progress messages and final handoff
    agree. Remove repetitive file bodies from visible text; use versions and short
    replies. Keep author instructions and raw specialist logs out of Kidra's loss.
-5. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
+5. If asked to validate, finish edits, reread the current trajectory, and review
+   the result. Call `sign_off_trajectory` with `sample_id`, `verdict: "validated"`
+   or `"rejected"`, your `reviewer` label, a specific review `summary`, and the
+   reviewed `revision` as `expected_revision`. It records your own assessment at
+   state 2 or -2 without model API calls. Compilation is required for a passing
+   sign-off; warnings remain your responsibility. Later edits invalidate it.
+   Ready (3) requires a separate human approval.
+6. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
    requester. The UI can export source; the CLI can export training JSONL. Explain
    that this is a curated synthetic sample and report the checks actually done.
 
@@ -466,7 +549,8 @@ to suit the requested training behavior rather than copying generic replies.
 
 ## Tool protocol and schema displays
 
-Use `create_event` with `{"op":"show_tools","window":"system","tools":["chat"]}`
+Open a dedicated window named `tools` with `window-type: "tools"`, then use
+`create_event` with `{"op":"show_tools","window":"tools","tools":["chat"]}`
 to append selected public schemas to an already open window. Set
 `randomly-add-additional-tools: true` to include deterministic extra distractor
 tools. Invisible arguments never appear in these schemas.

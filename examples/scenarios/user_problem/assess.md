@@ -1,0 +1,1 @@
+Decide whether the conversation has resolved the user problem using the success criteria and author-only reference solution. Do not require extra turns solely because a tag says novice or complex. If unresolved, describe the meaningful next exchange. A partial answer or clarification question is not resolution. Return resolved and next_exchange.

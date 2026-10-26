@@ -312,13 +312,9 @@ await click("status-button");
 assert.equal($("generation-panel").hidden, false);
 await click("edit-tags");
 assert($("settings-dialog").hasAttribute("open"));
-await w.document.querySelector('[data-config="tasks"]').onclick();
-assert.equal(
-  w.document.querySelectorAll("#config-content .config-card").length,
-  7,
-);
-await w.document.querySelector('[data-config="conditions"]').onclick();
-assert(w.document.querySelectorAll(".tag-picker button").length >= 40);
+assert.equal(w.document.querySelector('[data-config="tasks"]'), null);
+assert.equal(w.document.querySelector('[data-config="conditions"]'), null);
+assert.match($("settings-dialog").textContent, /Generation Settings/);
 await w.document.querySelector('[data-config="automatic"]').onclick();
 assert.match($("config-content").textContent, /Consecutive failure limit/);
 await click("save-config");
@@ -338,8 +334,10 @@ assert.equal(
 );
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
-for (const id of ["generate-one", "validate-sample", "auto-start"])
-  assert.equal($("generation-menu").contains($(id)), true);
+assert.equal($("generation-menu").contains($("generate-one")), true);
+assert.equal($("generation-menu").contains($("generate-batch")), true);
+for (const id of ["approve-sample", "validate-sample", "auto-start", "report-dialog"])
+  assert.equal($(id), null);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
 assert.equal($("edit-menu").contains($("preferences-button")), true);
@@ -937,11 +935,177 @@ assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupM
 await waitFor(() => !w.document.title.startsWith("*") &&
   !("collapsed_events" in JSON.parse($("sample-json").value).metadata));
 assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
+await click("generate-batch");
+assert.equal($("generation-count").value, "10");
+await click("generate-one");
+assert.equal($("generation-count").value, "1");
+assert.equal($("generation-panel").hidden, false);
+assert.equal($("scenario-type").value, "user_problem");
+assert.equal($("scenario-start"), null);
+assert.equal($("export-button"), null);
+assert.equal($("pause-run").textContent, "Start");
+assert.equal($("pause-run").disabled, false);
+assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
+assert.match($("generation-progress").title, /steps complete/);
+assert.equal($("scenario-tag-controls").hidden, true);
+const beforeBatchStartFetch = w.fetch;
+let batchStartBody;
+let batchQueryRequested = false;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/run") {
+    batchStartBody = JSON.parse(options.body);
+    return new w.Response(JSON.stringify({ok:true}), {status:200, headers:{"content-type":"application/json"}});
+  }
+  if (String(path).startsWith("/api/state?")) {
+    const url = new URL(path, base);
+    if (url.searchParams.get("query") === "@batch:test-batch") {
+      batchQueryRequested = true;
+      url.searchParams.set("query", "");
+    }
+    const response = await beforeBatchStartFetch(url.pathname + url.search, options);
+    const data = await response.json();
+    data.status.batch = {id:"test-batch", target:3, completed:3, attempts:3, attempt_limit:9, state:"complete"};
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return beforeBatchStartFetch(path, options);
+};
+$("generation-count").value = "3";
+await click("pause-run");
+assert.equal(batchStartBody.batch_size, 3);
+assert.equal(batchStartBody.scenario, "user_problem");
+assert.match($("batch-progress").textContent, /3\/3 completed/);
+await click("view-generation-batch");
+assert.equal($("sample-search").value, "@batch:test-batch");
+assert.equal(batchQueryRequested, true);
+assert.equal($("generation-panel").hidden, true);
+w.fetch = beforeBatchStartFetch;
+$("sample-search").value = "";
+$("sample-search").oninput();
+await waitFor(() => $("view-generation-batch").hidden, 5000);
+$("generation-count").value = "1";
+$("randomize-tags").checked = false; $("randomize-tags").onchange();
+assert.equal($("scenario-tag-controls").hidden, false);
+$("randomize-tags").checked = true; $("randomize-tags").onchange();
+assert.equal($("scenario-tag-controls").hidden, true);
+assert.equal($("view-generation-draft").parentElement.lastElementChild.id, "view-generation-draft");
+assert.equal($("view-generation-draft").hidden, true);
+assert.equal($("stop-run").textContent, "Cancel");
+await click("close-generation-panel");
+assert.equal($("generation-panel").hidden, true);
+await click("settings-button");
+await w.document.querySelector('[data-config="endpoints"]').onclick();
+assert.equal($("save-config").disabled, true);
+const timeoutBox = w.document.querySelector('[data-config-path="endpoints.0.timeout"]');
+const urlBox = w.document.querySelector('[data-config-path="endpoints.0.base_url"]');
+urlBox.value = "http://localhost:9090/v1";
+urlBox.dispatchEvent(new w.Event("input", {bubbles:true}));
+timeoutBox.value = "999";
+timeoutBox.dispatchEvent(new w.Event("input", {bubbles:true}));
+assert.equal(timeoutBox.getAttribute("aria-invalid"), "true");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
+await click("settings-button");
+assert.equal(w.document.querySelector('[data-config-path="endpoints.0.base_url"]').value, "http://localhost:9090/v1");
+const fixedTimeout = w.document.querySelector('[data-config-path="endpoints.0.timeout"]');
+fixedTimeout.value = "120";
+fixedTimeout.dispatchEvent(new w.Event("input", {bubbles:true}));
+assert.equal(fixedTimeout.getAttribute("aria-invalid"), "false");
+assert.equal($("save-config").disabled, false);
+await click("save-config");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
+const manualTag = $("scenario-tag-controls").querySelector("select");
+assert(manualTag);
+manualTag.value = manualTag.options[manualTag.options.length - 1].value;
+manualTag.onchange();
+assert.equal($("randomize-tags").checked, false);
+$("randomize-tags").checked = true;
+await click("export-generation-log");
+assert.equal(downloadedFilename, "generation.log");
+assert.equal(typeof await downloadedBlob.text(), "string");
+const actualFetch = w.fetch;
+let logFixture = [{time:"2026-10-25T00:00:00Z", level:"info", message:"Stable log entry"}];
+w.fetch = async (path, options) => {
+  const response = await actualFetch(path, options);
+  if (path.startsWith("/api/state?")) {
+    const data = await response.json(); data.logs = logFixture;
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+await waitFor(() => $("activity-log").textContent.includes("Stable log entry"), 5000);
+const retainedLogNode = $("activity-log").firstChild;
+const previousReads = completedStateReads;
+await waitFor(() => completedStateReads > previousReads, 5000);
+assert.equal($("activity-log").firstChild, retainedLogNode);
+Object.defineProperty($("activity-log"), "scrollHeight", {value:1000, configurable:true});
+Object.defineProperty($("activity-log"), "clientHeight", {value:100, configurable:true});
+$("activity-log").scrollTop = 100;
+logFixture = [...logFixture, {time:"2026-10-25T00:00:01Z", level:"info", message:"New log entry"}];
+await waitFor(() => $("activity-log").textContent.includes("New log entry"), 5000);
+assert.equal($("activity-log").scrollTop, 100);
+logFixture = [];
+await click("clear-generation-log");
+await waitFor(() => !$("activity-log").textContent, 5000);
+assert.equal(w.document.querySelectorAll("[data-validation-state]").length, 7);
+await w.document.querySelector('[data-validation-state="0"]').onclick();
+await waitFor(() => $("sample-list").textContent.includes("Pending"), 5000);
+assert.equal($("set-state-menu-button").disabled, false);
+await waitFor(() => w.document.querySelector('[data-validation-state="0"]').getAttribute("aria-checked") === "true", 5000);
+assert.equal(w.document.querySelectorAll('#set-state-menu [aria-checked="true"]').length, 1);
+await w.document.querySelector('[data-validation-state="3"]').onclick();
+await waitFor(() => $("sample-list").textContent.includes("Ready"), 5000);
+await waitFor(() => w.document.querySelector('[data-validation-state="3"]').getAttribute("aria-checked") === "true", 5000);
+assert.equal(w.document.querySelector('[data-validation-state="0"]').getAttribute("aria-checked"), "false");
+assert.equal($("resume-trajectory-generation").disabled, true);
+await click("preferences-button");
+assert.equal($("model-api-retries").value, "2");
+$("model-api-retries").value = "1";
+await $("preferences-form").onsubmit({preventDefault(){}});
+await click("preferences-button");
+assert.equal($("model-api-retries").value, "1");
+await click("cancel-preferences");
+const beforeResumeFetch = w.fetch;
+let resumeRequests = 0;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/resume") {
+    resumeRequests++;
+    const confirmed = JSON.parse(options.body).confirm_edited;
+    return new w.Response(JSON.stringify(confirmed ? {ok:true} : {detail:"Trajectory edited since checkpoint", confirmation_required:true}), {status:confirmed ? 200 : 409, headers:{"content-type":"application/json"}});
+  }
+  return beforeResumeFetch(path, options);
+};
+confirmResult = false;
+await click("resume-trajectory-generation");
+assert.equal(resumeRequests, 1);
+assert.match(confirmationMessage, /replace those edits/);
+confirmResult = true;
+await click("resume-trajectory-generation");
+assert.equal(resumeRequests, 3);
+w.fetch = beforeResumeFetch;
+const emptyStateResponse = await w.fetch("/api/state", {headers: {
+  "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+}});
+assert.equal(emptyStateResponse.ok, true);
+const emptyState = await emptyStateResponse.json();
+const beforeEmptyFetch = w.fetch;
+w.fetch = async (path, options) => {
+  if (String(path).startsWith("/api/state")) return new w.Response(JSON.stringify({
+    ...emptyState, samples: [], sample_count: 0, total: 0, selected_index: -1,
+    revision: emptyState.revision + 1,
+    status: {...emptyState.status, draft_id: null, draft_index: null},
+  }), {status: 200, headers: {"content-type": "application/json"}});
+  return beforeEmptyFetch(path, options);
+};
+await waitFor(() => $("set-state-menu-button").disabled, 5000);
+assert.equal($("set-state-menu").hidden, true);
+assert.equal(w.document.querySelectorAll('#set-state-menu [aria-checked="true"]').length, 0);
+assert.equal([...w.document.querySelectorAll("[data-validation-state]")].every(button => button.disabled), true);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 99,
+    checks: 120,
     errors,
   }),
 );

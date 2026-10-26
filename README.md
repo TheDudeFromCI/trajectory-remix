@@ -187,7 +187,7 @@ shows 100 results per page. Undo history and compiled previews are bounded.
 
 The dashboard and MCP `list_trajectories` share [the search query language](trajectory_remix/guides/search.md):
 spaces mean AND, `|` means OR, `-` excludes a term/group, `*` matches wildcard
-text, `#coding` filters tags, and `@name`, `@uuid`, `@windows`, `@uses_tool`
+text, `#coding` filters tags, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch`
 filter properties. For example, `python -(math complex) #coding` searches
 readable source text across events. MCP agents can read the complete guide with
 `get_authoring_guide(topic="search")`; the dashboard links it beside the search box.
@@ -573,3 +573,17 @@ ordinary append events can stream manually authored observations with inline
 anchors when authoring reactive trajectories.
 
 Primary API/security references: [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/en/api/tokenizer).
+
+## Scenario-based single sample generation
+
+Pass `--scenarios-dir examples/scenarios` on startup, then open
+**Edit → Generation → Single Sample**. The external directory contains nested
+scenario folders with `flow.yaml` and Markdown prompts. The included `user_problem`
+scenario samples context tags, develops a solution, uses simulated tools, varies
+conversation length, publishes an immediately selectable draft, and validates or
+repairs it. The progress panel supports pause/resume, immediate cancellation,
+colored streamed output, and a configurable LLM concurrency limit (default 1).
+
+Automated drafts require human approval (Validation 3) before token export.
+See [Scenario workflows](docs/SCENARIOS.md) for YAML syntax, failure paths, role
+profiles, inspection, lifecycle details, and the current implementation limits.

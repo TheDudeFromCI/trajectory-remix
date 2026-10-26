@@ -60,19 +60,22 @@ Use `*substring*` for a property/tag substring match.
 
 ## Properties
 
-Property names and string values are case-insensitive. These four properties
+Property names and string values are case-insensitive. These properties
 are supported; arbitrary metadata keys are not query-language properties.
 
 | Property | Meaning | Examples |
 | --- | --- | --- |
 | `@name` | Editable trajectory name, stored as `id`. Matches the full name. An absent name does not match. | `@name:parallel-window-*`, `@name:"my trajectory"` |
 | `@uuid` | Immutable trajectory UUID. Matches the full UUID. | `@uuid:12345678-*` |
+| `@state` | Validation stage: unfinished (-3), rejected (-2), unsuccessful (-1), pending (0), candidate (1), validated (2), ready (3). Accepts the name or numeric level; missing/null levels count as unfinished, matching the dashboard. | `@state:candidate`, `@state:-2` |
+| `@batch` | Generation batch ID from `metadata.generation_batch`. Missing/null IDs do not match, including `@batch:*`. | `@batch:12345678-*`, `-@batch:*` |
 | `@windows` | Number of distinct declared windows, including implicit visible tool-call windows. Repeated opens/calls in one window count once; invisible calls add no window. | `@windows:>5`, `@windows:<=3`, `@windows:2` |
 | `@uses_tool` | A tool called by an authored `tool-call` or `invisible-tool-call` event. Merely advertising a tool with `show_tools` does not count. | `@uses_tool:calculator`, `@uses_tool:file_*` |
 
 Window counts accept `=`, `!=`, `<`, `<=`, `>`, and `>=`, followed immediately
 by a nonnegative integer. Omitting the operator means equality. Values must fit
-a signed 64-bit integer. Other properties accept literal values and `*` globs.
+a signed 64-bit integer. State names/levels require an exact match; unknown states
+report an error. Other properties accept literal values and `*` globs.
 Negation and grouping work with properties: `-@uses_tool:subagent` excludes
 trajectories using that tool; `-(@windows:>5 @uses_tool:calculator)` excludes
 only trajectories satisfying both conditions.
@@ -110,6 +113,17 @@ before pagination; terms can match beyond the first page. Results keep dataset
 order. Fetch an individual result with `get_trajectory(sample_id=...)`.
 Use `offset` and `limit` for subsequent pages. The dashboard shows 100 per page;
 MCP defaults to 50 and accepts limits from 1 through 5000.
+
+To discover five candidates for subscription-backed Codex review, call:
+
+```json
+{"name":"list_trajectories","arguments":{"query":"@state:candidate","limit":5}}
+```
+
+Restrict a review to one batch with `@state:candidate @batch:<batch-id>`.
+`limit` is a separate tool argument, not part of the query string. These searches
+do not contact model endpoints. The reviewer reads and assesses the samples itself;
+`validate_trajectory(semantic=false)` provides compiler diagnostics without API calls.
 
 ## Invalid queries and storage
 

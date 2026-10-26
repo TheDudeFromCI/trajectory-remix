@@ -4,6 +4,9 @@ Goal: fix wording or timing without replacing a trajectory's JSON. This example
 continues `first-steps` from [First trajectory](first.md). For another sample,
 substitute its ID and the addresses returned by `list_events`.
 
+For semantic review or repairs to generated samples, first read
+`get_authoring_guide(topic="review")`. Fixing compiler warnings alone is insufficient.
+
 ## 1. Find the current address and revision
 
 ```json
@@ -90,6 +93,12 @@ what executes. Result text is computed from those fields.
 On a revision conflict, reread events and reapply the intended small change.
 On a compile error, inspect its diagnostic path and repair that event. Avoid
 `replace_trajectory` and `apply_batch` while learning these steps.
+
+Edits invalidate prior reviews: automated samples return to Pending, human drafts
+to Unfinished. If the user asked you to repair **and validate**, reread and review
+the repaired trajectory, then use `sign_off_trajectory` with your reviewer label,
+summary, verdict (`validated` or `rejected`), and the reviewed `expected_revision`.
+It records state 2 or -2 without model API calls; it never grants Ready (3).
 
 If streams overlap in one window, inspect their full start/end intervals.
 For a dependent stream, move it after the earlier completion anchor. For

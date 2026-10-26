@@ -42,6 +42,48 @@ def prepare_sample(sample, existing=None):
     return sample
 
 
+def evaluation_source(sample):
+    source = copy.deepcopy(sample)
+    metadata = source.get("metadata", {})
+    if isinstance(metadata, dict):
+        for key in ("validation_level", "evaluations", "approval"):
+            metadata.pop(key, None)
+    return source
+
+
+def invalidate_automation(sample, existing):
+    """A human edit cannot inherit evaluations for different trajectory content."""
+    previous = existing.get("metadata", {})
+    if isinstance(previous, dict) and (
+        previous.get("origin") == "automation" or "validation_level" in previous
+    ):
+        metadata = sample.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = sample["metadata"] = {}
+        if previous.get("origin") == "automation":
+            metadata["origin"] = "automation"
+        if evaluation_source(sample) != evaluation_source(existing):
+            metadata["validation_level"] = (
+                0 if previous.get("origin") == "automation" else -3
+            )
+            metadata.pop("evaluations", None)
+        else:
+            metadata["validation_level"] = previous.get("validation_level", -3)
+    return sample
+
+
+def training_eligible(sample):
+    metadata = sample.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get(
+            "validation_level", 0 if metadata.get("origin") == "automation" else -3
+        )
+        == 3
+    )
+
+
 def new_sample():
     ident = str(uuid.uuid4())
     return {
@@ -49,6 +91,7 @@ def new_sample():
         "id": ident,
         "uuid": ident,
         "tick-policy": "external-first",
+        "metadata": {"validation_level": -3},
         "defaults": {"implicit-noop-loss-weight": 0.1},
         "replay": {
             "0": [

@@ -26,6 +26,59 @@ MAX_TICKS = 100_000
 MAX_ROWS = 500_000
 
 
+def tick_terms(expression, depth=0):
+    """Parse a bounded max/anchor grammar without evaluating Python."""
+    if not isinstance(expression, str) or len(expression) > 8192 or depth > 16:
+        raise ValueError("Invalid tick expression")
+    expression = expression.strip()
+    match = KEY.fullmatch(expression)
+    if match:
+        return (
+            [(None, int(expression))]
+            if expression.isdigit()
+            else [(int(match[1]), int(match[2] or 0))]
+        )
+    if expression.startswith("max(") and expression.endswith(")"):
+        body, parts, start, nesting = expression[4:-1], [], 0, 0
+        for index, char in enumerate(body):
+            if char == "(":
+                nesting += 1
+            elif char == ")":
+                nesting -= 1
+            elif char == "," and nesting == 0:
+                parts.append(body[start:index])
+                start = index + 1
+            if nesting < 0:
+                raise ValueError("Invalid max expression")
+        parts.append(body[start:])
+        if nesting:
+            raise ValueError("Invalid max expression")
+        terms = [term for part in parts for term in tick_terms(part, depth + 1)]
+        if len(terms) > 128:
+            raise ValueError("Too many max operands")
+        return terms
+    raise ValueError("Expected an integer, {N_TICK:n}+offset, or max(...)")
+
+
+def valid_tick(expression):
+    try:
+        tick_terms(expression)
+        return True
+    except ValueError:
+        return False
+
+
+def shift_tick(expression, offset):
+    terms = tick_terms(expression)
+    if any(delta + offset < 0 for _, delta in terms):
+        raise ValueError("Tick/anchor offset cannot become negative")
+    values = [
+        str(delta + offset) if aid is None else f"{{N_TICK:{aid}}}+{delta + offset}"
+        for aid, delta in terms
+    ]
+    return values[0] if len(values) == 1 else "max(" + ", ".join(values) + ")"
+
+
 def window_names(sample):
     replay = sample.get("replay")
     if not isinstance(replay, dict):
@@ -245,7 +298,11 @@ class Compiler:
 
     def show_tools(self, event, sample, path):
         selected = event.get("tools", [])
-        if not isinstance(selected, list) or any(not isinstance(name, str) for name in selected) or len(set(selected)) != len(selected):
+        if (
+            not isinstance(selected, list)
+            or any(not isinstance(name, str) for name in selected)
+            or len(set(selected)) != len(selected)
+        ):
             raise CompileError("show_tools tools must be unique tool names", path)
         additional = event.get("randomly-add-additional-tools", False)
         if type(additional) is not bool:
@@ -257,12 +314,20 @@ class Compiler:
             raise CompileError(str(error), path) from error
         if additional:
             rng = random.Random(trajectory_uuid(sample) + path)
-            candidates = sorted({name for name, tool in self.tools.tools.items() if not tool.invisible} - set(selected))
+            candidates = sorted(
+                {name for name, tool in self.tools.tools.items() if not tool.invisible}
+                - set(selected)
+            )
             selected = selected + [name for name in candidates if rng.random() < 0.5]
         schemas = [self.tools.get(name).definition() for name in selected]
-        return {"op": "append", "window": event["window"], "source": "tools",
-                "content": json.dumps(schemas, ensure_ascii=False, indent=2),
-                "delivery": "instant", "loss": {"mask": "exclude"}}
+        return {
+            "op": "append",
+            "window": event["window"],
+            "source": "tools",
+            "content": json.dumps(schemas, ensure_ascii=False, separators=(",", ":")),
+            "delivery": "instant",
+            "loss": {"mask": "exclude"},
+        }
 
     def compile(self, sample: dict) -> dict:
         from .sandbox_replay import compile_sandbox, validate_call
@@ -303,7 +368,7 @@ class Compiler:
         window_slots = self.slots_for(sample)
         # Stable tie-breaking independent of JSON object insertion order.
         for key in keys:
-            if not isinstance(key, str) or not KEY.fullmatch(key):
+            if not valid_tick(key):
                 raise CompileError(
                     "Invalid tick expression: use an integer or {N_TICK:n}+offset",
                     str(key),
@@ -346,12 +411,21 @@ class Compiler:
                     "show_tools": showing_tools,
                 }
                 if "replace-content" in event:
-                    if event["op"] != "append" or type(event["replace-content"]) is not bool:
-                        raise CompileError("replace-content requires an append and a boolean", path)
+                    if (
+                        event["op"] != "append"
+                        or type(event["replace-content"]) is not bool
+                    ):
+                        raise CompileError(
+                            "replace-content requires an append and a boolean", path
+                        )
                     item["replace_content"] = event["replace-content"]
                 if event["op"] in ("tool-call", "invisible-tool-call"):
-                    validate_call(event, path, self.tools,
-                                  validate_arguments=event["op"] == "invisible-tool-call")
+                    validate_call(
+                        event,
+                        path,
+                        self.tools,
+                        validate_arguments=event["op"] == "invisible-tool-call",
+                    )
                 if event["op"] == "invisible-tool-call":
                     prepared.append(item)
                     continue
@@ -424,7 +498,8 @@ class Compiler:
                 tick, phase = owner["result_end"], "B"
             else:
                 offset = (
-                    0 if owner["instant"] or boundary == 0
+                    0
+                    if owner["instant"] or boundary == 0
                     else (boundary - 1) // owner["rate"]
                 )
                 tick = start + offset
@@ -444,11 +519,11 @@ class Compiler:
                 raise CompileError("Cyclic anchor dependency", item["path"])
             resolving.add(ident)
             key = item["key"]
-            if key.isdigit():
-                tick = int(key)
-            else:
-                m = KEY.fullmatch(key)
-                aid, delta = int(m[1]), int(m[2] or 0)
+            captures = []
+            for aid, delta in tick_terms(key):
+                if aid is None:
+                    captures.append((delta, None, None, None, delta))
+                    continue
                 if aid not in owners:
                     raise CompileError(f"Undefined anchor {aid}", item["path"])
                 owner, n = owners[aid]
@@ -456,7 +531,13 @@ class Compiler:
                 if captured is None:
                     resolving.remove(ident)
                     return None
-                phase = captured["phase"]
+                captures.append(
+                    (captured["tick"] + delta, aid, n, captured["phase"], delta)
+                )
+            tick = max(value[0] for value in captures)
+            for at, aid, n, phase, delta in captures:
+                if at != tick:
+                    continue
                 if delta == 0 and phase == "D" and n > 0:
                     raise CompileError(
                         f"Anchor {aid} captures a phase-D output; dependent event must start at +1 or later",
@@ -472,7 +553,6 @@ class Compiler:
                         f"Anchor {aid} is captured in phase B; open/append dependents must start at +1 or later",
                         item["path"],
                     )
-                tick = captured["tick"] + delta
             if tick >= MAX_TICKS:
                 raise CompileError(f"Tick limit exceeded ({MAX_TICKS})", item["path"])
             resolving.remove(ident)
@@ -487,22 +567,41 @@ class Compiler:
 
         def finish_result(item, call, tick, output):
             result = {
-                "op": "append", "window": call["window"], "source": "tool",
+                "op": "append",
+                "window": call["window"],
+                "source": "tool",
                 "delivery": item["event"].get("delivery", "instant"),
-                "content": "<tool_result>" + tool_text(output, self.special.values(), json_encoded=True).replace("<", r"\u003c") + "</tool_result>",
+                "content": "<tool_result>"
+                + tool_text(output, self.special.values(), json_encoded=True).replace(
+                    "<", r"\u003c"
+                )
+                + "</tool_result>",
                 "loss": {"mask": "exclude"},
             }
             encoded = self.encode(result, item["path"], noop_weight, literal=True)
             rate = item["event"].get("tokens-per-tick", 1)
             if result["delivery"] == "stream" and call["results"]:
                 tick = max(tick, call["results"][-1]["end"] + 1)
-            offset = ((len(encoded.ids)-1)//rate if result["delivery"] == "stream" and encoded.ids else 0)
+            offset = (
+                (len(encoded.ids) - 1) // rate
+                if result["delivery"] == "stream" and encoded.ids
+                else 0
+            )
             end = tick + offset
             if end >= MAX_TICKS:
-                raise CompileError("Expanded stream exceeds tick limit", item["path"] + ".result")
-            call["results"].append({"event": result, "encoded": encoded,
-                                    "tick": tick, "end": end, "rate": rate,
-                                    "instant": result["delivery"] == "instant"})
+                raise CompileError(
+                    "Expanded stream exceeds tick limit", item["path"] + ".result"
+                )
+            call["results"].append(
+                {
+                    "event": result,
+                    "encoded": encoded,
+                    "tick": tick,
+                    "end": end,
+                    "rate": rate,
+                    "instant": result["delivery"] == "instant",
+                }
+            )
 
         resolve_items()
         sandbox, tool_calls, window_changes = compile_sandbox(
@@ -553,22 +652,58 @@ class Compiler:
             call = calls_by_path[item["path"]]
             # Requests and results share a window that has existed since tick zero.
             # Structured arguments select a registered tool; request text remains data.
-            expanded.append({**item, "event": item["request_event"],
-                             "path": item["path"] + ".request", "synthetic_request": True})
+            expanded.append(
+                {
+                    **item,
+                    "event": item["request_event"],
+                    "path": item["path"] + ".request",
+                    "synthetic_request": True,
+                }
+            )
             for index, result in enumerate(call.pop("results")):
-                expanded.append({**item, "event": result["event"], "tick": result["tick"],
-                                 "path": item["path"] + ".result" + (f".{index}" if index else ""),
-                                 "instant": result["instant"], "rate": result["rate"],
-                                 "encoded": result["encoded"], "synthetic_window_write": True, "sort_stage": 2})
+                expanded.append(
+                    {
+                        **item,
+                        "event": result["event"],
+                        "tick": result["tick"],
+                        "path": item["path"]
+                        + ".result"
+                        + (f".{index}" if index else ""),
+                        "instant": result["instant"],
+                        "rate": result["rate"],
+                        "encoded": result["encoded"],
+                        "synthetic_window_write": True,
+                        "sort_stage": 2,
+                    }
+                )
         for index, change in enumerate(window_changes):
-            message = {"op": "append", "window": change["window"], "source": "tool",
-                       "content": tool_text(change["content"], self.special.values()), "loss": {"mask": "exclude"}}
-            expanded.append({"event": message, "key": str(change["tick"]),
-                             "tick": change["tick"], "path": change["path"] + f".window.{index}",
-                             "instant": True, "rate": 1, "replace_content": change["replace"],
-                             "synthetic_window_write": True, "order": change["order"], "sort_stage": 1,
-                             "encoded": self.encode(message, change["path"], noop_weight, literal=True)})
-        expanded.sort(key=lambda item: (item.get("order", -1), item.get("sort_stage", 0)))
+            message = {
+                "op": "append",
+                "window": change["window"],
+                "source": "tool",
+                "content": tool_text(change["content"], self.special.values()),
+                "loss": {"mask": "exclude"},
+            }
+            expanded.append(
+                {
+                    "event": message,
+                    "key": str(change["tick"]),
+                    "tick": change["tick"],
+                    "path": change["path"] + f".window.{index}",
+                    "instant": True,
+                    "rate": 1,
+                    "replace_content": change["replace"],
+                    "synthetic_window_write": True,
+                    "order": change["order"],
+                    "sort_stage": 1,
+                    "encoded": self.encode(
+                        message, change["path"], noop_weight, literal=True
+                    ),
+                }
+            )
+        expanded.sort(
+            key=lambda item: (item.get("order", -1), item.get("sort_stage", 0))
+        )
         prepared = expanded
         for order, item in enumerate(prepared):
             item["order"] = order
@@ -749,9 +884,21 @@ class Compiler:
                     reset_items.add(item["order"])
                     wid = item["event"]["window"]
                     for previous in rows:
-                        if previous["window"] == wid and previous["durable"] and previous["op"] not in ("open", "header") and "removed_at" not in previous:
-                            previous["removed_at"] = {"tick": tick, "input_rank": input_rank}
-                    positions[wid] = sum(r["durable"] for r in rows if r["window"] == wid and r["op"] in ("open", "header"))
+                        if (
+                            previous["window"] == wid
+                            and previous["durable"]
+                            and previous["op"] not in ("open", "header")
+                            and "removed_at" not in previous
+                        ):
+                            previous["removed_at"] = {
+                                "tick": tick,
+                                "input_rank": input_rank,
+                            }
+                    positions[wid] = sum(
+                        r["durable"]
+                        for r in rows
+                        if r["window"] == wid and r["op"] in ("open", "header")
+                    )
                 if delivery.get("empty"):
                     continue
                 item = delivery["item"]
@@ -808,6 +955,64 @@ class Compiler:
             for w in windows.values()
             if w["close"] is None
         ]
+        for item in prepared:
+            event = item["event"]
+            window = event.get("window")
+            purpose = windows.get(window, {}).get("type")
+            if item.get("show_tools") and (window == "system" or purpose == "system"):
+                warnings.append(
+                    {
+                        "severity": "warning",
+                        "code": "tools_in_system",
+                        "path": item["path"],
+                        "message": "show_tools adds tool schemas to the system prompt. Put show_tools in a dedicated tools window instead.",
+                    }
+                )
+            if event["op"] == "generate" and (window == "chat" or purpose == "chat"):
+                text = item["encoded"].text
+                for token in self.special.values():
+                    text = text.replace(token, "")
+                if text.strip():
+                    warnings.append(
+                        {
+                            "severity": "warning",
+                            "code": "direct_chat_generation",
+                            "path": item["path"],
+                            "message": "Text is generated directly into chat. Send the reply with a visible chat tool call instead; generate only EOS/NOOP controls in the chat window.",
+                        }
+                    )
+        # Use the actual expanded schemas (including randomized additions), and
+        # the normal visibility predicate so closed/replaced context cannot count.
+        shown = {
+            item["path"]: {
+                schema["function"]["name"]
+                for schema in json.loads(item["event"]["content"])
+            }
+            for item in prepared
+            if item.get("show_tools")
+        }
+        shown_rows = {
+            row["event"]: row
+            for row in rows
+            if row["event"] in shown and row["durable"]
+        }
+        for call in tool_calls:
+            if call.get("invisible"):
+                continue
+            query = {"tick": call["request_start"], "phase": "D"}
+            if not any(
+                call["tool"] in shown[path]
+                and visible_to(query, row, list(windows.values()))
+                for path, row in shown_rows.items()
+            ):
+                warnings.append(
+                    {
+                        "severity": "warning",
+                        "code": "tool_not_shown",
+                        "path": call["path"],
+                        "message": f"Tool '{call['tool']}' is used at tick {call['request_start']} without a visible show_tools listing. Add it to show_tools before the request.",
+                    }
+                )
         plan = {
             "sample_id": sample["id"],
             "trajectory_uuid": trajectory_uuid(sample),
@@ -839,7 +1044,11 @@ class Compiler:
         cumulative = defaultdict(list)
         counts = defaultdict(int)
         for r in plan["rows"]:
-            if r["tick"] <= tick and r["durable"] and ("removed_at" not in r or tick < r["removed_at"]["tick"]):
+            if (
+                r["tick"] <= tick
+                and r["durable"]
+                and ("removed_at" not in r or tick < r["removed_at"]["tick"])
+            ):
                 counts[r["window"]] += 1
                 if r["token_id"] not in self.ids.values():
                     cumulative[r["window"]].append(r["token_id"])
@@ -867,7 +1076,15 @@ def visible_to(query: dict, key: dict, windows: list[dict]) -> bool:
     if not key["durable"]:
         return False
     removed = key.get("removed_at")
-    if removed and (query["tick"] > removed["tick"] or query["tick"] == removed["tick"] and (query["phase"] == "D" or query["phase"] == "B" and query["input_rank"] >= removed["input_rank"])):
+    if removed and (
+        query["tick"] > removed["tick"]
+        or query["tick"] == removed["tick"]
+        and (
+            query["phase"] == "D"
+            or query["phase"] == "B"
+            and query["input_rank"] >= removed["input_rank"]
+        )
+    ):
         return False
     life = next(w for w in windows if w["id"] == key["window"])
     if life["open"] > query["tick"] or (

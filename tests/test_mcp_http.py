@@ -298,7 +298,8 @@ async def test_real_http_sdk_sse_and_stdio_share_the_dashboard(tmp_path, compile
             async with httpx.AsyncClient(
                 base_url=base, trust_env=False, timeout=5, headers=ACCEPT
             ) as client:
-                for _ in range(100):
+                # Cold dependency imports can exceed five seconds on shared runners.
+                for _ in range(600):
                     try:
                         (await client.get("/")).raise_for_status()
                         break
@@ -308,7 +309,7 @@ async def test_real_http_sdk_sse_and_stdio_share_the_dashboard(tmp_path, compile
                         ).read_text()
                         await asyncio.sleep(0.05)
                 else:
-                    pytest.fail("Server did not start")
+                    pytest.fail("Server did not start: " + (tmp_path / "server.log").read_text())
 
                 def factory(headers=None, timeout=None, auth=None):
                     return httpx.AsyncClient(

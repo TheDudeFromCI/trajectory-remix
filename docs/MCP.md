@@ -15,6 +15,7 @@ the next task; it does not concatenate the lessons or load the entire manual:
 
 | Topic | Walkthrough |
 | --- | --- |
+| `review` | [Review shared context, evidence lifetimes, tool necessity and semantic correctness before sign-off](../trajectory_remix/guides/review.md) |
 | `first` | [Create a tiny trajectory; learn start ticks, token streams and closure](../trajectory_remix/guides/first.md) |
 | `parallel` | [Overlap independent specialist work and anchor dependent follow-ups](../trajectory_remix/guides/parallel.md) |
 | `edit` | [Repair wording and timing with targeted event edits](../trajectory_remix/guides/edit.md) |
@@ -204,6 +205,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 | `undo_edits` | Undo one or more source actions as one revision change. |
 | `redo_edits` | Reapply undone source actions. |
 | `validate_trajectory` | Compile and optionally run configured semantic LLM validators. |
+| `sign_off_trajectory` | Record the calling agent's completed review as Validated (2) or Rejected (-2), with reviewer, summary and required reviewed revision; no model API calls. |
 | `get_diagnostics` | Read compiler errors/warnings, optionally filtered by severity. |
 | `get_anchors` | Read resolved anchor ticks, phases and owning event paths/windows. |
 | `get_window_history` | Read one window's lifecycle, cumulative text, event spans and token rows. |
@@ -729,10 +731,37 @@ language as the dashboard. It searches readable source string values, including
 replay text, arguments and authored outcomes. Spaces mean AND, `|` means OR,
 `-` negates a term/group, parentheses nest, and `*` provides word wildcards.
 `#tag` filters complete metadata tags; properties are `@name`, `@uuid`,
-`@windows` (numeric comparisons) and `@uses_tool` (actual visible/invisible calls).
+`@windows` (numeric comparisons), `@uses_tool` (actual visible/invisible calls),
+`@state` (validation stage), and `@batch` (generation batch ID).
+For example, `list_trajectories(query="@state:candidate", limit=5)` discovers
+five candidates for external review without calling a model API.
 All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
 Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
 through MCP with `get_authoring_guide(topic="search")`.
+
+Before reviewing or repairing, read `get_authoring_guide(topic="review")`, the
+[semantic review checklist](../trajectory_remix/guides/review.md). It explains
+shared open-window attention, redundant file operations, evidence lifetimes
+throughout generation, and independent correctness checks. Zero compiler
+warnings do not establish these properties.
+
+After repairing a candidate, edits reset its previous review state. To sign off
+your own review, reread the repaired source, inspect compiler diagnostics and
+semantic correctness, then call:
+
+```json
+{"name":"sign_off_trajectory","arguments":{"sample_id":"example-1","verdict":"validated","reviewer":"GPT-6.1 via Codex","summary":"Reviewed tool visibility, timing, answer correctness and chat delivery after repairs.","expected_revision":42}}
+```
+
+Replace `42` with the revision of the source you actually reviewed. A stale
+revision fails without changing the sample. `verdict: "rejected"` records -2 and
+can also record rejection of a sample that fails compilation. A passing review
+requires successful compilation; returned warnings remain the reviewer's
+responsibility. The tool records a self-reported reviewer label, summary,
+timestamp, reviewed revision, source hash and tokenizer/tool fingerprints in
+`metadata.evaluations`. It does not independently verify the agent's assessment
+or identity and does not invoke configured model endpoints. Subsequent content
+edits invalidate the sign-off; undo/redo includes it. It never marks Ready (3).
 
 `query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
 (`all`/`any`), `offset`, and `limit`. Scalar filter operators are
@@ -762,7 +791,16 @@ calls. Visible event editing and `call_simulated_tool` reject such arguments.
 The old list of external mutation tools no longer restricts invisible calls.
 
 Insert selected public schemas using `create_event` with an event like
-`{"op":"show_tools","window":"system","tools":["chat"],"randomly-add-additional-tools":true}`.
-This is a masked text append to an already open window. The checkbox editor
+`{"op":"show_tools","window":"tools","tools":["chat"],"randomly-add-additional-tools":true}`.
+Open the dedicated tools window first with `window-type: "tools"`; keep schemas
+out of the system prompt. This is a masked text append to that window. The checkbox editor
 supports the same fields. See [the tool contract](SANDBOX.md) for custom Python
 modules, state snapshots, and external schema/hash dependencies.
+
+Compiler diagnostics warn about `show_tools` in a system window
+(`tools_in_system`) and reply text generated directly into chat
+(`direct_chat_generation`). Send replies through the visible `chat` tool;
+EOS/NOOP control events in chat are allowed. These warnings do not fail local
+compilation, and include the source event path for targeted repairs.
+
+Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.

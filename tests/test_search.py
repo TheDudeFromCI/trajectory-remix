@@ -10,7 +10,7 @@ from trajectory_remix.storage import DatasetStore, SQLiteSamples
 @pytest.fixture
 def search_store(compiler, tmp_path):
     store = DatasetStore.initialize(tmp_path / "search.sqlite", compiler)
-    store.replace([
+    samples = [
         {"id": "parallel-window-one", "metadata": {"tags": ["Coding", "linear-math"], "json_key_only": "Straße"},
          "replay": {"0": [*[{'op': 'open', 'window': f'w{i}'} for i in range(6)],
                           {"op": "append", "window": "w0", "content": "Python math list human apple a.b a?b [abc]"},
@@ -27,7 +27,11 @@ def search_store(compiler, tmp_path):
         {"id": "both-excluded", "replay": {"0": [{"op": "append", "content": "python math complex superhuman orange #coding"}]}},
         {"id": "my trajectory", "metadata": {"note": "ruby\njava list\n-complex\na|b"}, "replay": {}},
         {"replay": {}},
-    ], 0)
+    ]
+    # UUIDs are searchable text too; random hexadecimal words can match a*e.
+    for index, sample in enumerate(samples):
+        sample['uuid'] = f'{index:08d}-0000-4000-8000-000000000000'
+    store.replace(samples, 0)
     return store
 
 
@@ -225,3 +229,81 @@ async def test_edits_undo_redo_deletion_and_failed_import_update_search_atomical
     assert invalid.status_code == 422
     assert await count("rollback-needle | @uses_tool:calculator") == 0
     assert await count(query) == 1
+
+
+@pytest.fixture
+def review_store(search_store):
+    samples = []
+    for level, name in enumerate(
+        ['unfinished', 'rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready'], -3
+    ):
+        samples.append({
+            'id': name,
+            'metadata': {'validation_level': level, 'generation_batch': 'Batch-A' if level <= 1 else 'Batch-B'},
+            'replay': {},
+        })
+    samples.extend([
+        {'id': 'missing', 'replay': {}},
+        {'id': 'null', 'metadata': {'validation_level': None, 'generation_batch': None}, 'replay': {}},
+        {'id': 'text-only', 'metadata': {'note': 'candidate Batch-A'}, 'replay': {}},
+    ])
+    search_store.replace(samples, search_store.info()[0])
+    return search_store
+
+
+@pytest.mark.parametrize('query,expected', [
+    *[(f'@state:{name.upper()}', [name]) for name in
+      ['rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready']],
+    *[(f'@state:{level}', [name]) for level, name in enumerate(
+      ['rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready'], -2)],
+    ('@state:unfinished', ['unfinished', 'missing', 'null', 'text-only']),
+    ('@state:-3', ['unfinished', 'missing', 'null', 'text-only']),
+    ('@batch:BATCH-A', ['unfinished', 'rejected', 'unsuccessful', 'pending', 'candidate']),
+    ('@batch:batch-*', ['unfinished', 'rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready']),
+    ('-@batch:*', ['missing', 'null', 'text-only']),
+    ('@state:candidate @batch:batch-a', ['candidate']),
+    ('(@state:candidate | @state:validated) -@batch:batch-a', ['validated']),
+    ('-@state:unfinished -@state:rejected', ['unsuccessful', 'pending', 'candidate', 'validated', 'ready']),
+    ('@batch:"x\' OR 1=1 --"', []),
+])
+def test_review_discovery_sql_and_draft_parity(review_store, query, expected):
+    total, result = review_store.listing(query)
+    assert total == len(expected)
+    assert [row['id'] for row in result] == expected
+    assert [sample['id'] for sample in review_store.samples if SearchQuery(query).matches(sample)] == expected
+
+
+def test_review_discovery_uses_metadata_before_pagination(review_store, monkeypatch):
+    def forbidden(*args):
+        raise AssertionError('Review discovery must not decode trajectory sources')
+
+    monkeypatch.setattr(SQLiteSamples, '__iter__', forbidden)
+    monkeypatch.setattr(SQLiteSamples, '__getitem__', forbidden)
+    total, page = review_store.listing('@batch:batch-a -@state:unfinished', offset=1, limit=2)
+    assert total == 4
+    assert [row['id'] for row in page] == ['unsuccessful', 'pending']
+
+
+async def test_candidate_discovery_through_mcp_and_dashboard(studio):
+    app, client = studio
+    for i in range(7):
+        app.state.dataset.store.samples.append({
+            'id': f'candidate-{i}',
+            'metadata': {'validation_level': 1, 'generation_batch': 'review-batch'},
+            'replay': {},
+        })
+    query = '@state:candidate @batch:review-batch'
+    mcp = await client.post('/api/mcp/call', json={
+        'name': 'list_trajectories', 'arguments': {'query': query, 'limit': 5},
+    })
+    dashboard = await client.get('/api/state', params={'query': query, 'limit': 5})
+    assert mcp.status_code == dashboard.status_code == 200
+    assert mcp.json()['total'] == dashboard.json()['total'] == 7
+    assert [s['id'] for s in mcp.json()['trajectories']] == [f'candidate-{i}' for i in range(5)]
+    assert [s['id'] for s in dashboard.json()['samples']] == [f'candidate-{i}' for i in range(5)]
+    assert (await client.post('/api/samples/1/state', json={'level': 2})).status_code == 200
+    remaining = await client.post('/api/mcp/call', json={
+        'name': 'list_trajectories', 'arguments': {'query': query, 'limit': 5},
+    })
+    assert remaining.json()['total'] == 6
+    assert 'candidate-0' not in [s['id'] for s in remaining.json()['trajectories']]
