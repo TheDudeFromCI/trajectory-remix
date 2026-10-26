@@ -27,13 +27,10 @@
         "window": "task-code",
         "tool": "note_save",
         "arguments": {
-          "key": "code",
-          "text": "Implement double",
+          "name": "code",
+          "description": "Implement double",
           "status": "doing",
-          "owner": "coder",
-          "acceptance_criteria": [
-            "Multiply a numeric value by two"
-          ]
+          "priority": "high"
         },
         "result-anchor": 1
       },
@@ -42,11 +39,11 @@
         "window": "task-review",
         "tool": "note_save",
         "arguments": {
-          "key": "review",
-          "text": "Review the implementation",
-          "status": "todo",
-          "owner": "reviewer",
-          "depends_on": [
+          "name": "review",
+          "description": "Review the implementation",
+          "priority": "medium",
+          "status": "not started",
+          "blocked_by": [
             "code"
           ]
         },
@@ -104,8 +101,8 @@
         "window": "code-done",
         "tool": "note_save",
         "arguments": {
-          "key": "code",
-          "text": "Implementation available",
+          "name": "code",
+          "description": "Implementation available",
           "status": "done"
         },
         "result-anchor": 4
@@ -152,8 +149,8 @@
         "window": "review-doing",
         "tool": "note_save",
         "arguments": {
-          "key": "review",
-          "text": "Source review underway",
+          "name": "review",
+          "description": "Source review underway",
           "status": "doing"
         },
         "result-anchor": 7
@@ -202,8 +199,8 @@
         "window": "review-done",
         "tool": "note_save",
         "arguments": {
-          "key": "review",
-          "text": "Source review complete; no test execution claimed",
+          "name": "review",
+          "description": "Source review complete; no test execution claimed",
           "status": "done"
         },
         "result-anchor": 10
