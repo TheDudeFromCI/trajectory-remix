@@ -8,8 +8,21 @@ def result(value, done=True, modified=False):
     return json.dumps({"ok": True, "result": value}, ensure_ascii=False), done, modified
 
 
-def failure(error, modified=False):
-    return json.dumps(tool_failure(error)), True, modified
+def failure(error, modified=False, *, max_bytes=None):
+    value = tool_failure(error)
+    output = json.dumps(value)
+    if max_bytes is not None and len(output.encode()) > max_bytes:
+        message = value["error"]
+        low, high = 0, len(message)
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = json.dumps({**value, "error": message[:middle] + "…"})
+            if len(candidate.encode()) <= max_bytes:
+                low = middle
+            else:
+                high = middle - 1
+        output = json.dumps({**value, "error": message[:low] + "…"})
+    return output, True, modified
 
 
 SYSTEM_DEFAULTS = {

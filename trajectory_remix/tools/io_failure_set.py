@@ -6,7 +6,7 @@ from ._simulation import result
 
 name = "io_failure_set"
 invisible = True
-description = "Replace simulated I/O failure rules. First matching rule wins; tool/path are globs. remaining makes a transient failure (otherwise repeats). code may be EIO, ENOSPC, EACCES, ETIMEDOUT, etc. Empty rules clears failures. Applied once at dispatch, before side effects, to file operations, watchers and network_request."
+description = "Replace simulated I/O failure rules. First matching rule wins; tool/path are globs. remaining makes a transient failure (otherwise repeats). code may be EIO, ENOSPC, EACCES, ETIMEDOUT, etc. Empty rules clears failures. Applied once at dispatch, before side effects, to file operations, watchers and web_search/web_open/web_find. Web refs resolve to their source URL for path matching."
 schema = {
     "type": "object",
     "properties": {

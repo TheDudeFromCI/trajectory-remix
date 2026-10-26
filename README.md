@@ -516,12 +516,19 @@ for arguments, timing, and examples.
 File tools also provide line-range reads, atomic batches of exact-text patches,
 copy/move/rename, glob listing and content search. Invisible `tool_permissions_set`
 and `io_failure_set` configure user rejections and transient/persistent faults.
-`network_request` models HTTP against invisible `network_set` fixtures, including
-response sequences, latency, timeouts and transport failures. All timing uses the
-trajectory clock; network simulation makes no internet requests. See
+`web_search`, `web_open` and `web_find` provide synthetic web research against
+readable pages seeded with invisible `web_set` calls. Search returns ranked,
+verbatim snippets; page reads and passage finding share stable source references.
+Results have strict byte budgets and continuation positions, including for long
+single-line pages. All timing uses the trajectory clock, with simulated latency,
+timeouts and transport failures; web tools make no internet requests. See
 [file operations](docs/SANDBOX.md#file-operations),
 [permissions and faults](docs/SANDBOX.md#simulated-permissions-and-io-failures), and
-[HTTP simulation](docs/SANDBOX.md#simulated-network-io).
+[web research](docs/SANDBOX.md#synthetic-web-research).
+
+The web tools replace `network_set`/`network_request`. Existing trajectories using
+those names must be reauthored with readable `web_set.pages` and the corresponding
+search/read calls; there is no automatic conversion of arbitrary HTTP fixtures.
 
 ## Headless export and tests
 

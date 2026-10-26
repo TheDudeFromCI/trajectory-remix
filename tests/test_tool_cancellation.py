@@ -3,7 +3,7 @@ import pytest
 from trajectory_remix.compiler import Compiler
 from trajectory_remix.sandbox_replay import tool_calls_frame
 from trajectory_remix.tools import ToolRegistry
-from test_io_extensions import call, hidden, route
+from test_io_extensions import call, hidden
 
 
 def eos(window, content="<|eos|>"):
@@ -38,14 +38,18 @@ def test_eos_abandons_partial_tool_args_without_dispatch(compiler, sample):
         ("timer", {"mode": "timeout", "seconds": 100}, "timers"),
         ("timer", {"mode": "interval", "seconds": 0.1, "count": 100}, "timers"),
         ("file_watch", {"path": "x", "timeout_seconds": 100}, "file_watchers"),
-        ("network_request", {"url": "https://example.test/api"}, "network_pending"),
+        ("web_open", {"url": "https://example.test/api"}, "web_pending"),
+        ("web_search", {"query": "example"}, "web_pending"),
+        ("web_find", {"url": "https://example.test/api", "text": "example"}, "web_pending"),
     ],
 )
 def test_eos_cleans_pending_state_and_preserves_other_active_calls(
     compiler, sample, tool, args, key
 ):
     sample["replay"]["0"].append(
-        hidden("network_set", {"routes": [route({"latency_seconds": 20})]})
+        hidden("web_set", {"pages": [{"url": "https://example.test/api",
+               "title": "Example", "text": "example", "latency_seconds": 20}],
+               "search_latency_seconds": 20})
     )
     sample["replay"]["1"] = [
         call(tool, args, "cancel"),
