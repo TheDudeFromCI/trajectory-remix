@@ -7,9 +7,12 @@ neither. Read this guide before reviewing or repairing generated trajectories.
 ## 1. Establish what Kidra can know
 
 Kidra attends to **all currently open Kidra windows** through shared global
-attention. It does not need a tool call to read another open window. A closed
-window is removed from attention; the reviewer seeing its historical contents
-does not mean Kidra still sees them. An idle open window retains context.
+attention. It does not need a tool call to read another open window. Closing a
+window drops its contents from Kidra's active context: the attention mechanism
+can no longer see or use that lost context, including while generating later
+tokens of an ongoing stream. Historical replay records do not preserve access
+for Kidra. Only information already retained in another open window remains
+available. An idle open window retains context.
 Replaced content is also unavailable unless preserved elsewhere.
 
 Invisible sandbox files are not visible merely because they exist. File tools
@@ -53,7 +56,34 @@ closing A loses that evidence. Close both after their last actual use; do not
 keep all windows open until the final reply by default. Document the dependency
 that justifies each nontrivial closure.
 
-## 4. Check the intended training behavior
+## 4. Look for performance improvements
+
+Use multiple reasoning windows for independent analyses, such as checking one
+file's logic, another file's API contract, and the user's constraints. Overlap
+their streams when the required inputs are available; each generating window can
+emit a token in the same tick. Do not serialize unrelated reasoning through one
+window. Dependent conclusions must still wait for their supporting facts; join
+the necessary completion anchors with `max(...)` before combining results.
+
+Extract relevant facts from large documents into a smaller reasoning or evidence
+window. Preserve the exact details downstream work needs: constraints, values,
+quotes, exceptions, and source/version references where relevant. Once that
+transfer finishes and no consumer needs the original document, close its window
+to reduce active context and attention workload. A reference to a closed document
+does not make its contents available, and an incomplete summary can break later
+reasoning. Check that the retained information really supports the final answer.
+
+For example, extract a configuration's three relevant settings and their caveats,
+then close the long configuration window while reasoning from those settings.
+Retain the original if later work still requires exact text omitted from the
+extraction. Close temporary analysis windows after their last consumer finishes.
+
+These are opportunities to reduce serial ticks and active context, not guaranteed
+wall-clock speedups. More windows also add overhead. Prefer useful concurrency
+and compact evidence over redundant analyses or summaries that duplicate an
+entire document without allowing earlier closure.
+
+## 5. Check the intended training behavior
 
 Verify the solution independently against the problem and supplied evidence.
 Review user knowledge, claims, uncertainty, clarifications and final answer for
@@ -62,7 +92,7 @@ Attachments belong in separate windows opened with the user's message. Tool
 schemas belong in a visible tools window before calls. Kidra sends messages via
 the `chat` tool; generated chat-window prose is not a delivered message.
 
-## 5. Repair, reread, then sign off
+## 6. Repair, reread, then sign off
 
 Make targeted edits, rerun `validate_trajectory(semantic=false)` and inspect its
 diagnostics. Recheck semantic dependencies affected by the edits; moving a closure
