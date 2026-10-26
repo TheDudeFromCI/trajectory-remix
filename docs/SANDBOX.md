@@ -47,6 +47,14 @@ use any key, including `tool_calls`, without colliding with scheduler metadata.
 The author-facing Sandbox panel displays the dictionary as JSON. Training
 exports contain only replay rows and window lifecycle data.
 
+Calling a TODO tool (`note_save`, `note_list`, or `note_delete`) creates a
+compiler-managed `notes` context window, open from tick zero and occupying a
+normal window slot. The model sees all six priority buckets as JSON, updated
+atomically in phase B whenever any task changes. The tool scheduler writes
+masked, replace-content updates; old notes are removed from attention. This
+reserved window is read-only to tools and cannot be authored directly. Task
+state still persists in the sandbox's `notes` dictionary.
+
 `duration-ticks` remains supported by the built-in simulation tools as a legacy
 execution delay. New tools implement their own progress in `run` and normally
 omit it. `ExecutionContext`, available through

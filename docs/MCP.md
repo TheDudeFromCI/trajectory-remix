@@ -571,7 +571,8 @@ These commands use the same `Sandbox` dispatcher as trajectory generation:
   `expected_version` to reject stale changes. Old versions remain readable after
   editing or deleting the current file, within the session's storage quota.
 - Lexical memory search: `memory_save`, `memory_search`.
-- Notes/tasks: `note_save`, `note_list`, `note_delete`.
+- Prioritized TODO tasks: `note_save`, `note_list`, `note_delete`. The compiler
+  opens a managed `notes` JSON context window for trajectories using these tools.
 - Text skills: `skill_save`, `skill_load`, `skill_list`.
 - Authored synthetic delegation: `subagent`; the author supplies its outcome.
 - Conversation inspection: `subagent_list`, `subagent_get`, `subagent_close`.
@@ -686,12 +687,15 @@ closed conversation fails. Replay
 checks availability at dispatch, so a later completion cannot justify an early
 resume. Parallel recorded conversations remain independent.
 
-`note_save` now accepts optional `owner`, `depends_on`, `blockers` and
-`acceptance_criteria`; the latter three are string arrays. Status also accepts
-`blocked`. Omitted optional fields are retained on update; use an empty string or
-array to clear them. Self-dependencies/cycles are rejected. Marking a task `done`
-requires all dependencies to exist and be done, with no blockers. Acceptance
-criteria are recorded requirements, not executable evidence checks.
+`note_save` uses `name` to identify a TODO task. New tasks require `description`,
+`priority` (`critical`, `very high`, `high`, `medium`, `low`, `very low`)
+and `status` (`not started`, `doing`, `paused`, `blocked`, `done`).
+Optionally provide `blocked_by` as an array of task names. Updates retain
+omitted fields; clear blockers with an empty array. Cycles are rejected and
+all blockers must be done before completing a task. `note_list` returns the
+six priority buckets, matching the always-open, externally updated `notes`
+context window. This window occupies a project slot and appears at tick zero
+in trajectories that invoke note tools; it may not be manually authored.
 
 Synthetic subagent responses are bounded to nonempty text of at most 200,000
 characters and recorded outcomes to 200,000 bytes. Conversation state and artifact

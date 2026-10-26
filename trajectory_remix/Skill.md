@@ -398,8 +398,8 @@ simulations; a stored skill is text, not installed code.
 | `file_copy`, `file_move`, `file_rename` | source/destination; optional overwrite and source expected_version. Move and rename are atomic; all retain historical artifacts. |
 | `file_search` | query; optional regex, case_sensitive, glob, context_lines and max_results. Returns bounded line-numbered matches. |
 | `memory_save`, `memory_search`                    | Save `key`, `text`; search with `query`, returning up to eight lexical matches.                                                                                    |
-| `note_save`                                       | `key`, `text`, `status` (`todo`, `doing`, `blocked`, `done`); optional `owner`, `depends_on`, `blockers`, `acceptance_criteria`. The last three are string arrays. |
-| `note_list`, `note_delete`                        | List notes with no arguments; delete with `key`.                                                                                                                   |
+| `note_save` | `name`; on creation also `description`, `priority` (`critical`, `very high`, `high`, `medium`, `low`, `very low`), `status` (`not started`, `doing`, `paused`, `blocked`, `done`); optional `blocked_by` task-name array. Updates retain omitted fields. |
+| `note_list`, `note_delete` | List the six priority buckets with no arguments; delete by `name`. |
 | `skill_save`, `skill_load`, `skill_list`          | Save `name`, `content`; retrieve by `name`; list with no arguments.                                                                                                |
 | `subagent`                                        | `task`; optional `resume` and `artifacts`; author supplies the outcome separately. No real delegation occurs.                                                      |
 | `subagent_list`, `subagent_get`, `subagent_close` | List with no arguments; inspect/close with `conversationId`.                                                                                                       |
@@ -424,11 +424,20 @@ are cleaned up. Earlier mutations remain. A cancelled call's result-anchor
 captures its EOS tick. See [cancellation](../docs/SANDBOX.md#cancellation-with-eos).
 
 
-Optional note fields survive updates; clear them with empty strings/arrays. A
-task cannot become `done` with blockers or missing/unfinished dependencies.
-Self-dependencies and cycles are errors. Acceptance criteria are descriptive;
-Remix does not execute them. Create a task per specialist and update statuses
-when the corresponding synthetic observations justify it.
+Notes are prioritized TODO tasks rather than searchable memories. Use a stable task
+`name`, a `description`, a `status`, and a `priority`. `blocked_by` lists other
+task names; it is optional and survives updates until explicitly cleared with
+`[]`. Self-dependencies and cycles are errors, and a task cannot become `done`
+until all blockers exist and are done. Reopening or deleting a prerequisite of
+an already-completed task is forbidden.
+
+Every trajectory that calls a note tool automatically receives an always-open
+`notes` context window at tick 0, initialized with empty priority buckets.
+The compiler replaces its JSON after every task mutation in phase B and masks
+all note content from training loss. This reserved window counts toward the
+project slot limit; never author a separate `notes` window or generate into it.
+Tasks are always visible through this window without calling `note_list`.
+Trajectories that never use note tools do not allocate the extra slot.
 
 ## Optional author workbench
 

@@ -184,27 +184,33 @@ Lowercases and tokenizes query/memory text into sets of word-like terms, ranks b
 
 ### `note_save`
 
-**Arguments:** required `key`, `text`, `status` (one of `todo`, `doing`, `blocked`, `done`); optional `owner`, `depends_on`, `blockers`, `acceptance_criteria`. Each of the last three is a string array, maximum 64 entries.
+**Arguments:** `name` is required. When creating a new task, also provide `description`, `priority` (`critical`, `very high`, `high`, `medium`, `low`, or `very low`), and `status` (`not started`, `doing`, `paused`, `blocked`, or `done`). The optional `blocked_by` array contains up to 64 distinct task names.
 
-**Result:** `{"saved":key}`.
+**Result:** `{"saved":name}`.
 
-Creates/updates a task record. Omitted optional fields on update retain their prior values. Rejects self-dependencies and dependency cycles. A task cannot be marked `done` if it has nonempty blockers or any dependency is missing/not `done`. Example: `{"key":"review","text":"Review implementation","status":"blocked","owner":"qa","depends_on":["implementation"],"blockers":["Awaiting artifact"],"acceptance_criteria":["Tests pass"]}`. It is a local task store, not a remote project-management service.
+Creates or updates a TODO task, distinct from the searchable text records handled by `memory_save`. On updates, only `name` is required; omitted fields remain unchanged. Names uniquely identify tasks across priorities. Dependencies may refer to tasks not yet created, but cannot form cycles (including self-dependencies). A task cannot be marked `done` until every task named by `blocked_by` exists and is `done`. A finished prerequisite cannot be reopened or deleted while a completed task depends on it. To clear blockers, supply an empty array.
+
+Example: `{"name":"security-bug","description":"Fix critical security vulnerability","priority":"critical","status":"not started","blocked_by":["update-auth-lib"]}`.
 
 ### `note_list`
 
 **Arguments:** none (`{}`).
 
-**Result:** a JSON object mapping note keys to complete stored note objects.
+**Result:** a JSON object with six priority buckets, ordered critical → very low; each bucket maps task names to `{"description":...,"status":...,"blocked_by":[...]}` objects.
 
-Returns every stored note, including status, owner, dependencies, blockers, and acceptance criteria where present. It does not automatically sort tasks by readiness or resolve blockers.
+Returns all tasks, including empty priority buckets. This is identical in structure to the automatic `notes` context window.
 
 ### `note_delete`
 
-**Arguments:** required `key`.
+**Arguments:** required `name`.
 
-**Result:** `{"deleted":key}`.
+**Result:** `{"deleted":name}`.
 
-Deletes the named note; missing keys fail. It does not automatically delete or rewrite dependencies in other notes.
+Deletes a named TODO task; missing names fail. Remaining tasks keep their `blocked_by` references, so an unfinished or deleted dependency prevents completion. A prerequisite referenced by a completed task cannot be deleted.
+
+### Automatic notes window
+
+When a trajectory uses `note_save`, `note_list`, or `note_delete` (including invisible calls), the compiler reserves a `notes` window at tick 0, initially containing JSON with all six empty priority buckets. It counts toward the project window-slot limit, is externally managed, and must not be authored, generated into, or closed by the model. Task mutations replace its JSON content in phase B at the mutation tick, keeping the latest task state available to the agent without calling `note_list`. Replacements are loss-masked; prior task-list tokens are evicted. Multiple changes in one tick are ordered by the source events. Samples with no note tools have no extra notes window.
 
 ## Stored skills
 
@@ -345,7 +351,7 @@ Closes an existing nonrunning conversation but preserves its messages. A running
 
 **Arguments:** none (`{}`).
 
-**Result:** `{"clock":...,"synthetic":true,"calls":number,"tasks":{"todo":n,"doing":n,"blocked":n,"done":n},"subagents":[...]}`.
+**Result:** `{"clock":...,"synthetic":true,"calls":number,"tasks":{"not started":n,"doing":n,"paused":n,"blocked":n,"done":n},"subagents":[...]}`.
 
 Summarizes the synthetic clock, the sandbox's legacy completed-call counter, note counts by status, and retained subagent lifecycle states. Useful for coordinator status checks while multiple delegated calls are in progress. It is not a list of live operating-system processes or a substitute for the author-facing per-call timeline.
 

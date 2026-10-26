@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 
@@ -72,7 +73,7 @@ def test_all_stores_clock_errors_and_sample_isolation(compiler, sample):
     }
     sample["replay"]["1"] = [
         call("memory_save", {"key": "k", "text": "remember"}, "m"),
-        call("note_save", {"key": "n", "text": "work", "status": "doing"}, "n"),
+        call("note_save", {"name": "n", "description": "work", "priority": "medium", "status": "doing"}, "n"),
         call("skill_save", {"name": "s", "content": "inspect"}, "s"),
         {"op": "invisible-tool-call", "tool": "time_advance", "arguments": {"seconds": 5}},
         call("file_write", {"path": "../host", "content": "no"}, "error"),
@@ -375,3 +376,64 @@ def test_streamed_result_tick_limit(compiler, sample):
     sample["replay"]["99990"] = [call("file_list", {}, "tool", content="x", delivery="stream")]
     with pytest.raises(CompileError, match="Expanded stream exceeds tick limit"):
         compiler.compile(sample)
+
+
+def _notes_at(compiler, plan, tick):
+    text = compiler.frame(plan, tick)["windows"]["notes"]["text"]
+    return json.loads(text[text.index("{"):])
+
+
+def test_notes_have_a_live_dedicated_window(compiler, sample):
+    sample["replay"].update({
+        "1": [{"op": "invisible-tool-call", "tool": "note_save", "arguments": {
+            "name": "security-bug", "description": "Fix the bug",
+            "priority": "critical", "status": "not started",
+            "blocked_by": ["update-auth-lib"],
+        }}],
+        "2": [{"op": "invisible-tool-call", "tool": "note_save", "arguments": {
+            "name": "update-auth-lib", "description": "Upgrade authentication",
+            "priority": "high", "status": "not started",
+        }}],
+        "3": [
+            {"op": "invisible-tool-call", "tool": "note_save", "arguments": {
+                "name": "update-auth-lib", "status": "doing",
+            }},
+            {"op": "invisible-tool-call", "tool": "note_save", "arguments": {
+                "name": "security-bug", "status": "paused",
+            }},
+        ],
+        "4": [{"op": "invisible-tool-call", "tool": "note_delete", "arguments": {
+            "name": "security-bug",
+        }}],
+        "5": [{"op": "generate", "window": "a", "content": "ready"}],
+    })
+    plan = compiler.compile(sample)
+    notes_window = next(w for w in plan["windows"] if w["id"] == "notes")
+    assert notes_window["open"] == 0 and notes_window["close"] is None
+    assert notes_window["type"] == "notes"
+    assert "notes" in plan["window_slots"]
+    assert _notes_at(compiler, plan, 0)["critical"] == {}
+    assert _notes_at(compiler, plan, 1)["critical"]["security-bug"]["status"] == "not started"
+    assert _notes_at(compiler, plan, 2)["high"]["update-auth-lib"]["status"] == "not started"
+    assert _notes_at(compiler, plan, 3)["high"]["update-auth-lib"]["status"] == "doing"
+    assert _notes_at(compiler, plan, 3)["critical"]["security-bug"]["status"] == "paused"
+    assert _notes_at(compiler, plan, 4)["critical"] == {}
+    assert _notes_at(compiler, plan, 4)["high"]["update-auth-lib"]["status"] == "doing"
+    assert all(row["loss_mask"] == 0 for row in plan["rows"]
+               if row["window"] == "notes" and row["durable"])
+    assert compiler.frame(plan, 4)["sandbox"]["notes"]["update-auth-lib"]["status"] == "doing"
+    assert compiler.compile(sample) == plan
+
+
+def test_notes_window_counts_against_slot_limit(compiler, sample):
+    from trajectory_remix.compiler import Compiler
+    limited = Compiler(compiler.tokenizer, max_window_slots=2, slot_policy="declaration-v1")
+    sample["replay"]["1"] = [{"op": "invisible-tool-call", "tool": "note_list", "arguments": {}}]
+    with pytest.raises(CompileError, match="3 window slots"):
+        limited.compile(sample)
+    sample["replay"]["0"].pop()
+    plan = limited.compile(sample)
+    assert set(plan["window_slots"]) == {"a", "notes"}
+    sample["replay"]["1"].append({"op": "open", "window": "notes", "window-type": "notes"})
+    with pytest.raises(CompileError, match="managed automatically"):
+        limited.compile(sample)

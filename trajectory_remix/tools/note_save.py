@@ -1,56 +1,73 @@
-"""Create/update a task with optional owner, dependencies, blockers and acceptance criteria. Omitted optional fields are retained."""
+"""Create or update a prioritized TODO task, including optional task dependencies."""
 
-from copy import deepcopy
-from ._support import run_builtin
+from ._notes import PRIORITIES, STATUSES
 from ._protocol import ToolError
+from ._support import run_builtin
 from .runtime import WindowProperties
 
 name = "note_save"
-description = "Create/update a task with optional owner, dependencies, blockers and acceptance criteria. Omitted optional fields are retained."
+description = (
+    "Create or update a prioritized TODO task. Supply name, description, status and "
+    "priority when creating a task; subsequent calls may update individual fields. "
+    "blocked_by contains task names, not free-form notes."
+)
 schema = {
     "type": "object",
     "properties": {
-        "key": {"type": "string"},
-        "text": {"type": "string"},
-        "status": {"type": "string", "enum": ["todo", "doing", "blocked", "done"]},
-        "owner": {"type": "string"},
-        "depends_on": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-        "blockers": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
-        "acceptance_criteria": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "description": {"type": "string", "minLength": 1, "maxLength": 5000},
+        "priority": {"type": "string", "enum": list(PRIORITIES)},
+        "status": {"type": "string", "enum": list(STATUSES)},
+        "blocked_by": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {"type": "string", "minLength": 1, "maxLength": 128},
             "maxItems": 64,
+            "uniqueItems": True,
         },
     },
-    "required": ["key", "text", "status"],
+    "required": ["name"],
     "additionalProperties": False,
 }
 
 
 def _run(runtime, args, windows):
+    task_name = args["name"]
+    if not task_name.strip():
+        raise ToolError("Task name cannot be blank")
+    previous = runtime.notes.get(task_name)
+    if previous is None and not {"description", "status", "priority"} <= args.keys():
+        raise ToolError("New tasks require description, status and priority")
     note = {
-        **runtime.notes.get(args["key"], {}),
-        **{k: deepcopy(v) for k, v in args.items() if k != "key"},
+        **(previous or {}),
+        **{key: value for key, value in args.items() if key != "name"},
     }
-    dependencies = note.get("depends_on", [])
-    if args["key"] in dependencies:
-        raise ToolError("A task cannot depend on itself")
-    pending, visited = (list(dependencies), set())
+    if not note["description"].strip():
+        raise ToolError("Task description cannot be blank")
+    blockers = note.get("blocked_by", [])
+    if any(not item.strip() for item in blockers):
+        raise ToolError("Blocker names cannot be blank")
+
+    # References may be forward-declared, but cycles must never be stored.
+    pending, visited = list(blockers), set()
     while pending:
         key = pending.pop()
-        if key == args["key"]:
+        if key == task_name:
             raise ToolError("Task dependency cycle")
         if key not in visited:
             visited.add(key)
-            pending.extend(runtime.notes.get(key, {}).get("depends_on", []))
-    if note["status"] == "done" and (
-        note.get("blockers")
-        or any(
-            (runtime.notes.get(dep, {}).get("status") != "done" for dep in dependencies)
-        )
+            pending.extend(runtime.notes.get(key, {}).get("blocked_by", []))
+    if note["status"] == "done" and any(
+        runtime.notes.get(dep, {}).get("status") != "done" for dep in blockers
     ):
-        raise ToolError("Task has blockers or unfinished dependencies")
-    return runtime.put(runtime.notes, args["key"], note)
+        raise ToolError("Task has unfinished or missing blockers")
+    if note["status"] != "done" and any(
+        task.get("status") == "done" and task_name in task.get("blocked_by", [])
+        for name, task in runtime.notes.items()
+        if name != task_name
+    ):
+        raise ToolError("Completed tasks depend on this task")
+
+    return runtime.put(runtime.notes, task_name, note)
 
 
 def run(

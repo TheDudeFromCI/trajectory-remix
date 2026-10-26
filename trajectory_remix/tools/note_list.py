@@ -1,11 +1,11 @@
-"""List tasks and notes."""
+"""List all TODO tasks grouped by priority."""
 
-from copy import deepcopy
+from ._notes import grouped_notes
 from ._support import run_builtin
 from .runtime import WindowProperties
 
 name = "note_list"
-description = "List tasks and notes."
+description = "List TODO tasks grouped from critical to very low priority."
 schema = {
     "type": "object",
     "properties": {},
@@ -15,7 +15,7 @@ schema = {
 
 
 def _run(runtime, args, windows):
-    return deepcopy(runtime.notes)
+    return grouped_notes(runtime.notes)
 
 
 def run(
