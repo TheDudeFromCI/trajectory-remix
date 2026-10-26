@@ -212,6 +212,15 @@ def window_view(items, calls, writes, tick, order, compiler):
 
 def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
     state, snapshots, calls, writes = {}, {}, [], []
+    notes_enabled = any(
+        item["event"].get("op") == "open"
+        and item["event"].get("window") == "notes"
+        and item["event"].get("window-type") == "notes"
+        for item in items
+    )
+    if notes_enabled:
+        from .tools._notes import notes_json
+
     metadata = sample.get("metadata", {})
     metadata = metadata if isinstance(metadata, dict) else {}
     context = ExecutionContext(
@@ -366,6 +375,8 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
         item, event = by_path[call["path"]], by_path[call["path"]]["event"]
 
         def write(wid, before, after):
+            if notes_enabled and wid == "notes":
+                raise ToolError("The notes context window is managed automatically")
             if before == after:
                 return
             append = after.startswith(before)
@@ -399,6 +410,7 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
             invisible=call.get("invisible", False),
             recorded_outcome=event.get("outcome"),
         )
+        notes_before = copy.deepcopy(state.get("notes", {})) if notes_enabled else None
         try:
             if cancelled and (
                 tick < call["start"] or last_runs.get(call["path"]) == tick
@@ -428,6 +440,19 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
             raise CompileError(
                 f"Tool {call['tool']} failed: {error}", call["path"]
             ) from error
+        if notes_enabled and state.get("notes", {}) != notes_before:
+            # Phase-B replacement is visible to other same-tick calls after this
+            # operation, and to model generation in phase D of this tick.
+            writes.append(
+                {
+                    "tick": tick,
+                    "order": order,
+                    "window": "notes",
+                    "path": call["path"],
+                    "replace": True,
+                    "content": notes_json(state.get("notes", {})),
+                }
+            )
         if modified:
             try:
                 snapshots[str(tick)] = copy.deepcopy(state)
