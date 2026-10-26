@@ -89,7 +89,7 @@ async def test_tool_grounded_generation_and_validation(compiler):
                         "function": {
                             "name": "note_save",
                             "arguments": json.dumps(
-                                {"key": "n", "text": "check", "status": "todo"}
+                                {"name": "n", "description": "check", "priority": "medium", "status": "not started"}
                             ),
                         },
                     }
@@ -116,7 +116,7 @@ async def test_tool_grounded_generation_and_validation(compiler):
     assert any(e["op"] == "append" and e["text"].startswith("<tool_result>") for e in spans)
     assert not any(w["id"].startswith("tool-call-") for w in plan["windows"])
     assert compiler.frame(plan, plan["max_tick"])["sandbox"]["notes"] == {
-        "n": {"text": "check", "status": "todo"}
+        "n": {"description": "check", "priority": "medium", "status": "not started"}
     }
 
 
