@@ -13,7 +13,7 @@ from tempfile import TemporaryFile
 from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
@@ -184,6 +184,10 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 "special": compiler.special,
             },
         }
+
+    @app.get("/search-guide", response_class=PlainTextResponse)
+    async def search_guide():
+        return (Path(__file__).parent / "guides" / "search.md").read_text(encoding="utf-8")
 
     @app.get("/api/samples/{index}")
     async def get_sample(index: int):
