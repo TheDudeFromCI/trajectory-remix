@@ -7,7 +7,7 @@ it does not run code or launch real specialists.
 ## 1. Read the session
 
 Call `get_session`. Keep its `revision`, `special_tokens` and `max_window_slots`.
-If generation is running, stop editing until it is stopped in the dashboard.
+Only the active generation draft is read-only; unrelated samples remain editable.
 Use logical window names; compilation assigns their numeric slots.
 
 ## 2. Choose your next task
@@ -28,6 +28,14 @@ For your own review, `validate_trajectory(semantic=false)` checks compiler
 diagnostics without model API calls. `semantic=true` calls configured model
 endpoints; it does not use the reviewing agent's subscription.
 
+When asked to validate a sample, finish repairs, reread the current trajectory and
+review the result. Then call `sign_off_trajectory` with its `sample_id`,
+`verdict: "validated"` or `"rejected"`, your `reviewer` label, a specific `summary`
+of the checks/findings, and that read's `revision` as `expected_revision`.
+This records your own review at state 2 or -2, without a model API call. Compiler
+checks alone do not establish semantic correctness. Edits invalidate a previous
+sign-off; Ready (3) remains a separate human approval.
+
 Read just one guide using `get_authoring_guide` with the indicated `topic`:
 
 | Your task | Topic | Repository copy |
@@ -43,12 +51,9 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 For a first session, finish `first`, then `parallel`. The tiny greeting in `first`
 teaches event syntax; the parallel lesson teaches the intended coordination behavior.
 Request `topic: "reference"` only when you need the complete manual.
-For a complete example rather than a minimal guided exercise, call
-`get_authoring_guide` with `topic: "example"`. Parse the returned
-`content` string as JSON to obtain the entire build-graph replay,
-including parallel file tools and invisible setup. This read does
-not import the sample or alter revisions.
-See [the example in the repository](../../examples/build-graph-analysis.json).
+For complete source, request `topic: "example"` and parse `content` as JSON.
+This read does not import or alter samples. See the
+[repository example](../../examples/build-graph-analysis.json).
 
 ## 3. Use this editing loop
 
@@ -57,10 +62,8 @@ Pass the latest dataset `revision` as `expected_revision` on each edit. Keep the
 new revision returned by that edit. A conflict means read again before retrying.
 Edits are saved immediately; `save_dataset` only reports a checkpoint.
 
-The guides show JSON objects with `name` and `arguments`. These mean MCP tool
-calls, not trajectory JSON to paste into the source editor. Examples omit
-`expected_revision` to stay readable; add the latest revision to each edit's
-`arguments`. Replace `$EOS` in example content with `get_session.special_tokens.eos`.
+Guide objects with `name` and `arguments` are MCP calls. Add the latest
+`expected_revision` to edits. Replace `$EOS` with `get_session.special_tokens.eos`.
 Run example blocks individually, in order. Steps between blocks also matter.
 
 ## Keep these three boundaries clear

@@ -10,7 +10,7 @@ from trajectory_remix.storage import DatasetStore, SQLiteSamples
 @pytest.fixture
 def search_store(compiler, tmp_path):
     store = DatasetStore.initialize(tmp_path / "search.sqlite", compiler)
-    store.replace([
+    samples = [
         {"id": "parallel-window-one", "metadata": {"tags": ["Coding", "linear-math"], "json_key_only": "Straße"},
          "replay": {"0": [*[{'op': 'open', 'window': f'w{i}'} for i in range(6)],
                           {"op": "append", "window": "w0", "content": "Python math list human apple a.b a?b [abc]"},
@@ -27,7 +27,11 @@ def search_store(compiler, tmp_path):
         {"id": "both-excluded", "replay": {"0": [{"op": "append", "content": "python math complex superhuman orange #coding"}]}},
         {"id": "my trajectory", "metadata": {"note": "ruby\njava list\n-complex\na|b"}, "replay": {}},
         {"replay": {}},
-    ], 0)
+    ]
+    # UUIDs are searchable text too; random hexadecimal words can match a*e.
+    for index, sample in enumerate(samples):
+        sample['uuid'] = f'{index:08d}-0000-4000-8000-000000000000'
+    store.replace(samples, 0)
     return store
 
 

@@ -218,6 +218,15 @@ The example runs initial validation only. To add a stronger validator, append a
 `remix.validate` step with `level: 2` and its endpoint; optional steps can use
 `when`. Deferred frontier review has no dedicated queue UI in this first version.
 
+External MCP agents can discover candidates with
+`list_trajectories(query="@state:candidate", limit=5)` and perform their own
+review/repairs. After reviewing the final source, `sign_off_trajectory` records
+Validated (2) or Rejected (-2), using a required reviewed revision, reviewer label
+and summary. This path makes no model API calls; subscription-backed Codex can
+do the review itself. Repairs invalidate previous reviews, so sign off after
+finishing edits and reviewing the repaired result. Human Ready (3) remains
+separate. See `docs/MCP.md` for the call and audit fields.
+
 For bounded validation, define each named check as an object. The bundled
 scenario uses these settings (the input paths select values from the validation
 step's `inputs`, not from arbitrary project data):

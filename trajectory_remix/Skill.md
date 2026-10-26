@@ -36,8 +36,9 @@ Built-in tools do not run code, launch workers or contact providers. Custom tool
 ## Connect and discover
 
 1. Call `get_session` for the current revision, tokenizer, special token spellings,
-   generation status and window-slot budget. Stop source editing while generation
-   is running; do not guess tokenizer spellings or numeric window slots.
+   generation status and window-slot budget. Only the current generation draft
+   is read-only; unrelated samples remain editable. Do not guess tokenizer
+   spellings or numeric window slots.
 2. Call `get_authoring_guide(topic="reference")` to read this file through MCP if you lack repository
    access. Request `topic="example"` from the same tool for the full build-graph
    trajectory JSON in its `content` string. Call `list_simulated_tools` for
@@ -511,7 +512,14 @@ resolve them before approving a training sample.
 4. Confirm TODOs, reviews, clarifications, progress messages and final handoff
    agree. Remove repetitive file bodies from visible text; use versions and short
    replies. Keep author instructions and raw specialist logs out of Kidra's loss.
-5. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
+5. If asked to validate, finish edits, reread the current trajectory, and review
+   the result. Call `sign_off_trajectory` with `sample_id`, `verdict: "validated"`
+   or `"rejected"`, your `reviewer` label, a specific review `summary`, and the
+   reviewed `revision` as `expected_revision`. It records your own assessment at
+   state 2 or -2 without model API calls. Compilation is required for a passing
+   sign-off; warnings remain your responsibility. Later edits invalidate it.
+   Ready (3) requires a separate human approval.
+6. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
    requester. The UI can export source; the CLI can export training JSONL. Explain
    that this is a curated synthetic sample and report the checks actually done.
 

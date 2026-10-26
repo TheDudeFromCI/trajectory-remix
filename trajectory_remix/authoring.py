@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import copy
 import difflib
+import hashlib
 import inspect
 import json
 import re
 import uuid
 from collections import OrderedDict
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, get_type_hints
 
@@ -21,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
 from .compiler import ANCHOR, CompileError, valid_tick, shift_tick
-from .dataset import new_sample, prepare_sample
+from .dataset import evaluation_source, new_sample, prepare_sample
 from .llm import SampleBuilder
 from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
@@ -190,10 +192,12 @@ class TrajectoryCommands:
                 "Dataset changed; read it again before editing", "conflict"
             )
 
-    def _commit(self, sample, index=None, validate=False):
+    def _commit(self, sample, index=None, validate=False, *, review=False):
         self._editable(None, self.state["samples"][index]["id"] if index is not None else sample.get("id"))
         from .dataset import invalidate_automation
-        if index is not None:
+        # An explicit sign-off changes review metadata, not the reviewed source.
+        # Ordinary edits must keep invalidating assessments of older content.
+        if index is not None and not review:
             sample = invalidate_automation(copy.deepcopy(sample), self.state["samples"][index])
         sample = prepare_sample(
             sample, self.state["samples"][index] if index is not None else None
@@ -784,12 +788,73 @@ class TrajectoryCommands:
                             )
         return {**self._commit(sample, index, validate), "events_changed": len(chosen)}
 
+    @command(write=True)
+    def sign_off_trajectory(
+        self,
+        sample_id: str,
+        verdict: Literal["validated", "rejected"],
+        reviewer: Annotated[str, Field(min_length=1, max_length=200)],
+        summary: Annotated[str, Field(min_length=1, max_length=10000)],
+        expected_revision: Nonnegative,
+    ):
+        """Record YOUR completed review without calling any model API.
+
+        After inspecting/repairing the trajectory, reread its current source and
+        review it, then pass that revision. validated sets state 2; rejected sets
+        state -2. Records the reviewer label (self-reported, e.g. GPT-6.1 via Codex),
+        summary, timestamp and reviewed source hash. Successful sign-off requires
+        compilation; compiler warnings remain your responsibility and are returned.
+        This records your assessment, not an independent LLM review.
+        Never grants Ready (3). Later content edits invalidate the sign-off.
+        """
+        index, sample = self._draft(sample_id, expected_revision)
+        reviewer, summary = reviewer.strip(), summary.strip()
+        if not reviewer or not summary:
+            raise CommandError("Reviewer and summary must contain non-whitespace text")
+        try:
+            diagnostics = self.compiler.compile(sample)["diagnostics"]
+        except CompileError as error:
+            if verdict == "validated":
+                raise
+            diagnostics = [error.diagnostic()]
+        metadata = sample.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = sample["metadata"] = {}
+        source_hash = hashlib.sha256(
+            json.dumps(evaluation_source(sample), sort_keys=True).encode()
+        ).hexdigest()
+        evaluation = {
+            "level": 2,
+            "origin": "mcp_sign_off",
+            "reviewer": reviewer,
+            "summary": summary,
+            "reviewed_revision": expected_revision,
+            "report": {"valid": verdict == "validated", "feedback": [summary]},
+            "source_hash": source_hash,
+            "tokenizer": self.compiler.fingerprint,
+            "tools": self.compiler.tools.fingerprint,
+            "time": datetime.now(UTC).isoformat(),
+        }
+        evaluations = metadata.get("evaluations")
+        if not isinstance(evaluations, list):
+            evaluations = metadata["evaluations"] = []
+        evaluations.append(evaluation)
+        metadata["validation_level"] = 2 if verdict == "validated" else -2
+        metadata.pop("approval", None)
+        return {
+            **self._commit(sample, index, review=True),
+            "validation_level": metadata["validation_level"],
+            "evaluation": evaluation,
+            "diagnostics": diagnostics,
+        }
+
     @command()
     async def validate_trajectory(self, sample_id: str, semantic: bool = False):
         """Compile a sample and report errors/warnings. semantic=True also calls configured LLM validators.
 
         No provider calls occur by default. Compiler errors return valid=false with a
         diagnostic path; the compiler stops at its first error. Warnings do not fail validation.
+        This does not sign off a review; use sign_off_trajectory after your own review.
         """
         revision = self.state["revision"]
         try:

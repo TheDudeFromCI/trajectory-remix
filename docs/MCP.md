@@ -204,6 +204,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 | `undo_edits` | Undo one or more source actions as one revision change. |
 | `redo_edits` | Reapply undone source actions. |
 | `validate_trajectory` | Compile and optionally run configured semantic LLM validators. |
+| `sign_off_trajectory` | Record the calling agent's completed review as Validated (2) or Rejected (-2), with reviewer, summary and required reviewed revision; no model API calls. |
 | `get_diagnostics` | Read compiler errors/warnings, optionally filtered by severity. |
 | `get_anchors` | Read resolved anchor ticks, phases and owning event paths/windows. |
 | `get_window_history` | Read one window's lifecycle, cumulative text, event spans and token rows. |
@@ -736,6 +737,24 @@ five candidates for external review without calling a model API.
 All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
 Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
 through MCP with `get_authoring_guide(topic="search")`.
+
+After repairing a candidate, edits reset its previous review state. To sign off
+your own review, reread the repaired source, inspect compiler diagnostics and
+semantic correctness, then call:
+
+```json
+{"name":"sign_off_trajectory","arguments":{"sample_id":"example-1","verdict":"validated","reviewer":"GPT-6.1 via Codex","summary":"Reviewed tool visibility, timing, answer correctness and chat delivery after repairs.","expected_revision":42}}
+```
+
+Replace `42` with the revision of the source you actually reviewed. A stale
+revision fails without changing the sample. `verdict: "rejected"` records -2 and
+can also record rejection of a sample that fails compilation. A passing review
+requires successful compilation; returned warnings remain the reviewer's
+responsibility. The tool records a self-reported reviewer label, summary,
+timestamp, reviewed revision, source hash and tokenizer/tool fingerprints in
+`metadata.evaluations`. It does not independently verify the agent's assessment
+or identity and does not invoke configured model endpoints. Subsequent content
+edits invalidate the sign-off; undo/redo includes it. It never marks Ready (3).
 
 `query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
 (`all`/`any`), `offset`, and `limit`. Scalar filter operators are
