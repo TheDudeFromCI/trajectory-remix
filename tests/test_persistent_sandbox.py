@@ -183,53 +183,29 @@ async def test_artifact_references_survive_edits_deletion_and_reject_conflicts()
     assert small.files == before.get("files", {}) and small.artifacts == before.get("artifacts", {})
 
 
-async def test_task_dependencies_blockers_and_acceptance_criteria():
+async def test_task_dependencies_and_status_updates():
     sandbox = Sandbox()
-    await sandbox.call(
-        "note_save",
-        {
-            "key": "code",
-            "text": "Implement",
-            "status": "doing",
-            "owner": "conversation-1",
-        },
-    )
-    await sandbox.call(
-        "note_save",
-        {
-            "key": "test",
-            "text": "Verify",
-            "status": "blocked",
-            "depends_on": ["code"],
-            "blockers": ["needs source"],
-            "acceptance_criteria": ["all tests pass"],
-        },
-    )
+    await sandbox.call("note_save", {
+        "name": "code", "description": "Implement",
+        "priority": "high", "status": "doing",
+    })
+    await sandbox.call("note_save", {
+        "name": "test", "description": "Verify",
+        "priority": "critical", "status": "blocked", "blocked_by": ["code"],
+    })
     with pytest.raises(ToolError, match="cycle"):
-        await sandbox.call(
-            "note_save",
-            {
-                "key": "code",
-                "text": "Implement",
-                "status": "doing",
-                "depends_on": ["test"],
-            },
-        )
+        await sandbox.call("note_save", {"name": "code", "blocked_by": ["test"]})
     with pytest.raises(ToolError, match="unfinished"):
-        await sandbox.call(
-            "note_save",
-            {"key": "test", "text": "Verify", "status": "done", "blockers": []},
-        )
-    await sandbox.call(
-        "note_save", {"key": "code", "text": "Implement", "status": "done"}
-    )
-    await sandbox.call(
-        "note_save",
-        {"key": "test", "text": "Verified", "status": "done", "blockers": []},
-    )
-    assert sandbox.notes["test"]["acceptance_criteria"] == ["all tests pass"]
-    assert sandbox.notes["code"]["owner"] == "conversation-1"
+        await sandbox.call("note_save", {"name": "test", "status": "done"})
+    await sandbox.call("note_save", {"name": "code", "status": "done"})
+    await sandbox.call("note_save", {
+        "name": "test", "description": "Verified", "status": "done",
+    })
+    assert sandbox.notes["test"]["blocked_by"] == ["code"]
+    assert sandbox.notes["test"]["priority"] == "critical"
+    assert sandbox.notes["test"]["description"] == "Verified"
     assert (await sandbox.call("runtime_status", {}))["tasks"]["done"] == 2
+
 
 
 def test_replay_persistent_lifecycle_and_runtime_status_never_show_future_answers(
@@ -345,7 +321,8 @@ def test_persistent_fixture_keeps_implementation_out_of_coordinator_tokens(compi
     review = frame["sandbox"]["conversations"]["reviewer"]["messages"][0]["content"]
     assert "def double" in review
     assert not any("def double" in w["text"] for w in frame["windows"].values())
-    assert all(w["close"] is not None for w in plan["windows"])
+    assert all(w["close"] is not None for w in plan["windows"] if w["id"] != "notes")
+    assert next(w for w in plan["windows"] if w["id"] == "notes")["close"] is None
 
 
 def test_artifacts_must_exist_at_dispatch_and_remain_pinned_during_work(
