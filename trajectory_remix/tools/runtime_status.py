@@ -1,5 +1,6 @@
 """Read synthetic time, completed call count, task counts and subagent lifecycle states."""
 
+from ._notes import STATUSES
 from ._support import run_builtin
 from .runtime import WindowProperties
 
@@ -20,7 +21,7 @@ def _run(runtime, args, windows):
         "calls": runtime.calls,
         "tasks": {
             status: sum((n["status"] == status for n in runtime.notes.values()))
-            for status in ("todo", "doing", "blocked", "done")
+            for status in STATUSES
         },
         "subagents": [runtime.conversation_summary(k) for k in runtime.conversations],
     }
