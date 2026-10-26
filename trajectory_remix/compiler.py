@@ -97,6 +97,19 @@ def window_names(sample):
                     name = event.get("window")
                     if isinstance(name, str):
                         names.setdefault(name, None)
+    # The task list is a dedicated, always-open context in task-bearing replays.
+    # Do not consume a window slot for samples that never use TODO tools.
+    if any(
+        isinstance(group, list)
+        and any(
+            isinstance(event, dict)
+            and event.get("op") in ("tool-call", "invisible-tool-call")
+            and event.get("tool") in ("note_save", "note_list", "note_delete")
+            for event in group
+        )
+        for group in replay.values()
+    ):
+        names.setdefault("notes", None)
     return list(names)
 
 
@@ -365,6 +378,26 @@ class Compiler:
                 (0, int(k)) if isinstance(k, str) and k.isdigit() else (1, str(k))
             ),
         )
+        notes_enabled = any(
+            isinstance(group, list)
+            and any(
+                isinstance(event, dict)
+                and event.get("op") in ("tool-call", "invisible-tool-call")
+                and event.get("tool") in ("note_save", "note_list", "note_delete")
+                for event in group
+            )
+            for group in replay.values()
+        )
+        if notes_enabled and any(
+            isinstance(group, list)
+            and any(
+                isinstance(event, dict)
+                and event.get("window") == "notes"
+                for event in group
+            )
+            for group in replay.values()
+        ):
+            raise CompileError("The notes window is managed automatically", "replay")
         window_slots = self.slots_for(sample)
         # Stable tie-breaking independent of JSON object insertion order.
         for key in keys:
@@ -603,6 +636,39 @@ class Compiler:
                 }
             )
 
+        if notes_enabled:
+            from .tools._notes import notes_json
+
+            initial_note_event = {
+                "op": "append",
+                "window": "notes",
+                "source": "system",
+                "content": notes_json({}),
+                "loss": {"mask": "exclude"},
+            }
+            prepared.extend(
+                [
+                    {
+                        "event": {"op": "open", "window": "notes", "window-type": "notes"},
+                        "key": "0",
+                        "tick": 0,
+                        "path": "notes.open",
+                        "order": -2,
+                    },
+                    {
+                        "event": initial_note_event,
+                        "key": "0",
+                        "tick": 0,
+                        "path": "notes.initial",
+                        "order": -1,
+                        "instant": True,
+                        "rate": 1,
+                        "encoded": self.encode(
+                            initial_note_event, "notes.initial", noop_weight, literal=True
+                        ),
+                    },
+                ]
+            )
         resolve_items()
         sandbox, tool_calls, window_changes = compile_sandbox(
             prepared, sample, self, resolve_items, finish_result
@@ -953,7 +1019,7 @@ class Compiler:
                 "message": "Window remains open at replay end; NOOP horizon ends at final scheduled tick.",
             }
             for w in windows.values()
-            if w["close"] is None
+            if w["close"] is None and w["type"] != "notes"
         ]
         for item in prepared:
             event = item["event"]
