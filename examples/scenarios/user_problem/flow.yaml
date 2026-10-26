@@ -90,15 +90,110 @@ schemas:
     - next_exchange
     additionalProperties: false
 tags:
+  # Each category samples one option. Omitted weights default to 1 (uniform).
   complexity:
   - name: simple
     description: A focused problem with few dependencies.
+  - name: moderate
+    description: A few related steps with a clear goal and manageable constraints.
   - name: complex
     description: Several interacting constraints or dependent steps.
+  - name: underspecified
+    description: Missing or ambiguous requirements need clarification before a reliable answer.
+  - name: competing priorities
+    description: Tradeoffs between explicit goals require explaining and choosing a compromise.
   domain:
+  # Subject choices; keep this key compatible with existing manual selections.
   - name: coding
+    description: Implement, debug, review, or explain code using supplied source and requirements.
   - name: planning
+    description: Turn a goal and constraints into an actionable plan.
   - name: mathematics
+    description: Solve or explain arithmetic, algebra, geometry, or other mathematical problems.
+  - name: science
+    description: Explain a scientific concept or evaluate a claim against supplied observations.
+  - name: history
+    description: Interpret historical sources, compare accounts, or explain a historical sequence.
+  - name: memory retrieval
+    description: Recover relevant details from supplied earlier conversations, notes, or memory records.
+  - name: TODOs
+    description: Extract, prioritize, reconcile, or update action items from supplied lists and messages.
+  - name: politics
+    description: Analyze political institutions, arguments, or supplied policy proposals and evidence.
+  - name: creative writing
+    description: Draft or revise fiction, poetry, dialogue, or a story outline under explicit constraints.
+  - name: data analysis
+    description: Interpret a supplied dataset, identify patterns, or check a data-driven conclusion.
+  - name: statistics
+    description: Reason about probability, uncertainty, sampling, or the interpretation of a study.
+  - name: logic
+    description: Solve a logic puzzle or examine whether a conclusion follows from its premises.
+  - name: physics
+    description: Explain physical behavior or solve a problem using stated quantities and assumptions.
+  - name: chemistry
+    description: Interpret chemical concepts, equations, or supplied experimental observations.
+  - name: biology
+    description: Explain biological mechanisms or interpret supplied observations about living systems.
+  - name: earth science
+    description: Reason about geology, weather, climate, or environmental observations from supplied information.
+  - name: astronomy
+    description: Explain astronomical concepts or interpret a supplied observation or dataset.
+  - name: geography
+    description: Reason about places, maps, spatial relationships, or supplied geographic information.
+  - name: civics
+    description: Explain public institutions, civic processes, or responsibilities using supplied reference material.
+  - name: economics
+    description: Analyze incentives, tradeoffs, markets, or a simplified economic model with stated assumptions.
+  - name: personal finance
+    description: Compare budgets, savings plans, fees, or household costs using supplied figures and terms.
+  - name: law and policy
+    description: Compare or explain supplied rules, contracts, or policy language and identify ambiguities.
+  - name: philosophy
+    description: Clarify a philosophical question, distinguish concepts, or evaluate an argument.
+  - name: ethics
+    description: Explore an ethical dilemma, competing responsibilities, or the consequences of a decision.
+  - name: education
+    description: Teach a concept, diagnose a misunderstanding, or adapt a lesson to a learner's needs.
+  - name: language learning
+    description: Explain grammar, vocabulary, usage, or a learner's mistakes with concrete examples.
+  - name: translation
+    description: Translate or compare wording while preserving meaning, register, and relevant cultural context.
+  - name: editing
+    description: Improve supplied prose for clarity, structure, tone, or consistency while preserving its intent.
+  - name: technical writing
+    description: Create or improve instructions, documentation, or an explanation from supplied technical facts.
+  - name: document review
+    description: Summarize, compare, or reconcile supplied documents, including conflicting statements and missing details.
+  - name: research synthesis
+    description: Combine supplied sources into an evidence-based answer while tracking disagreements and uncertainty.
+  - name: knowledge organization
+    description: Organize notes, classify information, link related records, or design a useful retrieval structure.
+  - name: scheduling
+    description: Reconcile calendars, durations, availability, time zones, or deadlines from supplied records.
+  - name: project management
+    description: Identify dependencies, milestones, risks, or responsibilities in a supplied project brief.
+  - name: logistics
+    description: Plan routing, inventory, packing, staffing, or resource allocation under explicit constraints.
+  - name: troubleshooting
+    description: Diagnose a malfunction from supplied symptoms, logs, instructions, and test results.
+  - name: design
+    description: Develop or critique a product, interface, or visual concept against a concrete brief.
+  - name: accessibility
+    description: Review supplied content or a design for barriers and propose practical accessible alternatives.
+  - name: health literacy
+    description: Explain supplied health information, interpret instructions, or prepare questions for a clinician.
+  - name: cooking
+    description: Adapt a recipe, plan a meal, or solve a cooking problem with supplied ingredients and constraints.
+  - name: gardening
+    description: Interpret plant-care records or plan planting and maintenance from supplied conditions.
+  - name: travel
+    description: Compare supplied itinerary options, packing needs, costs, or travel constraints without live booking.
+  - name: music
+    description: Explain music theory, analyze supplied musical material, or plan practice around a learner's goals.
+  - name: games
+    description: Explain rules, analyze a game state, or design a puzzle or game mechanic with checkable constraints.
+  - name: communication
+    description: Draft or revise a message, handle a disagreement, or adapt an explanation to its audience.
 roles:
   user:
     instructions: Write only the fictional user. Preserve their domain knowledge and
@@ -109,11 +204,46 @@ roles:
         description: Frustrated and willing to challenge an answer; not automatically
           abusive.
       - name: polite
+        description: Courteous and cooperative without necessarily agreeing with every suggestion.
       - name: impatient
+        description: Wants progress quickly and may interrupt explanations or push for a shorter answer.
+      - name: skeptical
+        description: Questions assumptions and asks for evidence before accepting an answer.
+      - name: terse
+        description: Gives short replies with little elaboration; clarify important omissions naturally.
+      - name: verbose
+        description: Provides lengthy explanations and tangents that require identifying the relevant details.
+      - name: anxious
+        description: Worried about making a mistake and may need clear explanations or reassurance.
+      - name: enthusiastic
+        description: Eager to explore ideas and may propose additions beyond the original request.
+      - name: distracted
+        description: Loses track of details or shifts focus, requiring concise reminders of the current goal.
+      - name: indecisive
+        description: Finds tradeoffs difficult and benefits from a clear comparison and recommendation.
+      - name: blunt
+        description: Speaks directly with little social cushioning, without necessarily being hostile.
+      - name: sarcastic
+        description: Uses dry or ironic remarks while still expressing an identifiable underlying need.
+      - name: demanding
+        description: Has high expectations and challenges incomplete results or unmet requirements.
       knowledge:
       - name: novice
+        description: Has little domain knowledge and needs concepts and assumptions explained plainly.
       - name: expert
+        description: Knows the domain well and expects precise reasoning, relevant details, and justified conclusions.
       - name: confidently mistaken
+        description: Strongly believes a specific misconception that must be identified and corrected with evidence.
+      - name: intermediate
+        description: Understands common concepts but needs help with unfamiliar cases or deeper implications.
+      - name: uneven knowledge
+        description: Knows some parts of the domain well but has important gaps in related areas.
+      - name: outdated knowledge
+        description: Relies on an older version of a method or rule that differs from the supplied current reference.
+      - name: practical experience
+        description: Can perform familiar tasks but may lack formal terminology or an explanation of why they work.
+      - name: theoretical knowledge
+        description: Understands concepts but has little experience applying them to concrete situations.
   kidra:
     instructions: Kidra is patient, competent, direct, and helpful. Clarify missing
       facts; never assume unseen tool results.
