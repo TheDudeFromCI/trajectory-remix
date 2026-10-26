@@ -761,7 +761,9 @@ const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
   "schema-version": "1.0",
   "tick-policy": "external-first",
   id: `sqlite-page-${index}`,
-  replay: { 0: [{ op: "open", window: "a" }] },
+  replay: { 0: [{ op: "open", window: "a" }, {
+    op: "append", window: "a", source: "user", content: index === 204 ? "Python humans math" : "complex",
+  }] },
   metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
 }));
 const imported = await fetch(base + "/api/import", {
@@ -784,6 +786,26 @@ await click("sample-page-next");
 await waitFor(() => $("sample-page-label").textContent === "101–200 of 205");
 assert.equal($("sample-list").children.length, 100);
 assert.equal($("sample-page-prev").disabled, false);
+$("sample-search").value = "python -(math complex) human* #sqlite-last @name:sqlite-page-* @windows:1";
+$("sample-search").oninput();
+await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
+assert.equal($("sample-list").children.length, 1);
+const searchGuide = await fetch(base + "/search-guide");
+assert.equal(searchGuide.status, 200);
+assert((await searchGuide.text()).includes("@uses_tool"));
+assert($("search-help").querySelector('a[href="/search-guide"]'));
+$("sample-search").value = "python |";
+$("sample-search").oninput();
+await waitFor(() => !$("search-error").hidden);
+assert($("search-error").textContent.includes("Invalid search query"));
+assert.equal($("sample-search").getAttribute("aria-invalid"), "true");
+assert.equal($("sample-list").children.length, 0);
+assert.equal($("sample-page-next").disabled, true);
+// Returning to the last valid query must redraw even when revision/query match.
+$("sample-search").value = "python -(math complex) human* #sqlite-last @name:sqlite-page-* @windows:1";
+$("sample-search").oninput();
+await waitFor(() => $("search-error").hidden && $("sample-list").children.length === 1);
+assert.equal($("sample-search").hasAttribute("aria-invalid"), false);
 $("sample-search").value = "sqlite-last";
 $("sample-search").oninput();
 await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");

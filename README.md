@@ -185,6 +185,13 @@ drafts). The server fetches trajectories on demand;
 it does not load or copy the whole dataset. The sidebar searches in SQLite and
 shows 100 results per page. Undo history and compiled previews are bounded.
 
+The dashboard and MCP `list_trajectories` share [the search query language](trajectory_remix/guides/search.md):
+spaces mean AND, `|` means OR, `-` excludes a term/group, `*` matches wildcard
+text, `#coding` filters tags, and `@name`, `@uuid`, `@windows`, `@uses_tool`
+filter properties. For example, `python -(math complex) #coding` searches
+readable source text across events. MCP agents can read the complete guide with
+`get_authoring_guide(topic="search")`; the dashboard links it beside the search box.
+
 Writes use WAL mode, a 30-second busy timeout and transactions. Multiple server
 processes can share a local database: revisions detect competing edits, and
 unique constraints prevent duplicate IDs. SQLite serializes writers while

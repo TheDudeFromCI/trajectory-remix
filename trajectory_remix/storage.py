@@ -15,6 +15,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 
 from .dataset import prepare_sample, public_config
+from .search import SearchQuery, readable_text, register_search_functions, used_tools
 
 GAP = 1 << 32
 
@@ -28,7 +29,7 @@ def encode(value):
 
 
 class DatasetStore:
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -42,7 +43,7 @@ class DatasetStore:
                 row = db.execute("SELECT version,max_window_slots,slot_policy FROM project WHERE singleton=1").fetchone()
             except sqlite3.DatabaseError as error:
                 raise ValueError("Not an initialized Trajectory Remix project") from error
-            if row is None or row[0] not in (3, self.SCHEMA_VERSION):
+            if row is None or row[0] not in (3, 4, self.SCHEMA_VERSION):
                 raise ValueError("Unsupported project schema; initialize a new project with its tokenizer and import trajectories")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
@@ -60,8 +61,24 @@ class DatasetStore:
                     source_hash TEXT NOT NULL, tools_hash TEXT NOT NULL,
                     error TEXT, plan TEXT
                 );
+                CREATE TABLE IF NOT EXISTS trajectory_search_tools (
+                    trajectory_uuid TEXT NOT NULL REFERENCES samples(uuid) ON DELETE CASCADE,
+                    tool TEXT NOT NULL,
+                    PRIMARY KEY(trajectory_uuid, tool)
+                );
             """)
-            db.execute("UPDATE project SET version=?", (self.SCHEMA_VERSION,))
+            if row[0] < self.SCHEMA_VERSION:
+                db.execute("BEGIN IMMEDIATE")
+                # Another opener may have completed the migration while we waited.
+                if db.execute("SELECT version FROM project").fetchone()[0] < self.SCHEMA_VERSION:
+                    # Stream one source at a time. Ordinary startup/listing never
+                    # reads replay JSON; only this one-time upgrade builds it.
+                    for source, in db.execute("SELECT source FROM samples"):
+                        sample = json.loads(source)
+                        db.execute("UPDATE trajectory_metadata SET search=? WHERE trajectory_uuid=?",
+                                   (readable_text(sample), sample["uuid"]))
+                        self.update_search_tools(db, sample)
+                    db.execute("UPDATE project SET version=?", (self.SCHEMA_VERSION,))
         self.max_window_slots, self.slot_policy = row[1], row[2]
         self.samples = SQLiteSamples(self)
 
@@ -275,6 +292,7 @@ class DatasetStore:
     def connect(self):
         db = sqlite3.connect(self.path.resolve().as_uri() + "?mode=rw", uri=True, timeout=30)
         try:
+            register_search_functions(db)
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA busy_timeout=30000")
             db.execute("PRAGMA cache_size=-4096")
@@ -322,6 +340,12 @@ class DatasetStore:
         return (sample["uuid"], ident if isinstance(ident, str) else None, encode(sample), encode(attributes), digest)
 
     @staticmethod
+    def update_search_tools(db, sample):
+        db.execute("DELETE FROM trajectory_search_tools WHERE trajectory_uuid=?", (sample["uuid"],))
+        db.executemany("INSERT INTO trajectory_search_tools VALUES(?,?)",
+                       [(sample["uuid"], tool) for tool in used_tools(sample)])
+
+    @staticmethod
     def update_metadata(db, sample):
         from .compiler import window_names
 
@@ -336,7 +360,8 @@ class DatasetStore:
                 properties=excluded.properties,tags=excluded.tags,
                 event_count=excluded.event_count,window_count=excluded.window_count,
                 tag_count=excluded.tag_count,search=excluded.search
-        """, (sample["uuid"], properties, encode(tags), events, len(window_names(sample)), len(tags), (str(sample.get("id", "")) + encode(metadata)).casefold()))
+        """, (sample["uuid"], properties, encode(tags), events, len(window_names(sample)), len(tags), readable_text(sample)))
+        DatasetStore.update_search_tools(db, sample)
         catalog = {name: (schema, digest) for name, schema, digest in db.execute("SELECT name,schema_json,file_hash FROM external_tools WHERE available=1")}
         names = set()
         if isinstance(replay, dict):
@@ -432,10 +457,11 @@ class DatasetStore:
             return db.execute("SELECT revision FROM project").fetchone()[0]
 
     def listing(self, query="", offset=0, limit=100, dashboard=False):
-        clause, args = ("WHERE instr(m.search, ?) > 0", [query.casefold()]) if query else ("", [])
+        predicate, args = SearchQuery(query).sql()
+        clause = f"WHERE {predicate}" if query.strip() else ""
         with self.connect() as db:
             db.execute("BEGIN")
-            total = db.execute(f"SELECT count(*) FROM trajectory_metadata m {clause}", args).fetchone()[0] if query else db.execute("SELECT sample_count FROM project").fetchone()[0]
+            total = db.execute(f"SELECT count(*) FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid {clause}", args).fetchone()[0] if clause else db.execute("SELECT sample_count FROM project").fetchone()[0]
             attributes_column = "NULL" if dashboard else "s.attributes"
             properties_column = "json_extract(m.properties, '$.validation_level')" if dashboard else "m.properties"
             rows = db.execute(f"SELECT s.position,s.sample_id,{attributes_column},m.event_count,m.tags,{properties_column},s.uuid FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid {clause} ORDER BY s.position LIMIT ? OFFSET ?", [*args, limit, offset])

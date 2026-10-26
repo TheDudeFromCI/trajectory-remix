@@ -181,7 +181,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
 | `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
 | `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
-| `list_trajectories` | Search IDs/metadata and paginate trajectory attributes. |
+| `list_trajectories` | Search readable text with AND/OR, negation, groups, wildcards, properties and tags; paginate trajectory attributes. |
 | `get_trajectory` | Read complete source JSON, including invalid drafts. |
 | `create_trajectory` | Create from full JSON, an empty draft, or `template: "demo"`. |
 | `duplicate_trajectory` | Deep-copy source and metadata under a new ID. |
@@ -723,6 +723,16 @@ fixed during project initialization. All authoring paths reject a trajectory
 that declares too many distinct windows, including implicit tool windows.
 The immutable trajectory `uuid` seeds `uuid-hash-v1` allocation; `id` is an
 editable unique label. UUID changes are rejected; duplicates receive new UUIDs.
+
+`list_trajectories(query="python -(math complex) #coding")` uses the same search
+language as the dashboard. It searches readable source string values, including
+replay text, arguments and authored outcomes. Spaces mean AND, `|` means OR,
+`-` negates a term/group, parentheses nest, and `*` provides word wildcards.
+`#tag` filters complete metadata tags; properties are `@name`, `@uuid`,
+`@windows` (numeric comparisons) and `@uses_tool` (actual visible/invisible calls).
+All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
+Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
+through MCP with `get_authoring_guide(topic="search")`.
 
 `query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
 (`all`/`any`), `offset`, and `limit`. Scalar filter operators are

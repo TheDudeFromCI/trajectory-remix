@@ -26,6 +26,7 @@ from .llm import SampleBuilder
 from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
 from .metadata import query as query_metadata
+from .search import SearchQuery
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import (
@@ -320,13 +321,13 @@ class TrajectoryCommands:
     def get_authoring_guide(
         self,
         topic: Literal[
-            "start", "first", "parallel", "edit", "sandbox", "tools", "reference", "example"
+            "start", "first", "parallel", "edit", "sandbox", "tools", "search", "reference", "example"
         ] = "start",
     ):
         """Read a short authoring lesson, complete reference, or example trajectory.
 
         Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
-        sandbox (trajectory files), tools (starter tool selection), reference (full manual),
+        sandbox (trajectory files), tools (starter tool selection), search (query syntax), reference (full manual),
         example (full build-graph JSON trajectory). No source or sandbox changes.
         """
         root = Path(__file__).parent
@@ -342,22 +343,22 @@ class TrajectoryCommands:
     def list_trajectories(
         self, query: str = "", offset: Nonnegative = 0, limit: PageSize = 50
     ):
-        """List trajectories with metadata; filter by ID or metadata text and paginate."""
+        """Search readable trajectory text, names, properties and tags, then paginate.
+
+        Case-insensitive query syntax: spaces AND, | OR, - negation, (groups),
+        * word wildcards, #tag, @name:glob, @uuid:glob, @windows:>5,
+        @uses_tool:glob. AND binds tighter than OR; - applies to a term or group.
+        Example: python -(math complex) #coding. Empty query lists everything.
+        Read get_authoring_guide(topic="search") for the full syntax and examples.
+        """
         if isinstance(self.state["samples"], SQLiteSamples):
             revision = self.state["revision"]
             total, trajectories = self.state["samples"].store.listing(
                 query, offset, limit
             )
             return {"revision": revision, "total": total, "trajectories": trajectories}
-        samples = [
-            s
-            for s in self.state["samples"]
-            if query.casefold()
-            in (
-                str(s.get("id", ""))
-                + json.dumps(s.get("metadata", {}), ensure_ascii=False)
-            ).casefold()
-        ]
+        search = SearchQuery(query)
+        samples = [s for s in self.state["samples"] if search.matches(s)]
         return {
             "revision": self.state["revision"],
             "total": len(samples),

@@ -21,6 +21,7 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 | Fix text or timing without replacing the trajectory | `edit` | [Small edits](edit.md) |
 | Put virtual files into a trajectory | `sandbox` | [Sandbox setup](sandbox.md) |
 | Choose which tools a beginner agent should see | `tools` | [Starter tool selection](tools.md) |
+| Find trajectories by text, tags or properties | `search` | [Search syntax](search.md) |
 | Inspect a complete replay with parallel tools | `example` | [Build-graph trajectory JSON](../../examples/build-graph-analysis.json) |
 
 For a first session, finish `first`, then `parallel`. The tiny greeting in `first`

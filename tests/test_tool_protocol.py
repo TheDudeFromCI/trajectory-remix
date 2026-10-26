@@ -467,7 +467,7 @@ def test_previous_database_schema_migrates_without_changing_trajectories(
     assert migrated.samples[0] == saved
     assert migrated.info()[:3] == store.info()[:3]
     with migrated.connect() as db:
-        assert db.execute("SELECT version FROM project").fetchone()[0] == 4
+        assert db.execute("SELECT version FROM project").fetchone()[0] == DatasetStore.SCHEMA_VERSION
 
 
 async def test_workbench_records_generic_window_writes(studio):
