@@ -233,6 +233,11 @@ def create_mcp_server(bridge):
         instructions=(
             "Tools edit the running Trajectory Remix dashboard session. Read get_session "
             "and get_authoring_guide first for a short starting guide. Request one topic at a time; "
+            'before reviewing or repairing, read get_authoring_guide(topic="review"). '
+            "Kidra attends to all open Kidra windows; reading an already-visible file needs a reason. "
+            "EOS removes a window from context. Keep needed evidence or a sufficient retained summary "
+            "available throughout dependent generation, including chat request composition. "
+            "Zero compiler warnings do not prove semantic correctness. "
             "list_trajectories searches readable text with AND/OR, negation, groups, wildcards, properties and tags; "
             'for "review five candidates", call list_trajectories(query="@state:candidate", limit=5). '
             "Add @batch:<batch-id> for a particular batch. Filter before fetching replay content; "

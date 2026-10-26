@@ -325,13 +325,14 @@ class TrajectoryCommands:
     def get_authoring_guide(
         self,
         topic: Literal[
-            "start", "first", "parallel", "edit", "sandbox", "tools", "search", "reference", "example"
+            "start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "reference", "example"
         ] = "start",
     ):
         """Read a short authoring lesson, complete reference, or example trajectory.
 
         Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
-        sandbox (trajectory files), tools (starter tool selection), search (query syntax), reference (full manual),
+        sandbox (trajectory files), tools (starter tool selection), search (query syntax),
+        review (semantic review/context dependencies; read before reviewing or repairing), reference (full manual),
         example (full build-graph JSON trajectory). No source or sandbox changes.
         """
         root = Path(__file__).parent
@@ -799,6 +800,9 @@ class TrajectoryCommands:
     ):
         """Record YOUR completed review without calling any model API.
 
+        Read get_authoring_guide(topic="review") before reviewing or repairing.
+        Zero compiler warnings do not establish semantic correctness. Check shared
+        open-window context, redundant tools and dependencies throughout streams.
         After inspecting/repairing the trajectory, reread its current source and
         review it, then pass that revision. validated sets state 2; rejected sets
         state -2. Records the reviewer label (self-reported, e.g. GPT-6.1 via Codex),

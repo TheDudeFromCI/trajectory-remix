@@ -31,7 +31,7 @@ async def test_default_guide_is_short_and_topics_are_explicit(studio):
     start = (await command(studio, "get_authoring_guide"))["content"]
     assert "Start here: one lesson at a time" in start
     assert len(start.split()) < 600
-    for topic in ("first", "parallel", "edit", "sandbox", "tools"):
+    for topic in ("first", "parallel", "edit", "sandbox", "tools", "review"):
         guide = (await command(studio, "get_authoring_guide", topic=topic))["content"]
         assert guide.startswith("# ") and len(guide.split()) < 1200
         assert f"`{topic}`" in start

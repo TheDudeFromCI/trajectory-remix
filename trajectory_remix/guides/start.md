@@ -1,8 +1,8 @@
 # Start here: one lesson at a time
 
-You are authoring a training scenario. You write the user request, Kidra's
-behavior and the specialists' replies. Remix checks and replays that scenario;
-it does not run code or launch real specialists.
+You are authoring or reviewing a training scenario: the user request, Kidra's
+behavior and specialists' replies. Remix checks and replays it; built-in tools
+simulate execution.
 
 ## 1. Read the session
 
@@ -28,8 +28,9 @@ For your own review, `validate_trajectory(semantic=false)` checks compiler
 diagnostics without model API calls. `semantic=true` calls configured model
 endpoints; it does not use the reviewing agent's subscription.
 
-When asked to validate a sample, finish repairs, reread the current trajectory and
-review the result. Then call `sign_off_trajectory` with its `sample_id`,
+Before reviewing or repairing, read `get_authoring_guide(topic="review")` for
+Kidra's shared window context, semantic checks and evidence lifetimes. Finish
+repairs, reread and review the result. Call `sign_off_trajectory` with its `sample_id`,
 `verdict: "validated"` or `"rejected"`, your `reviewer` label, a specific `summary`
 of the checks/findings, and that read's `revision` as `expected_revision`.
 This records your own review at state 2 or -2, without a model API call. Compiler
@@ -40,6 +41,7 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 
 | Your task | Topic | Repository copy |
 | --- | --- | --- |
+| Review semantics or repair a generated sample | `review` | [Review checklist](review.md) |
 | Learn ticks and make a tiny trajectory | `first` | [First trajectory](first.md) |
 | Schedule independent specialists concurrently | `parallel` | [Parallel work](parallel.md) |
 | Fix text or timing without replacing the trajectory | `edit` | [Small edits](edit.md) |
@@ -48,8 +50,7 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 | Find trajectories by text, tags or properties | `search` | [Search syntax](search.md) |
 | Inspect a complete replay with parallel tools | `example` | [Build-graph trajectory JSON](../../examples/build-graph-analysis.json) |
 
-For a first session, finish `first`, then `parallel`. The tiny greeting in `first`
-teaches event syntax; the parallel lesson teaches the intended coordination behavior.
+For new authors, finish `first`, then `parallel`.
 Request `topic: "reference"` only when you need the complete manual.
 For complete source, request `topic: "example"` and parse `content` as JSON.
 This read does not import or alter samples. See the

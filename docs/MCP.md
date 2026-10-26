@@ -15,6 +15,7 @@ the next task; it does not concatenate the lessons or load the entire manual:
 
 | Topic | Walkthrough |
 | --- | --- |
+| `review` | [Review shared context, evidence lifetimes, tool necessity and semantic correctness before sign-off](../trajectory_remix/guides/review.md) |
 | `first` | [Create a tiny trajectory; learn start ticks, token streams and closure](../trajectory_remix/guides/first.md) |
 | `parallel` | [Overlap independent specialist work and anchor dependent follow-ups](../trajectory_remix/guides/parallel.md) |
 | `edit` | [Repair wording and timing with targeted event edits](../trajectory_remix/guides/edit.md) |
@@ -737,6 +738,12 @@ five candidates for external review without calling a model API.
 All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
 Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
 through MCP with `get_authoring_guide(topic="search")`.
+
+Before reviewing or repairing, read `get_authoring_guide(topic="review")`, the
+[semantic review checklist](../trajectory_remix/guides/review.md). It explains
+shared open-window attention, redundant file operations, evidence lifetimes
+throughout generation, and independent correctness checks. Zero compiler
+warnings do not establish these properties.
 
 After repairing a candidate, edits reset its previous review state. To sign off
 your own review, reread the repaired source, inspect compiler diagnostics and

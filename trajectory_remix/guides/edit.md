@@ -4,6 +4,9 @@ Goal: fix wording or timing without replacing a trajectory's JSON. This example
 continues `first-steps` from [First trajectory](first.md). For another sample,
 substitute its ID and the addresses returned by `list_events`.
 
+For semantic review or repairs to generated samples, first read
+`get_authoring_guide(topic="review")`. Fixing compiler warnings alone is insufficient.
+
 ## 1. Find the current address and revision
 
 ```json

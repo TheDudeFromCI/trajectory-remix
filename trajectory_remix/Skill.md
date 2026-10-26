@@ -8,6 +8,8 @@ description: Author curated parallel training trajectories through the Trajector
 This is the full reference. For a smaller first task, use the
 [short starting guide](guides/start.md), or request `get_authoring_guide()`.
 Retrieve this complete manual explicitly with `topic: "reference"`.
+Before reviewing or repairing, read [the review checklist](guides/review.md)
+using `get_authoring_guide(topic="review")`.
 
 Find existing trajectories with `list_trajectories(query=...)`. Its query language
 supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
@@ -79,6 +81,15 @@ being consulted. For tool results, keep the tool window open until the relevant
 facts have been transferred into reasoning; then generate EOS immediately if no
 remaining work needs the original result. Keep reasoning windows open until their
 consumers have used them.
+
+Do not call `file_read` to make an already-visible file available to Kidra:
+all open Kidra windows already participate in global attention. A read or file
+listing needs additional information, such as an unseen file, a changed version,
+or directory metadata. Invisible sandbox files are not automatically visible.
+For every closure, check the entire downstream generation interval, including
+composition of a `chat` request. Closing at its start can remove evidence needed
+for later tokens. A sufficient summary retained elsewhere can permit earlier
+closure; a promise to remember facts cannot.
 
 Reasoning can run in parallel in multiple windows. Analyze independent files,
 constraints, or subtasks concurrently rather than serializing all thought through
