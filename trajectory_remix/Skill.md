@@ -334,7 +334,7 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. The 38 built-in tools are local
+Always confirm current schemas with `list_simulated_tools`. The 40 built-in tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
@@ -366,8 +366,18 @@ simulations; a stored skill is text, not installed code.
 | `hardware_load_set` | Invisible-only file_io_ticks and per-operation operation_ticks. New file calls sample additive latency once at dispatch. |
 | `tool_permissions_set` | Invisible-only permission policy: default allow/deny and ordered tool/path glob rules with decision and optional remaining/message. Simulate user rejection before dispatch. |
 | `io_failure_set` | Invisible-only rules for I/O faults by tool/path glob, code, optional remaining/message. Empty rules clears faults. |
-| `network_set` | Invisible-only HTTP routes with URL glob, method, optional request_body/request_headers, and sequential responses with status/headers/body, latency_seconds/error. Last response repeats. |
-| `network_request` | url; optional method, headers, body and timeout_seconds (default 30). Simulated fixtures only; no internet requests. HTTP errors are returned statuses; transport errors fail. |
+| `web_set` | Invisible-only pages with url/title/text, optional published_at/links/status/latency_seconds/error; optional exact-query searches and search_latency_seconds. Replaces active pages; old refs retain snapshots. |
+| `web_search` | query; ranked source refs, titles, URLs and verbatim snippets. Optional max_results/offset; use next_offset to continue. |
+| `web_open` | Exactly one of url/ref; readable page excerpts and links. Continue with next_line/next_column; paginate links with link_offset/next_link_offset. |
+| `web_find` | Exactly one of url/ref plus literal text; matching lines and short context. Optional case_sensitive/context_lines/max_results; use next_line as start_line to continue. |
+
+Web observations default to a 6000-byte JSON-envelope budget (max_output_bytes,
+1024–16000), not an exact token count. All three visible tools accept
+timeout_seconds (default 30 simulated seconds). Use search refs to pin evidence;
+URL reads resolve the current corpus. Seed readable text, never whole HTML pages.
+Follow returned link URLs with web_open. Unknown URLs fail without inventing pages.
+The old network_set/network_request tools have been removed; reauthor HTTP fixtures
+as web pages and research calls. See [web research](../docs/SANDBOX.md#synthetic-web-research).
 
 Generated EOS cancels the owning tool window. A request ending with EOS is never
 dispatched, so its arguments may be incomplete. For a running call, schedule a

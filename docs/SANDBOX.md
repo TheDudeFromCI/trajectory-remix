@@ -375,42 +375,97 @@ The invisible `io_failure_set` replaces deterministic fault rules:
 
 Fault matching uses the same tool/path globs. The first matching rule is sampled
 once at dispatch, after permission checks and before I/O side effects or latency.
-It applies to all ten file operations, `file_watch` and `network_request`,
+It applies to all ten file operations, `file_watch`, `web_search`, `web_open` and `web_find`,
 including invisible calls. Codes such as `EIO`, `ENOSPC`, `EACCES`, `ETIMEDOUT`, or
 `ECONNRESET` are author-selected labels. Omit `remaining` to keep failing, or
 use one failure then let retries succeed. `{"rules":[]}` clears faults. Failed
-operations leave files intact and do not consume network fixture responses.
+operations leave files intact and do not create pending web observations. Web refs
+resolve to their original URL for permission/fault matching; URL fragments do not
+bypass URL rules. Search silently omits pages denied for `web_search`.
 
-## Simulated network I/O
+## Synthetic web research
 
-`network_request` models HTTP with `url`, optional `method` (default GET),
-`headers`, `body`, and `timeout_seconds` (default 30 simulated seconds). It never
-uses host networking. Authors configure deterministic routes invisibly:
+The web tools simulate the research loop: **search → read → find → follow links**.
+They never access the internet or render HTML. Authors seed readable source text
+(Markdown is fine), representing the output of a real page extraction pipeline:
 
 ```json
-{"op":"invisible-tool-call", "tool":"network_set", "arguments":{"routes":[
-  {"url":"https://example.test/api", "method":"POST", "request_body":"hello",
-   "responses":[
-     {"status":503, "body":"Try again", "latency_seconds":0.5},
-     {"status":200, "headers":{"Content-Type":"text/plain"}, "body":"Saved"}
-   ]}
-]}}
+{"op":"invisible-tool-call", "tool":"web_set", "arguments":{
+  "pages":[
+    {"url":"https://docs.example.test/releases/4", "title":"Version 4 release notes",
+     "published_at":"2030-02-12", "text":"# Version 4\n\nVersion 4 requires Python 3.12 or later.",
+     "links":[{"id":"install", "text":"Installation", "url":"/install"}]},
+    {"url":"https://docs.example.test/install", "title":"Installation",
+     "text":"Install version 4 using pip."}
+  ],
+  "searches":[{"query":"version 4 Python", "urls":["https://docs.example.test/releases/4"]}]
+}}
 ```
 
-Routes match in order by method and URL glob, with optional exact request body
-and a subset of request headers (case-insensitive header names). Each dispatch
-consumes the next response; the last response repeats. Route replacement resets
-cursors while in-flight requests retain their sampled response. Unmatched URLs
-fail explicitly. Request URLs require HTTP/HTTPS, a host and no credentials.
+Then schedule visible `web_search` with `{"query":"version 4 Python"}`.
+Its `results` contain titles, URLs, source `ref`s, optional publication dates and
+verbatim snippets from the stored page. Search uses deterministic BM25 over word
+and number tokens, with a title boost and URL tie-breaker. Any query term may
+match. Optional `searches` override rankings by exact query after case folding
+and whitespace normalization; every listed URL must belong to the active corpus.
+An explicit empty URL list gives no results. Other queries use corpus search.
+Use `max_results` (default 5) and returned `next_offset` as `offset` to paginate.
 
-Responses contain status (default 200), headers and text body. HTTP errors such
-as 404/429/503 are successful transport results, letting Kidra interpret them.
-Optional `error` simulates `dns`, `connection_refused`, `connection_reset`, `tls`
-or `timeout`. Optional `latency_seconds` uses the same anchored tick clock as
-timers; clock jumps affect waiting requests. Transport failures and timeouts
-return tool errors; explicit fixture timeouts wait until the request deadline.
-At an exact latency/deadline tie the response wins. HEAD returns an empty body.
-There are no automatic retries or redirects. Fixtures and pending responses are
-bounded by the workbench byte budget. Idle requests do not add state snapshots.
-EOS cancellation releases pending responses; the dispatched fixture remains
-consumed. Use response sequences to teach retries, rate limiting and recovery.
+Read a result with `web_open({"ref":"<returned ref>"})`, or open a known `url`.
+Supply exactly one of `url` or `ref`. Text excerpts default to 40 lines; line
+numbers are 1-based. If `truncated` is true, continue with returned `next_line`
+as `start_line` and `next_column` as `start_column`. Columns count Unicode
+characters from zero, allowing lossless continuation within a huge single line.
+The result also contains status, total_lines, start/end positions, links and
+optional published_at. Use returned link URLs in another `web_open`; relative
+fixture links are resolved against the source URL. Links paginate separately:
+pass `next_link_offset` as `link_offset`; `max_links` defaults to 5 and can be 0.
+To retrieve links without page text, set `start_line` beyond `total_lines`.
+Unseeded link targets fail explicitly rather than inventing a destination.
+
+Use `web_find` with a source and literal `text` to locate relevant passages.
+It returns at most one hit per matching line, with 1-based line numbers, 0-based
+match columns, short exact excerpts and neighboring lines. Matching is
+case-insensitive by default. `context_lines` defaults to 1 and `max_results` to
+10. Continue with `next_line` as `start_line`. Hit text is limited to 360
+characters and each context line to 240; a smaller byte budget may shorten or
+omit context further. `text_start_column` locates the hit excerpt within its
+source line. Use `web_open` for the full passage or multiple hits on one line.
+
+Every visible web tool accepts `max_output_bytes` (default 6000, range 1024–16000).
+The limit includes the **entire UTF-8 JSON envelope**, including metadata, URLs,
+links and escaping. This is a strict byte limit, not an exact tokenizer count.
+Search/find can return fewer items than requested. A metadata-only result that
+cannot fit returns a bounded tool error asking for a larger budget. Large pages
+remain in author-facing sandbox state; only excerpts enter the model context.
+
+`web_set` atomically replaces active pages and search overrides. `pages:[]`
+clears the active corpus. Content-addressed refs retain immutable snapshots,
+including titles, dates and links, even after a replacement or clearing. Opening
+by URL resolves the current page; opening a prior ref preserves earlier evidence.
+In-flight requests retain the observation sampled when execution begins.
+Historical snapshots and pending observations count against the sandbox byte
+quota; a replacement that exceeds it fails without changing existing fixtures.
+Recompilation starts fresh and reproduces the same refs and observations.
+
+Pages require unique HTTP/HTTPS URLs without credentials, whitespace or invalid
+ports. URL fragments are ignored; other URL components match exactly. Links
+require unique IDs within each page. CRLF/CR line endings normalize to LF.
+Optional `status` defaults to 200; authored 403/404/429/503 pages remain readable
+results with that status. Unknown URLs and refs are tool failures. Transport
+`error` can be `dns`, `connection_refused`, `connection_reset`, `tls` or `timeout`.
+There are no automatic redirects, retries or live-network fallbacks.
+
+Optional page `latency_seconds` applies to open/find, and top-level
+`search_latency_seconds` to searches. All three tools accept `timeout_seconds`
+(default 30). Waiting uses the anchored synthetic clock; clock jumps affect it.
+At an exact latency/deadline tie the response wins. Explicit `error:"timeout"`
+waits until the deadline. EOS cancels requests and releases pending state; idle
+ticks do not create state snapshots. Use `io_failure_set` for transient failures,
+and later invisible `web_set` calls to model publication changes or recovery.
+
+**Migration:** `network_set` and `network_request` have been removed. Existing
+trajectories using them need reauthoring: convert responses into readable pages,
+replace calls with research tools, and retime dependent events after new result
+anchors. Arbitrary HTTP methods, raw headers/bodies and response sequences are
+outside the web-tool contract; no automatic migration is attempted.
