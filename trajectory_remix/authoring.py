@@ -345,10 +345,14 @@ class TrajectoryCommands:
     ):
         """Search readable trajectory text, names, properties and tags, then paginate.
 
+        For "review five candidate trajectories", call with query="@state:candidate",
+        limit=5. Add @batch:<batch-id> to restrict a batch. Filter here before
+        fetching replay content; do not enumerate all trajectories to check states.
+
         Case-insensitive query syntax: spaces AND, | OR, - negation, (groups),
         * word wildcards, #tag, @name:glob, @uuid:glob, @windows:>5,
         @uses_tool:glob, @state:candidate, @batch:glob. AND binds tighter than OR;
-        - applies to a term or group. Use limit=5 to review five candidates.
+        - applies to a term or group.
         Example: python -(math complex) #coding. Empty query lists everything.
         Read get_authoring_guide(topic="search") for the full syntax and examples.
         """

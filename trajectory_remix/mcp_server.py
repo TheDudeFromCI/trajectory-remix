@@ -234,6 +234,9 @@ def create_mcp_server(bridge):
             "Tools edit the running Trajectory Remix dashboard session. Read get_session "
             "and get_authoring_guide first for a short starting guide. Request one topic at a time; "
             "list_trajectories searches readable text with AND/OR, negation, groups, wildcards, properties and tags; "
+            'for "review five candidates", call list_trajectories(query="@state:candidate", limit=5). '
+            "Add @batch:<batch-id> for a particular batch. Filter before fetching replay content; "
+            "do not enumerate the dataset to check states manually. "
             "get_authoring_guide(topic=search) documents its query syntax. "
             "topic=reference returns the full manual and topic=example returns the complete bundled "
             "trajectory JSON without importing it. Use sample IDs and expected_revision for edits. Events use current "

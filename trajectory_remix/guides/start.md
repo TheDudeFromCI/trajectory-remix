@@ -12,6 +12,22 @@ Use logical window names; compilation assigns their numeric slots.
 
 ## 2. Choose your next task
 
+For review tasks, filter before fetching trajectories. For "review five candidate
+trajectories", call:
+
+```json
+{"name":"list_trajectories","arguments":{"query":"@state:candidate","limit":5}}
+```
+
+Add `@batch:<batch-id>` to the query when reviewing a particular generation batch.
+Use the requested state and count in the query and `limit`; do not list the whole
+dataset and check each trajectory's state manually. Results contain metadata;
+fetch replay content only for the matching trajectories you will review. Read
+`get_authoring_guide(topic="search")` if you need more query syntax.
+For your own review, `validate_trajectory(semantic=false)` checks compiler
+diagnostics without model API calls. `semantic=true` calls configured model
+endpoints; it does not use the reviewing agent's subscription.
+
 Read just one guide using `get_authoring_guide` with the indicated `topic`:
 
 | Your task | Topic | Repository copy |

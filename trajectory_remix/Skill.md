@@ -15,6 +15,14 @@ supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
 [the search guide](guides/search.md) with `get_authoring_guide(topic="search")`
 for examples and precise matching rules.
 
+For "review five candidate trajectories", call
+`list_trajectories(query="@state:candidate", limit=5)`. Add `@batch:<batch-id>`
+when a batch is specified. Filter before fetching replay content; do not list
+every trajectory and check its state manually. Fetch only the matching samples
+you will review. Compiler diagnostics use `validate_trajectory(semantic=false)`;
+`semantic=true` contacts configured model API endpoints, independently of the
+reviewing agent's subscription.
+
 Use this workflow to write a proposed training example. You are the **author** of
 the entire scenario: the user, Kidra, the specialists, their replies and external
 activity. Kidra is the **coordinator being trained**. Keep those roles separate.
