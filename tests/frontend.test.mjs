@@ -958,7 +958,7 @@ w.fetch = async (path, options) => {
   }
   if (String(path).startsWith("/api/state?")) {
     const url = new URL(path, base);
-    if (url.searchParams.get("query") === "test-batch") {
+    if (url.searchParams.get("query") === "@batch:test-batch") {
       batchQueryRequested = true;
       url.searchParams.set("query", "");
     }
@@ -975,7 +975,7 @@ assert.equal(batchStartBody.batch_size, 3);
 assert.equal(batchStartBody.scenario, "user_problem");
 assert.match($("batch-progress").textContent, /3\/3 completed/);
 await click("view-generation-batch");
-assert.equal($("sample-search").value, "test-batch");
+assert.equal($("sample-search").value, "@batch:test-batch");
 assert.equal(batchQueryRequested, true);
 assert.equal($("generation-panel").hidden, true);
 w.fetch = beforeBatchStartFetch;

@@ -10,6 +10,7 @@ from trajectory_remix.search import SearchQuery, SearchSyntaxError, glob_match, 
 @pytest.mark.parametrize("query", [
     "(", ")", "()", "python)", "(python", "python |", "| python", "a || b",
     "-", "a -", '"unterminated', '""', "#", "@name:", "@name", "@unknown:x",
+    "@state:", "@state:unknown", "@state:4", "@state:-4", "@state:*", "@batch:",
     "@windows:abc", "@windows:>5.2", "@windows:>-1", "@windows:=>2",
     "@windows:9223372036854775808", "x" * 4097,
     " ".join(["x"] * 257), "(" * 34 + "x" + ")" * 34, "-" * 34 + "x",

@@ -32,6 +32,9 @@ async def test_batch_creates_searchable_candidates_and_keeps_model_metrics_local
     assert all(s["metadata"]["validation_level"] == 1 for s in samples)
     assert all(s["metadata"]["generation_batch"] == batch["id"] for s in samples)
     assert app.state.dataset.store.listing(query=batch["id"])[0] == 3
+    assert app.state.dataset.store.listing(
+        query=f"@state:candidate @batch:{batch['id']}", limit=5
+    )[0] == 3
     assert runner.status["model_requests"] < len(fake.messages)
 
 

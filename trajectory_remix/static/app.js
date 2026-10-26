@@ -2506,9 +2506,10 @@ $("generate-batch").onclick = action(async () => {
 $("view-generation-batch").onclick = action(async () => {
   if (!state.status.batch) return;
   if (hasPendingChanges()) await compileSample(true);
-  $("sample-search").value = state.status.batch.id;
+  const query = `@batch:${state.status.batch.id}`;
+  $("sample-search").value = query;
   sampleOffset = 0;
-  const listing = await json("state?" + new URLSearchParams({query: state.status.batch.id, offset: "0", limit: String(SAMPLE_PAGE_SIZE)}));
+  const listing = await json("state?" + new URLSearchParams({query, offset: "0", limit: String(SAMPLE_PAGE_SIZE)}));
   lastGenerationDraft = listing.status.draft_id;
   if (listing.samples.length) await selectSample(listing.samples[0].index, true);
   await refresh();

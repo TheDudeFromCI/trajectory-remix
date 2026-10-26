@@ -225,3 +225,81 @@ async def test_edits_undo_redo_deletion_and_failed_import_update_search_atomical
     assert invalid.status_code == 422
     assert await count("rollback-needle | @uses_tool:calculator") == 0
     assert await count(query) == 1
+
+
+@pytest.fixture
+def review_store(search_store):
+    samples = []
+    for level, name in enumerate(
+        ['unfinished', 'rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready'], -3
+    ):
+        samples.append({
+            'id': name,
+            'metadata': {'validation_level': level, 'generation_batch': 'Batch-A' if level <= 1 else 'Batch-B'},
+            'replay': {},
+        })
+    samples.extend([
+        {'id': 'missing', 'replay': {}},
+        {'id': 'null', 'metadata': {'validation_level': None, 'generation_batch': None}, 'replay': {}},
+        {'id': 'text-only', 'metadata': {'note': 'candidate Batch-A'}, 'replay': {}},
+    ])
+    search_store.replace(samples, search_store.info()[0])
+    return search_store
+
+
+@pytest.mark.parametrize('query,expected', [
+    *[(f'@state:{name.upper()}', [name]) for name in
+      ['rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready']],
+    *[(f'@state:{level}', [name]) for level, name in enumerate(
+      ['rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready'], -2)],
+    ('@state:unfinished', ['unfinished', 'missing', 'null', 'text-only']),
+    ('@state:-3', ['unfinished', 'missing', 'null', 'text-only']),
+    ('@batch:BATCH-A', ['unfinished', 'rejected', 'unsuccessful', 'pending', 'candidate']),
+    ('@batch:batch-*', ['unfinished', 'rejected', 'unsuccessful', 'pending', 'candidate', 'validated', 'ready']),
+    ('-@batch:*', ['missing', 'null', 'text-only']),
+    ('@state:candidate @batch:batch-a', ['candidate']),
+    ('(@state:candidate | @state:validated) -@batch:batch-a', ['validated']),
+    ('-@state:unfinished -@state:rejected', ['unsuccessful', 'pending', 'candidate', 'validated', 'ready']),
+    ('@batch:"x\' OR 1=1 --"', []),
+])
+def test_review_discovery_sql_and_draft_parity(review_store, query, expected):
+    total, result = review_store.listing(query)
+    assert total == len(expected)
+    assert [row['id'] for row in result] == expected
+    assert [sample['id'] for sample in review_store.samples if SearchQuery(query).matches(sample)] == expected
+
+
+def test_review_discovery_uses_metadata_before_pagination(review_store, monkeypatch):
+    def forbidden(*args):
+        raise AssertionError('Review discovery must not decode trajectory sources')
+
+    monkeypatch.setattr(SQLiteSamples, '__iter__', forbidden)
+    monkeypatch.setattr(SQLiteSamples, '__getitem__', forbidden)
+    total, page = review_store.listing('@batch:batch-a -@state:unfinished', offset=1, limit=2)
+    assert total == 4
+    assert [row['id'] for row in page] == ['unsuccessful', 'pending']
+
+
+async def test_candidate_discovery_through_mcp_and_dashboard(studio):
+    app, client = studio
+    for i in range(7):
+        app.state.dataset.store.samples.append({
+            'id': f'candidate-{i}',
+            'metadata': {'validation_level': 1, 'generation_batch': 'review-batch'},
+            'replay': {},
+        })
+    query = '@state:candidate @batch:review-batch'
+    mcp = await client.post('/api/mcp/call', json={
+        'name': 'list_trajectories', 'arguments': {'query': query, 'limit': 5},
+    })
+    dashboard = await client.get('/api/state', params={'query': query, 'limit': 5})
+    assert mcp.status_code == dashboard.status_code == 200
+    assert mcp.json()['total'] == dashboard.json()['total'] == 7
+    assert [s['id'] for s in mcp.json()['trajectories']] == [f'candidate-{i}' for i in range(5)]
+    assert [s['id'] for s in dashboard.json()['samples']] == [f'candidate-{i}' for i in range(5)]
+    assert (await client.post('/api/samples/1/state', json={'level': 2})).status_code == 200
+    remaining = await client.post('/api/mcp/call', json={
+        'name': 'list_trajectories', 'arguments': {'query': query, 'limit': 5},
+    })
+    assert remaining.json()['total'] == 6
+    assert 'candidate-0' not in [s['id'] for s in remaining.json()['trajectories']]

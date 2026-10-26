@@ -729,7 +729,10 @@ language as the dashboard. It searches readable source string values, including
 replay text, arguments and authored outcomes. Spaces mean AND, `|` means OR,
 `-` negates a term/group, parentheses nest, and `*` provides word wildcards.
 `#tag` filters complete metadata tags; properties are `@name`, `@uuid`,
-`@windows` (numeric comparisons) and `@uses_tool` (actual visible/invisible calls).
+`@windows` (numeric comparisons), `@uses_tool` (actual visible/invisible calls),
+`@state` (validation stage), and `@batch` (generation batch ID).
+For example, `list_trajectories(query="@state:candidate", limit=5)` discovers
+five candidates for external review without calling a model API.
 All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
 Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
 through MCP with `get_authoring_guide(topic="search")`.

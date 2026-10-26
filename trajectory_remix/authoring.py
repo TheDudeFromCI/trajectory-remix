@@ -347,7 +347,8 @@ class TrajectoryCommands:
 
         Case-insensitive query syntax: spaces AND, | OR, - negation, (groups),
         * word wildcards, #tag, @name:glob, @uuid:glob, @windows:>5,
-        @uses_tool:glob. AND binds tighter than OR; - applies to a term or group.
+        @uses_tool:glob, @state:candidate, @batch:glob. AND binds tighter than OR;
+        - applies to a term or group. Use limit=5 to review five candidates.
         Example: python -(math complex) #coding. Empty query lists everything.
         Read get_authoring_guide(topic="search") for the full syntax and examples.
         """
