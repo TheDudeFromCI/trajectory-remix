@@ -2211,7 +2211,7 @@ async function changeHistory(direction) {
 $("undo-edit").onclick = action(() => changeHistory("undo"));
 $("redo-edit").onclick = action(() => changeHistory("redo"));
 function closeMenus() {
-  for (const name of ["file", "edit"]) {
+  for (const name of ["file", "edit", "view"]) {
     $(name + "-menu").hidden = true;
     $(name + "-menu-button").setAttribute("aria-expanded", "false");
   }
@@ -2243,6 +2243,22 @@ function toggleMenu(name) {
 }
 $("file-menu-button").onclick = () => toggleMenu("file");
 $("edit-menu-button").onclick = () => toggleMenu("edit");
+$("view-menu-button").onclick = () => toggleMenu("view");
+function setDatasetPanelVisible(visible) {
+  const workspace = $("workspace");
+  workspace.classList.toggle("dataset-panel-hidden", !visible);
+  workspace.querySelector(".sidebar").hidden = !visible;
+  workspace.querySelector('[data-resize="sidebar"]').hidden = !visible;
+  $("dataset-panel-check").textContent = visible ? "✔" : "";
+  $("toggle-dataset-panel").setAttribute("aria-checked", String(visible));
+  drawTimeline();
+}
+$("toggle-dataset-panel").onclick = () => {
+  setDatasetPanelVisible(
+    $("workspace").classList.contains("dataset-panel-hidden"),
+  );
+  closeMenus();
+};
 $("export-sample").onclick = action(async () => {
   closeMenus();
   if (selected < 0 || !sample) return;
@@ -2292,9 +2308,11 @@ $("preferences-form").onsubmit = action(async (event) => {
   if (compileTimer !== null) scheduleCompile();
   $("preferences-dialog").close();
 });
-for (const name of ["file", "edit"])
+for (const name of ["file", "edit", "view"])
   $(name + "-menu-button").onmouseenter = () => {
-    const anyOpen = !$("file-menu").hidden || !$("edit-menu").hidden;
+    const anyOpen = ["file", "edit", "view"].some(
+      (menu) => !$(menu + "-menu").hidden,
+    );
     if ($(name + "-menu").hidden && anyOpen) toggleMenu(name);
   };
 document.addEventListener("click", (e) => {
