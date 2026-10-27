@@ -8,24 +8,27 @@ from __future__ import annotations
 
 import copy
 import difflib
+import hashlib
 import inspect
 import json
 import re
 import uuid
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from .changes import HistoryError, SampleHistory, json_changes, json_equal
-from .compiler import ANCHOR, KEY, CompileError
-from .dataset import new_sample, prepare_sample
+from .compiler import ANCHOR, CompileError, valid_tick, shift_tick
+from .dataset import evaluation_source, new_sample, prepare_sample
 from .llm import SampleBuilder
 from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
 from .metadata import query as query_metadata
 from .preview import PreviewCache
+from .search import SearchQuery
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import (
@@ -178,8 +181,8 @@ class TrajectoryCommands:
                 return index, sample
         raise CommandError(f"Trajectory not found: {sample_id}", "not_found")
 
-    def _editable(self, expected_revision):
-        if self.runner.status["running"]:
+    def _editable(self, expected_revision, sample_id=None):
+        if self.runner.status["running"] or (getattr(self.runner, "scenario_runner", None) and self.runner.scenario_runner.locked(sample_id)):
             raise CommandError("Stop generation before editing the dataset", "busy")
         if (
             expected_revision is not None
@@ -189,7 +192,13 @@ class TrajectoryCommands:
                 "Dataset changed; read it again before editing", "conflict"
             )
 
-    def _commit(self, sample, index=None, validate=False):
+    def _commit(self, sample, index=None, validate=False, *, review=False):
+        self._editable(None, self.state["samples"][index]["id"] if index is not None else sample.get("id"))
+        from .dataset import invalidate_automation
+        # An explicit sign-off changes review metadata, not the reviewed source.
+        # Ordinary edits must keep invalidating assessments of older content.
+        if index is not None and not review:
+            sample = invalidate_automation(copy.deepcopy(sample), self.state["samples"][index])
         sample = prepare_sample(
             sample, self.state["samples"][index] if index is not None else None
         )
@@ -241,7 +250,7 @@ class TrajectoryCommands:
         }
 
     def _draft(self, sample_id, expected_revision):
-        self._editable(expected_revision)
+        self._editable(expected_revision, sample_id)
         index, sample = self._find(sample_id)
         return index, copy.deepcopy(sample)
 
@@ -262,7 +271,7 @@ class TrajectoryCommands:
         return group[event_index]
 
     def _insert(self, sample, tick, event, position):
-        if not KEY.fullmatch(tick):
+        if not valid_tick(tick):
             raise CommandError("tick must be an integer string or {N_TICK:n}+offset")
         replay = self._replay(sample)
         group = replay.setdefault(tick, [])
@@ -313,13 +322,14 @@ class TrajectoryCommands:
     def get_authoring_guide(
         self,
         topic: Literal[
-            "start", "first", "parallel", "edit", "sandbox", "tools", "reference", "example"
+            "start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "reference", "example"
         ] = "start",
     ):
         """Read a short authoring lesson, complete reference, or example trajectory.
 
         Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
-        sandbox (trajectory files), tools (starter tool selection), reference (full manual),
+        sandbox (trajectory files), tools (starter tool selection), search (query syntax),
+        review (semantic review/context dependencies; read before reviewing or repairing), reference (full manual),
         example (full build-graph JSON trajectory). No source or sandbox changes.
         """
         root = Path(__file__).parent
@@ -335,22 +345,27 @@ class TrajectoryCommands:
     def list_trajectories(
         self, query: str = "", offset: Nonnegative = 0, limit: PageSize = 50
     ):
-        """List trajectories with metadata; filter by ID or metadata text and paginate."""
+        """Search readable trajectory text, names, properties and tags, then paginate.
+
+        For "review five candidate trajectories", call with query="@state:candidate",
+        limit=5. Add @batch:<batch-id> to restrict a batch. Filter here before
+        fetching replay content; do not enumerate all trajectories to check states.
+
+        Case-insensitive query syntax: spaces AND, | OR, - negation, (groups),
+        * word wildcards, #tag, @name:glob, @uuid:glob, @windows:>5,
+        @uses_tool:glob, @state:candidate, @batch:glob. AND binds tighter than OR;
+        - applies to a term or group.
+        Example: python -(math complex) #coding. Empty query lists everything.
+        Read get_authoring_guide(topic="search") for the full syntax and examples.
+        """
         if isinstance(self.state["samples"], SQLiteSamples):
             revision = self.state["revision"]
             total, trajectories = self.state["samples"].store.listing(
                 query, offset, limit
             )
             return {"revision": revision, "total": total, "trajectories": trajectories}
-        samples = [
-            s
-            for s in self.state["samples"]
-            if query.casefold()
-            in (
-                str(s.get("id", ""))
-                + json.dumps(s.get("metadata", {}), ensure_ascii=False)
-            ).casefold()
-        ]
+        search = SearchQuery(query)
+        samples = [s for s in self.state["samples"] if search.matches(s)]
         return {
             "revision": self.state["revision"],
             "total": len(samples),
@@ -622,16 +637,10 @@ class TrajectoryCommands:
             raise CommandError("Choose to_tick or tick_offset")
         target = to_tick if to_tick is not None else tick
         if tick_offset is not None:
-            match = KEY.fullmatch(tick)
-            if not match:
-                raise CommandError("Cannot offset an invalid tick key; specify to_tick")
-            base = int(tick) if tick.isdigit() else int(match[2] or 0)
-            shifted = base + tick_offset
-            if shifted < 0:
-                raise CommandError("Tick/anchor offset cannot become negative")
-            target = (
-                str(shifted) if tick.isdigit() else f"{{N_TICK:{match[1]}}}+{shifted}"
-            )
+            try:
+                target = shift_tick(tick, tick_offset)
+            except ValueError as error:
+                raise CommandError(str(error)) from error
         event = self._remove(sample, tick, event_index)
         address = self._insert(sample, target, event, position)
         return {**self._commit(sample, index, validate), **address}
@@ -777,12 +786,76 @@ class TrajectoryCommands:
                             )
         return {**self._commit(sample, index, validate), "events_changed": len(chosen)}
 
+    @command(write=True)
+    def sign_off_trajectory(
+        self,
+        sample_id: str,
+        verdict: Literal["validated", "rejected"],
+        reviewer: Annotated[str, Field(min_length=1, max_length=200)],
+        summary: Annotated[str, Field(min_length=1, max_length=10000)],
+        expected_revision: Nonnegative,
+    ):
+        """Record YOUR completed review without calling any model API.
+
+        Read get_authoring_guide(topic="review") before reviewing or repairing.
+        Zero compiler warnings do not establish semantic correctness. Check shared
+        open-window context, redundant tools and dependencies throughout streams.
+        After inspecting/repairing the trajectory, reread its current source and
+        review it, then pass that revision. validated sets state 2; rejected sets
+        state -2. Records the reviewer label (self-reported, e.g. GPT-6.1 via Codex),
+        summary, timestamp and reviewed source hash. Successful sign-off requires
+        compilation; compiler warnings remain your responsibility and are returned.
+        This records your assessment, not an independent LLM review.
+        Never grants Ready (3). Later content edits invalidate the sign-off.
+        """
+        index, sample = self._draft(sample_id, expected_revision)
+        reviewer, summary = reviewer.strip(), summary.strip()
+        if not reviewer or not summary:
+            raise CommandError("Reviewer and summary must contain non-whitespace text")
+        try:
+            diagnostics = self.compiler.compile(sample)["diagnostics"]
+        except CompileError as error:
+            if verdict == "validated":
+                raise
+            diagnostics = [error.diagnostic()]
+        metadata = sample.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = sample["metadata"] = {}
+        source_hash = hashlib.sha256(
+            json.dumps(evaluation_source(sample), sort_keys=True).encode()
+        ).hexdigest()
+        evaluation = {
+            "level": 2,
+            "origin": "mcp_sign_off",
+            "reviewer": reviewer,
+            "summary": summary,
+            "reviewed_revision": expected_revision,
+            "report": {"valid": verdict == "validated", "feedback": [summary]},
+            "source_hash": source_hash,
+            "tokenizer": self.compiler.fingerprint,
+            "tools": self.compiler.tools.fingerprint,
+            "time": datetime.now(UTC).isoformat(),
+        }
+        evaluations = metadata.get("evaluations")
+        if not isinstance(evaluations, list):
+            evaluations = metadata["evaluations"] = []
+        evaluations.append(evaluation)
+        metadata["validation_level"] = 2 if verdict == "validated" else -2
+        metadata.pop("approval", None)
+        return {
+            **self._commit(sample, index, review=True),
+            "validation_level": metadata["validation_level"],
+            "evaluation": evaluation,
+            "diagnostics": diagnostics,
+        }
+
     @command()
     async def validate_trajectory(self, sample_id: str, semantic: bool = False):
         """Compile a sample and report errors/warnings. semantic=True also calls configured LLM validators.
 
         No provider calls occur by default. Compiler errors return valid=false with a
         diagnostic path; the compiler stops at its first error. Warnings do not fail validation.
+        This does not sign off a review; use sign_off_trajectory after your own review.
         """
         revision = self.state["revision"]
         try:
@@ -801,11 +874,17 @@ class TrajectoryCommands:
             "revision": revision,
         }
         if semantic:
+            self._editable(None, sample_id)
             sample = copy.deepcopy(self._find(sample_id)[1])
             builder = SampleBuilder(
                 self.compiler, copy.deepcopy(self.state["config"]), self.client
             )
-            result["semantic"] = await builder.validators(sample)
+            scenario = getattr(self.runner, "scenario_runner", None)
+            if scenario and scenario.status["running"]:
+                async with scenario.limit:
+                    result["semantic"] = await builder.validators(sample)
+            else:
+                result["semantic"] = await builder.validators(sample)
             result["valid"] = result["semantic"]["valid"]
         return result
 
@@ -1085,6 +1164,23 @@ class TrajectoryCommands:
         """
         return self.history.view(include_changes)
 
+    def _check_history_lock(self, direction, steps):
+        scenario = getattr(self.runner, "scenario_runner", None)
+        if scenario is None or not scenario.status["running"]:
+            return
+        source = self.history.undo_stack if direction == "undo" else self.history.redo_stack
+        preview = self.state["samples"].copy()
+        for entry in reversed(source[-steps:]):
+            for operation in entry["inverse" if direction == "undo" else "forward"]:
+                index = int(operation["path"].lstrip("/"))
+                if operation["op"] != "add" and scenario.locked(preview[index]["id"]):
+                    raise CommandError("History action changes the active trajectory", "busy")
+                if operation.get("value", {}).get("id") == scenario.status["draft_id"]:
+                    raise CommandError("History action changes the active trajectory", "busy")
+                if operation["op"] == "add": preview.insert(index, operation["value"])
+                elif operation["op"] == "remove": del preview[index]
+                else: preview[index] = operation["value"]
+
     @command(write=True, destructive=True)
     def undo_edits(
         self,
@@ -1093,6 +1189,7 @@ class TrajectoryCommands:
     ):
         """Undo source edits as one revision change. Stop generation first; the undo commits immediately."""
         self._editable(expected_revision)
+        self._check_history_lock("undo", steps)
         return self.history.restore("undo", steps)
 
     @command(write=True, destructive=True)
@@ -1103,6 +1200,7 @@ class TrajectoryCommands:
     ):
         """Reapply undone source edits. A new source edit discards the redo branch."""
         self._editable(expected_revision)
+        self._check_history_lock("redo", steps)
         return self.history.restore("redo", steps)
 
     @command()
@@ -1320,7 +1418,7 @@ class TrajectoryCommands:
         recorder = None
         context = None
         if record_sample_id is not None:
-            self._editable(expected_revision)
+            self._editable(expected_revision, record_sample_id)
             _, sample = self._find(record_sample_id)
             windows = []
             if any(sample.get("replay", {}).values()):

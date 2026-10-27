@@ -50,8 +50,11 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "create_tool_session",
                     "apply_batch",
                     "query_trajectories",
+                    "sign_off_trajectory",
                 } <= set(tools)
                 assert tools["get_trajectory"].annotations.readOnlyHint
+                assert not tools["sign_off_trajectory"].annotations.readOnlyHint
+                assert "expected_revision" in tools["sign_off_trajectory"].inputSchema["required"]
                 guide = await session.call_tool("get_authoring_guide", {})
                 assert (
                     not guide.isError
@@ -59,6 +62,10 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 )
                 parallel = await session.call_tool("get_authoring_guide", {"topic": "parallel"})
                 assert not parallel.isError and "Verify overlap" in parallel.structuredContent["content"]
+                search_guide = await session.call_tool("get_authoring_guide", {"topic": "search"})
+                assert not search_guide.isError and "## Wildcards" in search_guide.structuredContent["content"]
+                assert "topic=search" in initialized.instructions
+                assert "query" in tools["list_trajectories"].inputSchema["properties"]
                 reference = await session.call_tool("get_authoring_guide", {"topic": "reference"})
                 assert not reference.isError and "Synthetic tool inventory" in reference.structuredContent["content"]
                 before_example = await session.call_tool("get_session", {})
@@ -98,6 +105,12 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "get_trajectory", {"sample_id": "from-mcp"}
                 )
                 assert result.structuredContent["sample"]["replay"]
+                found = await session.call_tool("list_trajectories", {
+                    "query": '@name:from-* @windows:>0 -"impossible phrase"',
+                })
+                assert not found.isError and found.structuredContent["total"] == 1
+                bad_query = await session.call_tool("list_trajectories", {"query": "python |"})
+                assert bad_query.isError and "Invalid search query" in bad_query.structuredContent["detail"]
                 report = await session.call_tool(
                     "validate_trajectory", {"sample_id": "from-mcp"}
                 )
@@ -272,7 +285,8 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
             async with httpx.AsyncClient(
                 base_url=base, trust_env=False, timeout=1
             ) as client:
-                for _ in range(100):
+                # Cold dependency imports can exceed five seconds on shared runners.
+                for _ in range(600):
                     try:
                         response = await client.get("/")
                         response.raise_for_status()
@@ -283,7 +297,7 @@ async def test_real_stdio_client_shares_dashboard_and_persists(tmp_path, compile
                         ).read_text()
                         await asyncio.sleep(0.05)
                 else:
-                    pytest.fail("Dashboard did not start")
+                    pytest.fail("Dashboard did not start: " + (tmp_path / "dashboard.log").read_text())
                 params = StdioServerParameters(
                     command=sys.executable,
                     args=[

@@ -1,6 +1,6 @@
 # Synthetic tools reference
 
-This document describes the **38 built-in synthetic tools** shipped with Trajectory Remix: **32 model-visible tools** and **6 author-only tools**. It covers their argument contracts, results, persistent state, timing, and use in authored trajectories. These are **not** the MCP commands that edit datasets. The MCP authoring API is documented in [MCP.md](MCP.md); the low-level execution contract and custom-tool interface are in [SANDBOX.md](SANDBOX.md).
+This document describes the **40 built-in synthetic tools** shipped with Trajectory Remix: **34 model-visible tools** and **6 author-only tools**. It covers their argument contracts, results, persistent state, timing, and use in authored trajectories. These are **not** the MCP commands that edit datasets. The MCP authoring API is documented in [MCP.md](MCP.md); the low-level execution contract and custom-tool interface are in [SANDBOX.md](SANDBOX.md).
 
 The authoritative implementations are the Python modules in [`trajectory_remix/tools/`](../trajectory_remix/tools/). Call MCP `list_simulated_tools` to retrieve the actual schemas, including installed custom tools. In that listing, author-only tools are marked `invisible: true`. The table below summarizes the built-ins; the sections that follow explain every one.
 
@@ -15,17 +15,17 @@ The authoritative implementations are the Python modules in [`trajectory_remix/t
 | Clock and timers | `time_now`, `time_set`, `timer` | `time_advance` |
 | Chat and delegated conversations | `chat`, `subagent`, `subagent_get`, `subagent_list`, `subagent_close` | — |
 | Runtime and hardware | `runtime_status`, `system_diagnostics` | `system_diagnostics_set`, `hardware_load_set` |
-| Network | `network_request` | `network_set` |
+| Web research | `web_search`, `web_open`, `web_find` | `web_set` |
 | Permission and fault scenarios | — | `tool_permissions_set`, `io_failure_set` |
 
 ## Operating model
 
-- **Simulation, not access to real resources.** Built-in files exist as UTF-8 text in a virtual RAM filesystem. Memory, notes, skills, conversations, network responses, and hardware readings are synthetic. `network_request` never sends an HTTP request; `subagent` never launches an LLM; `system_diagnostics` never probes the host. Neither file tools nor `calculator` execute arbitrary shell/Python code.
+- **Simulation, not access to real resources.** Built-in files exist as UTF-8 text in a virtual RAM filesystem. Memory, notes, skills, conversations, web pages, and hardware readings are synthetic. Web tools never send an HTTP request; `subagent` never launches an LLM; `system_diagnostics` never probes the host. Neither file tools nor `calculator` execute arbitrary shell/Python code.
 - **One sandbox per trajectory.** Recompilation starts from fresh deterministic state. A sandbox is a tool-owned dictionary, initially holding `tick_rate`; most tools add state only when used. Separate MCP workbench tool sessions have separate ephemeral sandboxes. Executing a tool in a workbench does not automatically transplant its state into a trajectory.
 - **Tick execution.** Kidra generates a tool request in a tool window, one token per tick. The call starts **the tick after the request's final token**. The runtime calls `run(args, state, windows)` on each execution tick until it reports completion. Calls may overlap; each runs in stable source order on a shared virtual world. A tool can produce zero or multiple observations while it is running.
 - **Results and masks.** Normal tool outputs are JSON envelopes: `{"ok":true,"result":...}` or `{"ok":false,"error":"..."}`. Visible observations are externally appended to the **same tool window** as the request, and excluded from training loss; Kidra's request is generated content. Authors can choose instant or streamed result delivery. A reported failure is an observation, not automatic trajectory termination.
 - **Visibility.** The six author-only tools can only be invoked through `invisible-tool-call`. Any otherwise visible tool may also be invoked invisibly to model external activity, without adding a request/result window. Some individual parameters, such as `chat.username` and `subagent.response`, are also invisible. Public model schemas omit them and reject them in visible calls. `show_tools` exposes selected public schemas to Kidra but does not act as an execution allowlist.
-- **Time and cancellation.** The synthetic clock advances with logical ticks (`tick_rate` defaults to 10 ticks/second), not host sleep or the count of tool calls. The default clock seed is `2030-01-01T09:00:00+00:00` unless configured in `metadata.synthetic_clock`. Generated EOS on a tool window cancels unfinished activity; built-in pending timers, watches, network calls, file operations, and subagents clean up, but completed mutations are not rolled back. Each invocation has a 10-second real-time safety deadline, independent of simulated duration.
+- **Time and cancellation.** The synthetic clock advances with logical ticks (`tick_rate` defaults to 10 ticks/second), not host sleep or the count of tool calls. The default clock seed is `2030-01-01T09:00:00+00:00` unless configured in `metadata.synthetic_clock`. Generated EOS on a tool window cancels unfinished activity; built-in pending timers, watches, web calls, file operations, and subagents clean up, but completed mutations are not rolled back. Each invocation has a 10-second real-time safety deadline, independent of simulated duration.
 - **Quotas and ordering.** Built-ins obey sandbox byte limits and tool-specific field limits. The trajectory compiler has its own tick/row limits. Within the same tick, a later tool can observe an earlier tool's completed mutation, but not vice versa. Schedule dependent model reasoning after the relevant tool result has been delivered.
 
 ### Authoring examples
@@ -184,27 +184,33 @@ Lowercases and tokenizes query/memory text into sets of word-like terms, ranks b
 
 ### `note_save`
 
-**Arguments:** required `key`, `text`, `status` (one of `todo`, `doing`, `blocked`, `done`); optional `owner`, `depends_on`, `blockers`, `acceptance_criteria`. Each of the last three is a string array, maximum 64 entries.
+**Arguments:** `name` is required. When creating a new task, also provide `description`, `priority` (`critical`, `very high`, `high`, `medium`, `low`, or `very low`), and `status` (`not started`, `doing`, `paused`, `blocked`, or `done`). The optional `blocked_by` array contains up to 64 distinct task names.
 
-**Result:** `{"saved":key}`.
+**Result:** `{"saved":name}`.
 
-Creates/updates a task record. Omitted optional fields on update retain their prior values. Rejects self-dependencies and dependency cycles. A task cannot be marked `done` if it has nonempty blockers or any dependency is missing/not `done`. Example: `{"key":"review","text":"Review implementation","status":"blocked","owner":"qa","depends_on":["implementation"],"blockers":["Awaiting artifact"],"acceptance_criteria":["Tests pass"]}`. It is a local task store, not a remote project-management service.
+Creates or updates a TODO task, distinct from the searchable text records handled by `memory_save`. On updates, only `name` is required; omitted fields remain unchanged. Names uniquely identify tasks across priorities. Dependencies may refer to tasks not yet created, but cannot form cycles (including self-dependencies). A task cannot be marked `done` until every task named by `blocked_by` exists and is `done`. A finished prerequisite cannot be reopened or deleted while a completed task depends on it. To clear blockers, supply an empty array.
+
+Example: `{"name":"security-bug","description":"Fix critical security vulnerability","priority":"critical","status":"not started","blocked_by":["update-auth-lib"]}`.
 
 ### `note_list`
 
 **Arguments:** none (`{}`).
 
-**Result:** a JSON object mapping note keys to complete stored note objects.
+**Result:** a JSON object with six priority buckets, ordered critical → very low; each bucket maps task names to `{"description":...,"status":...,"blocked_by":[...]}` objects.
 
-Returns every stored note, including status, owner, dependencies, blockers, and acceptance criteria where present. It does not automatically sort tasks by readiness or resolve blockers.
+Returns all tasks, including empty priority buckets. This is identical in structure to the automatic `notes` context window.
 
 ### `note_delete`
 
-**Arguments:** required `key`.
+**Arguments:** required `name`.
 
-**Result:** `{"deleted":key}`.
+**Result:** `{"deleted":name}`.
 
-Deletes the named note; missing keys fail. It does not automatically delete or rewrite dependencies in other notes.
+Deletes a named TODO task; missing names fail. Remaining tasks keep their `blocked_by` references, so an unfinished or deleted dependency prevents completion. A prerequisite referenced by a completed task cannot be deleted.
+
+### Automatic notes window
+
+When a trajectory uses `note_save`, `note_list`, or `note_delete` (including invisible calls), the compiler reserves a `notes` window at tick 0, initially containing JSON with all six empty priority buckets. It counts toward the project window-slot limit, is externally managed, and must not be authored, generated into, or closed by the model. Task mutations replace its JSON content in phase B at the mutation tick, keeping the latest task state available to the agent without calling `note_list`. Replacements are loss-masked; prior task-list tokens are evicted. Multiple changes in one tick are ordered by the source events. Samples with no note tools have no extra notes window.
 
 ## Stored skills
 
@@ -345,7 +351,7 @@ Closes an existing nonrunning conversation but preserves its messages. A running
 
 **Arguments:** none (`{}`).
 
-**Result:** `{"clock":...,"synthetic":true,"calls":number,"tasks":{"todo":n,"doing":n,"blocked":n,"done":n},"subagents":[...]}`.
+**Result:** `{"clock":...,"synthetic":true,"calls":number,"tasks":{"not started":n,"doing":n,"paused":n,"blocked":n,"done":n},"subagents":[...]}`.
 
 Summarizes the synthetic clock, the sandbox's legacy completed-call counter, note counts by status, and retained subagent lifecycle states. Useful for coordinator status checks while multiple delegated calls are in progress. It is not a list of live operating-system processes or a substitute for the author-facing per-call timeline.
 
@@ -379,42 +385,89 @@ Merges fields into the synthetic diagnostics; omitted values retain prior settin
 
 Adds deterministic **execution latency**, not CPU load, to `file_read`, `file_write`, `file_patch`, `file_delete`, `file_stat`, `file_list`, `file_copy`, `file_move`, `file_rename`, and `file_search`. Per-tool overrides beat the default. Delay is sampled when a call starts and is additive to legacy `duration-ticks`; changing the config does not retime already-running calls. The mutation happens on completion. Set an override to zero to remove that tool's added delay.
 
-## Simulated HTTP
+## Synthetic web research
 
-### `network_request`
+All web tools use authored readable text, never live network access. See the
+[complete setup and research walkthrough](SANDBOX.md#synthetic-web-research).
 
-**Arguments:** required `url` (HTTP/HTTPS URL without embedded credentials); optional `method` (`GET` default, or `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`), `headers` (string map), `body` (text), `timeout_seconds` (default 30, max 86400).
+### `web_set` — author-only
 
-**Result:** `{"url":...,"method":...,"status":200,"headers":{},"body":"...","elapsed_seconds":...}`, or a tool-failure envelope.
+**Arguments:** required `pages` (0–128). Each requires `url`, `title` (max 512
+characters), `text` (max 100000). Optional `published_at` (max 64 characters),
+`status` (200–599, default 200), `latency_seconds` (0–86400), `error` (`dns`,
+`connection_refused`, `connection_reset`, `tls`, `timeout`) and `links` (0–128).
+Each link requires `id`, `text`, `url`; relative URLs resolve against the page.
+Optional `searches` (0–128) contains `{query,urls}` exact-query ranking overrides,
+including empty results; URLs must be unique and in the active corpus. Optional
+`search_latency_seconds` applies to search calls (0–86400, default 0).
 
-Uses **only** routes configured by `network_set`. A matching route may impose simulated latency, return sequential responses or inject a transport error. HTTP statuses such as 404/429/503 are *successful tool transport outcomes* (`ok:true`); the model must interpret the status itself. DNS/TLS/reset/timeout problems become `ok:false` tool failures. Never makes a host network request, follows redirects, or retries automatically. `HEAD` returns an empty body. Waiting requests can be cancelled; the selected response has already been consumed.
+**Result:** `{"pages":number,"searches":number}`.
 
-### `network_set` — author-only
+Atomically replaces the active corpus and overrides. Old immutable snapshots and
+in-flight observations survive replacement, within the sandbox byte quota.
+Duplicate page URLs, link IDs or normalized override queries fail. URLs require
+HTTP/HTTPS without credentials or whitespace; fragments are stripped. CRLF/CR
+normalize to LF. Query overrides case-fold and collapse whitespace.
 
-**Arguments:** required `routes` (array, at most 128; `[]` clears fixtures). Each route has `url` (URL glob), optional `method` (default `GET`), optional exact `request_body` and matching subset `request_headers`, and required nonempty `responses` (max 128). Response fields: `status` (100–599, default 200), `headers`, `body` (text), `latency_seconds` (0–86400), or `error` (`dns`, `connection_refused`, `connection_reset`, `tls`, `timeout`).
+### `web_search`
 
-**Result:** `{"routes":number}`.
+**Arguments:** `query` (1–512 characters); optional `max_results` (1–20, default
+5), `offset` (0–128, default 0), plus the common web options below.
 
-Replaces the fixture list and resets per-route response cursors. Routes are tested in declared order; the first matching method, URL glob, exact body, and required header subset wins. Request header names match case-insensitively. Each new request consumes the next response in that route's sequence; its last response repeats. In-flight requests retain the response selected at dispatch even if routes are changed. Example:
+**Result:** `{results:[{ref,url,title,published_at?,snippet}],total_results,truncated,next_offset}`.
 
-~~~json
-{
-  "op": "invisible-tool-call",
-  "tool": "network_set",
-  "arguments": {
-    "routes": [{
-      "url": "https://api.example.test/items",
-      "method": "GET",
-      "responses": [
-        {"status": 503, "body": "Retry later", "latency_seconds": 0.5},
-        {"status": 200, "body": "{\"items\":[1,2]}"}
-      ]
-    }]
-  }
-}
-~~~
+Deterministic BM25 ranking with a title boost and URL tie-breaker, unless an
+exact query override exists. Any query term can match; punctuation-only queries
+without an override fail. Snippets are exact excerpts of at most 240 characters.
+Search excludes pages denied for `web_search`. Empty searches return an empty
+list, not invented content. Use `next_offset` to continue.
 
-A sequence such as 503 then 200 lets a trajectory teach explicit retry behavior; the two calls must be authored in separate, causally valid windows/times.
+### `web_open`
+
+**Arguments:** exactly one of `url`/`ref`; optional `start_line` (1-based, default
+1), `start_column` (0-based, default 0), `max_lines` (1–200, default 40),
+`link_offset` (0–128, default 0), `max_links` (0–20, default 5), and common options.
+
+**Result:** `{ref,url,title,published_at?,status,total_lines,start_line,start_column,end_line,content,truncated,next_line,next_column,links,next_link_offset}`.
+
+Reads exact text from a snapshot. Continue with both `next_line` and `next_column`
+to avoid losing text in a long line. `end_line` is null for empty excerpts.
+Links paginate independently; follow their URLs with another open call.
+`next_link_offset` may be non-null even when text is complete. Set `max_links:0`
+to reserve the budget for text, or start beyond `total_lines` to read only links.
+URL reads resolve the active corpus; refs pin earlier evidence and metadata.
+Authored HTTP error statuses are readable results; unknown URLs/refs fail.
+
+### `web_find`
+
+**Arguments:** exactly one of `url`/`ref` and literal `text` (1–512 characters);
+optional `case_sensitive` (default false), `start_line` (1-based, default 1),
+`max_results` (1–100, default 10), `context_lines` (0–3, default 1), common options.
+
+**Result:** `{ref,url,title,published_at?,status,matches:[{line,column,text,text_start_column,before,after}],truncated,next_line}`.
+
+At most one hit per matching line. Columns are 0-based; `text_start_column`
+positions the excerpt. Hit excerpts are at most 360 characters and context lines
+240, and may be further shortened/omitted to fit the byte budget. Use open for
+complete passages. Paginate with returned `next_line` as `start_line`.
+
+### Shared web options and execution
+
+`max_output_bytes` defaults to 6000 (1024–16000) and bounds the **entire UTF-8 JSON
+envelope**, including metadata and escaped text. It is not an exact token count.
+A result may contain fewer items/lines than requested, with continuation positions.
+If metadata alone cannot fit, a bounded tool error asks for a larger budget.
+`timeout_seconds` defaults to 30 (0–86400 simulated seconds).
+
+Latency, timeout, clock jumps, sparse snapshots and EOS cleanup use the same
+synthetic clock as timers. Deadline ties favor an available response. Transport
+errors fail; explicit fixture timeouts wait for the deadline. Permission and I/O
+fault checks precede execution. URL-scoped rules also apply to refs and ignore
+fragments. No automatic redirects, retries or live-network fallback exist.
+
+**Migration:** these tools replace `network_set`/`network_request`; reauthor raw
+HTTP fixtures as readable pages and search/read/find calls. There are no legacy
+aliases or automatic migrations. Retime dependent events using result anchors.
 
 ## Author-only permission and failure injection
 
@@ -441,7 +494,7 @@ Replaces the entire permission policy. The **first matching** rule determines pe
 
 **Result:** `{"rules":[...]}` (the installed fault policy).
 
-Replaces deterministic fault rules; `{"rules":[]}` clears them. The first matching rule injects an error **once at dispatch**, after simulated permission checks but before effects or artificial latency. Applies to the ten ordinary file operations, `file_watch`, and `network_request`; unlike simulated permissions, faults may affect invisible file/network calls too. `remaining:1` models a transient error; omitting it models a persistent one. Example:
+Replaces deterministic fault rules; `{"rules":[]}` clears them. The first matching rule injects an error **once at dispatch**, after simulated permission checks but before effects or artificial latency. Applies to the ten ordinary file operations, `file_watch`, and all three visible web tools; unlike simulated permissions, faults may affect invisible file/web calls too. `remaining:1` models a transient error; omitting it models a persistent one. Example:
 
 ~~~json
 {"op":"invisible-tool-call","tool":"io_failure_set","arguments":{"rules":[
@@ -451,7 +504,7 @@ Replaces deterministic fault rules; `{"rules":[]}` clears them. The first matchi
 
 ## Design and correctness notes
 
-1. **Keep cause and observation separate.** Configure network routes, files, diagnostic changes, and specialist outcomes before visible calls depend on them. An invisible side effect supplies no automatic model-visible text.
+1. **Keep cause and observation separate.** Configure web pages, files, diagnostic changes, and specialist outcomes before visible calls depend on them. An invisible side effect supplies no automatic model-visible text.
 2. **Use parallel tool windows for parallel calls.** Two independently generating requests can overlap, each with its own request/result window. The sandbox state is shared, and tool invocations are ordered deterministically by the replay scheduler. A model window cannot have overlapping competing generated streams.
 3. **Pin reviewed files.** Obtain `file_stat.version` or the version returned by `file_write`, then pass that specific hash through `subagent.artifacts`. A later edit does not retroactively change a specialist's supplied content.
 4. **Expect negative outcomes.** Simulate missing files, version conflicts, permission rejections, transient I/O faults, HTTP failures, timeouts, and cancelled calls as observable states rather than manually inventing mismatched tool results.

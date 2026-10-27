@@ -156,13 +156,14 @@ async def test_json_imports_commit_without_checkpoint_and_preserve_keys_policy(c
 def test_cli_streams_export_and_preserves_output_on_failure(compiler, sample, tmp_path):
     path, output = tmp_path / "project.sqlite", tmp_path / "chunks.jsonl"
     store = DatasetStore.initialize(path, compiler)
+    sample["metadata"] = {"validation_level": 3}
     store.replace([sample], 0)
     command = [sys.executable, "-m", "trajectory_remix", "--dataset", str(path), "--export", str(output)]
     result = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert json.loads(output.read_text().splitlines()[0])["sample_id"] == sample["id"]
     previous = output.read_bytes()
-    store.samples.append({"id": "invalid", "replay": {}})
+    store.samples.append({"id": "invalid", "replay": {}, "metadata": {"validation_level": 3}})
     result = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert result.returncode != 0
     assert output.read_bytes() == previous

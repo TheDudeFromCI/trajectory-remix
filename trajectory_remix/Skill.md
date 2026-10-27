@@ -8,6 +8,22 @@ description: Author curated parallel training trajectories through the Trajector
 This is the full reference. For a smaller first task, use the
 [short starting guide](guides/start.md), or request `get_authoring_guide()`.
 Retrieve this complete manual explicitly with `topic: "reference"`.
+Before reviewing or repairing, read [the review checklist](guides/review.md)
+using `get_authoring_guide(topic="review")`.
+
+Find existing trajectories with `list_trajectories(query=...)`. Its query language
+supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
+`#tags`, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch` properties. Read
+[the search guide](guides/search.md) with `get_authoring_guide(topic="search")`
+for examples and precise matching rules.
+
+For "review five candidate trajectories", call
+`list_trajectories(query="@state:candidate", limit=5)`. Add `@batch:<batch-id>`
+when a batch is specified. Filter before fetching replay content; do not list
+every trajectory and check its state manually. Fetch only the matching samples
+you will review. Compiler diagnostics use `validate_trajectory(semantic=false)`;
+`semantic=true` contacts configured model API endpoints, independently of the
+reviewing agent's subscription.
 
 Use this workflow to write a proposed training example. You are the **author** of
 the entire scenario: the user, Kidra, the specialists, their replies and external
@@ -22,8 +38,9 @@ Built-in tools do not run code, launch workers or contact providers. Custom tool
 ## Connect and discover
 
 1. Call `get_session` for the current revision, tokenizer, special token spellings,
-   generation status and window-slot budget. Stop source editing while generation
-   is running; do not guess tokenizer spellings or numeric window slots.
+   generation status and window-slot budget. Only the current generation draft
+   is read-only; unrelated samples remain editable. Do not guess tokenizer
+   spellings or numeric window slots.
 2. Call `get_authoring_guide(topic="reference")` to read this file through MCP if you lack repository
    access. Request `topic="example"` from the same tool for the full build-graph
    trajectory JSON in its `content` string. Call `list_simulated_tools` for
@@ -58,6 +75,26 @@ information across active windows without merging those histories into a single
 stream. On a model forward pass, each generating window can emit one token;
 other windows may remain idle or receive external content.
 
+Close windows as soon as their useful context is no longer needed, rather than
+keeping every window until the final response or closing one while it is still
+being consulted. For tool results, keep the tool window open until the relevant
+facts have been transferred into reasoning; then generate EOS immediately if no
+remaining work needs the original result. Keep reasoning windows open until their
+consumers have used them.
+
+Do not call `file_read` to make an already-visible file available to Kidra:
+all open Kidra windows already participate in global attention. A read or file
+listing needs additional information, such as an unseen file, a changed version,
+or directory metadata. Invisible sandbox files are not automatically visible.
+For every closure, check the entire downstream generation interval, including
+composition of a `chat` request. Closing at its start can remove evidence needed
+for later tokens. A sufficient summary retained elsewhere can permit earlier
+closure; a promise to remember facts cannot.
+
+Reasoning can run in parallel in multiple windows. Analyze independent files,
+constraints, or subtasks concurrently rather than serializing all thought through
+one reasoning window. Each branch must still respect observation availability.
+
 Give each window one coherent purpose. For example, keep the system prompt,
 current user request, working reasoning, user-visible chat and each attached
 document in separate windows. Put each tool interaction in a tool window of its
@@ -74,6 +111,14 @@ as "use the result in Window 7" identifies a specific context, not a vague
 reference to earlier text. Never invent numeric window IDs: obtain the configured
 slots and special tokens from `get_session` and use logical markers in source.
 A window's purpose (`window-type`) and its identity are different things.
+
+### File attachments
+
+Put each user file attachment in its own window; do not paste file contents into
+the user's chat message. Open attachment windows in the same tick as that chat
+message, append the external content with the proper mask, and retain them while
+their context is needed. Virtual files accessed through file tools remain a
+separate simulator capability.
 
 ### Ticks, generation and external appends
 
@@ -193,6 +238,14 @@ Open the named `chat` window before using the synthetic `chat` tool. Open reason
 windows with meaningful `window-type` values. Tool calls create their tool windows
 from tick 0 automatically; reuse a tool window when its token streams do not
 overlap. Keep the total distinct windows within `get_session.max_window_slots`.
+
+Deliver Kidra's user-facing messages through a **visible `chat` tool call** with
+`arguments: {"content": "message body"}`, after listing `chat` with `show_tools`
+in a dedicated tools window. Keep tool schemas out of the system prompt.
+Generate the request in a tool window; the simulator inserts the framed message
+into the open chat window. Do not duplicate that result or substitute direct
+answer generation in chat. Private reasoning belongs in reasoning windows and
+must not become another user-facing draft of the same answer.
 
 These are author-side `create_tool_call` arguments for one specialist turn:
 
@@ -328,7 +381,7 @@ claim a reviewer checked a newer version it was never supplied.
 
 ## Synthetic tool inventory
 
-Always confirm current schemas with `list_simulated_tools`. The 38 built-in tools are local
+Always confirm current schemas with `list_simulated_tools`. The 40 built-in tools are local
 simulations; a stored skill is text, not installed code.
 
 | Tools                                             | Required arguments and behavior                                                                                                                                    |
@@ -345,8 +398,8 @@ simulations; a stored skill is text, not installed code.
 | `file_copy`, `file_move`, `file_rename` | source/destination; optional overwrite and source expected_version. Move and rename are atomic; all retain historical artifacts. |
 | `file_search` | query; optional regex, case_sensitive, glob, context_lines and max_results. Returns bounded line-numbered matches. |
 | `memory_save`, `memory_search`                    | Save `key`, `text`; search with `query`, returning up to eight lexical matches.                                                                                    |
-| `note_save`                                       | `key`, `text`, `status` (`todo`, `doing`, `blocked`, `done`); optional `owner`, `depends_on`, `blockers`, `acceptance_criteria`. The last three are string arrays. |
-| `note_list`, `note_delete`                        | List notes with no arguments; delete with `key`.                                                                                                                   |
+| `note_save` | `name`; on creation also `description`, `priority` (`critical`, `very high`, `high`, `medium`, `low`, `very low`), `status` (`not started`, `doing`, `paused`, `blocked`, `done`); optional `blocked_by` task-name array. Updates retain omitted fields. |
+| `note_list`, `note_delete` | List the six priority buckets with no arguments; delete by `name`. |
 | `skill_save`, `skill_load`, `skill_list`          | Save `name`, `content`; retrieve by `name`; list with no arguments.                                                                                                |
 | `subagent`                                        | `task`; optional `resume` and `artifacts`; author supplies the outcome separately. No real delegation occurs.                                                      |
 | `subagent_list`, `subagent_get`, `subagent_close` | List with no arguments; inspect/close with `conversationId`.                                                                                                       |
@@ -360,8 +413,18 @@ simulations; a stored skill is text, not installed code.
 | `hardware_load_set` | Invisible-only file_io_ticks and per-operation operation_ticks. New file calls sample additive latency once at dispatch. |
 | `tool_permissions_set` | Invisible-only permission policy: default allow/deny and ordered tool/path glob rules with decision and optional remaining/message. Simulate user rejection before dispatch. |
 | `io_failure_set` | Invisible-only rules for I/O faults by tool/path glob, code, optional remaining/message. Empty rules clears faults. |
-| `network_set` | Invisible-only HTTP routes with URL glob, method, optional request_body/request_headers, and sequential responses with status/headers/body, latency_seconds/error. Last response repeats. |
-| `network_request` | url; optional method, headers, body and timeout_seconds (default 30). Simulated fixtures only; no internet requests. HTTP errors are returned statuses; transport errors fail. |
+| `web_set` | Invisible-only pages with url/title/text, optional published_at/links/status/latency_seconds/error; optional exact-query searches and search_latency_seconds. Replaces active pages; old refs retain snapshots. |
+| `web_search` | query; ranked source refs, titles, URLs and verbatim snippets. Optional max_results/offset; use next_offset to continue. |
+| `web_open` | Exactly one of url/ref; readable page excerpts and links. Continue with next_line/next_column; paginate links with link_offset/next_link_offset. |
+| `web_find` | Exactly one of url/ref plus literal text; matching lines and short context. Optional case_sensitive/context_lines/max_results; use next_line as start_line to continue. |
+
+Web observations default to a 6000-byte JSON-envelope budget (max_output_bytes,
+1024–16000), not an exact token count. All three visible tools accept
+timeout_seconds (default 30 simulated seconds). Use search refs to pin evidence;
+URL reads resolve the current corpus. Seed readable text, never whole HTML pages.
+Follow returned link URLs with web_open. Unknown URLs fail without inventing pages.
+The old network_set/network_request tools have been removed; reauthor HTTP fixtures
+as web pages and research calls. See [web research](../docs/SANDBOX.md#synthetic-web-research).
 
 Generated EOS cancels the owning tool window. A request ending with EOS is never
 dispatched, so its arguments may be incomplete. For a running call, schedule a
@@ -371,11 +434,20 @@ are cleaned up. Earlier mutations remain. A cancelled call's result-anchor
 captures its EOS tick. See [cancellation](../docs/SANDBOX.md#cancellation-with-eos).
 
 
-Optional note fields survive updates; clear them with empty strings/arrays. A
-task cannot become `done` with blockers or missing/unfinished dependencies.
-Self-dependencies and cycles are errors. Acceptance criteria are descriptive;
-Remix does not execute them. Create a task per specialist and update statuses
-when the corresponding synthetic observations justify it.
+Notes are prioritized TODO tasks rather than searchable memories. Use a stable task
+`name`, a `description`, a `status`, and a `priority`. `blocked_by` lists other
+task names; it is optional and survives updates until explicitly cleared with
+`[]`. Self-dependencies and cycles are errors, and a task cannot become `done`
+until all blockers exist and are done. Reopening or deleting a prerequisite of
+an already-completed task is forbidden.
+
+Every trajectory that calls a note tool automatically receives an always-open
+`notes` context window at tick 0, initialized with empty priority buckets.
+The compiler replaces its JSON after every task mutation in phase B and masks
+all note content from training loss. This reserved window counts toward the
+project slot limit; never author a separate `notes` window or generate into it.
+Tasks are always visible through this window without calling `note_list`.
+Trajectories that never use note tools do not allocate the extra slot.
 
 ## Optional author workbench
 
@@ -425,6 +497,35 @@ the specialist has the relevant context and the reported result is consistent
 with the supplied artifacts. Do not present those authored results as tests
 actually executed by Remix or as verification of the dataset's real quality.
 
+## Anchor-based scheduling and tool context
+
+Always use tick anchors instead of hard-coded offsets except trivial initial
+input timing (for example, a user message at tick 1). Anchors are invisible and
+may be placed anywhere in a content block, including mid-sentence:
+`I should check what 2123*1565{N_TICK:17} is before proceeding.` Start the
+calculator request at `{N_TICK:17}+1` while independent reasoning continues.
+Parallelize useful work; do not wait for the entire reasoning block to finish
+before issuing an already-justified tool request.
+
+To join multiple branches use `max({N_TICK:7}+1, {N_TICK:8}+1)`. This waits for
+all referenced anchors and preserves dependencies when text lengths change.
+Nested maxima and numeric operands are supported; cycles, missing anchors, tick
+limits, and phase visibility rules still apply. Use +1 when consuming a newly
+generated token or completed result, including each branch of a max expression.
+
+Always provide tools context before the agent uses tools, through a `show_tools`
+event in an open tools window (for example `{"op":"show_tools","window":"tools","tools":["calculator"]}`).
+Do not assume a tool is available to Kidra merely because the authoring API can
+list or execute it.
+The compiler warns with `tool_not_shown` at the request event if the listing is
+missing from visible context. A listing added later, closed, or replaced does
+not count. Fix the warning before handing the trajectory off for review.
+Use an explicit tools window with `window-type: "tools"` for schemas;
+`show_tools` in a system window produces a `tools_in_system` warning. Generating
+reply text directly in chat produces `direct_chat_generation`; EOS/NOOP control
+events are allowed there. These are advisory compiler diagnostics; inspect and
+resolve them before approving a training sample.
+
 ## Validate and hand off
 
 1. Call `validate_trajectory` with its default `semantic: false`. This compiles
@@ -443,7 +544,14 @@ actually executed by Remix or as verification of the dataset's real quality.
 4. Confirm TODOs, reviews, clarifications, progress messages and final handoff
    agree. Remove repetitive file bodies from visible text; use versions and short
    replies. Keep author instructions and raw specialist logs out of Kidra's loss.
-5. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
+5. If asked to validate, finish edits, reread the current trajectory, and review
+   the result. Call `sign_off_trajectory` with `sample_id`, `verdict: "validated"`
+   or `"rejected"`, your `reviewer` label, a specific review `summary`, and the
+   reviewed `revision` as `expected_revision`. It records your own assessment at
+   state 2 or -2 without model API calls. Compilation is required for a passing
+   sign-off; warnings remain your responsibility. Later edits invalidate it.
+   Ready (3) requires a separate human approval.
+6. Call `save_dataset`, then `get_trajectory` for source JSON to return to the
    requester. The UI can export source; the CLI can export training JSONL. Explain
    that this is a curated synthetic sample and report the checks actually done.
 
@@ -462,7 +570,8 @@ to suit the requested training behavior rather than copying generic replies.
 
 ## Tool protocol and schema displays
 
-Use `create_event` with `{"op":"show_tools","window":"system","tools":["chat"]}`
+Open a dedicated window named `tools` with `window-type: "tools"`, then use
+`create_event` with `{"op":"show_tools","window":"tools","tools":["chat"]}`
 to append selected public schemas to an already open window. Set
 `randomly-add-additional-tools: true` to include deterministic extra distractor
 tools. Invisible arguments never appear in these schemas.

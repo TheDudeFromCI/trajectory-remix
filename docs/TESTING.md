@@ -78,6 +78,12 @@
   slot allocation and implicit-window budgets, typed key filters, tag membership,
   grouped counts, pagination without source reads, transactional projections,
   content hashes, undo/redo, cascading deletion and rollback.
+- Search checks cover readable replay text, case folding, AND/OR precedence,
+  nested negation, word wildcards, property comparisons, tool usage and tags,
+  matching SQL/draft behavior, pagination, invalid syntax, migration rollback,
+  and transactional updates through edits/imports/undo/redo. MCP protocol checks
+  retrieve the packaged search guide and exercise queries and errors. DOM checks
+  combine operators beyond page one and verify inline query error recovery.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an

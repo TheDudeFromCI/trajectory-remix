@@ -160,6 +160,11 @@ header {
   text-align: left;
   padding: 6px 8px;
 }
+.file-menu-popup .menu-check {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+}
 .file-menu-popup hr[role="separator"] {
   width: 100%;
   margin: 2px 0;
@@ -180,6 +185,13 @@ header {
       minmax(320px, 34%)
     );
   height: calc(100vh - 36px);
+}
+.workspace.dataset-panel-hidden {
+  grid-template-columns: minmax(0, 1fr) 0 var(--editor-w, minmax(320px, 34%));
+}
+.workspace.dataset-panel-hidden .sidebar,
+.workspace.dataset-panel-hidden [data-resize="sidebar"] {
+  display: none;
 }
 .resizer {
   position: relative;
@@ -241,6 +253,14 @@ body.resizing iframe {
 .submenu:focus-within > .submenu-popup[hidden] {
   display: grid;
 }
+#set-state-menu-button:disabled + #set-state-menu {
+  display: none;
+}
+#set-state-menu [aria-checked="true"]::after {
+  content: "✔";
+  float: right;
+  margin-left: 14px;
+}
 .floating-panel {
   position: fixed;
   z-index: 15;
@@ -294,6 +314,22 @@ body.resizing iframe {
 .search {
   width: 100%;
   margin-bottom: 7px;
+}
+.search-help,
+.search-error {
+  margin: 0 12px 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.search-help summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.search-help a {
+  color: var(--accent);
+}
+.search-error {
+  color: #ff9c9c;
 }
 .metadata-panel {
   flex: 0 1 auto;
@@ -1046,7 +1082,7 @@ dialog {
 }
 dialog::backdrop {
   background: #060c15bb;
-  backdrop-filter: blur(3px);
+
 }
 .dialog-header {
   padding: 11px 13px;
@@ -1195,18 +1231,6 @@ dialog::backdrop {
 #export-dialog {
   max-width: 640px;
 }
-#report-dialog {
-  max-width: 720px;
-}
-#validation-report {
-  padding: 12px;
-  white-space: pre-wrap;
-  font:
-    12px/1.7 ui-monospace,
-    monospace;
-  max-height: 65vh;
-  overflow: auto;
-}
 @media (max-width: 1250px) {
   .workspace {
     grid-template-columns: var(--sidebar-w, 190px) 0 minmax(0, 1fr) 0 var(
@@ -1237,6 +1261,10 @@ dialog::backdrop {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(220px, 40vh) minmax(90px, 20vh);
     overflow: auto;
+  }
+  .workspace.dataset-panel-hidden {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(220px, 40vh);
   }
   .resizer-x {
     display: none;
@@ -1280,3 +1308,37 @@ dialog::backdrop {
   padding: 5px 8px;
   font-size: 11px;
 }
+
+/* Nonmodal generation progress keeps the dashboard and first draft accessible. */
+#generation-panel { width: min(420px, calc(100vw - 32px)); }
+#generation-panel .floating-body { overflow: auto; }
+#generation-panel label { display: block; margin-top: 8px; font-size: 11px; color: var(--muted); }
+#generation-panel select, #scenario-parallel { width: 100%; box-sizing: border-box; }
+#generation-progress { width: 100%; accent-color: var(--accent); }
+#generation-detail { overflow-wrap: anywhere; font-size: 11px; min-height: 28px; }
+#activity-log { max-height: 260px; white-space: pre-wrap; }
+.log-success { color: #7be0c3; }
+.log-warning { color: #f2c66d; }
+.log-error { color: #ff9191; }
+.log-output { color: #b8c9ec; }
+
+#generation-panel { position: fixed; inset: 8vh 5vw auto; width: 90vw; height: 70vh; max-height: 84vh; }
+#generation-panel-header { cursor: default; flex: 0 0 auto; }
+.generation-layout { display: grid; grid-template-columns: 2fr 1fr; flex: 1; min-height: 0; gap: 16px; padding: 12px; }
+.generation-log { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.log-toolbar { display: flex; gap: 8px; align-items: center; }
+.log-toolbar b { margin-right: auto; }
+#generation-panel #activity-log { flex: 1; max-height: none; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.generation-controls { overflow: auto; min-height: 0; }
+#settings-errors { color: #ff9191; white-space: pre-wrap; padding: 0 14px; }
+#config-content input[aria-invalid="true"] { border: 2px solid #ff6767; }
+@media (max-width: 650px) { .generation-layout { grid-template-columns: 1fr; grid-template-rows: 2fr 1fr; } }
+
+.context-meter { display: flex; background: #202938; height: 12px; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.context-meter span { display: block; height: 100%; }
+.context-base { background: #4396ed; }
+.request-metrics { font-size: 11px; margin-bottom: 8px; overflow-wrap: anywhere; }
+#scenario-tag-controls { border: 0; padding: 0; margin: 8px 0; }
+#scenario-tag-controls label { margin-bottom: 6px; }
+#randomize-tags { width: auto; }
+.log-toolbar { flex-wrap: wrap; }

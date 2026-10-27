@@ -200,6 +200,77 @@ def test_show_tools_is_literal_masked_and_deterministic(compiler, sample):
         compiler.compile(sample)
 
 
+@pytest.mark.parametrize(
+    "listing", ["missing", "same_tick", "late", "closed", "replaced", "wrong_tool"]
+)
+def test_tool_listing_warning_respects_visible_context(compiler, sample, listing):
+    sample["replay"]["3"] = [call("calculator", args={"expression": "2+2"})]
+    if listing != "missing":
+        at = "3" if listing == "same_tick" else "4" if listing == "late" else "1"
+        sample["replay"].setdefault(at, []).append(
+            {
+                "op": "show_tools",
+                "window": "a",
+                "tools": ["file_list" if listing == "wrong_tool" else "calculator"],
+            }
+        )
+    if listing == "closed":
+        sample["replay"]["2"] = [
+            {"op": "generate", "window": "a", "content": "<|eos|>"}
+        ]
+    elif listing == "replaced":
+        sample["replay"]["2"] = [
+            {
+                "op": "append",
+                "window": "a",
+                "source": "system",
+                "content": "Replacement context",
+                "replace-content": True,
+            }
+        ]
+    plan = compiler.compile(sample)
+    warnings = [d for d in plan["diagnostics"] if d.get("code") == "tool_not_shown"]
+    assert bool(warnings) == (listing != "same_tick")
+    if warnings:
+        assert warnings[0]["severity"] == "warning"
+        assert warnings[0]["path"] == "replay[3][0]"
+        assert "calculator" in warnings[0]["message"]
+
+
+def test_randomized_tool_listing_uses_actual_expansion(compiler, sample):
+    sample["replay"]["1"] = [
+        {
+            "op": "show_tools",
+            "window": "a",
+            "tools": [],
+            "randomly-add-additional-tools": True,
+        }
+    ]
+    expanded = compiler.show_tools(sample["replay"]["1"][0], sample, "replay[1][0]")
+    listed = {s["function"]["name"] for s in json.loads(expanded["content"])}
+    sample["replay"]["3"] = [call("calculator", args={"expression": "2+2"})]
+    warnings = [
+        d
+        for d in compiler.compile(sample)["diagnostics"]
+        if d.get("code") == "tool_not_shown"
+    ]
+    assert bool(warnings) == ("calculator" not in listed)
+
+
+def test_invisible_setup_does_not_require_tool_listing(compiler, sample):
+    sample["replay"]["1"] = [
+        {
+            "op": "invisible-tool-call",
+            "tool": "file_write",
+            "arguments": {"path": "fixture.txt", "content": "authored input"},
+        }
+    ]
+    assert not any(
+        d.get("code") == "tool_not_shown"
+        for d in compiler.compile(sample)["diagnostics"]
+    )
+
+
 def external_file(folder, text="first", schema=None):
     schema = schema or {
         "type": "object",
@@ -396,7 +467,7 @@ def test_previous_database_schema_migrates_without_changing_trajectories(
     assert migrated.samples[0] == saved
     assert migrated.info()[:3] == store.info()[:3]
     with migrated.connect() as db:
-        assert db.execute("SELECT version FROM project").fetchone()[0] == 4
+        assert db.execute("SELECT version FROM project").fetchone()[0] == DatasetStore.SCHEMA_VERSION
 
 
 async def test_workbench_records_generic_window_writes(studio):

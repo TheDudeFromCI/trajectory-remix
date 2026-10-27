@@ -1,9 +1,34 @@
 import copy
+import json
 
 import pytest
 
 from trajectory_remix.compiler import CompileError, FrameIndex, chunks, visible_to
 from trajectory_remix.preview import PreviewCache
+
+
+def test_large_preview_retains_managed_note_updates(compiler, large_sample):
+    large_sample["replay"].update({
+        "19990": [{"op": "invisible-tool-call", "tool": "note_save", "arguments": {
+            "name": "review", "description": "Inspect preview", "priority": "high", "status": "not started",
+        }}],
+        "19992": [{"op": "invisible-tool-call", "tool": "note_save", "arguments": {
+            "name": "review", "status": "doing",
+        }}],
+        "19994": [{"op": "invisible-tool-call", "tool": "note_delete", "arguments": {"name": "review"}}],
+    })
+    preview = PreviewCache(compiler).compile(large_sample)
+    assert len(preview.plan["rows"]) > 50_000
+    for tick in (19994, 19989, 19990, 19992, 0):
+        frame = preview.frame(tick)
+        assert frame == compiler.frame(preview.plan, tick)
+        text = frame["windows"]["notes"]["text"]
+        tasks = json.loads(text[text.index("{"):])["high"]
+        if 19990 <= tick < 19994:
+            assert tasks["review"]["status"] == ("doing" if tick >= 19992 else "not started")
+        else:
+            assert tasks == {}
+    assert all(row["loss_mask"] == 0 for row in preview.index.rows["notes"])
 
 
 def test_indexed_large_replay_preserves_context_and_exports(compiler, large_sample):

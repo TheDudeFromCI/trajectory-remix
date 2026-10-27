@@ -36,7 +36,10 @@ def test_bos_noop_eos_masks(compiler, sample):
     eos = next(r for r in p["rows"] if r["token_id"] == compiler.ids["eos"])
     assert eos["loss_mask"] == 1 and eos["tick"] == 3
     assert next(w for w in p["windows"] if w["id"] == "a")["close"] == 3
-    assert compiler.frame(p, 2)["windows"]["a"]["text"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>x"
+    assert (
+        compiler.frame(p, 2)["windows"]["a"]["text"]
+        == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>x"
+    )
 
 
 def test_same_tick_parallel_causality(compiler, sample):
@@ -311,7 +314,76 @@ def test_multiple_instant_appends_order(compiler, sample):
         {"op": "append", "window": "a", "source": "user", "content": "cd"},
     ]
     p = compiler.compile(sample)
-    assert compiler.frame(p, 1)["windows"]["a"]["text"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>abcd"
+    assert (
+        compiler.frame(p, 1)["windows"]["a"]["text"]
+        == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>abcd"
+    )
     keys = [r for r in p["rows"] if r["op"] == "append"]
     assert visible_to(keys[1], keys[0], p["windows"])
     assert not visible_to(keys[0], keys[1], p["windows"])
+
+
+def test_max_anchor_join_waits_for_all_branches(compiler, sample):
+    sample["replay"]["1"] = [
+        {"op": "generate", "window": "a", "content": "a{N_TICK:7}"},
+        {"op": "generate", "window": "b", "content": "longer{N_TICK:8}"},
+    ]
+    sample["replay"]["max({N_TICK:7}+1, {N_TICK:8}+1)"] = [
+        {"op": "open", "window": "joined"}
+    ]
+    plan = compiler.compile(sample)
+    at = max(plan["anchors"]["7"]["tick"], plan["anchors"]["8"]["tick"]) + 1
+    assert next(w for w in plan["windows"] if w["id"] == "joined")["open"] == at
+
+
+def test_max_anchor_validation_and_shift():
+    from trajectory_remix.compiler import tick_terms, shift_tick, valid_tick
+
+    assert tick_terms("max(3, max({N_TICK:7}+1, {N_TICK:8}+2))") == [
+        (None, 3),
+        (7, 1),
+        (8, 2),
+    ]
+    assert (
+        shift_tick("max({N_TICK:7}+1, {N_TICK:8}+2)", 3)
+        == "max({N_TICK:7}+4, {N_TICK:8}+5)"
+    )
+    for expression in [
+        "max()",
+        "max(1,)",
+        "max(__import__('os'))",
+        "max({N_TICK:7}-1, 3)",
+    ]:
+        assert not valid_tick(expression)
+
+
+def test_max_joins_simulated_tool_completion_anchors(compiler, sample):
+    sample["replay"]["1"] = [
+        {
+            "op": "tool-call",
+            "tool": "calculator",
+            "window": "left-tool",
+            "arguments": {"expression": "2+2"},
+            "duration-ticks": 2,
+            "result-anchor": 7,
+        },
+        {
+            "op": "tool-call",
+            "tool": "calculator",
+            "window": "right-tool",
+            "arguments": {"expression": "3+3"},
+            "duration-ticks": 5,
+            "result-anchor": 8,
+        },
+    ]
+    sample["replay"]["max({N_TICK:7}+1, {N_TICK:8}+1)"] = [
+        {"op": "open", "window": "joined-results"}
+    ]
+    plan = compiler.compile(sample)
+    joined = next(
+        window for window in plan["windows"] if window["id"] == "joined-results"
+    )
+    assert (
+        joined["open"]
+        == max(plan["anchors"]["7"]["tick"], plan["anchors"]["8"]["tick"]) + 1
+    )

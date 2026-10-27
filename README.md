@@ -185,6 +185,13 @@ drafts). The server fetches trajectories on demand;
 it does not load or copy the whole dataset. The sidebar searches in SQLite and
 shows 100 results per page. Undo history and compiled previews are bounded.
 
+The dashboard and MCP `list_trajectories` share [the search query language](trajectory_remix/guides/search.md):
+spaces mean AND, `|` means OR, `-` excludes a term/group, `*` matches wildcard
+text, `#coding` filters tags, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch`
+filter properties. For example, `python -(math complex) #coding` searches
+readable source text across events. MCP agents can read the complete guide with
+`get_authoring_guide(topic="search")`; the dashboard links it beside the search box.
+
 Writes use WAL mode, a 30-second busy timeout and transactions. Multiple server
 processes can share a local database: revisions detect competing edits, and
 unique constraints prevent duplicate IDs. SQLite serializes writers while
@@ -525,12 +532,19 @@ for arguments, timing, and examples.
 File tools also provide line-range reads, atomic batches of exact-text patches,
 copy/move/rename, glob listing and content search. Invisible `tool_permissions_set`
 and `io_failure_set` configure user rejections and transient/persistent faults.
-`network_request` models HTTP against invisible `network_set` fixtures, including
-response sequences, latency, timeouts and transport failures. All timing uses the
-trajectory clock; network simulation makes no internet requests. See
+`web_search`, `web_open` and `web_find` provide synthetic web research against
+readable pages seeded with invisible `web_set` calls. Search returns ranked,
+verbatim snippets; page reads and passage finding share stable source references.
+Results have strict byte budgets and continuation positions, including for long
+single-line pages. All timing uses the trajectory clock, with simulated latency,
+timeouts and transport failures; web tools make no internet requests. See
 [file operations](docs/SANDBOX.md#file-operations),
 [permissions and faults](docs/SANDBOX.md#simulated-permissions-and-io-failures), and
-[HTTP simulation](docs/SANDBOX.md#simulated-network-io).
+[web research](docs/SANDBOX.md#synthetic-web-research).
+
+The web tools replace `network_set`/`network_request`. Existing trajectories using
+those names must be reauthored with readable `web_set.pages` and the corresponding
+search/read calls; there is no automatic conversion of arbitrary HTTP fixtures.
 
 ## Headless export and tests
 
@@ -582,3 +596,17 @@ ordinary append events can stream manually authored observations with inline
 anchors when authoring reactive trajectories.
 
 Primary API/security references: [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/en/api/tokenizer).
+
+## Scenario-based single sample generation
+
+Pass `--scenarios-dir examples/scenarios` on startup, then open
+**Edit → Generation → Single Sample**. The external directory contains nested
+scenario folders with `flow.yaml` and Markdown prompts. The included `user_problem`
+scenario samples context tags, develops a solution, uses simulated tools, varies
+conversation length, publishes an immediately selectable draft, and validates or
+repairs it. The progress panel supports pause/resume, immediate cancellation,
+colored streamed output, and a configurable LLM concurrency limit (default 1).
+
+Automated drafts require human approval (Validation 3) before token export.
+See [Scenario workflows](docs/SCENARIOS.md) for YAML syntax, failure paths, role
+profiles, inspection, lifecycle details, and the current implementation limits.

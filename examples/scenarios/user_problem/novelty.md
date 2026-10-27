@@ -1,0 +1,1 @@
+Judge whether the proposed concept semantically duplicates an existing concept. Compare the actual problem, solution approach, and interaction, not wording. Return similarity 0 for no meaningful overlap and 1 for an exact duplicate, plus concrete feedback. Empty candidates means similarity 0.

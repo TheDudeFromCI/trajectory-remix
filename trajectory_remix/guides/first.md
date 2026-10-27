@@ -112,6 +112,13 @@ tick at that point in the stream and emits no text. Its ID is unique in this dra
 
 ## 4. Answer after that mark, then close the other windows
 
+This minimal exercise demonstrates raw text generation. For a delivered Kidra
+reply in a tool-based scenario, expose `chat` with `show_tools` and schedule a
+visible `chat` tool call with `arguments.content` containing the message body.
+The simulator inserts the framed message into the open chat window. See the full
+reference for this delivery protocol; direct text generation below is a syntax
+exercise, not an example of sending a message through the chat tool.
+
 ```json
 {
   "name": "create_event",

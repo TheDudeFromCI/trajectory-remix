@@ -324,13 +324,9 @@ await click("status-button");
 assert.equal($("generation-panel").hidden, false);
 await click("edit-tags");
 assert($("settings-dialog").hasAttribute("open"));
-await w.document.querySelector('[data-config="tasks"]').onclick();
-assert.equal(
-  w.document.querySelectorAll("#config-content .config-card").length,
-  7,
-);
-await w.document.querySelector('[data-config="conditions"]').onclick();
-assert(w.document.querySelectorAll(".tag-picker button").length >= 40);
+assert.equal(w.document.querySelector('[data-config="tasks"]'), null);
+assert.equal(w.document.querySelector('[data-config="conditions"]'), null);
+assert.match($("settings-dialog").textContent, /Generation Settings/);
 await w.document.querySelector('[data-config="automatic"]').onclick();
 assert.match($("config-content").textContent, /Consecutive failure limit/);
 await click("save-config");
@@ -346,12 +342,43 @@ assert.equal(
   [...w.document.querySelectorAll("header .menu-trigger, header .menu-label")]
     .map((item) => item.textContent)
     .join(""),
-  "FileEditHelp",
+  "FileEditViewHelp",
 );
+const datasetSidebar = w.document.querySelector(".sidebar");
+const datasetResizer = w.document.querySelector('[data-resize="sidebar"]');
+assert.equal($("toggle-dataset-panel").getAttribute("role"), "menuitemcheckbox");
+assert.equal(datasetSidebar.hidden, false);
+assert.equal(datasetResizer.hidden, false);
+assert.equal($("dataset-panel-check").textContent, "✔");
+await click("view-menu-button");
+assert.equal($("view-menu").hidden, false);
+assert.equal($("view-menu-button").getAttribute("aria-expanded"), "true");
+await click("toggle-dataset-panel");
+assert.equal(datasetSidebar.hidden, true);
+assert.equal(datasetResizer.hidden, true);
+assert.equal($("workspace").classList.contains("dataset-panel-hidden"), true);
+assert.equal($("toggle-dataset-panel").getAttribute("aria-checked"), "false");
+assert.equal($("dataset-panel-check").textContent, "");
+assert.equal($("view-menu").hidden, true);
+assert.equal($("view-menu-button").getAttribute("aria-expanded"), "false");
+await click("view-menu-button");
+await click("toggle-dataset-panel");
+assert.equal(datasetSidebar.hidden, false);
+assert.equal(datasetResizer.hidden, false);
+assert.equal($("workspace").classList.contains("dataset-panel-hidden"), false);
+assert.equal($("toggle-dataset-panel").getAttribute("aria-checked"), "true");
+assert.equal($("dataset-panel-check").textContent, "✔");
+await click("view-menu-button");
+await click("edit-menu-button");
+assert.equal($("view-menu").hidden, true);
+assert.equal($("edit-menu").hidden, false);
+await click("edit-menu-button"); // Leave the existing menu tests in their initial closed state.
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
-for (const id of ["generate-one", "validate-sample", "auto-start"])
-  assert.equal($("generation-menu").contains($(id)), true);
+assert.equal($("generation-menu").contains($("generate-one")), true);
+assert.equal($("generation-menu").contains($("generate-batch")), true);
+for (const id of ["approve-sample", "validate-sample", "auto-start", "report-dialog"])
+  assert.equal($(id), null);
 await click("edit-menu-button");
 assert.equal($("edit-menu").hidden, false);
 assert.equal($("edit-menu").contains($("preferences-button")), true);
@@ -777,7 +804,9 @@ const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
   "schema-version": "1.0",
   "tick-policy": "external-first",
   id: `sqlite-page-${index}`,
-  replay: { 0: [{ op: "open", window: "a" }] },
+  replay: { 0: [{ op: "open", window: "a" }, {
+    op: "append", window: "a", source: "user", content: index === 204 ? "Python humans math" : "complex",
+  }] },
   metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
 }));
 const imported = await fetch(base + "/api/import", {
@@ -800,6 +829,26 @@ await click("sample-page-next");
 await waitFor(() => $("sample-page-label").textContent === "101–200 of 205");
 assert.equal($("sample-list").children.length, 100);
 assert.equal($("sample-page-prev").disabled, false);
+$("sample-search").value = "python -(math complex) human* #sqlite-last @name:sqlite-page-* @windows:1";
+$("sample-search").oninput();
+await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
+assert.equal($("sample-list").children.length, 1);
+const searchGuide = await fetch(base + "/search-guide");
+assert.equal(searchGuide.status, 200);
+assert((await searchGuide.text()).includes("@uses_tool"));
+assert($("search-help").querySelector('a[href="/search-guide"]'));
+$("sample-search").value = "python |";
+$("sample-search").oninput();
+await waitFor(() => !$("search-error").hidden);
+assert($("search-error").textContent.includes("Invalid search query"));
+assert.equal($("sample-search").getAttribute("aria-invalid"), "true");
+assert.equal($("sample-list").children.length, 0);
+assert.equal($("sample-page-next").disabled, true);
+// Returning to the last valid query must redraw even when revision/query match.
+$("sample-search").value = "python -(math complex) human* #sqlite-last @name:sqlite-page-* @windows:1";
+$("sample-search").oninput();
+await waitFor(() => $("search-error").hidden && $("sample-list").children.length === 1);
+assert.equal($("sample-search").hasAttribute("aria-invalid"), false);
 $("sample-search").value = "sqlite-last";
 $("sample-search").oninput();
 await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
@@ -929,6 +978,154 @@ assert.deepEqual(JSON.parse(w.localStorage.getItem(collapseKey)).groups, [groupM
 await waitFor(() => !w.document.title.startsWith("*") &&
   !("collapsed_events" in JSON.parse($("sample-json").value).metadata));
 assert.equal("collapsed" in JSON.parse($("sample-json").value).metadata.event_groups[0], false);
+await click("generate-batch");
+assert.equal($("generation-count").value, "10");
+await click("generate-one");
+assert.equal($("generation-count").value, "1");
+assert.equal($("generation-panel").hidden, false);
+assert.equal($("scenario-type").value, "user_problem");
+assert.equal($("scenario-start"), null);
+assert.equal($("export-button"), null);
+assert.equal($("pause-run").textContent, "Start");
+assert.equal($("pause-run").disabled, false);
+assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
+assert.match($("generation-progress").title, /steps complete/);
+assert.equal($("scenario-tag-controls").hidden, true);
+const beforeBatchStartFetch = w.fetch;
+let batchStartBody;
+let batchQueryRequested = false;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/run") {
+    batchStartBody = JSON.parse(options.body);
+    return new w.Response(JSON.stringify({ok:true}), {status:200, headers:{"content-type":"application/json"}});
+  }
+  if (String(path).startsWith("/api/state?")) {
+    const url = new URL(path, base);
+    if (url.searchParams.get("query") === "@batch:test-batch") {
+      batchQueryRequested = true;
+      url.searchParams.set("query", "");
+    }
+    const response = await beforeBatchStartFetch(url.pathname + url.search, options);
+    const data = await response.json();
+    data.status.batch = {id:"test-batch", target:3, completed:3, attempts:3, attempt_limit:9, state:"complete"};
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return beforeBatchStartFetch(path, options);
+};
+$("generation-count").value = "3";
+await click("pause-run");
+assert.equal(batchStartBody.batch_size, 3);
+assert.equal(batchStartBody.scenario, "user_problem");
+assert.match($("batch-progress").textContent, /3\/3 completed/);
+await click("view-generation-batch");
+assert.equal($("sample-search").value, "@batch:test-batch");
+assert.equal(batchQueryRequested, true);
+assert.equal($("generation-panel").hidden, true);
+w.fetch = beforeBatchStartFetch;
+$("sample-search").value = "";
+$("sample-search").oninput();
+await waitFor(() => $("view-generation-batch").hidden, 5000);
+$("generation-count").value = "1";
+$("randomize-tags").checked = false; $("randomize-tags").onchange();
+assert.equal($("scenario-tag-controls").hidden, false);
+$("randomize-tags").checked = true; $("randomize-tags").onchange();
+assert.equal($("scenario-tag-controls").hidden, true);
+assert.equal($("view-generation-draft").parentElement.lastElementChild.id, "view-generation-draft");
+assert.equal($("view-generation-draft").hidden, true);
+assert.equal($("stop-run").textContent, "Cancel");
+await click("close-generation-panel");
+assert.equal($("generation-panel").hidden, true);
+await click("settings-button");
+await w.document.querySelector('[data-config="endpoints"]').onclick();
+assert.equal($("save-config").disabled, true);
+const timeoutBox = w.document.querySelector('[data-config-path="endpoints.0.timeout"]');
+const urlBox = w.document.querySelector('[data-config-path="endpoints.0.base_url"]');
+urlBox.value = "http://localhost:9090/v1";
+urlBox.dispatchEvent(new w.Event("input", {bubbles:true}));
+timeoutBox.value = "999";
+timeoutBox.dispatchEvent(new w.Event("input", {bubbles:true}));
+assert.equal(timeoutBox.getAttribute("aria-invalid"), "true");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
+await click("settings-button");
+assert.equal(w.document.querySelector('[data-config-path="endpoints.0.base_url"]').value, "http://localhost:9090/v1");
+const fixedTimeout = w.document.querySelector('[data-config-path="endpoints.0.timeout"]');
+fixedTimeout.value = "120";
+fixedTimeout.dispatchEvent(new w.Event("input", {bubbles:true}));
+assert.equal(fixedTimeout.getAttribute("aria-invalid"), "false");
+assert.equal($("save-config").disabled, false);
+await click("save-config");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
+const manualTag = $("scenario-tag-controls").querySelector("select");
+assert(manualTag);
+manualTag.value = manualTag.options[manualTag.options.length - 1].value;
+manualTag.onchange();
+assert.equal($("randomize-tags").checked, false);
+$("randomize-tags").checked = true;
+await click("export-generation-log");
+assert.equal(downloadedFilename, "generation.log");
+assert.equal(typeof await downloadedBlob.text(), "string");
+const actualFetch = w.fetch;
+let logFixture = [{time:"2026-10-25T00:00:00Z", level:"info", message:"Stable log entry"}];
+w.fetch = async (path, options) => {
+  const response = await actualFetch(path, options);
+  if (path.startsWith("/api/state?")) {
+    const data = await response.json(); data.logs = logFixture;
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+await waitFor(() => $("activity-log").textContent.includes("Stable log entry"), 5000);
+const retainedLogNode = $("activity-log").firstChild;
+const previousReads = completedStateReads;
+await waitFor(() => completedStateReads > previousReads, 5000);
+assert.equal($("activity-log").firstChild, retainedLogNode);
+Object.defineProperty($("activity-log"), "scrollHeight", {value:1000, configurable:true});
+Object.defineProperty($("activity-log"), "clientHeight", {value:100, configurable:true});
+$("activity-log").scrollTop = 100;
+logFixture = [...logFixture, {time:"2026-10-25T00:00:01Z", level:"info", message:"New log entry"}];
+await waitFor(() => $("activity-log").textContent.includes("New log entry"), 5000);
+assert.equal($("activity-log").scrollTop, 100);
+logFixture = [];
+await click("clear-generation-log");
+await waitFor(() => !$("activity-log").textContent, 5000);
+assert.equal(w.document.querySelectorAll("[data-validation-state]").length, 7);
+await w.document.querySelector('[data-validation-state="0"]').onclick();
+await waitFor(() => $("sample-list").textContent.includes("Pending"), 5000);
+assert.equal($("set-state-menu-button").disabled, false);
+await waitFor(() => w.document.querySelector('[data-validation-state="0"]').getAttribute("aria-checked") === "true", 5000);
+assert.equal(w.document.querySelectorAll('#set-state-menu [aria-checked="true"]').length, 1);
+await w.document.querySelector('[data-validation-state="3"]').onclick();
+await waitFor(() => $("sample-list").textContent.includes("Ready"), 5000);
+await waitFor(() => w.document.querySelector('[data-validation-state="3"]').getAttribute("aria-checked") === "true", 5000);
+assert.equal(w.document.querySelector('[data-validation-state="0"]').getAttribute("aria-checked"), "false");
+assert.equal($("resume-trajectory-generation").disabled, true);
+await click("preferences-button");
+assert.equal($("model-api-retries").value, "2");
+$("model-api-retries").value = "1";
+await $("preferences-form").onsubmit({preventDefault(){}});
+await click("preferences-button");
+assert.equal($("model-api-retries").value, "1");
+await click("cancel-preferences");
+const beforeResumeFetch = w.fetch;
+let resumeRequests = 0;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/resume") {
+    resumeRequests++;
+    const confirmed = JSON.parse(options.body).confirm_edited;
+    return new w.Response(JSON.stringify(confirmed ? {ok:true} : {detail:"Trajectory edited since checkpoint", confirmation_required:true}), {status:confirmed ? 200 : 409, headers:{"content-type":"application/json"}});
+  }
+  return beforeResumeFetch(path, options);
+};
+confirmResult = false;
+await click("resume-trajectory-generation");
+assert.equal(resumeRequests, 1);
+assert.match(confirmationMessage, /replace those edits/);
+confirmResult = true;
+await click("resume-trajectory-generation");
+assert.equal(resumeRequests, 3);
+w.fetch = beforeResumeFetch;
 // A short source can expand past 50,000 records because open windows idle.
 await w.document.querySelector('.tab[data-view="json"]').onclick();
 const largeSource = {
@@ -952,6 +1149,12 @@ assert.equal("rows" in lastPlan, false);
 assert.equal("sandbox" in lastPlan, false);
 assert(JSON.stringify(lastPlan).length < 10000);
 const largeCompileCount = compileCount();
+$("timeline").onmousemove({
+  target: $("timeline"),
+  clientX: 125 + 20000 * +$("timeline-zoom").value - $("timeline-scroll").scrollLeft,
+  clientY: 35,
+});
+assert.match($("timeline-event").textContent, /generate · 20000–20003/);
 jump(20004);
 await waitFor(() => /new-state/.test($("sandbox-state").textContent));
 assert.match($("window-grid").textContent, /earlierxyz/);
@@ -1004,11 +1207,30 @@ const frameRequestCount = () => requests.filter((r) => /^\/api\/frames?\//.test(
 const expiredRequestCount = frameRequestCount();
 await new Promise((resolve) => setTimeout(resolve, 100));
 assert.equal(frameRequestCount(), expiredRequestCount);
+
+const emptyStateResponse = await w.fetch("/api/state", {headers: {
+  "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+}});
+assert.equal(emptyStateResponse.ok, true);
+const emptyState = await emptyStateResponse.json();
+const beforeEmptyFetch = w.fetch;
+w.fetch = async (path, options) => {
+  if (String(path).startsWith("/api/state")) return new w.Response(JSON.stringify({
+    ...emptyState, samples: [], sample_count: 0, total: 0, selected_index: -1,
+    revision: emptyState.revision + 1,
+    status: {...emptyState.status, draft_id: null, draft_index: null},
+  }), {status: 200, headers: {"content-type": "application/json"}});
+  return beforeEmptyFetch(path, options);
+};
+await waitFor(() => $("set-state-menu-button").disabled, 5000);
+assert.equal($("set-state-menu").hidden, true);
+assert.equal(w.document.querySelectorAll('#set-state-menu [aria-checked="true"]').length, 0);
+assert.equal([...w.document.querySelectorAll("[data-validation-state]")].every(button => button.disabled), true);
 assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 99,
+    checks: 120,
     errors,
   }),
 );

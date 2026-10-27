@@ -95,12 +95,12 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
     memory = await tool(studio, "memory_search", {"query": "Remix"})
     assert memory["interaction"]["outcome"]["result"][0]["key"] == "one"
     await tool(
-        studio, "note_save", {"key": "work", "text": "inspect", "status": "todo"}
+        studio, "note_save", {"name": "work", "description": "inspect", "priority": "low", "status": "not started"}
     )
     await tool(studio, "skill_save", {"name": "audit", "content": "Verify results"})
     assert (await tool(studio, "note_list", {}))["interaction"]["outcome"]["result"][
-        "work"
-    ]["status"] == "todo"
+        "low"
+    ]["work"]["status"] == "not started"
     assert (await tool(studio, "skill_load", {"name": "audit"}))["interaction"][
         "outcome"
     ]["result"]["content"] == "Verify results"
@@ -108,7 +108,7 @@ async def test_simulated_tools_use_real_dispatcher_and_are_isolated(studio, tmp_
         "result"
     ] == ["audit"]
     await tool(studio, "file_delete", {"path": file_path})
-    await tool(studio, "note_delete", {"key": "work"})
+    await tool(studio, "note_delete", {"name": "work"})
     clock = await tool(studio, "time_now", {})
     assert clock["interaction"]["outcome"]["result"]["synthetic"]
     state = await call(studio, "get_tool_session", session_id="tools")
