@@ -17,6 +17,23 @@ from trajectory_remix.storage import DatasetStore
 EXAMPLES = Path(__file__).parents[1] / "examples/scenarios"
 
 
+def review_output(messages, valid=True, feedback="Incorrect answer", context_requests=None):
+    schema = json.loads(messages[0]["content"].split("Return JSON matching this schema:\n")[-1])
+    if "checks" not in schema["properties"]:
+        result = {"valid": valid, "feedback": [] if valid else [feedback]}
+    else:
+        result = {"checks": {
+            name: {"evidence": "replay[0][0]: reviewed source", "status": "pass" if valid else "fail", "feedback": "" if valid else feedback}
+            for name in schema["properties"]["checks"]["required"]
+        }}
+    if context_requests:
+        result["context_requests"] = context_requests
+        if "checks" in result:
+            for item in result["checks"].values():
+                item.update(status="needs_context", evidence="Earlier evidence is required", feedback="")
+    return result
+
+
 def app_for(tmp_path, compiler, client, scenarios=EXAMPLES, *, legacy_reviews=True):
     path = tmp_path / "project.sqlite"
     DatasetStore.initialize(path, compiler)
@@ -87,10 +104,7 @@ class ScenarioClient:
                 "next_exchange": "Ask for a concrete example.",
             }
         elif prompt.startswith("Validate"):
-            output = {
-                "valid": self.valid,
-                "feedback": [] if self.valid else ["Incorrect answer"],
-            }
+            output = review_output(messages, self.valid)
         else:
             raise AssertionError(prompt[:80])
         return {"content": json.dumps(output)}
@@ -1373,6 +1387,12 @@ async def test_bundled_bounded_reviews_use_small_projected_prompts(compiler, tmp
     assert fake.reviews >= 4
     report = runner.builder.sample["metadata"]["evaluations"][-1]["report"]
     assert all(item["groups"] > 0 for item in report["checks"].values())
+    assert fake.reviews == sum(item["groups"] for item in report["checks"].values())
+    definitions = runner.scenario.flow.steps["validate"].checks
+    for name, category in report["checks"].items():
+        for group in category["rule_results"]:
+            assert set(group["checks"]) == set(definitions[name].rules)
+            assert all(item["status"] == "pass" for item in group["checks"].values())
 
 
 async def test_bounded_review_repairs_only_the_identified_text(compiler, tmp_path):
@@ -1420,12 +1440,7 @@ async def test_bounded_review_repairs_only_the_identified_text(compiler, tmp_pat
                 )
                 return {
                     "content": json.dumps(
-                        {
-                            "valid": not fail,
-                            "feedback": ["Reasoning should be private working notes"]
-                            if fail
-                            else [],
-                        }
+                        review_output(messages, not fail, "Reasoning should be private working notes")
                     )
                 }
             return await super().complete(endpoint, messages, tools)
@@ -1495,11 +1510,7 @@ async def test_review_context_request_retries_with_evidence(compiler, tmp_path):
                     self.requested_id = older[0]
                     return {
                         "content": json.dumps(
-                            {
-                                "valid": False,
-                                "feedback": [],
-                                "context_requests": [self.requested_id],
-                            }
+                            review_output(messages, context_requests=[self.requested_id])
                         )
                     }
                 if self.requested and self.requested_id in ids:
@@ -1586,10 +1597,7 @@ async def test_invalid_targeted_repair_is_not_published(compiler, tmp_path):
                 valid = data["view"] != "reasoning"
                 return {
                     "content": json.dumps(
-                        {
-                            "valid": valid,
-                            "feedback": [] if valid else ["Fix private notes"],
-                        }
+                        review_output(messages, valid, "Fix private notes")
                     )
                 }
             return await super().complete(endpoint, messages, tools)
@@ -1607,3 +1615,79 @@ async def test_invalid_targeted_repair_is_not_published(compiler, tmp_path):
         for event in events
     )
     compiler.compile(saved)
+
+
+def checklist_scenario(tmp_path, *, repairs=0):
+    return write_scenario(tmp_path, {"steps": {"review": {
+        "uses": "remix.validate", "endpoint": "validator",
+        "checks": {
+            "primary": {"prompt": "review.md", "view": "layout", "rules": {
+                "grounding": {"requirement": "Claims match observations."},
+                "specialists": {"requirement": "Specialists have evidence.", "allow_not_applicable": True},
+            }},
+            "secondary": {"prompt": "review.md", "view": "reasoning", "rules": {
+                "private_notes": {"requirement": "Reasoning is private."},
+            }},
+        },
+        "max_repairs": repairs, "repair_mode": "edits", "repair_prompt": "repair.md",
+    }}}, {"review.md": "Validate this checklist.", "repair.md": "Repair ONLY the findings."})
+
+
+async def test_rule_failure_collects_all_categories_then_rechecks_every_rule(compiler, tmp_path):
+    class ChecklistClient:
+        reviews = 0
+        repaired = False
+
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]["content"].startswith("Repair"):
+                assert self.reviews == 2  # No short circuit after the first failure.
+                data = json.loads(messages[1]["content"])
+                assert len(data["findings"]) == 1
+                assert "[grounding]" in data["findings"][0]
+                assert "specialists" not in data["findings"][0]
+                self.repaired = True
+                return {"content": '{"edits":[]}'}
+            self.reviews += 1
+            result = review_output(messages)
+            if "grounding" in result["checks"]:
+                result["checks"]["specialists"].update(
+                    status="not_applicable", evidence="No specialist calls in this group"
+                )
+                if not self.repaired:
+                    result["checks"]["grounding"].update(status="fail", feedback="Correct the unsupported claim.")
+            return {"content": json.dumps(result)}
+
+    client = ChecklistClient()
+    runner = app_for(tmp_path, compiler, client, checklist_scenario(tmp_path, repairs=1), legacy_reviews=False).state.scenario_runner
+    runner.start("custom")
+    await finish(runner)
+    assert client.reviews == 4  # Same candidate still requires a complete new review.
+    reports = [e["report"] for e in runner.builder.sample["metadata"]["evaluations"]]
+    assert [r["valid"] for r in reports] == [False, True]
+    assert len(reports[0]["feedback"]) == 1
+    assert reports[0]["checks"]["secondary"]["valid"]
+    assert runner.snapshot["flow"]["steps"]["review"]["checks"]["primary"]["rules"]["grounding"]["requirement"] == "Claims match observations."
+
+
+@pytest.mark.parametrize("failure", ["missing_item", "extra_item", "invalid_applicability", "missing_context_request"])
+async def test_malformed_rule_results_never_promote_a_sample(compiler, tmp_path, failure):
+    class MalformedClient:
+        async def complete(self, endpoint, messages, tools=None):
+            result = review_output(messages)
+            if failure == "missing_item":
+                result["checks"].pop("grounding")
+            elif failure == "extra_item":
+                result["checks"]["invented"] = result["checks"]["grounding"]
+            else:
+                result["checks"]["grounding"]["status"] = (
+                    "not_applicable" if failure == "invalid_applicability" else "needs_context"
+                )
+            return {"content": json.dumps(result)}
+
+    runner = app_for(tmp_path, compiler, MalformedClient(), checklist_scenario(tmp_path), legacy_reviews=False).state.scenario_runner
+    runner.state["config"].setdefault("single_generation", {})["max_attempts"] = 1
+    runner.start("custom")
+    await asyncio.wait_for(runner.job, 5)
+    assert runner.status["phase"] == "rejected"
+    assert not runner.builder.sample["metadata"].get("evaluations")
+    assert runner.status["accepted"] == 0

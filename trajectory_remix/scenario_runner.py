@@ -35,7 +35,17 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from .dataset import evaluation_source
 from .generation_stats import RequestStats
 from .llm import SampleBuilder
-from .review import EDIT_SCHEMA, ReviewView, apply_edits, compact, count
+from .review import (
+    EDIT_SCHEMA,
+    ReviewView,
+    apply_edits,
+    checklist_instructions,
+    checklist_report,
+    checklist_schema,
+    compact,
+    count,
+    unique_json_object,
+)
 from .scenarios import (
     Flow,
     ReviewCheck,
@@ -739,8 +749,12 @@ class ScenarioRunner:
         finally:
             self.limit.release()
 
-    def render_prompt(self, step, inputs, context, schema=None, prompt=None):
+    def render_prompt(
+        self, step, inputs, context, schema=None, prompt=None, rules=None
+    ):
         instructions = self.scenario.prompts[prompt or step.prompt]
+        if rules:
+            instructions += "\n" + checklist_instructions(rules)
         if step.profile:
             instructions += "\nAuthoring role profile:\n" + compact(
                 context["roles"][step.profile]
@@ -751,11 +765,11 @@ class ScenarioRunner:
             instructions += "\nReturn JSON matching this schema:\n" + compact(schema)
         return instructions, compact(inputs)
 
-    def prompt_tokens(self, step, inputs, context, schema, prompt):
+    def prompt_tokens(self, step, inputs, context, schema, prompt, rules=None):
         return (
             sum(
                 count(self.compiler.tokenizer, text)
-                for text in self.render_prompt(step, inputs, context, schema, prompt)
+                for text in self.render_prompt(step, inputs, context, schema, prompt, rules)
             )
             + 128
         )
@@ -769,8 +783,9 @@ class ScenarioRunner:
         schema=None,
         prompt=None,
         max_input_tokens=None,
+        rules=None,
     ):
-        instructions, data = self.render_prompt(step, inputs, context, schema, prompt)
+        instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
         if max_input_tokens is None:
             max_input_tokens = step.max_input_tokens
         if max_input_tokens is not None:
@@ -782,7 +797,7 @@ class ScenarioRunner:
                 )
             if (
                 max_input_tokens <= 0
-                or self.prompt_tokens(step, inputs, context, schema, prompt)
+                or self.prompt_tokens(step, inputs, context, schema, prompt, rules)
                 > max_input_tokens
             ):
                 raise ValueError(
@@ -963,7 +978,10 @@ class ScenarioRunner:
                 self.snapshot["steps"].setdefault(path, {})["last_output"] = text
                 self.log(text, "output", path)
                 if schema:
-                    result = json.loads(text)
+                    result = (
+                        json.loads(text, object_pairs_hook=unique_json_object)
+                        if rules else json.loads(text)
+                    )
                 else:
                     result = text
                 if schema:
@@ -1241,6 +1259,7 @@ class ScenarioRunner:
     async def review_groups(
         self, step, definition, inputs, context, path, draft, plan, source_hash
     ):
+        schema = checklist_schema(definition.rules) if definition.rules else CHUNK_REPORT
         budget = definition.max_input_tokens
         endpoint = self.endpoints[step.endpoint]
         if endpoint.get("context_size"):
@@ -1255,7 +1274,9 @@ class ScenarioRunner:
             draft, plan, definition, self.compiler.tokenizer, tools=self.compiler.tools
         )
         fits = lambda payload: (
-            self.prompt_tokens(step, payload, context, CHUNK_REPORT, definition.prompt)
+            self.prompt_tokens(
+                step, payload, context, schema, definition.prompt, definition.rules
+            )
             <= budget
         )
         groups = list(view.groups(inputs, fits))
@@ -1269,7 +1290,7 @@ class ScenarioRunner:
             else:
                 for context_round in range(definition.context_rounds + 1):
                     size = self.prompt_tokens(
-                        step, payload, context, CHUNK_REPORT, definition.prompt
+                        step, payload, context, schema, definition.prompt, definition.rules
                     )
                     self.log(
                         {
@@ -1283,8 +1304,9 @@ class ScenarioRunner:
                                     step,
                                     payload,
                                     context,
-                                    CHUNK_REPORT,
+                                    schema,
                                     definition.prompt,
+                                    definition.rules,
                                 )[0],
                             ),
                             "timeline_tokens_estimated": count(
@@ -1300,10 +1322,13 @@ class ScenarioRunner:
                         payload,
                         context,
                         group_path,
-                        CHUNK_REPORT,
+                        schema,
                         definition.prompt,
                         max_input_tokens=budget,
+                        rules=definition.rules,
                     )
+                    if definition.rules:
+                        result = checklist_report(result)
                     requests = result.pop("context_requests", [])
                     if not requests:
                         break
@@ -1348,6 +1373,12 @@ class ScenarioRunner:
             "valid": all(r["valid"] for r in reports),
             "feedback": findings,
             "groups": len(groups),
+            **(
+                {"rule_results": [
+                    {"group": index, "checks": r["checks"]}
+                    for index, r in enumerate(reports)
+                ]} if definition.rules else {}
+            ),
         }, failures
 
     async def repair_groups(
