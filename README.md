@@ -358,7 +358,23 @@ contract; it is not an audit of the current ProjectKidra repository.
   Every segment boundary must also be a tokenizer-token boundary.
 
 Defaults: at most 100,000 ticks and 500,000 expanded rows per compiled sample.
-Interactive previews are limited to 50,000 rows. Imports are limited to 32 MB per
+Rows are token-level replay records, including implicit NOOPs for idle open
+windows; row count is not a measure of source text size. The dashboard can seek
+and play trajectories throughout those compiler limits. It loads small ranges
+of post-commit snapshots on demand, without downloading expanded rows or
+replaying a prefix in the browser. Playback buffers while a range loads.
+
+Compilation and preview availability are separate: a valid sample stays valid
+if its timeline metadata or a frame exceeds the 4 MB preview output budget.
+The dashboard explains the preview limit; MCP `preview_snapshots` can inspect
+selected windows/ranges, and `get_window_history` paginates token records.
+NOOPs, losses and training exports are unchanged. Dashboard and MCP share an LRU
+plan cache (six entries, at most 500,000 retained rows in total, 15-minute idle
+expiry); an evicted/expired preview asks you to compile again. Active playback
+reuses the cached plan. Cache limits bound retained expansion, not process RSS
+or temporary compilation memory.
+
+Imports are limited to 32 MB per
 file and requests to 40 MB. Large imports should be split into batches; the SQLite dataset itself has no
 100,000-trajectory limit.
 

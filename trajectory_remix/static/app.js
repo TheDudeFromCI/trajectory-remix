@@ -15,8 +15,11 @@ let state,
   dirty = false,
   view = "events",
   playing = null;
-let frameRequest = false,
-  currentFrame = null;
+let frameRequest = null,
+  currentFrame = null,
+  frameCache = new Map(),
+  frameFailure = null,
+  previewMessage = null;
 let configDraft,
   configTab = "endpoints",
   eventDraft = [],
@@ -78,6 +81,7 @@ async function api(path, method = "GET", body) {
     const error = new Error(e.detail || "Request failed");
     error.status = res.status;
     error.diagnostics = e.diagnostics;
+    error.code = e.code;
     throw error;
   }
   return res;
@@ -491,11 +495,22 @@ async function compileSample(persist = true) {
     $("sample-json").value = JSON.stringify(sample, null, 2);
     try {
       plan = await json("compile", "POST", { sample });
-      currentFrame = plan.frame;
+      currentFrame = null;
+      frameCache.clear();
+      frameFailure = null;
+      previewMessage = null;
       diagnostics(plan.diagnostics);
+      if (!plan.preview.available) {
+        previewMessage = plan.preview.message;
+        plan = null;
+        renderReplay();
+        return;
+      }
       setTick(Math.min(tick, plan.max_tick));
+      await fetchFrame();
     } catch (e) {
       plan = null;
+      previewMessage = null;
       renderReplay();
       diagnostics(
         e.diagnostics || [
@@ -516,6 +531,7 @@ function setTick(value) {
   );
   $("tick-number").value = tick;
   $("tick-scrubber").value = tick;
+  currentFrame = frameCache.get(tick) || null;
   renderReplay();
 }
 let expandedWindowId = null;
@@ -548,14 +564,16 @@ function renderReplay() {
       node(
         "strong",
         "",
-        sample
+        previewMessage
+          ? "Compiled successfully; preview unavailable."
+          : sample
           ? "Compile the sample to preview its execution."
           : "Build a trajectory. Inspect every tick.",
       ),
       document.createTextNode(
-        sample
+        previewMessage || (sample
           ? "Compiler errors appear below. Edit events or source JSON, then apply again."
-          : "Import JSON / JSONL samples or create a sample. Load a saved .kidra-dataset to restore its generation configuration.",
+          : "Import JSON / JSONL samples or create a sample. Load a saved .kidra-dataset to restore its generation configuration."),
       ),
     );
     grid.append(empty);
@@ -605,20 +623,26 @@ function renderReplay() {
       `${isExpanded ? "Shrink" : "Expand"} context window ${w.id}`,
     );
     head.append(resize);
-    const data = currentFrame?.windows?.[w.id];
+    const data = currentFrame?.tick === tick ? currentFrame.windows?.[w.id] : null;
     let content = data?.text || "";
     if (!showWindowHeaders)
       content = content.replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
     card.append(
       head,
-      windowContent(content || (unopened ? "Not opened yet." : "No content.")),
+      windowContent(
+        !data
+          ? frameFailure?.id === plan.plan_id && frameFailure.tick === tick
+            ? `Preview unavailable: ${frameFailure.message}`
+            : "Loading preview…"
+          : content || (unopened ? "Not opened yet." : "No content."),
+      ),
     );
     const count = data?.cached_tokens || 0;
     card.append(
       node(
         "div",
         "window-foot",
-        `${count} cached tokens · opened ${w.open}${w.close !== null ? " · closed " + w.close : ""}`,
+        `${data ? count : "…"} cached tokens · opened ${w.open}${w.close !== null ? " · closed " + w.close : ""}`,
       ),
     );
     if (isExpanded) {
@@ -637,23 +661,46 @@ function renderReplay() {
   drawTimeline();
   if (currentFrame?.tick !== tick) fetchFrame();
 }
-async function fetchFrame() {
-  if (frameRequest || !plan) return;
-  frameRequest = true;
+function fetchFrame() {
+  if (frameRequest || !plan || currentFrame?.tick === tick) return frameRequest;
+  if (frameFailure?.id === plan.plan_id && frameFailure.tick === tick) return;
   const id = plan.plan_id,
     target = tick;
-  try {
-    const result = await json(`frame/${id}/${target}`);
-    if (plan?.plan_id === id) {
-      currentFrame = result;
-      if (tick === target) renderReplay();
+  frameRequest = (async () => {
+    let failed = false;
+    try {
+      let result;
+      try {
+        // A small range amortizes request overhead during playback. Seeking always
+        // starts at the selected tick; the browser never replays an earlier prefix.
+        result = await json(`frames/${id}?start_tick=${target}&end_tick=${Math.min(target + 7, plan.max_tick)}`);
+      } catch (e) {
+        if (e.code !== "preview_limit") throw e;
+        result = { frames: [await json(`frame/${id}/${target}`)] };
+      }
+      if (plan?.plan_id === id) {
+        frameCache = new Map(result.frames.map((frame) => [frame.tick, frame]));
+        currentFrame = frameCache.get(tick) || null;
+        frameFailure = null;
+        renderReplay();
+      }
+    } catch (e) {
+      failed = true;
+      if (plan?.plan_id === id && tick === target) {
+        pause();
+        frameFailure = { id, tick: target, message: e.message };
+        toast(e.message, true);
+        renderReplay();
+      }
+    } finally {
+      frameRequest = null;
+      // No retry loop for expired plans or output limits. A new seek/compile can
+      // try again, and a seek made during an in-flight request must still load.
+      if (plan && currentFrame?.tick !== tick && (!failed || plan.plan_id !== id || tick !== target))
+        setTimeout(fetchFrame, 0);
     }
-  } catch (e) {
-    toast(e.message, true);
-  } finally {
-    frameRequest = false;
-    if (plan && currentFrame?.tick !== tick) setTimeout(fetchFrame, 25);
-  }
+  })();
+  return frameRequest;
 }
 function renderSandbox() {
   $("sandbox-panel").hidden = !plan;
@@ -662,7 +709,8 @@ function renderSandbox() {
   $("sandbox-state").replaceChildren();
   if (!plan) return;
   if (currentFrame?.tick !== tick) {
-    $("sandbox-state").textContent = "Loading sandbox…";
+    $("sandbox-state").textContent = frameFailure?.id === plan.plan_id && frameFailure.tick === tick
+      ? `Preview unavailable: ${frameFailure.message}` : "Loading sandbox…";
     return;
   }
   const sandbox = currentFrame.sandbox;
@@ -2361,6 +2409,8 @@ $("play").onclick = () => {
         pause();
         return;
       }
+      // Buffer on slow requests so playback does not silently skip states.
+      if (currentFrame?.tick !== tick) return;
       setTick(tick + 1);
       focusTick();
     },
@@ -2408,11 +2458,11 @@ $("timeline").onmousemove = (e) => {
   const call = plan.tool_calls?.[wi - plan.windows.length];
   const text =
     call && call.start <= t && t <= call.end
-      ? `${call.tool} · ${call.start}–${call.end} · ${JSON.stringify(call.arguments)}`
+      ? `${call.tool} · ${call.start}–${call.end}`
       : [
           ...anchors,
           ...events.map(
-            (x) => `${x.op} · ${x.start}–${x.end} · ${x.text.slice(0, 100)}`,
+            (x) => `${x.op} · ${x.start}–${x.end}`,
           ),
         ].join(" | ");
   $("timeline-event").textContent = text;

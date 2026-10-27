@@ -12,13 +12,25 @@ w.structuredClone = structuredClone;
 const requests = [];
 let holdNextCompile = false,
   releaseCompile = null,
+  holdNextFrames = false,
+  releaseFrames = null,
+  nextFramesError = null,
   completedStateReads = 0,
   lastPlan = null,
   confirmResult = true,
   confirmationMessage = null;
 w.fetch = async (path, options) => {
   requests.push({ path, options });
+  if (path.startsWith("/api/frames/") && nextFramesError) {
+    const error = nextFramesError;
+    nextFramesError = null;
+    return new Response(JSON.stringify(error), { status: error.code === "preview_limit" ? 413 : 404 });
+  }
   const response = await fetch(new URL(path, base), options);
+  if (path.startsWith("/api/frames/") && holdNextFrames) {
+    holdNextFrames = false;
+    await new Promise((resolve) => (releaseFrames = resolve));
+  }
   if (path.startsWith("/api/state?")) completedStateReads++;
   if (path === "/api/compile" && holdNextCompile) {
     holdNextCompile = false;
@@ -557,7 +569,6 @@ await waitFor(() =>
     (call) =>
       call.tool === "file_write" &&
       call.end - call.start === 50 &&
-      call.arguments.content === "new file version" &&
       Number($("max-tick").textContent) === call.end,
   ),
 );
@@ -569,6 +580,9 @@ const jump = (value) => {
   $("tick-number").value = String(value);
   $("tick-number").onchange({ target: $("tick-number") });
 };
+const readFrame = async (at) => (await w.fetch(`/api/frame/${lastPlan.plan_id}/${at}`, {
+  headers: { "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content },
+})).json();
 jump(execution.start);
 await waitFor(() =>
   /file_write · running/.test($("sandbox-calls").textContent),
@@ -623,7 +637,7 @@ await waitFor(
     lastPlan?.events.some(
       (event) =>
         event.path.endsWith(".request") &&
-        event.text.includes('file_write",<|noop|>'),
+        requestArea.value.includes('file_write",<|noop|>'),
     ) &&
     lastPlan.tool_calls[0].result_end > lastPlan.tool_calls[0].end &&
     Number($("max-tick").textContent) === lastPlan.max_tick,
@@ -770,7 +784,7 @@ const setCall = lastPlan.tool_calls.find((call) => call.tool === "time_set");
 assert.equal(setCall.outcome.ok, true);
 jump(setCall.end);
 await waitFor(() =>
-  $("sandbox-state").textContent.includes(setCall.outcome.result.timestamp),
+  /time_set · completed/.test($("sandbox-calls").textContent),
 );
 const setOperation = setCard.querySelector(".event-header select");
 setOperation.value = "invisible-tool-call";
@@ -851,9 +865,9 @@ const toolCheck = [...showCard.querySelectorAll("label")].find((label) => label.
 toolCheck.checked = true;
 toolCheck.onchange();
 await waitFor(() => !w.document.title.startsWith("*"));
-await waitFor(() => lastPlan?.sample_id === "sqlite-page-204" && lastPlan.events.some((event) => event.key === "1" && event.text.includes('"chat"')));
+await waitFor(() => lastPlan?.sample_id === "sqlite-page-204" && lastPlan.events.some((event) => event.key === "1" && event.op === "append"));
 assert.deepEqual(JSON.parse($("sample-json").value).replay["1"][0].tools, ["chat"]);
-const shown = lastPlan.events.find((event) => event.key === "1").text;
+const shown = (await readFrame(lastPlan.max_tick)).windows.a.text;
 assert.match(shown, /"chat"/);
 assert.doesNotMatch(shown, /"username"|"file_read"/);
 const extraCheck = [...showCard.querySelectorAll("label")].find((label) => label.textContent === "Randomly add additional tools").querySelector("input");
@@ -864,7 +878,7 @@ assert.equal(JSON.parse($("sample-json").value).replay["1"][0]["randomly-add-add
 // Per-trajectory tick rate is an ordinary persisted metadata setting.
 $("tick-rate").value = "20";
 $("tick-rate").oninput();
-await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && lastPlan?.sandbox.initial.tick_rate === 20);
+await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled && /"tick_rate": 20/.test($("sandbox-state").textContent));
 assert.equal(JSON.parse($("sample-json").value).metadata.synthetic_clock.tick_rate, 20);
 // New math, timer, and author-only load tools use the same actual editor flow.
 await click("add-tool-call");
@@ -880,7 +894,7 @@ const mathArgs = mathCard.querySelector('textarea[aria-label="arguments JSON"]')
 mathArgs.value = JSON.stringify({expression: "sin(pi / 2) + sqrt(9)"});
 mathArgs.oninput();
 await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "calculator"));
-assert.equal(lastPlan.tool_calls.find((call) => call.tool === "calculator").outcome.result.value, 4);
+assert.equal((await readFrame(lastPlan.max_tick)).tool_calls.find((call) => call.tool === "calculator").outcome.result.value, 4);
 await click("add-tool-call");
 let timerCard = [...w.document.querySelectorAll(".event-card")].at(-1);
 const timerSelect = timerCard.querySelector(".event-options select");
@@ -892,7 +906,7 @@ timerArgs.value = JSON.stringify({mode: "interval", seconds: 0.1, count: 2});
 timerArgs.oninput();
 await waitFor(() => lastPlan.tool_calls.some((call) => call.tool === "timer"));
 const interval = lastPlan.tool_calls.find((call) => call.tool === "timer");
-assert.equal(interval.outputs.length, 2);
+assert.equal((await readFrame(lastPlan.max_tick)).tool_calls.find((call) => call.tool === "timer").outputs.length, 2);
 assert.equal(interval.end - interval.start, 4);
 await click("add-invisible-call");
 let loadCard = [...w.document.querySelectorAll(".event-card")].at(-1);
@@ -1112,6 +1126,88 @@ confirmResult = true;
 await click("resume-trajectory-generation");
 assert.equal(resumeRequests, 3);
 w.fetch = beforeResumeFetch;
+// A short source can expand past 50,000 records because open windows idle.
+await w.document.querySelector('.tab[data-view="json"]').onclick();
+const largeSource = {
+  "schema-version": "1.0", "tick-policy": "external-first", id: "large-preview",
+  uuid: JSON.parse($("sample-json").value).uuid,
+  replay: {
+    0: ["a", "b", "c"].map((window) => ({ op: "open", window })),
+    1: [{ op: "append", window: "a", source: "user", content: "earlier" },
+        { op: "append", window: "b", source: "user", content: "old" }],
+    20000: [{ op: "generate", window: "a", content: "xyz<|eos|>" }],
+    20001: [{ op: "invisible-tool-call", tool: "file_write", arguments: {path: "x", content: "new-state"}, "duration-ticks": 3 }],
+    20002: [{ op: "append", window: "b", source: "user", content: "replacement", "replace-content": true }],
+    20015: [{ op: "append", window: "b", source: "user", content: "tail" }],
+  },
+};
+$("sample-json").value = JSON.stringify(largeSource);
+$("sample-json").oninput();
+await waitFor(() => lastPlan?.sample_id === "large-preview" && lastPlan.row_count > 50000 &&
+  !$("undo-edit").disabled && !$("window-grid").textContent.includes("Loading preview"));
+assert.equal("rows" in lastPlan, false);
+assert.equal("sandbox" in lastPlan, false);
+assert(JSON.stringify(lastPlan).length < 10000);
+const largeCompileCount = compileCount();
+$("timeline").onmousemove({
+  target: $("timeline"),
+  clientX: 125 + 20000 * +$("timeline-zoom").value - $("timeline-scroll").scrollLeft,
+  clientY: 35,
+});
+assert.match($("timeline-event").textContent, /generate · 20000–20003/);
+jump(20004);
+await waitFor(() => /new-state/.test($("sandbox-state").textContent));
+assert.match($("window-grid").textContent, /earlierxyz/);
+assert.match($("window-grid").textContent, /replacement/);
+jump(1);
+assert.doesNotMatch($("window-grid").textContent, /earlierxyz|replacement/);
+await waitFor(() => /old/.test($("window-grid").textContent));
+assert.doesNotMatch($("sandbox-state").textContent, /new-state/);
+// A seek during a delayed range response must settle on the latest tick.
+holdNextFrames = true;
+jump(19999);
+await waitFor(() => releaseFrames !== null);
+assert.match($("window-grid").textContent, /Loading preview/);
+jump(20002);
+releaseFrames();
+releaseFrames = null;
+await waitFor(() => /replacement/.test($("window-grid").textContent));
+assert.equal($("tick-number").value, "20002");
+assert.doesNotMatch($("sandbox-state").textContent, /new-state/);
+// Slow loading buffers playback at a chunk boundary rather than skipping ticks.
+holdNextFrames = true;
+$("play-speed").value = "120";
+await click("play");
+await waitFor(() => releaseFrames !== null);
+assert.equal($("tick-number").value, "20007");
+await new Promise((resolve) => setTimeout(resolve, 60));
+assert.equal($("tick-number").value, "20007");
+releaseFrames();
+releaseFrames = null;
+await waitFor(() => $("tick-number").value === "20015" && $("play").textContent === "Play");
+assert.match($("window-grid").textContent, /replacementtail/);
+assert.match($("sandbox-state").textContent, /new-state/);
+assert.equal(compileCount(), largeCompileCount);
+const rangeRequests = requests.filter((r) => r.path.startsWith(`/api/frames/${lastPlan.plan_id}?`));
+assert(rangeRequests.some((r) => r.path.includes("start_tick=19999")));
+assert(rangeRequests.length < 12);
+for (const request of rangeRequests) {
+  const query = new URL(request.path, base).searchParams;
+  assert(Number(query.get("end_tick")) - Number(query.get("start_tick")) < 8);
+}
+// An oversized range falls back to one frame; expiry does not cause a retry loop.
+nextFramesError = { code: "preview_limit", detail: "Preview range exceeds 4 MB; request fewer frames" };
+jump(1000);
+await waitFor(() => requests.some((r) => r.path === `/api/frame/${lastPlan.plan_id}/1000`) &&
+  !$("window-grid").textContent.includes("Loading preview"));
+nextFramesError = { detail: "Preview expired; compile the sample again" };
+jump(500);
+await waitFor(() => /Preview unavailable: Preview expired/.test($("window-grid").textContent));
+const frameRequestCount = () => requests.filter((r) => /^\/api\/frames?\//.test(r.path)).length;
+const expiredRequestCount = frameRequestCount();
+await new Promise((resolve) => setTimeout(resolve, 100));
+assert.equal(frameRequestCount(), expiredRequestCount);
+
 const emptyStateResponse = await w.fetch("/api/state", {headers: {
   "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
 }});

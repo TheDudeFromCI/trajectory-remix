@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import hashlib
 import json
 import secrets
-from collections import OrderedDict
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryFile
@@ -13,13 +11,14 @@ from tempfile import TemporaryFile
 from starlette.background import BackgroundTask
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
 
 from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, chunks
+from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewLimit, bounded_json
 from .dataset import (
     new_sample,
     invalidate_automation,
@@ -49,17 +48,24 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     runner.scenario_runner = scenario_runner
     generation_mode = {"scenario": bool(scenario_runner.snapshot)}
     token = secrets.token_urlsafe(32)
-    previews = OrderedDict()
     static = Path(__file__).parent / "static"
 
     @asynccontextmanager
     async def lifespan(app):
+        async def expire_previews():
+            while True:
+                await asyncio.sleep(60)
+                commands.previews.purge()
+
         async with AsyncExitStack() as stack:
             if mcp_http.manager is not None:
                 await stack.enter_async_context(mcp_http.manager.run())
+            expiry = asyncio.create_task(expire_previews())
             try:
                 yield
             finally:
+                expiry.cancel()
+                await asyncio.gather(expiry, return_exceptions=True)
                 try:
                     await scenario_runner.stop()
                     await runner.stop()
@@ -122,6 +128,12 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.exception_handler(ValueError)
     async def value_error(request, error):
         return JSONResponse({"detail": str(error)}, status_code=422)
+
+    @app.exception_handler(PreviewLimit)
+    async def preview_limit(request, error):
+        return JSONResponse(
+            {"detail": str(error), "code": "preview_limit"}, status_code=413
+        )
 
     @app.exception_handler(CommandError)
     async def command_error(request, error):
@@ -359,25 +371,50 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         sample = data.get("sample")
         if sample is None:
             sample = sample_at(data.get("index", -1))
-        plan = compiler.compile(sample)
-        if len(plan["rows"]) > 50_000:
-            raise ValueError(
-                "Preview exceeds 50,000 rows; export via CLI or split the trajectory"
-            )
-        plan_id = hashlib.sha256(
-            (json.dumps(sample, sort_keys=True) + compiler.tools.fingerprint).encode()
-        ).hexdigest()[:24]
-        previews[plan_id] = plan
-        previews.move_to_end(plan_id)
-        while len(previews) > 6:
-            previews.popitem(last=False)
-        return {**plan, "plan_id": plan_id, "frame": compiler.frame(plan, 0)}
+        preview = commands.previews.compile(sample, revision=state["revision"])
+        result = {**preview.metadata(), "preview": {"available": True}}
+        try:
+            encoded = bounded_json(result, "Timeline metadata exceeds 4 MB; inspect a window/range with MCP get_window_history or preview_snapshots.")
+        except PreviewLimit as error:
+            return {
+                "valid": True, "plan_id": preview.plan_id,
+                "row_count": len(preview.plan["rows"]),
+                "diagnostics": [], "diagnostic_count": len(preview.plan["diagnostics"]),
+                "preview": {"available": False, "message": str(error)},
+            }
+        # Compilation success is independent of the initial snapshot's size.
+        # Frames are requested separately with their own count/output budgets.
+        return Response(encoded, media_type="application/json")
+
+    def get_preview(plan_id):
+        preview = commands.previews.get(plan_id)
+        if preview is None:
+            raise HTTPException(404, "Preview expired or evicted from the bounded cache; compile the sample again")
+        return preview
 
     @app.get("/api/frame/{plan_id}/{tick}")
     async def frame(plan_id: str, tick: int):
-        if plan_id not in previews:
-            raise HTTPException(404, "Preview expired; compile the sample again")
-        return compiler.frame(previews[plan_id], tick)
+        result = get_preview(plan_id).frame(tick)
+        encoded = bounded_json(result, "Frame exceeds 4 MB; inspect selected windows with MCP preview_snapshots(windows=[...]) or paginated get_window_history.")
+        return Response(encoded, media_type="application/json")
+
+    @app.get("/api/frames/{plan_id}")
+    async def frames(
+        plan_id: str, start_tick: int = Query(ge=0), end_tick: int = Query(ge=0),
+    ):
+        preview = get_preview(plan_id)
+        commands._range(preview.plan, start_tick, end_tick)
+        if end_tick - start_tick + 1 > MAX_PREVIEW_FRAMES:
+            raise PreviewLimit(f"Preview request exceeds {MAX_PREVIEW_FRAMES} frames; reduce end_tick")
+        result, size = [], len(b'{"frames":[]}')
+        for tick in range(start_tick, end_tick + 1):
+            frame = preview.frame(tick)
+            encoded = bounded_json(frame, "Frame exceeds 4 MB; inspect selected windows with MCP preview_snapshots(windows=[...]) or paginated get_window_history.")
+            size += len(encoded) + bool(result)
+            if size > MAX_PREVIEW_BYTES:
+                raise PreviewLimit("Preview range exceeds 4 MB; request fewer frames")
+            result.append(encoded)
+        return Response(b'{"frames":[' + b','.join(result) + b']}', media_type="application/json")
 
     @app.post("/api/checkpoint")
     async def checkpoint():

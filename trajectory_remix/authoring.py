@@ -13,7 +13,6 @@ import inspect
 import json
 import re
 import uuid
-from collections import OrderedDict
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +27,7 @@ from .llm import SampleBuilder
 from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
 from .metadata import query as query_metadata
+from .preview import PreviewCache
 from .search import SearchQuery
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
@@ -124,7 +124,7 @@ class TrajectoryCommands:
         self.action = ContextVar("trajectory_command", default="Edit trajectory")
         self.edit_revision = ContextVar("trajectory_revision", default=None)
         self.tool_sessions = ToolSessions(registry=compiler.tools)
-        self.cache = OrderedDict()
+        self.previews = PreviewCache(compiler)
         self.commands = {
             name: getattr(self, name)
             for name in dir(type(self))
@@ -293,14 +293,11 @@ class TrajectoryCommands:
         return event
 
     def _plan(self, sample_id):
+        return self._preview(sample_id).plan
+
+    def _preview(self, sample_id):
         _, sample = self._find(sample_id)
-        key = (self.state["revision"], sample_id)
-        if key not in self.cache:
-            self.cache[key] = self.compiler.compile(sample)
-            while len(self.cache) > 6:
-                self.cache.popitem(last=False)
-        self.cache.move_to_end(key)
-        return self.cache[key]
+        return self.previews.compile(sample, revision=self.state["revision"])
 
     def _range(self, plan, start_tick, end_tick):
         end_tick = plan["max_tick"] if end_tick is None else end_tick
@@ -927,24 +924,30 @@ class TrajectoryCommands:
         Tick bounds are inclusive. Text includes the prefix before start_tick. NOOP rows
         are omitted by default; token rows retain phase, durability and loss information.
         """
-        plan = self._plan(sample_id)
+        preview = self._preview(sample_id)
+        plan = preview.plan
         end_tick = self._range(plan, start_tick, end_tick)
         life = next((w for w in plan["windows"] if w["id"] == window), None)
         if life is None:
             raise CommandError("Window not found", "not_found")
-        rows = [
+        matching = (
             r
             for r in plan["rows"]
             if r["window"] == window
             and start_tick <= r["tick"] <= end_tick
             and (include_noops or r["op"] != "noop")
-        ]
+        )
+        rows, total = [], 0
+        for row in matching:
+            if offset <= total < offset + limit:
+                rows.append(row)
+            total += 1
         return {
             "revision": self.state["revision"],
             "window": life,
             "start_tick": start_tick,
             "end_tick": end_tick,
-            "text": self.compiler.frame(plan, end_tick)["windows"][window]["text"],
+            "text": preview.frame(end_tick, [window])["windows"][window]["text"],
             "events": [
                 e
                 for e in plan["events"]
@@ -952,8 +955,8 @@ class TrajectoryCommands:
                 and e["start"] <= end_tick
                 and e["end"] >= start_tick
             ],
-            "rows": rows[offset : offset + limit],
-            "total_rows": len(rows),
+            "rows": rows,
+            "total_rows": total,
         }
 
     @command()
@@ -967,28 +970,24 @@ class TrajectoryCommands:
     ):
         """Preview post-commit snapshots over an inclusive timeline range, retaining earlier context.
 
-        At most 100 frames, 50,000 compiled rows and 4 MB of output per request.
+        At most 100 frames and 4 MB of output per request, regardless of plan row count.
         Filter windows or narrow the range for larger trajectories. kv_tokens is zero
         for closed/pending windows; cached_tokens counts historical durable tokens.
         """
-        plan = self._plan(sample_id)
+        preview = self._preview(sample_id)
+        plan = preview.plan
         self._range(plan, start_tick, end_tick)
         ticks = range(start_tick, end_tick + 1, step)
-        if len(ticks) > 100 or len(plan["rows"]) > 50_000:
+        if len(ticks) > 100:
             raise CommandError(
-                "Preview exceeds 100 frames or 50,000 rows; narrow the range or split the sample"
+                "Preview exceeds 100 frames; narrow the range or increase step"
             )
         known = {w["id"] for w in plan["windows"]}
         if windows is not None and not set(windows) <= known:
             raise CommandError("Unknown preview window", "not_found")
         frames, size = [], 0
         for tick in ticks:
-            frame = self.compiler.frame(plan, tick)
-            frame["windows"] = {
-                w: data
-                for w, data in frame["windows"].items()
-                if windows is None or w in windows
-            }
+            frame = preview.frame(tick, windows)
             for life in plan["windows"]:
                 if life["id"] not in frame["windows"]:
                     continue

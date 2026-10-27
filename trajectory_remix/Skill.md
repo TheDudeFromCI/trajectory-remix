@@ -534,7 +534,9 @@ resolve them before approving a training sample.
 2. Inspect `get_sandbox_state` and `preview_snapshots` before dispatch, while calls
    overlap, at completions, and after follow-ups. Running calls must not expose
    future answers/files. Prefer small ranges; snapshots are bounded to 100 frames
-   and 4 MB, and interactive previews currently have a 50,000-row limit.
+   and 4 MB. Large plans can be inspected with narrow ranges/window filters;
+   previews do not impose a whole-plan 50,000-row limit. Compiler safety limits
+   remain 100,000 ticks and 500,000 expanded rows, including idle-window NOOPs.
 3. Use `get_window_history` to check request/output supervision, masked user/tool
    observations, NOOPs, window references and EOS closure. Source structure alone
    cannot prove a reviewer's claims are supported; compare its pinned context and
