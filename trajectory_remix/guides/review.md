@@ -4,6 +4,43 @@ You are assessing the behavior being taught, including task correctness and
 Kidra's context dependencies. A successful compile with zero warnings establishes
 neither. Read this guide before reviewing or repairing generated trajectories.
 
+## Scenario checklist and MCP tools
+
+Find samples with `list_trajectories(query="@state:candidate #user_scenario", limit=5)`.
+The bundled flow emits `#user_scenario`; custom flows choose their `tag` in
+flow.yaml (default: folder name). Randomized scenario and `role:trait` tags remain.
+
+Call `review_trajectory(sample_id=...)`. It automatically fetches the matching
+checklist, repair guidance, this guide, source, compiler diagnostics, `revision`
+and `checklist_hash`. Use `include_source=false` for large samples, then inspect
+bounded events/windows/snapshots. `get_review_checklist` fetches only the contract.
+No model endpoints run; these are MCP authoring tools, not replay tools.
+
+Generated `metadata.review_checklist` snapshots preserve original rules/prompts
+after export/import or scenario-file changes. Older/tag-only samples need the
+matching `--scenarios-dir`; metadata.scenario is a legacy fallback. Missing or
+conflicting scenarios fail explicitly. Never substitute another scenario's rules.
+
+Evaluate every rule yourself over the whole trajectory, including all groups.
+Give concise evidence before each status and cite event IDs for failures.
+Explain permitted `not_applicable` results. Resolve missing evidence before
+recording; `needs_context` cannot approve a sample.
+
+Use `repair_trajectory` with the revision/checklist hash and `edits` referencing
+original `replay[tick][index]` IDs: replace/delete, insert_before/insert_after,
+append, or replace_text with a JSON-pointer field and exact unique old/new text.
+The candidate compiles before one atomic commit; `dry_run=true` validates without
+saving. Repairs cannot edit metadata/identity. Reread `review_trajectory` afterward
+and review every rule again.
+
+Finish with `record_trajectory_review`: pass the latest revision/checklist hash,
+your reviewer/summary, and `results` matching `checklist.results_schema`.
+Include every category (e.g. `validate.reasoning`) and every rule's
+`evidence`, `status`, `feedback`; passing feedback is empty. Code validates
+coverage and computes state 2/-2. This records your assessment, not independent
+proof, and never Ready (3). Stale revisions/checklists require rereading.
+For manual/non-scenario samples use the general guidance and `sign_off_trajectory`.
+
 ## 1. Establish what Kidra can know
 
 Kidra attends to **all currently open Kidra windows** through shared global
@@ -99,7 +136,8 @@ diagnostics. Recheck semantic dependencies affected by the edits; moving a closu
 or deleting a tool can break later claims even when compilation still passes.
 Reread and review the final source at the revision you will sign off.
 
-Call `sign_off_trajectory` with verdict `validated` or `rejected`, your reviewer
+For scenario samples, use `record_trajectory_review` as described above.
+For manual samples, call `sign_off_trajectory` with verdict `validated` or `rejected`, your reviewer
 label, a specific summary of checks/findings and the reviewed `expected_revision`.
 Support the summary with concrete event/window/anchor references when relevant.
 Do not claim checks you did not perform. If evidence is missing or uncertain,

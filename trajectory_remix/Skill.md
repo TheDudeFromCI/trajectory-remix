@@ -17,6 +17,17 @@ supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
 [the search guide](guides/search.md) with `get_authoring_guide(topic="search")`
 for examples and precise matching rules.
 
+For scenario review, call `review_trajectory(sample_id=...)`. It automatically
+fetches the matching scenario checklist, guide, source and compiler diagnostics.
+The bundled flow tags new samples `#user_scenario`, alongside all randomized
+scenario and role tags. Use `repair_trajectory` for atomic targeted edits with the
+returned revision/checklist hash; reread and review every rule after repair.
+Record complete per-rule results with `record_trajectory_review`, which computes
+state 2/-2 without model calls. `get_review_checklist` retrieves only the checklist.
+Generated snapshots preserve original rules after scenario-file changes or import;
+older samples need the matching configured scenario. Missing/conflicting scenarios
+fail explicitly. See [the review guide](guides/review.md) for schemas and the loop.
+
 For "review five candidate trajectories", call
 `list_trajectories(query="@state:candidate", limit=5)`. Add `@batch:<batch-id>`
 when a batch is specified. Filter before fetching replay content; do not list
@@ -545,7 +556,9 @@ resolve them before approving a training sample.
    agree. Remove repetitive file bodies from visible text; use versions and short
    replies. Keep author instructions and raw specialist logs out of Kidra's loss.
 5. If asked to validate, finish edits, reread the current trajectory, and review
-   the result. Call `sign_off_trajectory` with `sample_id`, `verdict: "validated"`
+   the result. For scenario samples use `review_trajectory` and
+   `record_trajectory_review` with complete per-rule results as above. For manual
+   samples, call `sign_off_trajectory` with `sample_id`, `verdict: "validated"`
    or `"rejected"`, your `reviewer` label, a specific review `summary`, and the
    reviewed `revision` as `expected_revision`. It records your own assessment at
    state 2 or -2 without model API calls. Compilation is required for a passing
