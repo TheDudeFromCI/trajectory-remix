@@ -451,6 +451,14 @@ All enabled validators must accept. Compiler validation always runs; LLM
 validation is optional. JSON code fences are tolerated. A malformed report
 fails rather than passing optimistically.
 
+Scenario-based generation additionally supports semantic checklists defined in
+`flow.yaml`. The bundled scenario reviews every rule within its existing four
+categories, requiring per-item evidence and a typed verdict in the same request
+per bounded group. Code derives acceptance, collects failed-item findings for
+repair, and reruns all checks after edits. Compiler checks remain separate.
+See [semantic checklist configuration](docs/SCENARIOS.md#semantic-checklists) for
+rule scopes, context requests, response examples and migration from older flows.
+
 ## Automatic mode
 
 - `max_samples`: accepted new samples; zero means unlimited.

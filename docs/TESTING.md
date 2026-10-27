@@ -4,6 +4,10 @@
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic
   edits, revision conflicts, patches, metadata, diagnostics and timeline inspection.
+- Scenario checklist tests cover exact rule coverage, typed statuses, evidence,
+  applicability, code-derived acceptance/findings, missing-context handling,
+  bounded cross-view evidence requests, saved group reuse, and complete reviews
+  after targeted repair. Legacy single-prompt/string/object checks remain covered.
 - Streamable HTTP checks cover direct POST initialization, initialized notifications,
   tool discovery/calls, session and protocol headers, deletion, malformed requests,
   HTTP methods, CORS preflight/exposed session headers and explicit origin/Host

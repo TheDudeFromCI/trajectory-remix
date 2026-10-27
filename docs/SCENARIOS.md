@@ -245,6 +245,12 @@ step's `inputs`, not from arbitrary project data):
         prompt: validate-layout.md
         view: layout
         inputs: [idea.problem]
+        rules:
+          context_retention:
+            requirement: Keep evidence active throughout dependent generation, or retain sufficient facts elsewhere before closing it.
+          attachment_separation:
+            requirement: Supply each attachment as separate document context, not whole-file chat prose.
+            allow_not_applicable: true
         events_per_chunk: 10
         overlap: 2
         max_input_tokens: 6000
@@ -257,11 +263,15 @@ step's `inputs`, not from arbitrary project data):
       reasoning:
         prompt: validate-reasoning.md
         view: reasoning
-        inputs: [roles]
+        inputs: [roles.user.tags, roles.kidra.instructions]
       correctness:
         prompt: validate-correctness.md
         view: correctness
         inputs: [idea.problem, idea.success_criteria]
+        rules:
+          task_fulfillment:
+            requirement: The actual request is resolved with a correct, usable result; earlier delivered replies may establish fulfillment.
+            scope: sample
     repair_prompt: repair-edits.md
     repair_mode: edits
     repair_max_input_tokens: 10000
@@ -276,10 +286,93 @@ are independent per check. `overlap` must be smaller than `events_per_chunk`.
 An input selector such as `idea.problem` selects that value only; selecting
 `idea` would include all its fields. No evaluation history is supplied.
 
+### Semantic checklists
+
+Define semantic rules under each object check's `rules` in **flow.yaml**. Each
+stable rule ID maps to a nonblank `requirement`, optional `scope` (`group`, the
+default, or `sample`), and `allow_not_applicable` (default `false`). Rule IDs use
+letters, digits, underscores or hyphens, starting with a letter. Duplicate YAML
+keys, invalid IDs, unknown fields and invalid scopes are rejected at load time.
+
+The runner generates an explicit prompt checklist and exact JSON schema from
+these same definitions. All rules in a category are reviewed **in the same
+request per group**, in YAML order; there is no separate request per rule.
+Evidence comes before the verdict in the requested schema. For example:
+
+```json
+{
+  "checks": {
+    "context_retention": {
+      "evidence": "replay[12][0] closes the source before replay[13][0] finishes using its values",
+      "status": "fail",
+      "feedback": "Retain the source until its dependent request finishes."
+    },
+    "attachment_separation": {
+      "evidence": "No attachments are supplied in these events",
+      "status": "not_applicable",
+      "feedback": ""
+    }
+  }
+}
+```
+
+Every configured rule must appear exactly once. Missing/extra rule IDs, an
+overall model-authored `valid`/`feedback`, incorrect types, blank evidence,
+failures without nonblank feedback, and feedback on passing/inapplicable items
+are rejected. `not_applicable` is accepted only for rules that explicitly permit
+it and must be justified in `evidence`. It never substitutes for missing context.
+The required evidence is a short explanation; failures must cite source event
+IDs. This records claimed evidence and coverage, not proof of semantic accuracy.
+
+Statuses are `pass`, `fail`, `needs_context`, and, when enabled,
+`not_applicable`. A group-scoped pass covers only the supplied events and their
+dependencies, not unseen portions of the sample. A sample-scoped pass must have
+enough relevant evidence to establish the whole requirement; absence of a local
+counterexample is insufficient. A rule needing omitted evidence returns
+`needs_context` and top-level `context_requests`, such as `["window:attachment-0"]`.
+Sample-scoped checks can request `sample_window:<id>` for the complete window
+history, including events later than the current group. `sample_window:chat`
+also includes chat tool requests/results across their tool windows, so a final
+acknowledgment can be checked against an earlier task-solving reply. This is
+offline review evidence, not permission for Kidra to use future observations.
+The same input budget and context-round limits apply; group-only checks cannot
+request full sample-window history.
+The reviewer gets bounded evidence and reevaluates the complete checklist for
+that group. Unavailable/over-budget evidence, missing requests, or unresolved
+requests after `context_rounds` block approval rather than triggering speculative
+repairs. All applicable groups and sample requirements must pass; code computes
+the overall verdict, so the model cannot override a failed item.
+
+Group reports retain the individual evidence/status/feedback in `checks`.
+Category reports expose `rule_results` with each group's checklist. Failed items
+become findings prefixed with their rule ID and evidence; category IDs are added
+to the combined report. Every category/group is reviewed before semantic repair
+begins. Targeted repair receives each failed group's collected findings, then
+edits are applied atomically and compiled. All rules are reviewed again after
+repair, including previously passing rules and unchanged candidates. The existing
+`max_repairs` limit bounds the loop. Rule count increases output tokens and may
+reduce how much evidence fits in a group; it adds no per-rule round trips.
+
+The bundled checklist covers the semantic guidance in the authoring reference
+and [review guide](../trajectory_remix/guides/review.md):
+
+| Category | Semantic rules |
+| --- | --- |
+| Layout | Actor ownership/visibility/supervision; separate attachments; coherent window purposes; evidence retention across entire dependent streams; timely context release and useful document compaction. |
+| Tools | Canonical outcome grounding and partial observations; time-correct knowledge; useful calls and redundant reads; dependency-aware concurrency; scoped specialist histories/artifact versions; artifact/test claims; progress, TODO meanings, error recovery and handoff consistency. |
+| Reasoning | Private working notes; useful parallel analysis; sufficient evidence transfer; user/Kidra role consistency; dialogue continuity and author-only knowledge; appropriate coordination/delegation. |
+| Correctness | Independent factual/logical verification; literal constraints; counterexamples to extremal claims; usable code/plans/edits; calibrated uncertainty; whole-conversation task fulfillment. |
+
+Compiler-verifiable structure, token/tick constraints, tool-schema visibility and
+chat delivery remain deterministic checks, outside the semantic rule list. The
+existing Generation Settings task validators and `validate_trajectory(semantic=true)`
+still use their separate legacy task configuration; `rules` applies to scenario
+`remix.validate` object checks.
+
 | View | Information supplied |
 | --- | --- |
-| `layout` | Event timing, purpose and lifecycle; user chat framing; attachment paths/sizes, without full file bodies or reasoning. |
-| `tools` | Requests, canonical simulator outcomes, relevant public tool schemas, chat and reasoning needed to assess causality. |
+| `layout` | Event timing, purpose and lifecycle; chat and attachment paths/sizes. Checklist-enabled checks also receive bounded source contents, reasoning and canonical tool outcomes to assess semantic consumers and evidence retention. |
+| `tools` | Requests, canonical simulator outcomes, relevant public tool schemas, chat and reasoning needed to assess causality; checklist-enabled checks also include document/attachment evidence to justify reads. |
 | `reasoning` | Private reasoning and conversational behavior; no tool-result bundles or full source metadata. |
 | `correctness` | Original task inputs, user messages, authored file evidence, tool observations and prior replies in groups, with the complete final answer shared across passes. |
 
@@ -294,9 +387,16 @@ only one unit, scanning advances by one instead of looping forever.
 
 Each group includes a boundary manifest: open-window lifetimes, pending calls,
 visible tool names, and recent history IDs. These are context references, not
-invented semantic summaries. A reviewer can return
+invented semantic summaries. A legacy reviewer (without `rules`) can return
 `{"valid":false,"feedback":[],"context_requests":["window:tool-0"]}` or request a
-specific history unit ID. Evidence is supplied in a fresh, bounded request.
+specific history unit ID. Checklist reviewers use `needs_context` as described
+above. Evidence is supplied in a fresh, bounded request.
+For checklist-enabled checks, `context_windows` maps each window ID to
+`[open_tick, close_tick]` (null means still open), including closed windows.
+Evidence requests can retrieve original documents and observations excluded by
+the check's normal view. Requests with `window:` retrieve earlier contents only;
+access to historical evidence for offline review does not establish that Kidra
+could access it during generation.
 Unknown IDs, exhausted context rounds, and evidence that cannot fit produce an
 explicit failure, never an approval based on unavailable context. Long-range
 semantic completeness still depends on the reviewer's evidence requests and
@@ -340,6 +440,10 @@ They retain the old whole-payload/full-replay behavior; migrate to object checks
 and edit repairs for bounded prompts. Refresh **all** copied example YAML and
 Markdown files and restart Remix to adopt the new defaults. Saved runs keep their
 original flow/prompts; start a fresh run to use newly edited scenario settings.
+Object checks with absent/empty `rules` retain the legacy `valid`/`feedback`
+response contract. To adopt per-rule coverage, copy both the updated flow.yaml
+and all four review prompts. Previously saved checkpoints keep their original
+rules and schemas through their saved flow/prompt snapshot.
 
 With `inputs.require_chat_delivery: true` (enabled in the bundled example), a
 deterministic check also requires a successful, nonempty visible `chat` tool reply

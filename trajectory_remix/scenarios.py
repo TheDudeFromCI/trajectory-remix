@@ -25,6 +25,12 @@ class Failure(Definition):
     value: Any = None
 
 
+class SemanticRule(Definition):
+    requirement: str = Field(min_length=1, pattern=r"\S")
+    scope: Literal["group", "sample"] = "group"
+    allow_not_applicable: bool = False
+
+
 class ReviewCheck(Definition):
     prompt: str = Field(min_length=1)
     view: Literal["layout", "tools", "reasoning", "correctness"]
@@ -34,9 +40,13 @@ class ReviewCheck(Definition):
     max_input_tokens: int = Field(default=6000, ge=512, le=100000)
     content_tokens: int = Field(default=800, ge=64, le=8000)
     context_rounds: int = Field(default=2, ge=0, le=5)
+    rules: dict[str, SemanticRule] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def check_limits(self):
+        for name in self.rules:
+            if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", name):
+                raise ValueError(f"Invalid semantic rule ID: {name}")
         if self.overlap >= self.events_per_chunk:
             raise ValueError("Review overlap must be smaller than events_per_chunk")
         if self.content_tokens >= self.max_input_tokens:
