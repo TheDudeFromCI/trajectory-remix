@@ -13,6 +13,7 @@ import inspect
 import json
 import re
 import uuid
+import jsonschema
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,10 @@ from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
 from .metadata import query as query_metadata
 from .preview import PreviewCache
+from .review import EDIT_SCHEMA, apply_edits, checklist_report
+from .trajectory_review import (
+    ScenarioChecklist, build_checklist, fingerprint, public_checklist, result_schema,
+)
 from .search import SearchQuery
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
@@ -786,6 +791,158 @@ class TrajectoryCommands:
                             )
         return {**self._commit(sample, index, validate), "events_changed": len(chosen)}
 
+    def _review_checklist(self, sample):
+        metadata = sample.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise CommandError("Trajectory metadata must be an object to resolve its scenario")
+        raw_tags = metadata.get("tags", [])
+        if not isinstance(raw_tags, list) or any(not isinstance(t, str) for t in raw_tags):
+            raise CommandError("metadata.tags must be an array of tag names")
+        if metadata.get("scenario") is not None and not isinstance(metadata["scenario"], str):
+            raise CommandError("metadata.scenario must be a scenario name")
+        tags = {t.casefold() for t in raw_tags}
+        scenario_runner = getattr(self.runner, "scenario_runner", None)
+        scenarios = scenario_runner.registry.scenarios if scenario_runner else {}
+        matches = [s for s in scenarios.values() if (s.flow.tag or s.name).casefold() in tags]
+        if len(matches) > 1:
+            raise CommandError("Multiple scenario tags; select one scenario before reviewing", "scenario_conflict")
+        snapshot = metadata.get("review_checklist")
+        if snapshot is not None:
+            try:
+                checklist = ScenarioChecklist.model_validate(snapshot)
+            except ValidationError as error:
+                raise CommandError(f"Invalid saved review checklist: {error}") from error
+            origin = "generation_snapshot"
+            if matches and matches[0].name != checklist.scenario:
+                raise CommandError("Scenario tag disagrees with the saved checklist", "scenario_conflict")
+            if checklist.tag.casefold() not in tags and not metadata.get("scenario"):
+                raise CommandError("Saved checklist has no matching scenario tag or metadata", "scenario_conflict")
+        else:
+            scenario = matches[0] if matches else scenarios.get(metadata.get("scenario"))
+            if scenario is None:
+                raise CommandError(
+                    "No scenario checklist found. Configure --scenarios-dir and assign its scenario tag, or retain the generated review_checklist snapshot.",
+                    "scenario_not_found",
+                )
+            checklist, origin = build_checklist(scenario), "scenario_registry"
+        if metadata.get("scenario") and metadata["scenario"] != checklist.scenario:
+            raise CommandError("Scenario metadata disagrees with its tag/checklist", "scenario_conflict")
+        if not checklist.checks:
+            raise CommandError("This scenario defines no review checks", "checklist_not_found")
+        return checklist, origin
+
+    @command()
+    def get_review_checklist(self, sample_id: str):
+        """Fetch this trajectory's scenario checklist automatically from its tag/provenance.
+
+        Generated snapshots preserve the original rules even without scenario files.
+        Older/tag-only samples use the configured scenario registry. Conflicting or
+        unknown scenarios fail explicitly. No model API calls or dataset changes.
+        """
+        checklist, origin = self._review_checklist(self._find(sample_id)[1])
+        return {"sample_id": sample_id, "revision": self.state["revision"],
+                "checklist": public_checklist(checklist, origin)}
+
+    @command()
+    def review_trajectory(self, sample_id: str, include_source: bool = True):
+        """Prepare YOUR review with the scenario checklist, guide and compiler diagnostics.
+
+        The checklist is fetched automatically; assess every rule yourself, using
+        event/window tools for further evidence. No model API is called. For large
+        samples set include_source=false and inspect bounded events/snapshots.
+        After repairs reread this tool, then record_trajectory_review with its
+        revision, checklist_hash and per-check results_schema. This tool does not
+        approve a sample or interpret an old validator's verdict as your review.
+        """
+        sample = copy.deepcopy(self._find(sample_id)[1])
+        result = self.get_review_checklist(sample_id)
+        try:
+            plan = self.compiler.compile(sample)
+            compilation = {"valid": True, "diagnostics": plan["diagnostics"], "max_tick": plan["max_tick"]}
+        except CompileError as error:
+            compilation = {"valid": False, "diagnostics": [error.diagnostic()]}
+        result.update(
+            source_hash=hashlib.sha256(json.dumps(evaluation_source(sample), sort_keys=True).encode()).hexdigest(),
+            compilation=compilation,
+            guide=self.get_authoring_guide("review")["content"],
+            context={k: sample.get("metadata", {}).get(k) for k in ("concept", "roles", "context_tags")},
+        )
+        if include_source:
+            # Prior evaluations are not evidence for this independent review.
+            result["sample"] = evaluation_source(sample)
+        return result
+
+    @command(write=True, destructive=True)
+    def repair_trajectory(
+        self, sample_id: str,
+        edits: Annotated[list[dict], Field(min_length=1, max_length=32, json_schema_extra={"items": EDIT_SCHEMA["properties"]["edits"]["items"]})],
+        expected_revision: Nonnegative, checklist_hash: str, dry_run: bool = False,
+    ):
+        """Apply targeted review repairs atomically; automatically return the scenario checklist.
+
+        Read review_trajectory first. Use original replay[tick][index] event_ids.
+        Actions: replace/delete, insert_before/insert_after, append at a tick, or
+        replace_text with a JSON-pointer field and exact unique old/new strings.
+        Repairs cannot alter identity/metadata. The whole candidate must compile;
+        failure changes nothing. dry_run validates without saving. Saved repairs
+        invalidate old assessments when source changes; review all rules again
+        before recording review.
+        No model/provider calls. Revision and checklist_hash bind the repair to
+        the source and checklist you read, including after scenario changes.
+        """
+        index, sample = self._draft(sample_id, expected_revision)
+        checklist, origin = self._review_checklist(sample)
+        if checklist_hash != fingerprint(checklist):
+            raise CommandError("Checklist changed; reread review_trajectory", "conflict")
+        try:
+            jsonschema.validate({"edits": edits}, EDIT_SCHEMA)
+            candidate = apply_edits(sample, edits)
+        except (ValueError, jsonschema.ValidationError) as error:
+            raise CommandError(str(error)) from error
+        plan = self.compiler.compile(candidate)
+        result = {"sample_id": sample_id, "revision": self.state["revision"], "saved": False}
+        if not dry_run:
+            result = self._commit(candidate, index)
+        return {**result, "diagnostics": plan["diagnostics"], "review_required": True,
+                "checklist": public_checklist(checklist, origin)}
+
+    @command(write=True)
+    def record_trajectory_review(
+        self, sample_id: str, results: dict,
+        reviewer: Annotated[str, Field(min_length=1, max_length=200)],
+        summary: Annotated[str, Field(min_length=1, max_length=10000)],
+        expected_revision: Nonnegative, checklist_hash: str,
+    ):
+        """Record YOUR complete per-rule review at state 2/-2; no model calls.
+
+        Read review_trajectory after the final repair. results must match its
+        checklist.results_schema exactly, covering every category and rule for the
+        entire trajectory. Missing/extra items, invalid applicability and unresolved
+        context cannot approve a sample. Code computes the verdict. Evidence is
+        your assessment, not independent verification. Never grants Ready (3).
+        """
+        index, sample = self._draft(sample_id, expected_revision)
+        checklist, _ = self._review_checklist(sample)
+        if checklist_hash != fingerprint(checklist):
+            raise CommandError("Checklist changed; reread review_trajectory", "conflict")
+        try:
+            jsonschema.validate(results, result_schema(checklist))
+            reports = {}
+            for name, check in checklist.checks.items():
+                report = checklist_report(results[name]) if check.rules else results[name]
+                if report.get("context_requests"):
+                    raise ValueError("Resolve requested evidence before recording a review")
+                reports[name] = report
+        except (ValueError, jsonschema.ValidationError) as error:
+            raise CommandError(str(error)) from error
+        report = {"valid": all(r["valid"] for r in reports.values()), "checks": reports,
+                  "feedback": [f"[{name}] {f}" for name, r in reports.items() for f in r["feedback"]]}
+        return self._save_review(
+            index, sample, "validated" if report["valid"] else "rejected", reviewer,
+            summary, expected_revision, report=report, origin="mcp_checklist_review",
+            checklist_hash=checklist_hash,
+        )
+
     @command(write=True)
     def sign_off_trajectory(
         self,
@@ -809,6 +966,12 @@ class TrajectoryCommands:
         Never grants Ready (3). Later content edits invalidate the sign-off.
         """
         index, sample = self._draft(sample_id, expected_revision)
+        return self._save_review(index, sample, verdict, reviewer, summary, expected_revision)
+
+    def _save_review(
+        self, index, sample, verdict, reviewer, summary, expected_revision,
+        *, report=None, origin="mcp_sign_off", checklist_hash=None,
+    ):
         reviewer, summary = reviewer.strip(), summary.strip()
         if not reviewer or not summary:
             raise CommandError("Reviewer and summary must contain non-whitespace text")
@@ -826,16 +989,18 @@ class TrajectoryCommands:
         ).hexdigest()
         evaluation = {
             "level": 2,
-            "origin": "mcp_sign_off",
+            "origin": origin,
             "reviewer": reviewer,
             "summary": summary,
             "reviewed_revision": expected_revision,
-            "report": {"valid": verdict == "validated", "feedback": [summary]},
+            "report": report if report is not None else {"valid": verdict == "validated", "feedback": [summary]},
             "source_hash": source_hash,
             "tokenizer": self.compiler.fingerprint,
             "tools": self.compiler.tools.fingerprint,
             "time": datetime.now(UTC).isoformat(),
         }
+        if checklist_hash is not None:
+            evaluation["checklist_hash"] = checklist_hash
         evaluations = metadata.get("evaluations")
         if not isinstance(evaluations, list):
             evaluations = metadata["evaluations"] = []

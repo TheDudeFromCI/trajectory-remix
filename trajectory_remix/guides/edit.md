@@ -99,6 +99,9 @@ to Unfinished. If the user asked you to repair **and validate**, reread and revi
 the repaired trajectory, then use `sign_off_trajectory` with your reviewer label,
 summary, verdict (`validated` or `rejected`), and the reviewed `expected_revision`.
 It records state 2 or -2 without model API calls; it never grants Ready (3).
+For scenario-tagged samples use `review_trajectory` to automatically fetch the
+checklist, `repair_trajectory` for atomic targeted edits, then reread and use
+`record_trajectory_review` with every per-rule result. See `topic="review"`.
 
 If streams overlap in one window, inspect their full start/end intervals.
 For a dependent stream, move it after the earlier completion anchor. For

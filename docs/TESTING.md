@@ -8,6 +8,10 @@
   applicability, code-derived acceptance/findings, missing-context handling,
   bounded cross-view evidence requests, saved group reuse, and complete reviews
   after targeted repair. Legacy single-prompt/string/object checks remain covered.
+- MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
+  preservation of randomized tags, portable checklist snapshots, exact results
+  schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
+  API-free per-item recording, and transport tool discovery.
 - Streamable HTTP checks cover direct POST initialization, initialized notifications,
   tool discovery/calls, session and protocol headers, deletion, malformed requests,
   HTTP methods, CORS preflight/exposed session headers and explicit origin/Host

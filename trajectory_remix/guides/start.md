@@ -28,14 +28,18 @@ For your own review, `validate_trajectory(semantic=false)` checks compiler
 diagnostics without model API calls. `semantic=true` calls configured model
 endpoints; it does not use the reviewing agent's subscription.
 
-Before reviewing or repairing, read `get_authoring_guide(topic="review")` for
-Kidra's shared window context, semantic checks and evidence lifetimes. Finish
-repairs, reread and review the result. Call `sign_off_trajectory` with its `sample_id`,
-`verdict: "validated"` or `"rejected"`, your `reviewer` label, a specific `summary`
-of the checks/findings, and that read's `revision` as `expected_revision`.
-This records your own review at state 2 or -2, without a model API call. Compiler
-checks alone do not establish semantic correctness. Edits invalidate a previous
-sign-off; Ready (3) remains a separate human approval.
+For scenario reviews, call `review_trajectory(sample_id=...)`: it automatically
+fetches the checklist, source, review guide and compiler diagnostics. Use
+`repair_trajectory` with the returned revision/checklist hash for targeted edits;
+reread and review all rules afterward. Finish with `record_trajectory_review`
+using every item in the returned schema. `#user_scenario` identifies the bundled
+flow. `get_review_checklist` retrieves just the rules. These tools make no model
+calls and record state 2/-2, never Ready (3).
+
+For manual/non-scenario reviews, read `get_authoring_guide(topic="review")`, finish
+repairs, reread the source and call `sign_off_trajectory` with your reviewer,
+summary, verdict and reviewed `expected_revision`. Edits invalidate assessments;
+compiler checks alone do not establish semantic correctness.
 
 Read just one guide using `get_authoring_guide` with the indicated `topic`:
 
@@ -52,9 +56,7 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 
 For new authors, finish `first`, then `parallel`.
 Request `topic: "reference"` only when you need the complete manual.
-For complete source, request `topic: "example"` and parse `content` as JSON.
-This read does not import or alter samples. See the
-[repository example](../../examples/build-graph-analysis.json).
+`topic: "example"` returns source JSON without importing it.
 
 ## 3. Use this editing loop
 

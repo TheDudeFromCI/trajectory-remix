@@ -111,7 +111,7 @@ For a complete worked replay, use `get_authoring_guide(topic="example")`.
 Its `content` field contains the full build-graph source as JSON text, without
 changing the active project.
 
-Both transports expose the same 42 tools for trajectory creation, bundled examples, full JSON inspection,
+Both transports expose the same tools for trajectory creation, bundled examples, full JSON inspection,
 duplication, metadata updates, event editing and content patches, validation,
 window history, anchors, timeline snapshots, atomic batches, source diffs,
 undo/redo, simulated-tool sessions and saving. It shares the running
@@ -125,6 +125,13 @@ outside text editors; focused editors retain their native text undo behavior.
 
 See [MCP setup and tool reference](docs/MCP.md) for client configuration,
 examples, validation options and limits.
+
+Scenario-aware MCP agents can use `review_trajectory` to automatically fetch a
+sample's semantic checklist, guide, source and diagnostics, then `repair_trajectory`
+and `record_trajectory_review` to apply targeted repairs and record complete
+per-rule assessments without model API calls. Newly generated samples from the
+bundled flow carry `#user_scenario` alongside randomized tags and preserve their
+original checklist. See [the MCP review workflow](docs/MCP.md#scenario-review-and-repair).
 
 ## Dashboard workflow
 
