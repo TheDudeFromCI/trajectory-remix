@@ -340,7 +340,11 @@ request full sample-window history.
 The reviewer gets bounded evidence and reevaluates the complete checklist for
 that group. Unavailable/over-budget evidence, missing requests, or unresolved
 requests after `context_rounds` block approval rather than triggering speculative
-repairs. All applicable groups and sample requirements must pass; code computes
+repairs. `review_retries` on the validation step (default 2, range 0–5) allows
+bounded correction of malformed reports and invalid, duplicate, or over-budget
+context requests. The reviewer receives the error and unchanged evidence, and
+can narrow a request to exact unit IDs. No evidence is silently truncated and
+the input budget still applies to corrective prompts. All applicable groups and sample requirements must pass; code computes
 the overall verdict, so the model cannot override a failed item.
 
 Group reports retain the individual evidence/status/feedback in `checks`.
@@ -352,6 +356,20 @@ edits are applied atomically and compiled. All rules are reviewed again after
 repair, including previously passing rules and unchanged candidates. The existing
 `max_repairs` limit bounds the loop. Rule count increases output tokens and may
 reduce how much evidence fits in a group; it adds no per-rule round trips.
+
+These are separate budgets: `context_rounds` bounds successful evidence
+expansions per group, `review_retries` bounds failed review responses/requests
+per group (or per legacy whole-payload check), and `max_repairs` bounds repair
+attempts on the same trajectory. Generic step `retries` and batch `max_attempts`
+do not replace either recovery budget. A log saying `attempt 1/1` describes
+generic step retries; repair progress is logged as `Repair attempt N/M`.
+
+When review recovery is exhausted, the batch pauses with `evaluation_failed`.
+The draft remains Pending (validation level 0), with an `evaluation_error` in
+metadata and its generation checkpoint intact. Resume continues that candidate
+and reuses completed review groups; it does not sample another idea or mark the
+sample unsuccessful. Fixed budget errors can still require a new run with
+updated settings: saved checkpoints retain their original flow and prompts.
 
 The bundled checklist covers the semantic guidance in the authoring reference
 and [review guide](../trajectory_remix/guides/review.md):
@@ -398,7 +416,7 @@ the check's normal view. Requests with `window:` retrieve earlier contents only;
 access to historical evidence for offline review does not establish that Kidra
 could access it during generation.
 Unknown IDs, exhausted context rounds, and evidence that cannot fit produce an
-explicit failure, never an approval based on unavailable context. Long-range
+explicit evaluation failure after bounded recovery, never an approval based on unavailable context. Long-range
 semantic completeness still depends on the reviewer's evidence requests and
 judgment; overlapping groups alone are not a proof of correctness.
 
@@ -433,6 +451,29 @@ edits are removed; conflicting whole-event replacements fail. Edits apply to a
 copy, then the full candidate is compiled before publication. Completed repair
 group outputs survive interruption; after a repair every review runs afresh,
 even if edits were empty. Metadata and identity cannot be changed by this schema.
+
+Malformed JSON, invalid pointers, conflicting edits, and compiler failures consume
+a repair attempt, retain the last compilable draft, and feed the error into the
+next repair via `retry_feedback`. Invalid cached edits are discarded. Only after
+`max_repairs` attempts (or when repair is disabled) is a failed candidate rejected.
+Provider outages and cancellation preserve the current attempt and remaining
+budget for resume. This also applies to full-replay repairs.
+
+Review `data` is a projection, not part of the source: use `/content`, not
+`data.content` or `/data/content`. Replacement/insertion `event` values must be
+raw replay events with `op` and the required source fields. Never copy review
+`id`, `event_id`, `purpose`, `start`, `end`, `tick`, or `data` fields into them.
+Moving an event requires delete plus append at a new tick; replace keeps its
+existing tick. The repair payload supplies the configured `eos_token`.
+
+The bundled `user_problem` scenario sets `inputs.release_tool_context: true` on
+`remix.draft`. Reasoning must preserve the exact evidence needed by the answer;
+tool-result windows close after that reasoning finishes and before the chat
+request starts. The answer writer receives the retained reasoning rather than
+the original observations. Reasoning remains open through delivery, then closes.
+Semantic checks still verify evidence transfer and timing. Custom scenarios
+default to false and retain tool context through delivery; true requires nonempty
+reasoning. The runtime does not guess the last semantic consumer from a window's age.
 
 Legacy `prompt: review.md`, string checks such as `tools: validate-tools.md`, and
 `repair_mode: replay` remain supported for custom scenarios and saved checkpoints.

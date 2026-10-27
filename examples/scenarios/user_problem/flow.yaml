@@ -359,7 +359,6 @@ steps:
         inputs:
           request: ${steps.user.output.text}
           history: ${iteration.history}
-          observations: ${steps.observations.output.results}
           reasoning: ${steps.reasoning.output.text}
         output_schema: Message
         retries: 1
@@ -371,6 +370,7 @@ steps:
         inputs:
           reasoning: ${steps.reasoning.output.text}
           response: ${steps.answer.output.text}
+          release_tool_context: true
       assess:
         uses: llm.generate
         prompt: assess.md
@@ -534,6 +534,7 @@ steps:
     repair_max_input_tokens: 10000
     repair_guides: [repair-notes.md]
     max_repairs: 2
+    review_retries: 2
     inputs:
       require_chat_delivery: true
       tags: ${scenario.tags}

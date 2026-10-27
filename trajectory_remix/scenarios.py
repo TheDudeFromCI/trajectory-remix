@@ -86,6 +86,7 @@ class Step(Definition):
     repair_max_input_tokens: int = Field(default=8000, ge=512, le=100000)
     repair_guides: list[str] = Field(default_factory=list)
     max_repairs: int = Field(default=0, ge=0, le=5)
+    review_retries: int = Field(default=2, ge=0, le=5)
     level: Literal[1, 2] = 1
     attempts: int = Field(default=3, ge=1, le=10)
     fallback: bool = True

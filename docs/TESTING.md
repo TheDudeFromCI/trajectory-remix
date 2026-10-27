@@ -8,6 +8,14 @@
   applicability, code-derived acceptance/findings, missing-context handling,
   bounded cross-view evidence requests, saved group reuse, and complete reviews
   after targeted repair. Legacy single-prompt/string/object checks remain covered.
+- Repair recovery regressions cover malformed JSON/schema, review-wrapper edits,
+  invalid source pointers, edit conflicts, compilation failures, atomic retention,
+  bounded retry exhaustion, full-replay repairs, and repair budgets across provider
+  interruption/resume. Review regressions cover malformed/unknown/repeated context
+  requests, exhausted rounds, narrowing over-budget evidence requests, and batch
+  pause/resume with Pending rather than rejected drafts. Lifecycle checks verify
+  tool evidence survives reasoning and retained reasoning survives chat delivery;
+  the dashboard test resumes evaluation failures without starting a fresh sample.
 - Streamable HTTP checks cover direct POST initialization, initialized notifications,
   tool discovery/calls, session and protocol headers, deletion, malformed requests,
   HTTP methods, CORS preflight/exposed session headers and explicit origin/Host
