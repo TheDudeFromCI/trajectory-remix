@@ -7,6 +7,7 @@ const COLLAPSE_STATE_PREFIX = "trajectory-remix.event-collapse.";
 const SAMPLE_PAGE_SIZE = 100;
 let sampleOffset = 0,
   searchTimer;
+let migrationBusy = false, migrationTracking = false, migrationStarting = false;
 let state,
   selected = -1,
   sample = null,
@@ -207,14 +208,16 @@ async function refresh(initial = false) {
       next.query !== state.query;
     const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
     state = next;
+    renderTokenizerMigration(next.tokenizer_migration);
     renderStatus();
     if (changed || initial || searchWasInvalid) renderSamples();
-    if (initial && state.samples.length)
+    if (initial && state.samples.length && !migrationBusy)
       await selectSample(state.samples[0].index, true);
     if (
       !initial &&
       sample &&
       next.revision !== sampleRevision &&
+      !migrationBusy &&
       !compileBusy &&
       !hasPendingChanges()
     ) {
@@ -244,7 +247,7 @@ async function refresh(initial = false) {
     if (draftJustArrived && !hasPendingChanges() && Number.isInteger(next.status.draft_index) && followDraft) {
       lastGenerationDraft = next.status.draft_id;
       await selectSample(next.status.draft_index, true);
-    } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges())
+    } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges() && !migrationBusy)
       await selectSample(state.samples[state.samples.length - 1].index, true);
     if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
   } finally {
@@ -266,6 +269,7 @@ function renderValidationState() {
 function renderStatus() {
   $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
+  $("migrate-tokenizer-button").disabled = s.running;
   const scenarioSelect = $("scenario-type");
   const scenarioNames = (state.scenarios || []).map((item) => item.name);
   if (Array.from(scenarioSelect.options).map((option) => option.value).join() !== scenarioNames.join()) {
@@ -303,8 +307,8 @@ function renderStatus() {
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
-  $("generate-one").disabled = s.running;
-  $("generate-batch").disabled = s.running;
+  $("generate-one").disabled = s.running || migrationBusy;
+  $("generate-batch").disabled = s.running || migrationBusy;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
@@ -435,6 +439,9 @@ async function selectSample(index, force = false) {
   pause();
   const response = await api("samples/" + index);
   sample = await response.json();
+  // Rebuild from this source; a previous tokenizer's plan must not supply
+  // window colors or other preview state while loading the event editor.
+  plan = null;
   sampleRevision = Number(response.headers.get("X-Remix-Revision"));
   selected = index;
   renderValidationState();
@@ -2475,6 +2482,90 @@ $("preferences-button").onclick = () => {
   $("show-window-headers").checked = showWindowHeaders;
   $("model-api-retries").value = state.config.single_generation?.api_retries ?? 2;
   $("preferences-dialog").showModal();
+};
+function setMigrationBusy(busy) {
+  migrationBusy = busy;
+  $("workspace").inert = busy;
+  $("tokenizer-migration-inputs").disabled = busy;
+  $("start-tokenizer-migration").disabled = busy;
+}
+function renderTokenizerMigration(status) {
+  if (!status || migrationStarting) return;
+  if (status.status === "running") migrationTracking = true;
+  if (!migrationTracking) return;
+  setMigrationBusy(status.status === "running");
+  const total = status.total || 0, converted = status.converted || 0;
+  $("tokenizer-migration-progress").max = Math.max(1, total);
+  $("tokenizer-migration-progress").value = status.status === "completed" ? Math.max(1, total) : converted;
+  $("tokenizer-migration-count").textContent = `${converted} / ${total} trajectories converted`;
+  $("tokenizer-migration-message").textContent = status.status === "completed"
+    ? "Migration complete. The new tokenizer is saved and active."
+    : status.status === "failed" ? "Migration failed. The project tokenizer was not changed."
+    : "Converting trajectories… Migration continues if you close this window.";
+  const details = (status.diagnostics || []).map(d => `${d.path}: ${d.message}`).join("\n");
+  $("tokenizer-migration-error").hidden = status.status !== "failed";
+  $("tokenizer-migration-error").textContent = [status.error, details].filter(Boolean).join("\n");
+}
+$("migrate-tokenizer-button").onclick = action(async () => {
+  closeMenus();
+  if (compileBusy) throw new Error("Wait for the current compilation to finish.");
+  if (hasPendingChanges()) await compileSample(true);
+  await refresh();
+  if (state.status.running) throw new Error("Stop generation before migrating the tokenizer.");
+  pause();
+  migrationTracking = state.tokenizer_migration?.status === "running";
+  if (migrationTracking) renderTokenizerMigration(state.tokenizer_migration);
+  else {
+    setMigrationBusy(false);
+    $("tokenizer-migration-form").reset();
+    for (const name of ["bos", "eos", "noop"])
+      $("tokenizer-" + name).value = state.tokenizer.special[name];
+    $("tokenizer-migration-progress").max = Math.max(1, state.sample_count);
+    $("tokenizer-migration-progress").value = 0;
+    $("tokenizer-migration-count").textContent = `0 / ${state.sample_count} trajectories converted`;
+    $("tokenizer-migration-message").textContent = "Choose or paste the new tokenizer configuration to begin.";
+    $("tokenizer-migration-error").hidden = true;
+  }
+  $("tokenizer-migration-dialog").showModal();
+});
+$("close-tokenizer-migration").onclick = $("dismiss-tokenizer-migration").onclick =
+  () => $("tokenizer-migration-dialog").close();
+$("tokenizer-file").onchange = action(async () => {
+  const file = $("tokenizer-file").files[0];
+  if (file) $("tokenizer-config").value = await file.text();
+});
+$("tokenizer-migration-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (migrationBusy) return;
+  migrationStarting = true;
+  setMigrationBusy(true);
+  $("tokenizer-migration-error").hidden = true;
+  try {
+    let status = await json("tokenizer/migrate", "POST", {
+      tokenizer: $("tokenizer-config").value,
+      special: Object.fromEntries(["bos", "eos", "noop"].map(name => [name, $("tokenizer-" + name).value])),
+      expected_revision: state.revision,
+    });
+    migrationStarting = false;
+    migrationTracking = true;
+    renderTokenizerMigration(status);
+    while (status.status === "running") {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      status = await json("tokenizer/migration");
+      renderTokenizerMigration(status);
+    }
+    await refresh();
+  } catch (error) {
+    $("tokenizer-migration-error").hidden = false;
+    $("tokenizer-migration-error").textContent = error.message;
+    // A lost response may still have started a migration; recover its status.
+    migrationStarting = false;
+    migrationTracking = false;
+    setMigrationBusy(false);
+    await action(() => refresh())();
+  } finally {
+    migrationStarting = false;
+  }
 };
 $("close-preferences").onclick = () => $("preferences-dialog").close();
 $("cancel-preferences").onclick = () => $("preferences-dialog").close();
