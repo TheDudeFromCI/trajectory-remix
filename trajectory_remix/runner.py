@@ -44,6 +44,8 @@ class Runner:
             return revision
 
     def start(self, single=False, task_ids=None, seed_index=None, validate=None):
+        if getattr(self, "tokenizer_migration", None) and self.tokenizer_migration.running:
+            raise ValueError("Wait for tokenizer migration to finish")
         if (self.job and not self.job.done()) or (getattr(self, "scenario_runner", None) and self.scenario_runner.status["running"]):
             raise ValueError("Generation is already running")
         config = copy.deepcopy(self.state["config"])

@@ -1107,6 +1107,16 @@ dialog::backdrop {
 .preferences-body {
   padding-top: 14px;
 }
+#tokenizer-migration-dialog { width: min(640px, 94vw); }
+.migration-body { padding: 0 16px 12px; }
+.migration-body fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.migration-body label { display: block; margin: 12px 0 6px; }
+.migration-body input, .migration-body textarea { width: 100%; }
+.migration-body textarea { min-height: 150px; resize: vertical; font-family: monospace; }
+.migration-special-tokens { display: flex; gap: 12px; }
+.migration-special-tokens label { flex: 1; min-width: 0; }
+.migration-body progress { width: 100%; accent-color: var(--accent); }
+#tokenizer-migration-error { color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; }
 .preferences-body > label {
   display: block;
   padding: 0 13px 8px;

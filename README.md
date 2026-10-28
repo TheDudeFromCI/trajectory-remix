@@ -45,7 +45,17 @@ Use your actual training tokenizer for real datasets. The demo tokenizer is only
 a fixture. Initialization reads the tokenizer locally and stores its complete
 JSON in the project. Startup and export load that embedded tokenizer; no original
 tokenizer file or tokenizer command-line options are needed or accepted.
-To use a different tokenizer, initialize a separate project and import trajectories.
+To change an existing project's tokenizer, use **File → Migrate Tokenizer…**.
+Upload a new `tokenizer.json` or paste its configuration, check the BOS/EOS/NOOP
+spellings, then start migration. The popup shows converted/total trajectories.
+Generation must be stopped; editing is blocked while migration runs in the
+background. Every saved trajectory is recompiled one at a time. Only a fully
+successful migration updates the embedded tokenizer and compiled tool caches;
+failure shows the offending trajectory and diagnostic and leaves the project
+unchanged. Source text, timing markers, UUIDs and metadata are preserved.
+Incompatible marker/segment boundaries or fixed timings require source repairs
+before retrying. Successful migration clears Undo/Redo history and old previews.
+Restart any other server processes sharing this project to load the new tokenizer.
 Padding and truncation are disabled when compiling trajectories. Required special tokens must each already map to
 one dedicated ID. They are never silently added or renumbered.
 
@@ -181,8 +191,8 @@ Leaving a name blank omits that property; the default names are Kidra and User.
 Dataset files are SQLite databases, conventionally named `project.sqlite`.
 The `project` row contains configuration, schema/revision counters, tokenizer JSON
 and special-token spellings (`bos`, `eos`, `noop`), the window-slot limit and a
-versioned allocation policy. The tokenizer is fixed at init;
-configuration edits and trajectory imports do not change it.
+versioned allocation policy. The tokenizer changes only through explicit
+migration; configuration edits and trajectory imports do not change it.
 Trajectories are stored as individual JSON records in rows, with indexed unique
 UUID primary keys and separate listing metadata. The editable `id` remains a
 unique label; `uuid` is immutable, survives edits/undo/imports, and seeds slot
