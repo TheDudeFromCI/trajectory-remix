@@ -1357,7 +1357,11 @@ class ScenarioRunner:
         for index, payload in enumerate(groups):
             group_path = f"{path}.groups.{index}"
             record = self.snapshot["steps"].setdefault(group_path, {})
-            if record.get("validation_source_hash") == source_hash:
+            group_hash = hashlib.sha256(compact(payload).encode()).hexdigest()
+            if (
+                record.get("validation_source_hash") == source_hash
+                and record.get("review_group_hash") == group_hash
+            ):
                 result = record["report"]
                 payload = record["review_payload"]
             else:
@@ -1378,6 +1382,7 @@ class ScenarioRunner:
                 )
                 record.update(
                     validation_source_hash=source_hash,
+                    review_group_hash=group_hash,
                     report=result,
                     review_payload=payload,
                 )

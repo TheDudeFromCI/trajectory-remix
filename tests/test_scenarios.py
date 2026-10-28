@@ -1460,8 +1460,9 @@ async def test_bounded_review_repairs_only_the_identified_text(compiler, tmp_pat
     ] == ["chat"]
 
 
-async def test_bounded_scan_resumes_completed_groups_without_new_calls(
-    compiler, tmp_path
+@pytest.mark.parametrize("stale_group", [None, "missing", "different"])
+async def test_bounded_scan_reuses_only_matching_completed_groups(
+    compiler, tmp_path, stale_group
 ):
     class ScanClient(ScenarioClient):
         scans = 0
@@ -1483,14 +1484,24 @@ async def test_bounded_scan_resumes_completed_groups_without_new_calls(
     first = copy.deepcopy(runner.snapshot["steps"]["validate.checks.layout.groups.0"])
     assert first["report"]["valid"]
     await runner.stop()
+    if stale_group:
+        cached = runner.snapshot["steps"]["validate.checks.layout.groups.0"]
+        if stale_group == "missing":
+            cached.pop("review_group_hash")
+        else:
+            cached["review_group_hash"] = "earlier group boundaries"
+        runner.persist()
     restored = create_app(tmp_path / "project.sqlite", client=fake)
     resumed = restored.state.scenario_runner
     resumed.resume_saved(ident)
     await asyncio.wait_for(resumed.job, 15)
     assert resumed.status["phase"] == "complete", list(resumed.logs)
     current = resumed.snapshot["steps"]["validate.checks.layout.groups.0"]
-    assert current["metrics"] == first["metrics"]
+    if not stale_group:
+        assert current["metrics"] == first["metrics"]
     assert current["messages"] == first["messages"]
+    groups = sum(c["groups"] for c in resumed.builder.sample["metadata"]["evaluations"][-1]["report"]["checks"].values())
+    assert fake.scans == groups + 1 + bool(stale_group)  # Includes the cancelled call.
 
 
 async def test_review_context_request_retries_with_evidence(compiler, tmp_path):
