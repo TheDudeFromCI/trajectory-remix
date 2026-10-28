@@ -1,0 +1,116 @@
+{
+  "reviewer": "parent agent; independent of the six API workers; unblinded",
+  "review_after_all_six_attempts": true,
+  "rubric": {
+    "frozen_before_execution": true,
+    "dimensions": {
+      "task_correctness": "0-4: satisfies original request and constraints; verify calculations independently",
+      "grounding": "0-4: claims match actual tool evidence and supplied world, no invented results",
+      "training_semantics": "0-4: causal visibility, generated tool requests, external masks and lifecycle",
+      "coherence": "0-4: user traits, dialogue continuity, private reasoning vs reply, relevant actions"
+    },
+    "critical_failure": "Wrong consequential answer, fabricated action/evidence, future leakage, or structurally unusable trajectory",
+    "approval": "No sample is granted Ready by this experiment"
+  },
+  "score_order": [
+    "task_correctness",
+    "grounding",
+    "training_semantics",
+    "coherence"
+  ],
+  "critical_failures_found": 0,
+  "ready_approvals_granted": 0,
+  "cases": {
+    "pair1-old": {
+      "scores": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "verdict": "correct reviewable draft",
+      "findings": [
+        "Correctly selects the latest studio message: courtyard hatch, Friday 18 September, 4–6 pm, confirmation email on phone, no receipt.",
+        "One genuine read of the saved file; private notes preserve the source version and final facts before the result window closes. Final answer is brief and suited to the impatient novice.",
+        "The saved chat includes a superseded arrangement, and the reply does not confuse it with the final one."
+      ]
+    },
+    "pair1-new": {
+      "scores": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "verdict": "correct reviewable draft",
+      "findings": [
+        "Reads the two requested notes in parallel and chooses the confirmed booking over the superseded provisional one.",
+        "Independently checked: £40 minus £15 deposit = £25. Date, time, address and required items agree with the confirmed note.",
+        "Private notes retain all reply facts and source versions before observation closure; concise bullet reply fits the impatient novice."
+      ]
+    },
+    "pair2-old": {
+      "scores": [
+        4,
+        4,
+        4,
+        3
+      ],
+      "verdict": "correct draft; presentation improvement advised",
+      "findings": [
+        "Correctly prioritizes representative random sampling under the $600 cap over the larger self-selected poll.",
+        "Independent checks: 100/sqrt(144)=8.333 percentage points; 100/sqrt(400)=5; random target costs 400×$4=$1600, $1000 over cap. R costs $576 and leaves $24.",
+        "Properly distinguishes sampling variation from selection bias and does not invent survey results or claim a majority.",
+        "The long single-paragraph answer and repeated committee wording are less easy to scan for a distracted novice. This is a presentation issue, not a wrong recommendation."
+      ]
+    },
+    "pair2-new": {
+      "scores": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "verdict": "correct reviewable draft",
+      "findings": [
+        "Independent enumeration of 100-person batches confirms A800/B400 maximizes expected signups subject to at most 12 expected complaints: 162 signups and 12 complaints.",
+        "Rates and tradeoff are correct: 12% vs 16.5% signups, .5% vs 2% complaints, gain 18 expected signups for 6 extra expected complaints versus all A.",
+        "Explains that estimated expected counts are not guarantees and that the proposed allocation leaves no expected-count cushion.",
+        "Readable table and decision-first response preserve the novice/distracted role without leaking author-only success criteria."
+      ]
+    },
+    "pair3-old": {
+      "scores": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "verdict": "correct reviewable draft",
+      "findings": [
+        "Independent force/work calculations confirm 187.526 N and 562.579 J for the 3 m ramp, 148.605 N and 594.421 J for the 4 m ramp.",
+        "Correctly chooses the 4 m ramp under the 160 N steady-force limit and distinguishes reduced force from increased total work. Both gain 470.4 J of gravitational potential energy.",
+        "The recommendation is explicitly conditional on the stated idealized model and does not promise equipment safety. Source facts and calculations are retained before the file window closes."
+      ]
+    },
+    "pair3-new": {
+      "scores": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "verdict": "correct reviewable draft",
+      "findings": [
+        "Correctly asks for the missing top-of-ramp speed instead of importing the author-only 3.0 m/s value from scenario setup.",
+        "After the user supplies 3.0 m/s, the second read is justified: the earlier result/private notes were closed, and the retained chat lacks the physical inputs.",
+        "Independent checks: bottom energy = 90+117.72−40 =167.72 J; bottom speed≈4.095 m/s. Stops at 1.3103 m with 128 N and 1.0615 m with 158 N; only the bigger brake fits 1.20 m.",
+        "Includes rolling resistance in addition to brake force, preserves the model assumptions, and delivers a useful two-turn clarification trajectory."
+      ]
+    }
+  },
+  "limits": [
+    "Single unblinded reviewer; subjective scores, not a statistical quality estimate.",
+    "Three independently authored tasks per method; paired tags do not make tasks identical."
+  ]
+}

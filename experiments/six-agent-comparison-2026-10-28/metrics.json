@@ -1,0 +1,464 @@
+{
+  "runs": [
+    {
+      "run_id": "pair1-old",
+      "scenario": "user_problem",
+      "route": "willow",
+      "seed": 1471,
+      "tags": {
+        "scenario": {
+          "complexity": "simple",
+          "domain": "memory retrieval"
+        },
+        "user": {
+          "behavior": "impatient",
+          "knowledge": "novice"
+        },
+        "kidra": {}
+      },
+      "started_at": 1793213270.7833424,
+      "finished_at": 1793213436.1401782,
+      "elapsed_seconds": 165.3339140370001,
+      "phase": "evaluation_failed",
+      "sample_count": 1,
+      "model_requests": 13,
+      "last_error": "validate.checks.layout.groups.0: Additional context still required after context_rounds; unseen evidence cannot be approved",
+      "validation_levels": [
+        0
+      ],
+      "request_counts_by_category": {
+        "world_generation": 1,
+        "novelty": 1,
+        "reference_solution": 1,
+        "user_content": 1,
+        "model_tool_decisions": 1,
+        "reasoning_or_reply": 2,
+        "conversation_assessment": 1,
+        "review_or_review_retry": 5
+      },
+      "first_draft_seconds": 70.23221969604492,
+      "final_draft_seconds": 70.23221969604492,
+      "pre_review_seconds": 75.70698881149292,
+      "proxy_turnaround_seconds": 162.31993794441223,
+      "proxy_queue_wait_seconds": 34.34085702896118,
+      "prompt_tokens_surrogate": 24002,
+      "completion_tokens_surrogate": 3210,
+      "reasoning_tokens_actual": null,
+      "windows": 6,
+      "training_rows": 3399,
+      "visible_tool_calls": 2,
+      "tool_names": [
+        "file_read",
+        "chat"
+      ],
+      "user_turns": 1,
+      "deterministic_checks_passed": true,
+      "checks": {
+        "compiles": true,
+        "all_windows_closed": true,
+        "observations_masked": true,
+        "visible_tool_requests_supervised": true,
+        "sampled_visibility_queries": 103,
+        "sampled_future_or_same_tick_generated_keys": 0,
+        "compiler_diagnostics": [],
+        "bos_present": true,
+        "eos_present": true,
+        "noop_present": true
+      }
+    },
+    {
+      "run_id": "pair1-new",
+      "scenario": "user_scenario_noval",
+      "route": "amber",
+      "seed": 1471,
+      "tags": {
+        "scenario": {
+          "complexity": "simple",
+          "domain": "memory retrieval"
+        },
+        "user": {
+          "behavior": "impatient",
+          "knowledge": "novice"
+        },
+        "kidra": {}
+      },
+      "started_at": 1793213270.9263957,
+      "finished_at": 1793213311.6741002,
+      "elapsed_seconds": 40.72180763899996,
+      "phase": "complete",
+      "sample_count": 1,
+      "model_requests": 4,
+      "last_error": null,
+      "validation_levels": [
+        0
+      ],
+      "request_counts_by_category": {
+        "world_generation": 1,
+        "user_content": 1,
+        "model_tool_decisions": 1,
+        "reasoning_or_reply": 1
+      },
+      "first_draft_seconds": 40.25695323944092,
+      "final_draft_seconds": 40.25695323944092,
+      "pre_review_seconds": 40.72180763899996,
+      "proxy_turnaround_seconds": 38.04199433326721,
+      "proxy_queue_wait_seconds": 6.943448781967163,
+      "prompt_tokens_surrogate": 6552,
+      "completion_tokens_surrogate": 1173,
+      "reasoning_tokens_actual": null,
+      "windows": 8,
+      "training_rows": 4769,
+      "visible_tool_calls": 3,
+      "tool_names": [
+        "file_read",
+        "file_read",
+        "chat"
+      ],
+      "user_turns": 1,
+      "deterministic_checks_passed": true,
+      "checks": {
+        "compiles": true,
+        "all_windows_closed": true,
+        "observations_masked": true,
+        "visible_tool_requests_supervised": true,
+        "sampled_visibility_queries": 101,
+        "sampled_future_or_same_tick_generated_keys": 0,
+        "compiler_diagnostics": [],
+        "bos_present": true,
+        "eos_present": true,
+        "noop_present": true
+      }
+    },
+    {
+      "run_id": "pair2-old",
+      "scenario": "user_problem",
+      "route": "cedar",
+      "seed": 2353,
+      "tags": {
+        "scenario": {
+          "complexity": "competing priorities",
+          "domain": "statistics"
+        },
+        "user": {
+          "behavior": "distracted",
+          "knowledge": "novice"
+        },
+        "kidra": {}
+      },
+      "started_at": 1793213271.097696,
+      "finished_at": 1793213468.9173064,
+      "elapsed_seconds": 197.78319751100003,
+      "phase": "evaluation_failed",
+      "sample_count": 1,
+      "model_requests": 13,
+      "last_error": "validate.checks.layout.groups.0: Requested evidence is unavailable, already supplied, or exceeds max_input_tokens; request specific missing unit IDs instead of an entire window",
+      "validation_levels": [
+        0
+      ],
+      "request_counts_by_category": {
+        "world_generation": 1,
+        "novelty": 1,
+        "reference_solution": 1,
+        "user_content": 1,
+        "model_tool_decisions": 1,
+        "reasoning_or_reply": 3,
+        "conversation_assessment": 1,
+        "review_or_review_retry": 4
+      },
+      "first_draft_seconds": 128.45447087287903,
+      "final_draft_seconds": 128.45447087287903,
+      "pre_review_seconds": 135.08215284347534,
+      "proxy_turnaround_seconds": 194.69447135925293,
+      "proxy_queue_wait_seconds": 31.389729261398315,
+      "prompt_tokens_surrogate": 27105,
+      "completion_tokens_surrogate": 5417,
+      "reasoning_tokens_actual": null,
+      "windows": 6,
+      "training_rows": 9049,
+      "visible_tool_calls": 2,
+      "tool_names": [
+        "file_read",
+        "chat"
+      ],
+      "user_turns": 1,
+      "deterministic_checks_passed": true,
+      "checks": {
+        "compiles": true,
+        "all_windows_closed": true,
+        "observations_masked": true,
+        "visible_tool_requests_supervised": true,
+        "sampled_visibility_queries": 102,
+        "sampled_future_or_same_tick_generated_keys": 0,
+        "compiler_diagnostics": [],
+        "bos_present": true,
+        "eos_present": true,
+        "noop_present": true
+      }
+    },
+    {
+      "run_id": "pair2-new",
+      "scenario": "user_scenario_noval",
+      "route": "kestrel",
+      "seed": 2353,
+      "tags": {
+        "scenario": {
+          "complexity": "competing priorities",
+          "domain": "statistics"
+        },
+        "user": {
+          "behavior": "distracted",
+          "knowledge": "novice"
+        },
+        "kidra": {}
+      },
+      "started_at": 1793213271.2194157,
+      "finished_at": 1793213338.3535337,
+      "elapsed_seconds": 67.09552450199999,
+      "phase": "complete",
+      "sample_count": 1,
+      "model_requests": 4,
+      "last_error": null,
+      "validation_levels": [
+        0
+      ],
+      "request_counts_by_category": {
+        "world_generation": 1,
+        "user_content": 1,
+        "model_tool_decisions": 1,
+        "reasoning_or_reply": 1
+      },
+      "first_draft_seconds": 66.55359029769897,
+      "final_draft_seconds": 66.55359029769897,
+      "pre_review_seconds": 67.09552450199999,
+      "proxy_turnaround_seconds": 64.50388789176941,
+      "proxy_queue_wait_seconds": 0.6776981353759766,
+      "prompt_tokens_surrogate": 6956,
+      "completion_tokens_surrogate": 1942,
+      "reasoning_tokens_actual": null,
+      "windows": 7,
+      "training_rows": 7912,
+      "visible_tool_calls": 2,
+      "tool_names": [
+        "file_read",
+        "chat"
+      ],
+      "user_turns": 1,
+      "deterministic_checks_passed": true,
+      "checks": {
+        "compiles": true,
+        "all_windows_closed": true,
+        "observations_masked": true,
+        "visible_tool_requests_supervised": true,
+        "sampled_visibility_queries": 101,
+        "sampled_future_or_same_tick_generated_keys": 0,
+        "compiler_diagnostics": [],
+        "bos_present": true,
+        "eos_present": true,
+        "noop_present": true
+      }
+    },
+    {
+      "run_id": "pair3-old",
+      "scenario": "user_problem",
+      "route": "cobalt",
+      "seed": 3149,
+      "tags": {
+        "scenario": {
+          "complexity": "moderate",
+          "domain": "physics"
+        },
+        "user": {
+          "behavior": "terse",
+          "knowledge": "practical experience"
+        },
+        "kidra": {}
+      },
+      "started_at": 1793213271.3518085,
+      "finished_at": 1793213441.843008,
+      "elapsed_seconds": 170.45807777100003,
+      "phase": "evaluation_failed",
+      "sample_count": 1,
+      "model_requests": 13,
+      "last_error": "validate.checks.layout.groups.0: Additional context still required after context_rounds; unseen evidence cannot be approved",
+      "validation_levels": [
+        0
+      ],
+      "request_counts_by_category": {
+        "world_generation": 1,
+        "novelty": 1,
+        "reference_solution": 1,
+        "user_content": 1,
+        "model_tool_decisions": 1,
+        "reasoning_or_reply": 2,
+        "conversation_assessment": 1,
+        "review_or_review_retry": 5
+      },
+      "first_draft_seconds": 89.66800236701965,
+      "final_draft_seconds": 89.66800236701965,
+      "pre_review_seconds": 95.40292835235596,
+      "proxy_turnaround_seconds": 166.99711346626282,
+      "proxy_queue_wait_seconds": 3.126748561859131,
+      "prompt_tokens_surrogate": 26385,
+      "completion_tokens_surrogate": 4600,
+      "reasoning_tokens_actual": null,
+      "windows": 6,
+      "training_rows": 8410,
+      "visible_tool_calls": 2,
+      "tool_names": [
+        "file_read",
+        "chat"
+      ],
+      "user_turns": 1,
+      "deterministic_checks_passed": true,
+      "checks": {
+        "compiles": true,
+        "all_windows_closed": true,
+        "observations_masked": true,
+        "visible_tool_requests_supervised": true,
+        "sampled_visibility_queries": 101,
+        "sampled_future_or_same_tick_generated_keys": 0,
+        "compiler_diagnostics": [],
+        "bos_present": true,
+        "eos_present": true,
+        "noop_present": true
+      }
+    },
+    {
+      "run_id": "pair3-new",
+      "scenario": "user_scenario_noval",
+      "route": "marble",
+      "seed": 3149,
+      "tags": {
+        "scenario": {
+          "complexity": "moderate",
+          "domain": "physics"
+        },
+        "user": {
+          "behavior": "terse",
+          "knowledge": "practical experience"
+        },
+        "kidra": {}
+      },
+      "started_at": 1793213271.4725928,
+      "finished_at": 1793213367.308771,
+      "elapsed_seconds": 95.78859137099994,
+      "phase": "complete",
+      "sample_count": 1,
+      "model_requests": 7,
+      "last_error": null,
+      "validation_levels": [
+        0
+      ],
+      "request_counts_by_category": {
+        "world_generation": 1,
+        "user_content": 2,
+        "model_tool_decisions": 2,
+        "reasoning_or_reply": 2
+      },
+      "first_draft_seconds": 62.5828971862793,
+      "final_draft_seconds": 95.25350022315979,
+      "pre_review_seconds": 95.78859137099994,
+      "proxy_turnaround_seconds": 92.66977953910828,
+      "proxy_queue_wait_seconds": 12.618666648864746,
+      "prompt_tokens_surrogate": 13083,
+      "completion_tokens_surrogate": 2131,
+      "reasoning_tokens_actual": null,
+      "windows": 11,
+      "training_rows": 11467,
+      "visible_tool_calls": 4,
+      "tool_names": [
+        "file_read",
+        "chat",
+        "file_read",
+        "chat"
+      ],
+      "user_turns": 2,
+      "deterministic_checks_passed": true,
+      "checks": {
+        "compiles": true,
+        "all_windows_closed": true,
+        "observations_masked": true,
+        "visible_tool_requests_supervised": true,
+        "sampled_visibility_queries": 101,
+        "sampled_future_or_same_tick_generated_keys": 0,
+        "compiler_diagnostics": [],
+        "bos_present": true,
+        "eos_present": true,
+        "noop_present": true
+      }
+    }
+  ],
+  "groups": {
+    "old": {
+      "cases": 3,
+      "retained": 3,
+      "generation_drafts_compiled": 3,
+      "workflow_complete": 0,
+      "evaluation_failed": 3,
+      "requests": 39,
+      "mean_final_draft_seconds": 96.11823097864787,
+      "mean_end_to_end_seconds": 177.85839643966673,
+      "sum_end_to_end_seconds": 533.5751893190002,
+      "mean_pre_review_seconds": 102.06402333577473,
+      "prompt_tokens_surrogate": 77492,
+      "completion_tokens_surrogate": 13227
+    },
+    "new": {
+      "cases": 3,
+      "retained": 3,
+      "generation_drafts_compiled": 3,
+      "workflow_complete": 3,
+      "evaluation_failed": 0,
+      "requests": 15,
+      "mean_final_draft_seconds": 67.35468125343323,
+      "mean_end_to_end_seconds": 67.86864117066663,
+      "sum_end_to_end_seconds": 203.6059235119999,
+      "mean_pre_review_seconds": 67.86864117066663,
+      "prompt_tokens_surrogate": 26591,
+      "completion_tokens_surrogate": 5246
+    }
+  },
+  "savings": {
+    "request_fraction": 0.6153846153846154,
+    "mean_final_draft_time_fraction": 0.2992517593421409,
+    "mean_end_to_end_time_fraction": 0.618411935960026,
+    "surrogate_total_tokens_fraction": 0.6490591827511326
+  },
+  "usage_source": "declared surrogate BPE; not actual agent billing/reasoning usage",
+  "independent_arithmetic": {
+    "pottery_balance": 25,
+    "campaign_rates": {
+      "A_signups": 0.12,
+      "B_signups": 0.165,
+      "A_complaints": 0.005,
+      "B_complaints": 0.02
+    },
+    "campaign_optimum": [
+      162.0,
+      800,
+      400,
+      12.0
+    ],
+    "survey_margin_144": 8.333333333333334,
+    "survey_margin_400": 5.0,
+    "survey_random_target_cost": 1600,
+    "new_physics": {
+      "bottom_energy": 167.72,
+      "bottom_speed": 4.095363231753686,
+      "small_stop": 1.3103125,
+      "big_stop": 1.061518987341772
+    },
+    "old_physics": [
+      {
+        "ramp": 3,
+        "force": 187.52639933347217,
+        "work": 562.5791980004165
+      },
+      {
+        "ramp": 4,
+        "force": 148.60519285539118,
+        "work": 594.4207714215647
+      }
+    ]
+  }
+}

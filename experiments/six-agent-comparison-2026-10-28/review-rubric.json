@@ -1,0 +1,11 @@
+{
+  "frozen_before_execution": true,
+  "dimensions": {
+    "task_correctness": "0-4: satisfies original request and constraints; verify calculations independently",
+    "grounding": "0-4: claims match actual tool evidence and supplied world, no invented results",
+    "training_semantics": "0-4: causal visibility, generated tool requests, external masks and lifecycle",
+    "coherence": "0-4: user traits, dialogue continuity, private reasoning vs reply, relevant actions"
+  },
+  "critical_failure": "Wrong consequential answer, fabricated action/evidence, future leakage, or structurally unusable trajectory",
+  "approval": "No sample is granted Ready by this experiment"
+}
