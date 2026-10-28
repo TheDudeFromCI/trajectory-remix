@@ -90,6 +90,10 @@ class ProviderFailure(RuntimeError):
     """Operational failure: retain a pending draft instead of failing its quality review."""
 
 
+class EvaluationFailure(RuntimeError):
+    """Review could not finish; this is not a verdict on the trajectory."""
+
+
 class ScenarioRunner:
     def __init__(self, legacy, registry, client=None):
         self.legacy, self.registry, self.client = legacy, registry, client
@@ -501,7 +505,7 @@ class ScenarioRunner:
             while True:
                 await self.gate()
                 await self.run_attempt()
-                if self.status["phase"] == "api_paused":
+                if self.status["phase"] in ("api_paused", "evaluation_failed"):
                     batch["state"] = "paused"
                     return
                 if self.status["phase"] == "complete":
@@ -572,6 +576,16 @@ class ScenarioRunner:
                 "Model API unavailable; generation paused without rejecting the attempt",
                 "warning",
             )
+        except EvaluationFailure as error:
+            self.snapshot["validation_passed"] = False
+            pending = copy.deepcopy(self.expected_draft)
+            pending["metadata"].update(
+                generation_phase="planning", validation_level=0,
+                evaluation_error=self.clean(str(error)),
+            )
+            self.publish(pending)
+            self.status.update(phase="evaluation_failed", last_error=self.clean(str(error)))
+            self.log("Evaluation failed; batch paused with a resumable draft: " + self.clean(str(error)), "error")
         except Rejected as error:
             if self.status["draft_id"]:
                 rejected = copy.deepcopy(self.expected_draft)
@@ -601,7 +615,7 @@ class ScenarioRunner:
         finally:
             self.status.update(
                 running=False,
-                paused=self.status["phase"] == "api_paused",
+                paused=self.status["phase"] in ("api_paused", "evaluation_failed"),
                 pause_requested=False,
                 active=[],
             )
@@ -693,6 +707,9 @@ class ScenarioRunner:
                 return result
             except asyncio.CancelledError:
                 record["state"] = "cancelled"
+                raise
+            except EvaluationFailure as error:
+                record.update(state="evaluation_failed", detail=self.clean(str(error)))
                 raise
             except Exception as error:
                 if isinstance(error, Rejected) and step.uses == "remix.reject":
@@ -1126,6 +1143,9 @@ class ScenarioRunner:
             case "remix.tools":
                 return self.simulate(inputs)
             case "remix.draft":
+                release_tools = inputs.get("release_tool_context", False)
+                if type(release_tools) is not bool or (release_tools and not inputs.get("reasoning")):
+                    raise ValueError("release_tool_context requires a boolean and nonempty reasoning")
                 if inputs.get("reasoning"):
                     self.builder.add_stream(
                         "reasoning-" + str(self.builder.serial),
@@ -1133,6 +1153,11 @@ class ScenarioRunner:
                         close=False,
                     )
                     self.builder.serial += 1
+                if release_tools:
+                    # The scenario explicitly promises that these notes retain
+                    # the evidence required by the reply. Semantic review checks
+                    # that promise; never infer it from window age alone.
+                    self.close_temporary_windows(("tool-",))
                 if inputs.get("response"):
                     await self.dispatch(
                         type(step)(uses="remix.message"),
@@ -1140,25 +1165,7 @@ class ScenarioRunner:
                         context,
                         path,
                     )
-                plan = self.compiler.compile(self.builder.sample)
-                closure_tick = str(plan["max_tick"] + 1)
-                for window in plan["windows"]:
-                    if (
-                        window["id"].startswith(("tool-", "reasoning-"))
-                        and window["close"] is None
-                    ):
-                        self.builder.sample["replay"].setdefault(
-                            closure_tick, []
-                        ).append(
-                            {
-                                "op": "generate",
-                                "window": window["id"],
-                                "content": self.compiler.special["eos"],
-                            }
-                        )
-                self.builder.next_tick = (
-                    self.compiler.compile(self.builder.sample)["max_tick"] + 1
-                )
+                self.close_temporary_windows(("tool-", "reasoning-"))
                 result = self.publish()
                 self.log(
                     "Draft ready in the dashboard; validation may still be running",
@@ -1170,6 +1177,15 @@ class ScenarioRunner:
                 return await self.validate(step, inputs, context, path)
             case "remix.reject":
                 raise Rejected(inputs.get("reason", "Rejected by scenario"))
+
+    def close_temporary_windows(self, prefixes):
+        plan = self.compiler.compile(self.builder.sample)
+        for window in plan["windows"]:
+            if window["id"].startswith(prefixes) and window["close"] is None:
+                self.builder.sample["replay"].setdefault(str(plan["max_tick"] + 1), []).append(
+                    {"op": "generate", "window": window["id"], "content": self.compiler.special["eos"]}
+                )
+        self.builder.next_tick = self.compiler.compile(self.builder.sample)["max_tick"] + 1
 
     def simulate(self, inputs):
         calls = inputs.get("calls", [])
@@ -1264,6 +1280,56 @@ class ScenarioRunner:
         self.persist()
         return {"id": draft["id"]}
 
+    def failure_detail(self, error):
+        return self.clean(error.message if isinstance(error, jsonschema.ValidationError) else str(error))[:256]
+
+    async def review_response(
+        self, step, payload, context, path, schema, prompt=None,
+        *, definition=None, view=None, budget=None,
+    ):
+        """Retry invalid reviews without converting missing evidence into a verdict."""
+        failures, rounds = 0, 0
+        while True:
+            if budget and "retry_feedback" in payload:
+                for limit in (256, 128, 64):
+                    if self.prompt_tokens(step, payload, context, schema, prompt, definition.rules) <= budget:
+                        break
+                    payload = {**payload, "retry_feedback": {"error": payload["retry_feedback"]["error"][:limit]}}
+            try:
+                result = await self.llm(
+                    step, payload, context, path, schema, prompt,
+                    max_input_tokens=budget,
+                    rules=definition.rules if definition else None,
+                )
+                if definition and definition.rules:
+                    result = checklist_report(result)
+                requests = result.pop("context_requests", [])
+                if not requests:
+                    return result, payload
+                if rounds == definition.context_rounds:
+                    raise ValueError("Additional context still required after context_rounds; unseen evidence cannot be approved")
+                extra = view.context(requests, payload)
+                events = {u["id"]: u for u in payload["events"]}
+                events.update({u["id"]: u for u in extra})
+                expanded = {**payload, "events": list(events.values())}
+                expanded.pop("retry_feedback", None)
+                if not extra or self.prompt_tokens(
+                    step, expanded, context, schema, prompt, definition.rules
+                ) > budget:
+                    raise ValueError("Requested evidence is unavailable, already supplied, or exceeds max_input_tokens; request specific missing unit IDs instead of an entire window")
+                payload = expanded
+                rounds += 1
+            except (ValueError, jsonschema.ValidationError) as error:
+                detail = self.failure_detail(error)
+                if failures >= step.review_retries:
+                    raise EvaluationFailure(f"{path}: {detail}") from error
+                failures += 1
+                self.log(f"Review recovery {failures}/{step.review_retries}: {detail}", "warning", path)
+                payload = {**payload, "retry_feedback": {
+                    "error": detail,
+                    "instruction": "Correct the review/schema or context request. Use exact unit IDs, without a history: prefix. Review only supplied evidence; if essential evidence is still missing, request it instead of guessing a verdict.",
+                }}
+
     async def review_groups(
         self, step, definition, inputs, context, path, draft, plan, source_hash
     ):
@@ -1285,73 +1351,46 @@ class ScenarioRunner:
             self.prompt_tokens(
                 step, payload, context, schema, definition.prompt, definition.rules
             )
-            <= budget
+            <= budget - (min(128, budget // 4) if step.review_retries else 0)
         )
-        groups = list(view.groups(inputs, fits))
+        try:
+            groups = list(view.groups(inputs, fits))
+        except ValueError:
+            # A large checklist may leave room for evidence but no recovery
+            # reserve. Do not make an otherwise valid review impossible.
+            groups = list(view.groups(inputs, lambda payload: self.prompt_tokens(
+                step, payload, context, schema, definition.prompt, definition.rules
+            ) <= budget))
         reports, failures = [], []
         for index, payload in enumerate(groups):
             group_path = f"{path}.groups.{index}"
             record = self.snapshot["steps"].setdefault(group_path, {})
-            if record.get("validation_source_hash") == source_hash:
+            group_hash = hashlib.sha256(compact(payload).encode()).hexdigest()
+            if (
+                record.get("validation_source_hash") == source_hash
+                and record.get("review_group_hash") == group_hash
+            ):
                 result = record["report"]
                 payload = record["review_payload"]
             else:
-                for context_round in range(definition.context_rounds + 1):
-                    size = self.prompt_tokens(
-                        step, payload, context, schema, definition.prompt, definition.rules
-                    )
-                    self.log(
-                        {
-                            "review_group": index + 1,
-                            "groups": len(groups),
-                            "units": len(payload["events"]),
-                            "input_tokens_estimated": size,
-                            "instructions_tokens_estimated": count(
-                                self.compiler.tokenizer,
-                                self.render_prompt(
-                                    step,
-                                    payload,
-                                    context,
-                                    schema,
-                                    definition.prompt,
-                                    definition.rules,
-                                )[0],
-                            ),
-                            "timeline_tokens_estimated": count(
-                                self.compiler.tokenizer, compact(payload["events"])
-                            ),
-                            "input_budget": budget,
-                        },
-                        "info",
-                        group_path,
-                    )
-                    result = await self.llm(
-                        step,
-                        payload,
-                        context,
-                        group_path,
-                        schema,
-                        definition.prompt,
-                        max_input_tokens=budget,
-                        rules=definition.rules,
-                    )
-                    if definition.rules:
-                        result = checklist_report(result)
-                    requests = result.pop("context_requests", [])
-                    if not requests:
-                        break
-                    if context_round == definition.context_rounds:
-                        raise ValueError(
-                            f"{group_path}: additional context still required after the configured context_rounds; review cannot approve unseen evidence"
-                        )
-                    extra = view.context(requests, payload)
-                    payload = {**payload, "events": [*payload["events"], *extra]}
-                    if not extra or not fits(payload):
-                        raise ValueError(
-                            f"{group_path}: requested evidence is unavailable or exceeds max_input_tokens; adjust the check's view/inputs/budget"
-                        )
+                self.log(
+                    {"review_group": index + 1, "groups": len(groups),
+                     "units": len(payload["events"]), "input_budget": budget,
+                     "instructions_tokens_estimated": count(
+                         self.compiler.tokenizer,
+                         self.render_prompt(step, payload, context, schema, definition.prompt, definition.rules)[0]),
+                     "timeline_tokens_estimated": count(self.compiler.tokenizer, compact(payload["events"])),
+                     "input_tokens_estimated": self.prompt_tokens(
+                         step, payload, context, schema, definition.prompt, definition.rules)},
+                    "info", group_path,
+                )
+                result, payload = await self.review_response(
+                    step, payload, context, group_path, schema, definition.prompt,
+                    definition=definition, view=view, budget=budget,
+                )
                 record.update(
                     validation_source_hash=source_hash,
+                    review_group_hash=group_hash,
                     report=result,
                     review_payload=payload,
                 )
@@ -1390,7 +1429,7 @@ class ScenarioRunner:
         }, failures
 
     async def repair_groups(
-        self, step, draft, plan, inputs, context, path, failures, report
+        self, step, draft, plan, inputs, context, path, failures, report, retry_feedback=None
     ):
         if not failures:
             # Deterministic findings still need a bounded repair context.
@@ -1428,6 +1467,8 @@ class ScenarioRunner:
                 "review": failure["review"],
                 "findings": failure["findings"],
                 "authoring_notes": guide,
+                "eos_token": self.compiler.special["eos"],
+                **({"retry_feedback": retry_feedback} if retry_feedback else {}),
             }
             repair_path = f"{path}.repair.{index}"
             record = self.snapshot["steps"].setdefault(repair_path, {})
@@ -1462,8 +1503,11 @@ class ScenarioRunner:
         if type(require_delivery) is not bool:
             raise ValueError("require_chat_delivery must be a boolean")
         draft = self.closed_draft()
-        for attempt in range(step.max_repairs + 1):
-            self.status["phase"] = "validating" if attempt == 0 else "repairing"
+        progress = self.snapshot.setdefault("validation_progress", {}).setdefault(
+            path, {"repairs": 0, "pending": False, "feedback": None}
+        )
+        while True:
+            self.status["phase"] = "validating"
             self.persist()
             plan = self.compiler.compile(draft)
             source = evaluation_source(draft)
@@ -1493,58 +1537,56 @@ class ScenarioRunner:
                 in {"tool_not_shown", "tools_in_system", "direct_chat_generation"}
             ]
             failed_groups = []
-            if structural and step.repair_mode == "edits":
-                report = {"valid": False, "feedback": structural, "checks": {}}
-            elif step.checks:
-                reports = {}
-                failed_groups = []
-                for name, definition in step.checks.items():
-                    check_path = path + ".checks." + name
-                    record = self.snapshot["steps"].setdefault(check_path, {})
-                    if isinstance(definition, ReviewCheck):
-                        result, failures = await self.review_groups(
-                            step,
-                            definition,
-                            inputs,
-                            context,
-                            check_path,
-                            draft,
-                            plan,
-                            source_hash,
-                        )
-                        failed_groups.extend(failures)
-                    else:
-                        if record.get("validation_source_hash") == source_hash:
-                            result = record["report"]
-                        else:
-                            self.log(f"Checking {name}", "info", check_path)
-                            result = await self.llm(
+            try:
+                if structural and step.repair_mode == "edits":
+                    report = {"valid": False, "feedback": structural, "checks": {}}
+                elif step.checks:
+                    reports = {}
+                    failed_groups = []
+                    for name, definition in step.checks.items():
+                        check_path = path + ".checks." + name
+                        record = self.snapshot["steps"].setdefault(check_path, {})
+                        if isinstance(definition, ReviewCheck):
+                            result, failures = await self.review_groups(
                                 step,
-                                review_inputs,
+                                definition,
+                                inputs,
                                 context,
                                 check_path,
-                                REPORT,
-                                definition,
+                                draft,
+                                plan,
+                                source_hash,
                             )
-                    record.update(validation_source_hash=source_hash, report=result)
-                    self.persist()
-                    reports[name] = result
-                    self.log(
-                        {"check": name, **result},
-                        "success" if result["valid"] else "error",
-                        check_path,
-                    )
-                report = {
-                    "valid": all(result["valid"] for result in reports.values()),
-                    "feedback": [
-                        f"[{name}] {finding}"
-                        for name, result in reports.items()
-                        for finding in result["feedback"]
-                    ],
-                    "checks": reports,
-                }
-            else:
-                report = await self.llm(step, review_inputs, context, path, REPORT)
+                            failed_groups.extend(failures)
+                        else:
+                            if record.get("validation_source_hash") == source_hash:
+                                result = record["report"]
+                            else:
+                                self.log(f"Checking {name}", "info", check_path)
+                                result, _ = await self.review_response(
+                                    step, review_inputs, context, check_path, REPORT, definition,
+                                )
+                        record.update(validation_source_hash=source_hash, report=result)
+                        self.persist()
+                        reports[name] = result
+                        self.log(
+                            {"check": name, **result},
+                            "success" if result["valid"] else "error",
+                            check_path,
+                        )
+                    report = {
+                        "valid": all(result["valid"] for result in reports.values()),
+                        "feedback": [
+                            f"[{name}] {finding}"
+                            for name, result in reports.items()
+                            for finding in result["feedback"]
+                        ],
+                        "checks": reports,
+                    }
+                else:
+                    report, _ = await self.review_response(step, review_inputs, context, path, REPORT)
+            except (ValueError, jsonschema.ValidationError) as error:
+                raise EvaluationFailure(f"{path}: {self.failure_detail(error)}") from error
             if require_delivery:
                 delivery = self.chat_delivery_report(draft, plan)
                 self.log(
@@ -1567,6 +1609,7 @@ class ScenarioRunner:
                 path,
             )
             metadata = draft["metadata"]
+            metadata.pop("evaluation_error", None)
             metadata.setdefault("evaluations", []).append(
                 {
                     "level": step.level,
@@ -1587,47 +1630,76 @@ class ScenarioRunner:
             if report["valid"]:
                 self.builder.sample = copy.deepcopy(draft)
                 return report
-            if attempt == step.max_repairs or not step.repair_prompt:
-                self.builder.sample = copy.deepcopy(draft)
-                raise Rejected(f"Validation {step.level} rejected the trajectory")
-            self.log("Repairing draft from validation findings", "warning", path)
-            if step.repair_mode == "edits":
-                candidate = await self.repair_groups(
-                    step, draft, plan, inputs, context, path, failed_groups, report
-                )
-            else:
-                repair_schema = {
-                    "type": "object",
-                    "properties": {"replay": {"type": "object"}},
-                    "required": ["replay"],
-                    "additionalProperties": False,
-                }
-                repair = await self.llm(
-                    step,
-                    {
-                        "trajectory": draft,
-                        "findings": report["feedback"],
-                        "authoring_guide": self.authoring_guide(),
-                    },
-                    context,
-                    path + ".repair",
-                    repair_schema,
-                    step.repair_prompt,
-                )
-                candidate = copy.deepcopy(draft)
-                candidate["replay"] = repair["replay"]
-            candidate["metadata"]["validation_level"] = 0
-            self.compiler.compile(candidate)
+            while True:
+                if not step.repair_prompt or (progress["repairs"] >= step.max_repairs and not progress["pending"]):
+                    self.builder.sample = copy.deepcopy(draft)
+                    raise Rejected(f"Validation {step.level} rejected the trajectory after {progress['repairs']} repair attempt(s)")
+                # A provider interruption resumes this attempt and its completed
+                # groups. Invalid outputs consume an attempt and are never cached
+                # as the next attempt's answer.
+                if not progress["pending"]:
+                    progress["repairs"] += 1
+                    progress["pending"] = True
+                self.status["phase"] = "repairing"
+                self.log(f"Repair attempt {progress['repairs']}/{step.max_repairs}", "warning", path)
+                self.persist()
+                try:
+                    if step.repair_mode == "edits":
+                        candidate = await self.repair_groups(
+                            step, draft, plan, inputs, context, path, failed_groups, report,
+                            progress["feedback"],
+                        )
+                    else:
+                        repair_schema = {
+                            "type": "object",
+                            "properties": {"replay": {"type": "object"}},
+                            "required": ["replay"],
+                            "additionalProperties": False,
+                        }
+                        repair = await self.llm(
+                            step,
+                            {
+                                "trajectory": draft,
+                                "findings": report["feedback"],
+                                "authoring_guide": self.authoring_guide(),
+                                **({"retry_feedback": progress["feedback"]} if progress["feedback"] else {}),
+                            },
+                            context, path + ".repair", repair_schema, step.repair_prompt,
+                        )
+                        candidate = copy.deepcopy(draft)
+                        candidate["replay"] = repair["replay"]
+                    candidate["metadata"]["validation_level"] = 0
+                    self.compiler.compile(candidate)
+                except (ValueError, jsonschema.ValidationError) as error:
+                    detail = self.failure_detail(error)
+                    progress.update(pending=False, feedback={
+                        "error": detail,
+                        "instruction": (
+                            "The prior repair was not applied. Correct the edits against the unchanged raw replay events; use /content, not /data/content. Return a complete replacement edit batch."
+                            if step.repair_mode == "edits" else
+                            "The prior repair was not applied. Correct the error against the unchanged trajectory and return the complete corrected replay in the requested schema."
+                        ),
+                    })
+                    self.clear_validation_cache(path, reviews=False)
+                    self.log(f"Repair {progress['repairs']}/{step.max_repairs} could not be applied: {detail}", "warning", path)
+                    self.persist()
+                    continue
+                progress.update(pending=False, feedback=None)
+                break
             # Every repair gets a fresh review, even if it returned the same replay.
-            for key, record in self.snapshot["steps"].items():
-                if key.startswith(path + ".checks."):
-                    record.pop("validation_source_hash", None)
-                if key.startswith(path + ".repair."):
-                    record.pop("repair_source_hash", None)
+            self.clear_validation_cache(path)
+            self.snapshot["validation_passed"] = False
             draft = candidate
             self.builder.sample = copy.deepcopy(draft)
             self.publish(draft)
-        return report
+
+    def clear_validation_cache(self, path, *, reviews=True):
+        for key, record in self.snapshot["steps"].items():
+            if reviews and key.startswith(path + ".checks."):
+                record.pop("validation_source_hash", None)
+            if key.startswith(path + ".repair."):
+                record.pop("repair_source_hash", None)
+                record.pop("repair_output", None)
 
     def chat_delivery_report(self, draft, plan):
         """Check delivery in the compiled simulator, independently of LLM verdicts."""

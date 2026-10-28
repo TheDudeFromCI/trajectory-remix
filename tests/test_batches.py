@@ -10,7 +10,8 @@ from trajectory_remix.server import create_app
 
 
 async def complete(runner):
-    await asyncio.wait_for(runner.job, 15)
+    # The per-sample allowance must also cover multi-sample batch tests.
+    await asyncio.wait_for(runner.job, 15 * runner.status["batch"]["target"])
 
 
 async def test_batch_creates_searchable_candidates_and_keeps_model_metrics_local(

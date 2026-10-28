@@ -15,8 +15,9 @@ a word. Plain terms are
 literal substrings: `python` also matches `Pythonic`. Unicode case folding
 makes `PYTHON` equivalent to `python` and `Straße` equivalent to `strasse`.
 
-Search reads authored source, including invisible setup. It does not compile or
-execute a trajectory, query providers, or search unrecorded runtime results.
+Text search reads authored source, including invisible setup. It does not compile
+or execute a trajectory, query providers, or search unrecorded runtime results.
+The diagnostic properties below use local compilation instead.
 JSON field names, JSON escaping, and numeric/boolean/null values are not text.
 For example, a metadata key `python` alone does not match; its string value does.
 
@@ -71,14 +72,32 @@ are supported; arbitrary metadata keys are not query-language properties.
 | `@batch` | Generation batch ID from `metadata.generation_batch`. Missing/null IDs do not match, including `@batch:*`. | `@batch:12345678-*`, `-@batch:*` |
 | `@windows` | Number of distinct declared windows, including implicit visible tool-call windows. Repeated opens/calls in one window count once; invisible calls add no window. | `@windows:>5`, `@windows:<=3`, `@windows:2` |
 | `@uses_tool` | A tool called by an authored `tool-call` or `invisible-tool-call` event. Merely advertising a tool with `show_tools` does not count. | `@uses_tool:calculator`, `@uses_tool:file_*` |
+| `@errors` | Whether local compilation fails with a compiler error. | `@errors:true`, `@errors:false` |
+| `@warnings` | Whether local compilation succeeds and reports at least one compiler warning. | `@warnings:true`, `@warnings:false` |
 
 Window counts accept `=`, `!=`, `<`, `<=`, `>`, and `>=`, followed immediately
 by a nonnegative integer. Omitting the operator means equality. Values must fit
 a signed 64-bit integer. State names/levels require an exact match; unknown states
-report an error. Other properties accept literal values and `*` globs.
+report an error. Errors and warnings accept only `true` or `false`,
+case-insensitively; other values and wildcards report an error. Other properties
+accept literal values and `*` globs.
 Negation and grouping work with properties: `-@uses_tool:subagent` excludes
 trajectories using that tool; `-(@windows:>5 @uses_tool:calculator)` excludes
 only trajectories satisfying both conditions.
+
+Use `@errors:false @warnings:false` to find trajectories that compile without
+diagnostics, or `@errors:true | @warnings:true` to find trajectories needing
+attention. The compiler stops at its first error and does not return warnings
+for that trajectory, so a failing trajectory matches `@warnings:false`.
+`@errors:false` alone still includes trajectories with warnings. These filters
+refer to compiler diagnostics, independently of the `@state` review stage.
+
+Diagnostic searches compile saved trajectories locally on first use after opening
+a project, using its tokenizer and configured tools. Compilation runs the local
+sandbox simulation without contacting model providers. Results are cached by
+source hash and refreshed after edits or tool changes; subsequent searches reuse
+unchanged results. The initial diagnostic search can take longer on large projects.
+Search does not change source, revisions, review state, or pinned tool dependencies.
 
 For typed arbitrary metadata filters and grouped counts, use the separate MCP
 `query_trajectories` and `get_metadata_counts` tools.

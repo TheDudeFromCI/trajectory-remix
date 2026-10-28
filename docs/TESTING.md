@@ -8,6 +8,14 @@
   applicability, code-derived acceptance/findings, missing-context handling,
   bounded cross-view evidence requests, saved group reuse, and complete reviews
   after targeted repair. Legacy single-prompt/string/object checks remain covered.
+- Repair recovery regressions cover malformed JSON/schema, review-wrapper edits,
+  invalid source pointers, edit conflicts, compilation failures, atomic retention,
+  bounded retry exhaustion, full-replay repairs, and repair budgets across provider
+  interruption/resume. Review regressions cover malformed/unknown/repeated context
+  requests, exhausted rounds, narrowing over-budget evidence requests, and batch
+  pause/resume with Pending rather than rejected drafts. Lifecycle checks verify
+  tool evidence survives reasoning and retained reasoning survives chat delivery;
+  the dashboard test resumes evaluation failures without starting a fresh sample.
 - MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
@@ -98,6 +106,10 @@
   and transactional updates through edits/imports/undo/redo. MCP protocol checks
   retrieve the packaged search guide and exercise queries and errors. DOM checks
   combine operators beyond page one and verify inline query error recovery.
+- Compiler diagnostic search checks cover `@errors`/`@warnings` true and false,
+  SQL/draft parity, invalid boolean values, grouping/negation, filtering before
+  pagination, lazy cache reuse, source/tool invalidation, reopening, and dashboard/MCP
+  agreement through edits and undo/redo without changing pinned dependencies.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an

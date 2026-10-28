@@ -182,7 +182,7 @@ def select_inputs(inputs, paths):
 
 
 class ReviewView:
-    def __init__(self, draft, plan, config, tokenizer, tools=None):
+    def __init__(self, draft, plan, config, tokenizer, tools=None, *, evidence=False):
         self.draft = draft
         self.context_view = None
         self.plan, self.config, self.tokenizer = plan, config, tokenizer
@@ -271,7 +271,7 @@ class ReviewView:
             if view == "layout":
                 # Checklist lifecycle review needs actual source/summary contents
                 # to determine when the last semantic consumer has finished.
-                if not config.rules:
+                if not config.rules and not evidence:
                     body = {
                         k: v
                         for k, v in body.items()
@@ -335,7 +335,7 @@ class ReviewView:
                 and not call.get("invisible")
                 and (
                     view in ("tools", "correctness")
-                    or view == "layout" and config.rules
+                    or view == "layout" and (config.rules or evidence)
                 )
                 and not (view == "correctness" and call["tool"] == "chat")
             ):
@@ -595,7 +595,7 @@ class ReviewView:
 
     def context(self, requests, payload):
         evidence = self
-        if self.config.rules and self.config.view != "layout":
+        if self.config.view != "layout" or not self.config.rules:
             # A scoped view may omit the original document or tool observation
             # needed to verify a summary. Fetch actual evidence, never a summary
             # invented by another reviewer; the caller still enforces its budget.
@@ -606,9 +606,10 @@ class ReviewView:
                     self.config.model_copy(update={"view": "layout"}),
                     self.tokenizer,
                     self.tools,
+                    evidence=True,
                 )
             evidence = self.context_view
-        known = {u["id"] for u in payload["events"]}
+        known = {u["id"]: u for u in payload["events"]}
         extra = []
         for uid in requests:
             if uid.startswith("sample_window:"):
@@ -636,8 +637,10 @@ class ReviewView:
                     raise ValueError(f"Unknown review context ID: {uid}")
                 selected = [evidence.by_id[uid]]
             for unit in selected:
-                if unit["id"] not in known:
-                    known.add(unit["id"])
+                if known.get(unit["id"]) != unit:
+                    # A legacy layout projection may already contain the ID
+                    # but omit its text. Supply the full evidence for that ID.
+                    known[unit["id"]] = unit
                     extra.append(unit)
         return extra
 
@@ -664,12 +667,26 @@ EDIT_SCHEMA = {
                     "event_id": {"type": "string"},
                     "event": {"type": "object"},
                     "tick": {"type": "string"},
-                    "field": {"type": "string"},
+                    "field": {"type": "string", "pattern": "^/", "description": "Pointer into the raw source event, e.g. /content or /arguments/content. Never /data/content."},
                     "old": {"type": "string", "minLength": 1},
                     "new": {"type": "string"},
                 },
                 "required": ["action"],
                 "additionalProperties": False,
+                "allOf": [
+                    {
+                        "if": {"properties": {"action": {"const": action}}},
+                        "then": {"required": fields},
+                    }
+                    for action, fields in {
+                        "append": ["tick", "event"],
+                        "replace": ["event_id", "event"],
+                        "delete": ["event_id"],
+                        "insert_before": ["event_id", "event"],
+                        "insert_after": ["event_id", "event"],
+                        "replace_text": ["event_id", "field", "old", "new"],
+                    }.items()
+                ],
             },
         }
     },
@@ -699,6 +716,12 @@ def apply_edits(draft, edits):
         }
         if action not in required or any(key not in edit for key in required[action]):
             raise ValueError("Repair edit has an unknown action or missing fields")
+        if "event" in edit and (
+            not isinstance(edit["event"], dict)
+            or not edit["event"].get("op")
+            or set(edit["event"]) & {"data", "id", "event_id", "purpose", "start", "end", "tick"}
+        ):
+            raise ValueError("Repair event must be a raw replay event, not a review wrapper; include op and source fields such as window/content")
         if action in ("replace", "delete"):
             if edit["event_id"] in whole_changes:
                 raise ValueError(

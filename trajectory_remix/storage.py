@@ -10,13 +10,14 @@ import copy
 import hashlib
 import json
 import sqlite3
+import uuid
 from collections.abc import MutableSequence
 from contextlib import closing, contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from .dataset import prepare_sample, public_config
-from .search import SearchQuery, readable_text, register_search_functions, used_tools
+from .search import SearchQuery, diagnostic_flags, readable_text, register_search_functions, used_tools
 
 GAP = 1 << 32
 
@@ -41,6 +42,9 @@ class DatasetStore:
 
     def __init__(self, path: Path):
         self.path = Path(path)
+        self.search_compiler = None
+        # Recheck once per open so compiler code changes cannot leave stale flags.
+        self._diagnostics_session = uuid.uuid4().hex
         if not self.path.is_file():
             raise ValueError(f"Project does not exist: {self.path}; run 'trajectory-remix init --dataset PATH --tokenizer FILE' first")
         with self.path.open("rb") as stream:
@@ -73,6 +77,11 @@ class DatasetStore:
                     trajectory_uuid TEXT NOT NULL REFERENCES samples(uuid) ON DELETE CASCADE,
                     tool TEXT NOT NULL,
                     PRIMARY KEY(trajectory_uuid, tool)
+                );
+                CREATE TABLE IF NOT EXISTS trajectory_search_diagnostics (
+                    trajectory_uuid TEXT PRIMARY KEY REFERENCES samples(uuid) ON DELETE CASCADE,
+                    source_hash TEXT NOT NULL, cache_key TEXT NOT NULL,
+                    errors INTEGER NOT NULL, warnings INTEGER NOT NULL
                 );
             """)
             if row[0] < self.SCHEMA_VERSION:
@@ -307,6 +316,7 @@ class DatasetStore:
         current = {tool.name: (self.schema_text(tool.schema), tool.file_hash, 1) for tool in registry.tools.values() if tool.external}
         changed = {name for name in previous.keys() | current.keys() if previous.get(name) != current.get(name)}
         compiler = self.load_compiler(registry)
+        self.search_compiler = compiler
         diagnostics = []
         if not previous and not current:
             return compiler, diagnostics
@@ -516,11 +526,30 @@ class DatasetStore:
             db.execute("UPDATE project SET sample_revision=revision+1,revision=revision+1")
             return db.execute("SELECT revision FROM project").fetchone()[0]
 
+    def refresh_search_diagnostics(self, db):
+        """Compile stale sources one at a time, only for diagnostic searches."""
+        if self.search_compiler is None:
+            self.search_compiler = self.load_compiler()
+        compiler = self.search_compiler
+        cache_key = self._diagnostics_session + compiler.tools.fingerprint
+        rows = db.execute("""
+            SELECT s.uuid,s.source,s.content_hash FROM samples s
+            LEFT JOIN trajectory_search_diagnostics d ON d.trajectory_uuid=s.uuid
+            WHERE d.source_hash IS NOT s.content_hash OR d.cache_key IS NOT ?
+        """, (cache_key,))
+        for ident, source, digest in rows:
+            errors, warnings = diagnostic_flags(json.loads(source), compiler)
+            db.execute("INSERT OR REPLACE INTO trajectory_search_diagnostics VALUES(?,?,?,?,?)",
+                       (ident, digest, cache_key, errors, warnings))
+
     def listing(self, query="", offset=0, limit=100, dashboard=False):
-        predicate, args = SearchQuery(query).sql()
+        search = SearchQuery(query)
+        predicate, args = search.sql()
         clause = f"WHERE {predicate}" if query.strip() else ""
         with self.connect() as db:
-            db.execute("BEGIN")
+            db.execute("BEGIN IMMEDIATE" if search.requires_diagnostics else "BEGIN")
+            if search.requires_diagnostics:
+                self.refresh_search_diagnostics(db)
             total = db.execute(f"SELECT count(*) FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid {clause}", args).fetchone()[0] if clause else db.execute("SELECT sample_count FROM project").fetchone()[0]
             attributes_column = "NULL" if dashboard else "s.attributes"
             properties_column = "json_extract(m.properties, '$.validation_level')" if dashboard else "m.properties"
