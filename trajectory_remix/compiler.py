@@ -366,7 +366,8 @@ class Compiler:
             "loss": {"mask": "exclude"},
         }
 
-    def compile(self, sample: dict) -> dict:
+    def compile(self, sample: dict, *, record_dependencies=True) -> dict:
+        """Compile locally; discovery can opt out of recording tool dependencies."""
         from .sandbox_replay import compile_sandbox, validate_call
 
         if not isinstance(sample, dict):
@@ -1129,7 +1130,7 @@ class Compiler:
             "rows": rows,
             "diagnostics": warnings,
         }
-        if self.tool_store is not None:
+        if self.tool_store is not None and record_dependencies:
             self.tool_store.record_tool_compilation(sample, self.tools, plan)
         return plan
 
