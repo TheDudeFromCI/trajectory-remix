@@ -31,4 +31,4 @@ Structural fidelity is covered separately by regression tests: model-authored to
 
 No live local inference endpoint or model artifacts were supplied in this environment. Real inference time, model-specific token savings, semantic quality, diversity, repair effort and approved-sample throughput remain unmeasured. Use the documented `--live` command with the server's actual tokenizer/template and total-completion parameter, externally review equivalent scenario outputs, and compare approved yield before drawing hardware or training-quality conclusions.
 
-The [recorded JSON report](content-first-benchmark.json) preserves these exact counters and measurement limitations. The integrated revision passed all 912 Python tests and 120 optional frontend DOM checks.
+The [recorded JSON report](content-first-benchmark.json) preserves these exact counters and measurement limitations. The integrated revision passed all 948 Python tests and 120 optional frontend DOM checks.

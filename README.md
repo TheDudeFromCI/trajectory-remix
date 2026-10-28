@@ -194,9 +194,11 @@ shows 100 results per page. Undo history and compiled previews are bounded.
 
 The dashboard and MCP `list_trajectories` share [the search query language](trajectory_remix/guides/search.md):
 spaces mean AND, `|` means OR, `-` excludes a term/group, `*` matches wildcard
-text, `#coding` filters tags, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch`
+text, `#coding` filters tags, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch`, `@errors`, `@warnings`
 filter properties. For example, `python -(math complex) #coding` searches
-readable source text across events. MCP agents can read the complete guide with
+readable source text across events. `@errors:false @warnings:false` finds
+trajectories that compile without diagnostics; both flags accept `true` and `false`.
+MCP agents can read the complete guide with
 `get_authoring_guide(topic="search")`; the dashboard links it beside the search box.
 
 Writes use WAL mode, a 30-second busy timeout and transactions. Multiple server

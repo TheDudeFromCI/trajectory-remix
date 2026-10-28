@@ -79,6 +79,18 @@ def register_search_functions(db):
     db.create_function("search_tag", 2, tag_match, deterministic=True)
 
 
+def diagnostic_flags(sample, compiler):
+    """Use the same diagnostics as validation, without pinning tool dependencies."""
+    from .compiler import CompileError
+
+    try:
+        plan = compiler.compile(sample, record_dependencies=False)
+    except CompileError:
+        # The compiler stops at the first error, before producing warnings.
+        return True, False
+    return False, any(item["severity"] == "warning" for item in plan["diagnostics"])
+
+
 def tokenize(query):
     tokens, index = [], 0
     while index < len(query):
@@ -122,6 +134,7 @@ class SearchQuery:
             raise SearchSyntaxError("use at most 4096 characters")
         self.tokens = tokenize(query)
         self.index = 0
+        self.requires_diagnostics = False
         self.root = self._or() if self.tokens else ("all",)
         if self.index != len(self.tokens):
             raise SearchSyntaxError(f"unexpected {self.tokens[self.index][1]!r}")
@@ -168,10 +181,15 @@ class SearchQuery:
             return ("tag", value[1:])
         if value.startswith("@"):
             name, separator, value = value[1:].partition(":")
-            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch"):
-                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, or @batch")
+            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch", "errors", "warnings"):
+                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, @batch, @errors, or @warnings")
             if not separator or not value:
                 raise SearchSyntaxError(f"supply a value after @{name}:")
+            if name in ("errors", "warnings"):
+                if value not in ("true", "false"):
+                    raise SearchSyntaxError(f"@{name} requires true or false")
+                self.requires_diagnostics = True
+                return (name, value == "true")
             if name == "state":
                 levels = {str(level): level for level in STATES.values()}
                 if value not in STATES and value not in levels:
@@ -204,6 +222,8 @@ class SearchQuery:
                 args.append(node[2])
                 return f"m.window_count {node[1]} ?"
             args.append(node[1])
+            if kind in ("errors", "warnings"):
+                return f"(SELECT d.{kind} FROM trajectory_search_diagnostics d WHERE d.trajectory_uuid=s.uuid) = ?"
             if kind == "state":
                 return "COALESCE(json_extract(m.properties, '$.validation_level'), -3) = ?"
             if kind == "batch":
@@ -218,12 +238,15 @@ class SearchQuery:
 
         return compile_node(self.root), args
 
-    def matches(self, sample):
-        """Same semantics for the command layer's in-memory authoring drafts."""
+    def matches(self, sample, compiler=None):
+        """Match authoring drafts; diagnostic properties need the project compiler."""
         from .compiler import window_names
         from .dataset import trajectory_uuid
 
+        flags = None
+
         def evaluate(node):
+            nonlocal flags
             kind = node[0]
             if kind == "all":
                 return True
@@ -233,6 +256,12 @@ class SearchQuery:
                 return any(evaluate(n) for n in node[1])
             if kind == "not":
                 return not evaluate(node[1])
+            if kind in ("errors", "warnings"):
+                if compiler is None:
+                    raise ValueError("Diagnostic search requires a compiler")
+                if flags is None:
+                    flags = diagnostic_flags(sample, compiler)
+                return flags[0 if kind == "errors" else 1] == node[1]
             if kind == "text":
                 text = readable_text(sample)
                 return text_match(node[1], text) if "*" in node[1] else node[1] in text

@@ -839,7 +839,9 @@ replay text, arguments and authored outcomes. Spaces mean AND, `|` means OR,
 `-` negates a term/group, parentheses nest, and `*` provides word wildcards.
 `#tag` filters complete metadata tags; properties are `@name`, `@uuid`,
 `@windows` (numeric comparisons), `@uses_tool` (actual visible/invisible calls),
-`@state` (validation stage), and `@batch` (generation batch ID).
+`@state` (validation stage), `@batch` (generation batch ID), and
+`@errors:true/false` / `@warnings:true/false` (cached local compiler diagnostics).
+Use `@errors:false @warnings:false` for trajectories that compile without diagnostics.
 For example, `list_trajectories(query="@state:candidate", limit=5)` discovers
 five candidates for external review without calling a model API.
 All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.

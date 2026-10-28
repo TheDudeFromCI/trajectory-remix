@@ -358,7 +358,8 @@ class TrajectoryCommands:
 
         Case-insensitive query syntax: spaces AND, | OR, - negation, (groups),
         * word wildcards, #tag, @name:glob, @uuid:glob, @windows:>5,
-        @uses_tool:glob, @state:candidate, @batch:glob. AND binds tighter than OR;
+        @uses_tool:glob, @state:candidate, @batch:glob, @errors:true/false,
+        @warnings:true/false. AND binds tighter than OR;
         - applies to a term or group.
         Example: python -(math complex) #coding. Empty query lists everything.
         Read get_authoring_guide(topic="search") for the full syntax and examples.
@@ -370,7 +371,7 @@ class TrajectoryCommands:
             )
             return {"revision": revision, "total": total, "trajectories": trajectories}
         search = SearchQuery(query)
-        samples = [s for s in self.state["samples"] if search.matches(s)]
+        samples = [s for s in self.state["samples"] if search.matches(s, self.compiler)]
         return {
             "revision": self.state["revision"],
             "total": len(samples),
