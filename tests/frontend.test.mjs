@@ -1126,6 +1126,33 @@ confirmResult = true;
 await click("resume-trajectory-generation");
 assert.equal(resumeRequests, 3);
 w.fetch = beforeResumeFetch;
+// Evaluation failures retain the existing candidate and resume the batch.
+const beforeEvaluationFetch = w.fetch;
+let evaluationResumed = false;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/resume") {
+    assert.equal(JSON.parse(options.body).sample_id, "evaluation-candidate");
+    evaluationResumed = true;
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
+  if (path === "/api/scenarios/start") assert.fail("Evaluation recovery must not start a fresh sample");
+  const response = await beforeEvaluationFetch(path, options);
+  if (path.startsWith("/api/state?")) {
+    const data = await response.json();
+    data.status = {...data.status, running:false, phase:"evaluation_failed",
+      draft_id:"evaluation-candidate", last_error:"Evaluation failed; review context unavailable",
+      batch:{id:"evaluation-batch", target:3, completed:0, attempts:1, attempt_limit:9, state:"paused"}};
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+await waitFor(() => $("pause-run").textContent === "Resume", 5000);
+assert.equal($("generation-count").value, "3");
+assert.match($("generation-detail").textContent, /Evaluation failed/);
+await click("pause-run");
+assert.equal(evaluationResumed, true);
+w.fetch = beforeEvaluationFetch;
+await waitFor(() => $("pause-run").textContent === "Start", 5000);
 // A short source can expand past 50,000 records because open windows idle.
 await w.document.querySelector('.tab[data-view="json"]').onclick();
 const largeSource = {

@@ -280,7 +280,7 @@ function renderStatus() {
   scenarioSelect.disabled = s.running;
   $("generation-count").disabled = s.running;
   const batch = s.batch;
-  if (batch && (s.running || s.phase === "api_paused")) $("generation-count").value = String(batch.target);
+  if (batch && (s.running || ["api_paused", "evaluation_failed"].includes(s.phase))) $("generation-count").value = String(batch.target);
   $("batch-progress").hidden = !batch || batch.target <= 1;
   const batchState = s.running && s.paused ? "paused" : s.pause_requested ? "pausing" : batch?.state;
   $("batch-progress").textContent = batch ? `${batch.completed}/${batch.target} completed · ${batch.attempts}/${batch.attempt_limit} attempts · ${batchState}` : "";
@@ -310,8 +310,8 @@ function renderStatus() {
   $("sample-json").readOnly = sampleLocked;
   $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
   renderValidationState();
-  $("pause-run").textContent = !s.running ? (s.phase === "api_paused" ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
-  $("pause-run").disabled = !s.running && !scenarioNames.length && !(s.phase === "api_paused" && s.draft_id);
+  $("pause-run").textContent = !s.running ? (["api_paused", "evaluation_failed"].includes(s.phase) ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
+  $("pause-run").disabled = !s.running && !scenarioNames.length && !(["api_paused", "evaluation_failed"].includes(s.phase) && s.draft_id);
   $("stop-run").disabled = !s.running;
   renderHistoryActions();
   $("selected-tags").replaceChildren(
@@ -2596,7 +2596,7 @@ $("stop-run").onclick = action(async () => {
 $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    if (state.status.phase === "api_paused") await resumeGeneration(state.status.draft_id);
+    if (["api_paused", "evaluation_failed"].includes(state.status.phase)) await resumeGeneration(state.status.draft_id);
     else {
       const count = $("generation-count");
       if (!count.reportValidity()) return;

@@ -155,6 +155,23 @@ def test_compact_json_and_dedup_preserve_strings():
     assert compact({"x": 1, "y": 2}) == '{"x":1,"y":2}'
 
 
+def test_legacy_layout_context_retrieves_full_source_evidence(compiler, sample):
+    sample["replay"]["1"] = [{"op": "append", "window": "a", "source": "user", "content": "Critical earlier observation"}]
+    sample["replay"]["10"] = [{"op": "generate", "window": "b", "content": "Use the evidence."}]
+    config = ReviewCheck(prompt="review.md", view="layout")
+    view = ReviewView(sample, compiler.compile(sample), config, compiler.tokenizer)
+    payload = view.payload([u for u in view.units if u["start"] == 10], {})
+    extra = view.context(["window:a"], payload)
+    assert any(u.get("data", {}).get("content") == "Critical earlier observation" for u in extra)
+    # An ID in the current group can also be only a content-free projection.
+    projected = view.payload([view.by_id["replay[1][0]"]], {})
+    assert "content" not in projected["events"][0]["data"]
+    full = view.context(["replay[1][0]"], projected)
+    assert full[0]["data"]["content"] == "Critical earlier observation"
+    projected["events"] = full
+    assert view.context(["replay[1][0]"], projected) == []
+
+
 def test_repairs_use_original_ids_and_are_atomic(sample):
     sample["replay"]["1"] = [
         {"op": "append", "window": "a", "content": "wrong fact", "source": "user"},
