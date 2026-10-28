@@ -133,6 +133,19 @@ per-rule assessments without model API calls. Newly generated samples from the
 bundled flow carry `#user_scenario` alongside randomized tags and preserve their
 original checklist. See [the MCP review workflow](docs/MCP.md#scenario-review-and-repair).
 
+**View → Trajectory Guidelines** opens the same guidance bundle exposed to MCP
+by `get_guidance`. Each guide has its own tab, with rendered Markdown and a source
+view. Select a scenario for creation prompts, review/repair guides and its checklist,
+or the current trajectory for its original saved review checklist.
+
+Use **Edit Custom Guidelines** in that window, or **Generation Settings → Custom
+Guidelines**, to edit a dataset guide and checklist, with optional scenario-specific
+additions. They are stored in the project configuration; standard guides and
+scenario files remain read-only. MCP agents should call `get_guidance` before
+creation, validation or repair, supplying `scenario` or `sample_id` as appropriate.
+Custom requirements supplement scenario snapshots and participate in the checklist
+hash, so changed requirements require a fresh review.
+
 ## Dashboard workflow
 
 1. **Import samples** accepts multiple `.json`, `.jsonl`, and `.kidra-dataset`
