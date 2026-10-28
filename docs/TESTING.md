@@ -100,6 +100,10 @@
   and transactional updates through edits/imports/undo/redo. MCP protocol checks
   retrieve the packaged search guide and exercise queries and errors. DOM checks
   combine operators beyond page one and verify inline query error recovery.
+- Compiler diagnostic search checks cover `@errors`/`@warnings` true and false,
+  SQL/draft parity, invalid boolean values, grouping/negation, filtering before
+  pagination, lazy cache reuse, source/tool invalidation, reopening, and dashboard/MCP
+  agreement through edits and undo/redo without changing pinned dependencies.
 - A Python wheel builds successfully and contains all dashboard assets.
 
 LLM integrations are tested against deterministic fake completions and an
