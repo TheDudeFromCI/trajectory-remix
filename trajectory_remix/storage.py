@@ -14,6 +14,7 @@ import uuid
 from collections.abc import MutableSequence
 from contextlib import closing, contextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from .dataset import prepare_sample, public_config
 from .search import SearchQuery, diagnostic_flags, readable_text, register_search_functions, used_tools
@@ -23,6 +24,13 @@ GAP = 1 << 32
 
 class StorageConflict(ValueError):
     code = "conflict"
+
+
+class TokenizerMigrationError(ValueError):
+    def __init__(self, sample, error):
+        super().__init__(f"Trajectory {sample.get('id', sample['uuid'])}: {error}")
+        self.sample_id = sample.get("id")
+        self.diagnostic = error.diagnostic()
 
 
 def encode(value):
@@ -173,6 +181,58 @@ class DatasetStore:
             return Compiler(Tokenizer.from_str(tokenizer), **json.loads(special), max_window_slots=self.max_window_slots, slot_policy=self.slot_policy, tools=tools, tool_store=self)
         except Exception as error:
             raise ValueError(f"Invalid project tokenizer: {error}") from error
+
+    def migrate_tokenizer(self, compiler, expected_revision, progress):
+        """Compile a snapshot one source at a time, then atomically install it.
+
+        Stage tool plans on disk so a failed migration never updates live caches
+        and a large dataset never accumulates compiled trajectories in RAM.
+        Writers remain free during compilation; any source/config change makes
+        the final revision check fail instead of installing a stale migration.
+        """
+        from .compiler import CompileError
+
+        store = self
+        with TemporaryDirectory(prefix="remix-tokenizer-") as temp:
+            with closing(sqlite3.connect(Path(temp) / "plans.sqlite")) as staged:
+                staged.execute("CREATE TABLE plans(uuid TEXT, source_hash TEXT, tools_hash TEXT, error TEXT, plan TEXT)")
+
+                class MigrationTools:
+                    def verify_tool_dependencies(self, sample, registry):
+                        store.verify_tool_dependencies(sample, registry)
+
+                    def record_tool_compilation(self, sample, registry, plan):
+                        if any(registry.get(name).external for name in store.tool_names(sample, registry)):
+                            try:
+                                cached = encode(plan)
+                            except (TypeError, ValueError):
+                                cached = None
+                            staged.execute("INSERT INTO plans VALUES(?,?,?,NULL,?)",
+                                           (sample["uuid"], store.row(sample)[-1], registry.fingerprint, cached))
+
+                compiler.tool_store = MigrationTools()
+                try:
+                    with self.connect() as snapshot:
+                        snapshot.execute("BEGIN")
+                        revision, total = snapshot.execute("SELECT revision,sample_count FROM project").fetchone()
+                        if revision != expected_revision:
+                            raise StorageConflict("Dataset changed; reload before migrating the tokenizer")
+                        progress(0, total)
+                        for converted, (raw,) in enumerate(snapshot.execute("SELECT source FROM samples ORDER BY position"), 1):
+                            sample = json.loads(raw)
+                            try:
+                                compiler.compile(sample)
+                            except CompileError as error:
+                                raise TokenizerMigrationError(sample, error) from error
+                            progress(converted, total)
+                    with self.transaction(expected_revision) as db:
+                        db.execute("UPDATE project SET tokenizer=?,special_tokens=?,sample_revision=revision+1,revision=revision+1",
+                                   (compiler.tokenizer.to_str(), encode(compiler.special)))
+                        db.execute("DELETE FROM tool_compilations")
+                        db.executemany("INSERT INTO tool_compilations VALUES(?,?,?,?,?)", staged.execute("SELECT * FROM plans"))
+                        return db.execute("SELECT revision FROM project").fetchone()[0]
+                finally:
+                    compiler.tool_store = self
 
     def tool_names(self, sample, registry):
         names = set()

@@ -7,6 +7,9 @@ trajectory-remix --dataset project.sqlite --scenarios-dir examples/scenarios
 ```
 
 Copy `examples/scenarios/user_problem` into your own directory to customize it.
+For autonomous work without user dialogue, select the content-first
+[`idle_scenario_noval` flow](idle-scenario-generation.md), which covers TODOs,
+project files, memory and alarms with external review only.
 The loader recursively discovers `flow.yaml`; its containing folder's basename is
 its scenario type. Basenames must be unique, even in different branches of the
 folder tree. Each scenario contains one `flow.yaml` and Markdown prompts. Prompt

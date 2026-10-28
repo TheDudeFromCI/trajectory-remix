@@ -46,6 +46,7 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 tools = {tool.name: tool for tool in catalog.tools}
                 assert {
                     "get_authoring_guide",
+                    "get_guidance",
                     "create_tool_call",
                     "get_sandbox_state",
                     "create_tool_session",
@@ -57,6 +58,11 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "repair_trajectory",
                     "record_trajectory_review",
                 } <= set(tools)
+                assert tools["get_guidance"].annotations.readOnlyHint
+                assert "get_guidance" in initialized.instructions
+                guidance = await session.call_tool("get_guidance", {})
+                assert not guidance.isError
+                assert any(d["id"] == "standard.review" for d in guidance.structuredContent["documents"])
                 assert tools["get_trajectory"].annotations.readOnlyHint
                 assert tools["review_trajectory"].annotations.readOnlyHint
                 assert not tools["repair_trajectory"].annotations.readOnlyHint

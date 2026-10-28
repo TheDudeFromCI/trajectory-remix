@@ -15,6 +15,7 @@
           <button id="file-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">File</button>
           <div id="file-menu" class="file-menu-popup" role="menu" hidden>
             <button id="import-button" role="menuitem">Import</button>
+            <button id="migrate-tokenizer-button" role="menuitem">Migrate Tokenizer…</button>
             <div class="submenu">
               <button id="export-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Export ▸</button>
               <div id="export-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
@@ -61,6 +62,8 @@
         <div class="file-menu">
           <button id="view-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">View</button>
           <div id="view-menu" class="file-menu-popup" role="menu" hidden>
+            <button id="guidelines-button" role="menuitem">Trajectory Guidelines</button>
+            <hr role="separator" />
             <button id="toggle-dataset-panel" role="menuitemcheckbox" aria-checked="true"><span id="dataset-panel-check" class="menu-check" aria-hidden="true">✔</span> Dataset Panel</button>
           </div>
         </div>
@@ -293,6 +296,37 @@
       </div>
     </aside>
     <div id="toast" role="status" hidden></div>
+    <dialog id="tokenizer-migration-dialog" aria-labelledby="tokenizer-migration-title">
+      <div class="dialog-header">
+        <h2 id="tokenizer-migration-title">Migrate tokenizer</h2>
+        <button id="close-tokenizer-migration" class="square" aria-label="Close tokenizer migration">×</button>
+      </div>
+      <form id="tokenizer-migration-form">
+        <div class="migration-body">
+          <p>Recompile every saved trajectory with a new tokenizer. The project is updated only after all trajectories convert successfully. Migration clears Undo/Redo history.</p>
+          <fieldset id="tokenizer-migration-inputs">
+            <label for="tokenizer-file">Upload tokenizer.json</label>
+            <input id="tokenizer-file" type="file" accept=".json,application/json" />
+            <label for="tokenizer-config">Tokenizer configuration (JSON)</label>
+            <textarea id="tokenizer-config" spellcheck="false" required placeholder="Paste tokenizer.json here, or upload it above"></textarea>
+            <div class="migration-special-tokens">
+              <label>BOS<input id="tokenizer-bos" required /></label>
+              <label>EOS<input id="tokenizer-eos" required /></label>
+              <label>NOOP<input id="tokenizer-noop" required /></label>
+            </div>
+            <p class="hint">Special tokens must already exist as dedicated tokens in the new configuration. Saved trajectory text and timing markers are preserved; incompatible trajectories must be repaired before retrying.</p>
+          </fieldset>
+          <progress id="tokenizer-migration-progress" max="1" value="0" aria-label="Trajectories converted"></progress>
+          <p id="tokenizer-migration-count" role="status" aria-live="polite">0 / 0 trajectories converted</p>
+          <p id="tokenizer-migration-message" role="status" aria-live="polite"></p>
+          <div id="tokenizer-migration-error" role="alert" hidden></div>
+        </div>
+        <div class="dialog-footer">
+          <button id="dismiss-tokenizer-migration" type="button">Close</button>
+          <button id="start-tokenizer-migration" class="primary" type="submit">Migrate tokenizer</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="preferences-dialog">
       <div class="dialog-header">
         <div>
@@ -345,6 +379,7 @@
         <button class="active" data-config="endpoints">Endpoints</button
 
         ><button data-config="automatic">Automatic mode</button>
+        <button data-config="guidance">Custom Guidelines</button>
       </div>
       <div id="settings-errors" role="alert"></div>
       <div id="config-content"></div>
@@ -354,6 +389,22 @@
           persistence.</span
         ><button id="save-config" class="primary" disabled>Save Changes</button>
       </div>
+    </dialog>
+    <dialog id="guidelines-dialog" aria-labelledby="guidelines-title">
+      <div class="dialog-header">
+        <h2 id="guidelines-title">Trajectory Guidelines</h2>
+        <button id="close-guidelines" class="square" aria-label="Close guidelines">×</button>
+      </div>
+      <div class="guidelines-controls">
+        <label>Scope <select id="guidelines-scenario"></select></label>
+        <label><input id="guidelines-source" type="checkbox" /> Show source</label>
+        <button id="edit-guidelines">Edit Custom Guidelines</button>
+      </div>
+      <p class="hint">The same guides and checklist are available to MCP agents. Standard and scenario files are read-only; custom guidelines are saved with this dataset.</p>
+      <p id="guidelines-error" role="alert" hidden></p>
+      <div id="guidelines-tabs" role="tablist" aria-label="Guides"></div>
+      <p id="guidelines-provenance" class="hint"></p>
+      <article id="guidelines-content" class="markdown-guide" role="tabpanel" tabindex="0"></article>
     </dialog>
     <dialog id="export-dialog">
       <p class="hint">Token exports include only Validation 3 trajectories. Approve generated samples after human review.</p>

@@ -45,7 +45,17 @@ Use your actual training tokenizer for real datasets. The demo tokenizer is only
 a fixture. Initialization reads the tokenizer locally and stores its complete
 JSON in the project. Startup and export load that embedded tokenizer; no original
 tokenizer file or tokenizer command-line options are needed or accepted.
-To use a different tokenizer, initialize a separate project and import trajectories.
+To change an existing project's tokenizer, use **File → Migrate Tokenizer…**.
+Upload a new `tokenizer.json` or paste its configuration, check the BOS/EOS/NOOP
+spellings, then start migration. The popup shows converted/total trajectories.
+Generation must be stopped; editing is blocked while migration runs in the
+background. Every saved trajectory is recompiled one at a time. Only a fully
+successful migration updates the embedded tokenizer and compiled tool caches;
+failure shows the offending trajectory and diagnostic and leaves the project
+unchanged. Source text, timing markers, UUIDs and metadata are preserved.
+Incompatible marker/segment boundaries or fixed timings require source repairs
+before retrying. Successful migration clears Undo/Redo history and old previews.
+Restart any other server processes sharing this project to load the new tokenizer.
 Padding and truncation are disabled when compiling trajectories. Required special tokens must each already map to
 one dedicated ID. They are never silently added or renumbered.
 
@@ -133,6 +143,19 @@ per-rule assessments without model API calls. Newly generated samples from the
 bundled flow carry `#user_scenario` alongside randomized tags and preserve their
 original checklist. See [the MCP review workflow](docs/MCP.md#scenario-review-and-repair).
 
+**View → Trajectory Guidelines** opens the same guidance bundle exposed to MCP
+by `get_guidance`. Each guide has its own tab, with rendered Markdown and a source
+view. Select a scenario for creation prompts, review/repair guides and its checklist,
+or the current trajectory for its original saved review checklist.
+
+Use **Edit Custom Guidelines** in that window, or **Generation Settings → Custom
+Guidelines**, to edit a dataset guide and checklist, with optional scenario-specific
+additions. They are stored in the project configuration; standard guides and
+scenario files remain read-only. MCP agents should call `get_guidance` before
+creation, validation or repair, supplying `scenario` or `sample_id` as appropriate.
+Custom requirements supplement scenario snapshots and participate in the checklist
+hash, so changed requirements require a fresh review.
+
 ## Dashboard workflow
 
 1. **Import samples** accepts multiple `.json`, `.jsonl`, and `.kidra-dataset`
@@ -181,8 +204,8 @@ Leaving a name blank omits that property; the default names are Kidra and User.
 Dataset files are SQLite databases, conventionally named `project.sqlite`.
 The `project` row contains configuration, schema/revision counters, tokenizer JSON
 and special-token spellings (`bos`, `eos`, `noop`), the window-slot limit and a
-versioned allocation policy. The tokenizer is fixed at init;
-configuration edits and trajectory imports do not change it.
+versioned allocation policy. The tokenizer changes only through explicit
+migration; configuration edits and trajectory imports do not change it.
 Trajectories are stored as individual JSON records in rows, with indexed unique
 UUID primary keys and separate listing metadata. The editable `id` remains a
 unique label; `uuid` is immutable, survives edits/undo/imports, and seeds slot

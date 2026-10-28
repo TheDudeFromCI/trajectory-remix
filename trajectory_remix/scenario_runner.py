@@ -218,6 +218,8 @@ class ScenarioRunner:
         tags=None,
         batch_size=1,
     ):
+        if getattr(self.legacy, "tokenizer_migration", None) and self.legacy.tokenizer_migration.running:
+            raise ValueError("Wait for tokenizer migration to finish")
         if not _retry and (self.status["running"] or self.legacy.status["running"]):
             raise ValueError("Generation is already running")
         if type(batch_size) is not int or not 1 <= batch_size <= 1000:
@@ -412,6 +414,8 @@ class ScenarioRunner:
         )
 
     def resume_saved(self, sample_id, *, confirm_edited=False):
+        if getattr(self.legacy, "tokenizer_migration", None) and self.legacy.tokenizer_migration.running:
+            raise ValueError("Wait for tokenizer migration to finish")
         if self.status["running"] or self.legacy.status["running"]:
             raise ValueError("Generation already running")
         if not self.can_resume(sample_id):
@@ -1253,6 +1257,9 @@ class ScenarioRunner:
                     raise ValueError('Supply calls or call_groups, not both')
                 groups = inputs['call_groups'] if 'call_groups' in inputs else [inputs['calls']] if inputs.get('calls') else []
                 result.update(self.simulate({'calls': groups}, start_tick=result['start_tick']))
+                # Lifecycle choices belong to the generated decision. Release
+                # only after every consumer in this committed batch finishes.
+                self.release_windows(inputs.get('release_windows', []))
                 self.publish()
                 return result
             case "remix.novelty":
@@ -1370,6 +1377,28 @@ class ScenarioRunner:
             case "remix.reject":
                 raise Rejected(inputs.get("reason", "Rejected by scenario"))
 
+    def release_windows(self, names):
+        if (not isinstance(names, list) or len(names) > 128
+                or any(not isinstance(name, str) or not name for name in names)
+                or len(names) != len(set(names))):
+            raise ValueError("release_windows must be a list of distinct window IDs")
+        if not names:
+            return
+        plan = self.compiler.compile(self.builder.sample)
+        windows = {window['id']: window for window in plan['windows']}
+        for name in names:
+            window = windows.get(name)
+            if window is None or window['close'] is not None:
+                raise ValueError(f"Cannot release missing or closed window {name}")
+            if window['type'] in ('system', 'notes', 'tools'):
+                raise ValueError(f"Cannot release persistent {window['type']} window {name}")
+        tick = str(plan['max_tick'] + 1)
+        self.builder.sample['replay'].setdefault(tick, []).extend(
+            {'op': 'generate', 'window': name, 'content': self.compiler.special['eos']}
+            for name in names
+        )
+        self.builder.next_tick = self.compiler.compile(self.builder.sample)['max_tick'] + 1
+
     def close_temporary_windows(self, prefixes):
         plan = self.compiler.compile(self.builder.sample)
         for window in plan["windows"]:
@@ -1400,13 +1429,21 @@ class ScenarioRunner:
                 self.builder.sample["replay"].setdefault(tick, []).append(
                     {"op": "open", "window": "tools", "window-type": "tools"}
                 )
-            self.builder.sample["replay"].setdefault(tick, []).append(
-                {
-                    "op": "show_tools",
-                    "window": "tools",
-                    "tools": sorted({call["tool"] for call in group}),
+            names = {call["tool"] for call in group}
+            if self.content_first:
+                # Contracts already visible in this persistent window need not
+                # be appended again on every adaptive action cycle.
+                names -= {
+                    name
+                    for events in self.builder.sample['replay'].values()
+                    for event in events
+                    if event['op'] == 'show_tools' and event['window'] == 'tools'
+                    for name in event['tools']
                 }
-            )
+            if names:
+                self.builder.sample["replay"].setdefault(tick, []).append(
+                    {"op": "show_tools", "window": "tools", "tools": sorted(names)}
+                )
             windows = []
             for call in group:
                 allowed = {'tool', 'arguments', 'outcome'}
@@ -1447,7 +1484,7 @@ class ScenarioRunner:
         draft = copy.deepcopy(self.builder.sample)
         plan = self.compiler.compile(draft)
         for window in plan["windows"]:
-            if window["close"] is None:
+            if window["close"] is None and window["type"] != "notes":
                 draft["replay"].setdefault(str(plan["max_tick"] + 1), []).append(
                     {
                         "op": "generate",

@@ -99,6 +99,41 @@ const waitFor = async (predicate, timeout = 3000) => {
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
 assert.doesNotMatch($("window-grid").textContent, /<\|cxt\|>/);
+// Tokenizer migration accepts pasted JSON and uploads, reports progress, and
+// refreshes the current preview without requiring a page reload.
+await click("file-menu-button");
+await click("migrate-tokenizer-button");
+assert.equal($("tokenizer-migration-dialog").open, true);
+assert.equal($("tokenizer-eos").value, "<|eos|>");
+$("tokenizer-config").value = "invalid JSON";
+await $("tokenizer-migration-form").onsubmit({ preventDefault() {} });
+assert.equal($("tokenizer-migration-error").hidden, false);
+assert.match($("tokenizer-migration-error").textContent, /Invalid tokenizer configuration/);
+assert.equal($("start-tokenizer-migration").disabled, false);
+const migrationConfig = JSON.parse(await fs.readFile(new URL("../examples/demo-tokenizer.json", import.meta.url), "utf8"));
+const migrationVocab = migrationConfig.model.vocab;
+[migrationVocab.a, migrationVocab.b] = [migrationVocab.b, migrationVocab.a];
+const tokenizerTransfer = new w.DataTransfer();
+tokenizerTransfer.items.add(new w.File([JSON.stringify(migrationConfig)], "new-tokenizer.json"));
+$("tokenizer-file").files = tokenizerTransfer.files;
+await $("tokenizer-file").onchange();
+assert.deepEqual(JSON.parse($("tokenizer-config").value), migrationConfig);
+const beforeMigrationPlan = lastPlan;
+const beforeMigrationSource = JSON.parse($("sample-json").value);
+const migrationSubmit = $("tokenizer-migration-form").onsubmit({ preventDefault() {} });
+assert.equal($("start-tokenizer-migration").disabled, true);
+assert.equal($("tokenizer-migration-inputs").disabled, true);
+assert.equal($("workspace").inert, true);
+await migrationSubmit;
+assert.equal($("tokenizer-migration-progress").value, 1);
+assert.equal($("tokenizer-migration-count").textContent, "1 / 1 trajectories converted");
+assert.match($("tokenizer-migration-message").textContent, /Migration complete/);
+assert.equal($("tokenizer-migration-error").hidden, true);
+assert.notEqual(lastPlan.tokenizer_sha256, beforeMigrationPlan.tokenizer_sha256);
+assert.deepEqual(JSON.parse($("sample-json").value), beforeMigrationSource);
+assert.equal($("workspace").inert, false);
+await click("dismiss-tokenizer-migration");
+assert.equal($("tokenizer-migration-dialog").open, false);
 await click("preferences-button");
 assert.equal($("show-window-headers").checked, false);
 $("show-window-headers").checked = true;
@@ -1057,6 +1092,58 @@ assert.equal($("save-config").disabled, false);
 await click("save-config");
 assert.equal($("save-config").disabled, true);
 await click("close-settings");
+// Guidance settings persist Markdown and the editor shows the exact MCP bundle.
+await click("view-menu-button");
+await click("guidelines-button");
+assert($("guidelines-dialog").open);
+assert($("guidelines-content").querySelector("h1"));
+await click("edit-guidelines");
+assert($("settings-dialog").open);
+assert($("custom-guide"));
+const customMarkdown = "# Dataset Names\nUse **random usernames**.\n- [ ] Include a joke.\n<img src=x onerror=alert(1)>\n[unsafe](javascript:alert(1))\n\n```text\nExact code\n```";
+$("custom-guide").value = customMarkdown;
+$("custom-guide").dispatchEvent(new w.Event("input", {bubbles: true}));
+$("custom-checklist").value = "- [ ] Check every window.";
+$("custom-checklist").dispatchEvent(new w.Event("input", {bubbles: true}));
+await click("save-config");
+assert.equal($("save-config").disabled, true);
+await click("close-settings");
+await click("guidelines-button");
+const guideTab = title => [...$("guidelines-tabs").children].find(tab => tab.textContent === title);
+assert(guideTab("Dataset Guide"));
+guideTab("Dataset Guide").onclick();
+assert.equal($("guidelines-content").querySelector("strong").textContent, "random usernames");
+assert.equal($("guidelines-content").querySelector("img"), null);
+assert.equal($("guidelines-content").querySelector("a"), null);
+assert.equal($("guidelines-content").querySelector('input[type="checkbox"]').disabled, true);
+$("guidelines-source").checked = true; $("guidelines-source").onchange();
+assert.equal($("guidelines-content").textContent, customMarkdown);
+$("guidelines-source").checked = false; $("guidelines-source").onchange();
+$("guidelines-scenario").value = "scenario:user_problem";
+await $("guidelines-scenario").onchange();
+assert(guideTab("Review Checklist"));
+assert(guideTab("idea.md"));
+guideTab("Review Checklist").onclick();
+assert.match($("guidelines-content").textContent, /user_problem/);
+await click("edit-guidelines");
+assert.equal($("custom-guidance-scenario").value, "user_problem");
+$("custom-guide").value = "# Scenario Guide\nMake a pun.";
+$("custom-guide").dispatchEvent(new w.Event("input", {bubbles: true}));
+await click("save-config");
+$("custom-guidance-scenario").value = ""; $("custom-guidance-scenario").onchange();
+assert.equal($("custom-guide").value, customMarkdown);
+await click("close-settings");
+await click("guidelines-button");
+$("guidelines-scenario").value = "scenario:user_problem"; await $("guidelines-scenario").onchange();
+guideTab("Scenario user_problem Guide").onclick();
+assert.match($("guidelines-content").textContent, /Make a pun/);
+const sharedGuidance = await (await w.fetch("/api/mcp/call", {method: "POST", headers: {
+  "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
+  "Content-Type": "application/json",
+}, body: JSON.stringify({name: "get_guidance", arguments: {scenario: "user_problem"}})})).json();
+assert.equal(sharedGuidance.documents.find(d => d.id === "custom.dataset.guide").content, customMarkdown);
+assert.equal(sharedGuidance.documents.find(d => d.id === "custom.scenario.guide").content, "# Scenario Guide\nMake a pun.");
+await click("close-guidelines");
 const manualTag = $("scenario-tag-controls").querySelector("select");
 assert(manualTag);
 manualTag.value = manualTag.options[manualTag.options.length - 1].value;
@@ -1257,7 +1344,7 @@ assert.deepEqual(errors, []);
 console.log(
   JSON.stringify({
     test: "DOM integration against live local backend",
-    checks: 120,
+    checks: 140,
     errors,
   }),
 );

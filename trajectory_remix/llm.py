@@ -187,6 +187,8 @@ def validate_config(config):
     for key, default, low in (("context_budget", 8192, 1), ("reserve_tokens", 256, 0)):
         if type(content.get(key, default)) is not int or not low <= content.get(key, default) <= 1_000_000:
             raise ValueError(f"content_first.{key} must be an integer in [{low}, 1000000]")
+    from .guidance import validate_guidance
+    validate_guidance(config.get("review_guidance", {}))
     single = config.get("single_generation", {})
     if not isinstance(single, dict):
         raise ValueError("single_generation must be an object")

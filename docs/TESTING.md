@@ -20,12 +20,23 @@
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
   API-free per-item recording, and transport tool discovery.
+- Guidance tests verify identical dashboard/MCP bundles, unchanged read-only standard
+  files, persistent dataset/scenario Markdown, portable saved prompts, custom-check
+  result coverage and stale checklist rejection. DOM checks edit both scopes, switch
+  guide tabs and scenarios, view exact source, and render user Markdown as safe text.
 - Streamable HTTP checks cover direct POST initialization, initialized notifications,
   tool discovery/calls, session and protocol headers, deletion, malformed requests,
   HTTP methods, CORS preflight/exposed session headers and explicit origin/Host
   restrictions without weakening dashboard token checks. A real network test uses
   the official SDK, verifies HTTP and stdio share edits, and holds GET/SSE open
   while POST remains operational. The dashboard also works without the MCP extra.
+- Idle-scenario regressions exercise autonomous project work without a user or
+  chat window, quiet and blocked endings, real alarm results, concurrent private
+  analyses/tools, observation-dependent writes and TODO completion, generated
+  window release, persistent automatic notes, budget rejection, iteration limits,
+  cancellation/restart, failed-proposal retention, API-free external repair and
+  Ready-gated export. `python scripts/demo_idle_scenario.py` runs the real flow
+  with scripted offline content; it does not benchmark or approve a real model.
 - DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
@@ -86,6 +97,12 @@
   verify embedded tokenizer/special-token round trips, launching after deleting
   the tokenizer source file, refusing reinitialization and launch-time tokenizer
   overrides, and rejecting missing databases without creating files.
+- Tokenizer migration checks cover configuration validation, every saved source
+  being recompiled, live progress, generation/edit locks, concurrent revision
+  conflicts, atomic rollback, new token-boundary failures, custom special tokens,
+  empty datasets, persisted tool-plan replacement, preview invalidation and
+  restart persistence. DOM checks exercise the File menu dialog, pasted JSON,
+  uploads, inline errors, disabled inputs, completion and source preservation.
 - Window header/reference checks cover initialization order, loss masks, same-tick
   visibility, closure, implicit/repeated tool calls, native tokenizer IDs, stable
   numeric slots, multi-digit references, anchors, segment masks, literal tool
