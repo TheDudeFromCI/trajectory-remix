@@ -18,7 +18,8 @@ from starlette.routing import Route
 
 from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, chunks
-from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewLimit, bounded_json
+from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewCache, PreviewLimit, bounded_json
+from .migration import TokenizerMigration
 from .dataset import (
     new_sample,
     invalidate_automation,
@@ -66,6 +67,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             finally:
                 expiry.cancel()
                 await asyncio.gather(expiry, return_exceptions=True)
+                if migration.task is not None:
+                    await asyncio.shield(migration.task)
                 try:
                     await scenario_runner.stop()
                     await runner.stop()
@@ -83,6 +86,19 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     app.state.tool_diagnostics = tool_diagnostics
     app.state.commands = commands
     app.state.tool_sessions = commands.tool_sessions
+
+    def activate_tokenizer(candidate, revision):
+        nonlocal compiler
+        compiler = candidate
+        app.state.compiler = runner.compiler = scenario_runner.compiler = commands.compiler = candidate
+        commands.previews = PreviewCache(candidate)
+        runner.history.undo_stack.clear()
+        runner.history.redo_stack.clear()
+        runner.history.tip = revision
+        runner.history.notice = "History cleared after tokenizer migration"
+
+    migration = TokenizerMigration(store, runner, activate_tokenizer)
+    app.state.tokenizer_migration = migration
     mcp_http = StreamableHTTP(commands, mcp_allowed_origins)
     app.routes.append(
         Route("/mcp", mcp_http, methods=["GET", "POST", "DELETE", "OPTIONS"])
@@ -106,6 +122,10 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             if origin and origin != str(request.base_url).rstrip("/"):
                 return JSONResponse(
                     {"detail": "Cross-origin requests are blocked"}, status_code=403
+                )
+            if migration.running and request.method not in ("GET", "HEAD"):
+                return JSONResponse(
+                    {"detail": "Wait for tokenizer migration to finish", "code": "busy"}, status_code=409
                 )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -157,6 +177,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         return data
 
     def editable(sample_id=None):
+        if migration.running:
+            raise HTTPException(409, "Wait for tokenizer migration to finish")
         if runner.status["running"] or scenario_runner.locked(sample_id):
             raise HTTPException(
                 409, "Stop generation before editing the dataset or configuration"
@@ -207,7 +229,19 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 "vocab": compiler.tokenizer.get_vocab_size(),
                 "special": compiler.special,
             },
+            "tokenizer_migration": dict(migration.status),
         }
+
+    @app.post("/api/tokenizer/migrate", status_code=202)
+    async def migrate_tokenizer(request: Request):
+        data = await body(request)
+        if runner.status["running"] or scenario_runner.status["running"] or migration.running:
+            raise HTTPException(409, "Stop generation and wait for any tokenizer migration to finish")
+        return migration.start(data, compiler)
+
+    @app.get("/api/tokenizer/migration")
+    async def tokenizer_migration_status():
+        return dict(migration.status)
 
     @app.get("/search-guide", response_class=PlainTextResponse)
     async def search_guide():

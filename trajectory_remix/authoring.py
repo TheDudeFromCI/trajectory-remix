@@ -148,6 +148,8 @@ class TrajectoryCommands:
         ]
 
     async def call(self, name, arguments):
+        if getattr(self.runner, "tokenizer_migration", None) and self.runner.tokenizer_migration.running:
+            raise CommandError("Wait for tokenizer migration to finish", "busy")
         if name not in self.commands:
             raise CommandError(f"Unknown tool: {name}", "unknown_tool")
         fn = self.commands[name]
@@ -187,6 +189,8 @@ class TrajectoryCommands:
         raise CommandError(f"Trajectory not found: {sample_id}", "not_found")
 
     def _editable(self, expected_revision, sample_id=None):
+        if getattr(self.runner, "tokenizer_migration", None) and self.runner.tokenizer_migration.running:
+            raise CommandError("Wait for tokenizer migration to finish", "busy")
         if self.runner.status["running"] or (getattr(self.runner, "scenario_runner", None) and self.runner.scenario_runner.locked(sample_id)):
             raise CommandError("Stop generation before editing the dataset", "busy")
         if (

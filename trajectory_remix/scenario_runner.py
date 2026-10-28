@@ -186,6 +186,8 @@ class ScenarioRunner:
         tags=None,
         batch_size=1,
     ):
+        if getattr(self.legacy, "tokenizer_migration", None) and self.legacy.tokenizer_migration.running:
+            raise ValueError("Wait for tokenizer migration to finish")
         if not _retry and (self.status["running"] or self.legacy.status["running"]):
             raise ValueError("Generation is already running")
         if type(batch_size) is not int or not 1 <= batch_size <= 1000:
@@ -377,6 +379,8 @@ class ScenarioRunner:
         )
 
     def resume_saved(self, sample_id, *, confirm_edited=False):
+        if getattr(self.legacy, "tokenizer_migration", None) and self.legacy.tokenizer_migration.running:
+            raise ValueError("Wait for tokenizer migration to finish")
         if self.status["running"] or self.legacy.status["running"]:
             raise ValueError("Generation already running")
         if not self.can_resume(sample_id):

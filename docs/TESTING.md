@@ -78,6 +78,12 @@
   verify embedded tokenizer/special-token round trips, launching after deleting
   the tokenizer source file, refusing reinitialization and launch-time tokenizer
   overrides, and rejecting missing databases without creating files.
+- Tokenizer migration checks cover configuration validation, every saved source
+  being recompiled, live progress, generation/edit locks, concurrent revision
+  conflicts, atomic rollback, new token-boundary failures, custom special tokens,
+  empty datasets, persisted tool-plan replacement, preview invalidation and
+  restart persistence. DOM checks exercise the File menu dialog, pasted JSON,
+  uploads, inline errors, disabled inputs, completion and source preservation.
 - Window header/reference checks cover initialization order, loss masks, same-tick
   visibility, closure, implicit/repeated tool calls, native tokenizer IDs, stable
   numeric slots, multi-digit references, anchors, segment masks, literal tool
