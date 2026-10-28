@@ -127,6 +127,7 @@ class Flow(Definition):
     system_prompt: str = "You are Kidra, a coordinator."
     version: Literal[1] = 1
     description: str = ""
+    tag: str | None = Field(default=None, pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
     schemas: dict[str, dict] = Field(default_factory=dict)
     tags: dict[str, list[Tag]] = Field(default_factory=dict)
     roles: dict[str, Profile] = Field(default_factory=dict)
@@ -321,12 +322,16 @@ class ScenarioRegistry:
                 scenario = Scenario(filename.parent)
                 if scenario.name in self.scenarios:
                     raise ValueError(f"Duplicate scenario type: {scenario.name}")
+                tag = scenario.flow.tag or scenario.name
+                if any((s.flow.tag or s.name).casefold() == tag.casefold() for s in self.scenarios.values()):
+                    raise ValueError(f"Duplicate scenario tag: {tag}")
                 self.scenarios[scenario.name] = scenario
 
     def listing(self):
         return [
             {
                 "name": s.name,
+                "tag": s.flow.tag or s.name,
                 "description": s.flow.description,
                 "tag_pools": {
                     "scenario": {

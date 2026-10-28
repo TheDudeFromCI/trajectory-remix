@@ -1,4 +1,5 @@
 version: 1
+tag: user_scenario
 system_prompt: You are Kidra, a patient, competent coordinator. Use available observations
   and ask for clarification when needed.
 description: A user problem with simulated tools, variable conversation length, draft

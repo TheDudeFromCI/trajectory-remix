@@ -294,6 +294,23 @@ default, or `sample`), and `allow_not_applicable` (default `false`). Rule IDs us
 letters, digits, underscores or hyphens, starting with a letter. Duplicate YAML
 keys, invalid IDs, unknown fields and invalid scopes are rejected at load time.
 
+The flow's top-level `tag` identifies its generated samples for MCP review.
+The bundled flow uses `tag: user_scenario` (search `#user_scenario`); custom flows
+default to their folder name. Tags are bare names without `#`, beginning with a
+letter and containing letters, digits, underscores or hyphens. Configured scenario
+tags must be unique, case-insensitively. Generation adds this tag while retaining
+all randomized scenario tag names and `role:trait` tags, plus structured
+`metadata.scenario`, `context_tags` and `roles` provenance.
+
+New samples retain their original rules/prompts in `metadata.review_checklist`.
+MCP `review_trajectory` fetches it automatically; `get_review_checklist` fetches
+just the contract. Older/tag-only samples resolve through the configured scenario
+registry (metadata.scenario remains a legacy fallback). `repair_trajectory` applies
+atomic targeted fixes, and `record_trajectory_review` records every per-rule result
+with revision/checklist-hash checks, without invoking configured model endpoints.
+See [scenario MCP review](MCP.md#scenario-review-and-repair). Keep the snapshot on
+export/import to preserve the original checklist after scenario files change.
+
 The runner generates an explicit prompt checklist and exact JSON schema from
 these same definitions. All rules in a category are reviewed **in the same
 request per group**, in YAML order; there is no separate request per rule.

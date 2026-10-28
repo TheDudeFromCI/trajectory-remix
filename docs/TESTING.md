@@ -16,6 +16,10 @@
   pause/resume with Pending rather than rejected drafts. Lifecycle checks verify
   tool evidence survives reasoning and retained reasoning survives chat delivery;
   the dashboard test resumes evaluation failures without starting a fresh sample.
+- MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
+  preservation of randomized tags, portable checklist snapshots, exact results
+  schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
+  API-free per-item recording, and transport tool discovery.
 - Streamable HTTP checks cover direct POST initialization, initialized notifications,
   tool discovery/calls, session and protocol headers, deletion, malformed requests,
   HTTP methods, CORS preflight/exposed session headers and explicit origin/Host

@@ -234,6 +234,12 @@ def create_mcp_server(bridge):
             "Tools edit the running Trajectory Remix dashboard session. Read get_session "
             "and get_authoring_guide first for a short starting guide. Request one topic at a time; "
             'before reviewing or repairing, read get_authoring_guide(topic="review"). '
+            "For scenario trajectories, review_trajectory automatically includes the matching "
+            "scenario checklist, source, guide and compiler diagnostics; get_review_checklist "
+            "fetches just the checklist. repair_trajectory applies revision-bound targeted "
+            "repairs. Reread after repairs and use record_trajectory_review to record every "
+            "rule result at state 2/-2, without model API calls. Generated #user_scenario "
+            "samples retain their original checklist; custom flows can define other tags. "
             "Kidra attends to all open Kidra windows; reading an already-visible file needs a reason. "
             "EOS removes a window from context. Keep needed evidence or a sufficient retained summary "
             "available throughout dependent generation, including chat request composition. "

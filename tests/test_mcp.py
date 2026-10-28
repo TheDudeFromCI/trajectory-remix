@@ -18,11 +18,12 @@ from mcp.shared.memory import create_client_server_memory_streams
 
 from trajectory_remix.mcp_server import DashboardBridge, create_mcp_server, local_url
 from trajectory_remix.server import create_app
+from test_scenarios import EXAMPLES
 
 
 async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tmp_path):
     DatasetStore.initialize(tmp_path / "project.kidra-dataset", compiler)
-    app = create_app(tmp_path / "project.kidra-dataset")
+    app = create_app(tmp_path / "project.kidra-dataset", scenarios_dir=EXAMPLES)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://testserver"
     ) as client:
@@ -51,8 +52,17 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "apply_batch",
                     "query_trajectories",
                     "sign_off_trajectory",
+                    "get_review_checklist",
+                    "review_trajectory",
+                    "repair_trajectory",
+                    "record_trajectory_review",
                 } <= set(tools)
                 assert tools["get_trajectory"].annotations.readOnlyHint
+                assert tools["review_trajectory"].annotations.readOnlyHint
+                assert not tools["repair_trajectory"].annotations.readOnlyHint
+                assert not tools["record_trajectory_review"].annotations.readOnlyHint
+                assert "checklist_hash" in tools["repair_trajectory"].inputSchema["required"]
+                assert "review_trajectory" in initialized.instructions
                 assert not tools["sign_off_trajectory"].annotations.readOnlyHint
                 assert "expected_revision" in tools["sign_off_trajectory"].inputSchema["required"]
                 guide = await session.call_tool("get_authoring_guide", {})
@@ -105,6 +115,22 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "get_trajectory", {"sample_id": "from-mcp"}
                 )
                 assert result.structuredContent["sample"]["replay"]
+                tagged = await session.call_tool("update_trajectory_metadata", {
+                    "sample_id": "from-mcp", "patch": {"metadata": {"tags": ["user_scenario"]}},
+                })
+                assert not tagged.isError
+                review = await session.call_tool("review_trajectory", {"sample_id": "from-mcp"})
+                assert not review.isError
+                checklist = review.structuredContent["checklist"]
+                assert checklist["tag"] == "user_scenario"
+                assert len(checklist["checks"]["validate.reasoning"]["rules"]) == 6
+                dry_run = await session.call_tool("repair_trajectory", {
+                    "sample_id": "from-mcp", "expected_revision": review.structuredContent["revision"],
+                    "checklist_hash": checklist["checklist_hash"], "dry_run": True,
+                    "edits": [{"action": "replace_text", "event_id": "replay[0][0]",
+                               "field": "/window-type", "old": "missing", "new": "ignored"}],
+                })
+                assert dry_run.isError  # Invalid targets fail through MCP without saving.
                 found = await session.call_tool("list_trajectories", {
                     "query": '@name:from-* @windows:>0 -"impossible phrase"',
                 })

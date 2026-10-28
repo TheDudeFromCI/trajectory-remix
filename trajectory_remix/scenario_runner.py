@@ -34,6 +34,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from .dataset import evaluation_source
 from .generation_stats import RequestStats
+from .trajectory_review import build_checklist
 from .llm import SampleBuilder
 from .review import (
     EDIT_SCHEMA,
@@ -304,12 +305,15 @@ class ScenarioRunner:
             "system", self.scenario.flow.system_prompt, op="append", source="system"
         )
         self.builder.sample["metadata"]["tags"] = [
-            tag["name"] for tag in self.context["scenario"]["tags"].values()
-        ] + [
+            self.scenario.flow.tag or name,
+        ] + [tag["name"] for tag in self.context["scenario"]["tags"].values()] + [
             f"{role}:{tag['name']}"
             for role, profile in roles.items()
             for tag in profile["tags"].values()
         ]
+        self.builder.sample["metadata"]["review_checklist"] = build_checklist(
+            self.scenario
+        ).model_dump()
         self.status["conditions"] = {
             "scenario": self.context["scenario"]["tags"],
             **{role: profile["tags"] for role, profile in roles.items()},

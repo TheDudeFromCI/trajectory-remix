@@ -180,6 +180,10 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 | --- | --- |
 | `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns Skill.md and `example` returns the complete build-graph JSON trajectory. |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
+| `get_review_checklist` | Automatically resolve a trajectory's scenario tag/provenance and fetch its semantic checklist and results schema. |
+| `review_trajectory` | Prepare an API-free review with the automatically fetched checklist, guide, source and compiler diagnostics; optionally omit full source. |
+| `repair_trajectory` | Apply atomic targeted edits using original event IDs, revision and checklist hash; compile the candidate, invalidate old assessments and return the checklist. Supports dry runs. |
+| `record_trajectory_review` | Validate every category/rule result and record the code-computed review verdict at 2/-2 without model calls. |
 | `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
 | `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
 | `list_trajectories` | Search readable text with AND/OR, negation, groups, wildcards, properties and tags; paginate trajectory attributes. |
@@ -503,9 +507,82 @@ frames with at most 16 frames and 4 MB per response; `/api/frame/{plan_id}/{tick
 returns one bounded snapshot. Preview output limits return HTTP 413 with
 `code: "preview_limit"`, independently of compilation validity.
 
+## Scenario review and repair
+
+The bundled flow declares `tag: user_scenario` in flow.yaml. Generation adds
+`"user_scenario"` to `metadata.tags`, searchable as `#user_scenario`, as well as
+all sampled scenario tag names and `role:trait` names. Custom flows can define
+another unique `tag`; the default is the scenario folder name. `metadata.scenario`
+retains that folder identity. Newly generated samples also save a portable
+`metadata.review_checklist` containing the original rules and review/repair
+prompts, without endpoint configuration or credentials.
+
+Use these authoring MCP calls (not synthetic tools within a replay):
+
+```json
+{"name":"list_trajectories","arguments":{"query":"@state:candidate #user_scenario","limit":5}}
+```
+
+For each matching sample:
+
+```json
+{"name":"review_trajectory","arguments":{"sample_id":"example-1"}}
+```
+
+The response automatically includes `checklist`, `guide`, current `sample`,
+`context` (concept, roles and selected scenario traits), compiler diagnostics,
+`source_hash` and `revision`. The checklist includes `scenario`, `tag`,
+`checklist_hash`, every rule's requirement/scope/applicability, repair guidance,
+and the complete `results_schema`. Its `source` is `generation_snapshot` when
+saved with the sample, or `scenario_registry` for older/tag-only samples.
+`include_source:false` omits the potentially large source; inspect bounded events,
+window histories and snapshots instead. `get_review_checklist(sample_id=...)`
+retrieves only the checklist when the source is already known.
+
+A saved snapshot takes precedence over changed scenario files and survives
+export/import and a server without --scenarios-dir. Older/tag-only samples need
+the matching configured scenario, resolved by tag with `metadata.scenario` as a
+legacy fallback. Missing, multiple or conflicting scenarios fail explicitly;
+there is no fallback to another flow's checklist. Older samples are not silently
+retagged or rewritten. A generated snapshot is source provenance, not proof of
+review correctness or authenticity; editing it changes the source/checklist hash.
+
+Evaluate every rule independently, following the returned review guide. Apply
+fixes with `repair_trajectory`, passing `sample_id`, `expected_revision`,
+`checklist_hash`, and a nonempty `edits` array (at most 32). Actions match the
+generation repair schema: replace/delete an original `event_id`, insert_before/
+insert_after it, append an event at a tick, or replace_text using an exact unique
+`old` string, `new` string and JSON-pointer `field`. The entire candidate must
+compile before a single undoable commit; identity and metadata cannot be edited
+through this schema. `dry_run:true` validates without saving. The response
+contains compiler diagnostics, the automatically fetched checklist and
+`review_required:true`; saved repairs invalidate prior assessments.
+
+Reread `review_trajectory` after all repairs, review the entire trajectory again,
+and call `record_trajectory_review` with that revision and checklist hash, your
+`reviewer`, a specific `summary`, and `results` matching `checklist.results_schema`.
+Results are keyed by qualified category, such as `validate.reasoning`, each with
+its required `checks` object containing every rule's evidence/status/feedback.
+The schema is generated dynamically; do not hard-code the bundled list or omit
+passing categories. Group-scoped generation rules still need a whole-trajectory
+assessment in this final external review. Legacy checks without rules retain
+valid/feedback responses as indicated by the returned schema.
+
+Missing/extra categories or rules, invalid types/applicability, blank evidence,
+contradictory feedback, unresolved context, stale revisions and changed checklist
+hashes cannot approve a sample. Inspect missing evidence before recording a
+verdict. Code derives acceptance and preserves per-item results and the checklist
+hash in the evaluation. All accepted checks record state 2; failures record -2.
+Compiler errors block passing reviews but can accompany a rejection. Warnings
+remain the reviewer's responsibility. No tool in this workflow calls a model
+endpoint or grants human Ready (3). For manual/non-scenario samples,
+`sign_off_trajectory` remains the general unstructured sign-off tool.
+
 ## Atomic batches and diffs
 
 `apply_batch` accepts an `edits` array containing `{name, arguments}` objects.
+This differs from `repair_trajectory`, whose `edits` use `action` and original
+`event_id` references. Repair tools cannot be nested inside apply_batch.
 Supported names are the twelve trajectory/event mutation commands from
 `create_trajectory` through `rename_window`; the input schema enumerates them.
 Read tools, saves, batches, history actions and simulated-tool commands cannot

@@ -61,6 +61,7 @@ not additional top-level MCP tools selected by the client allowlist.
 
 | Defer initially | Introduce when |
 | --- | --- |
+| `get_review_checklist`, `review_trajectory`, `repair_trajectory`, `record_trajectory_review` | The task is reviewing/repairing a scenario sample; its checklist is automatically included. Read the review guide. |
 | `apply_batch` | The agent can make and validate individual edits; an atomic multi-edit repair is needed. |
 | `get_trajectory`, `replace_trajectory`, `create_trajectory.sample` | Full-source inspection, import or a structural migration is specifically needed. Prefer event reads for routine edits. |
 | `create_tool_session`, `list_tool_sessions`, `get_tool_session`, `call_simulated_tool`, `record_tool_interaction`, `reset_tool_session`, `delete_tool_session` | The user explicitly needs a separate ephemeral workbench and understands that recording does not transfer state. |
