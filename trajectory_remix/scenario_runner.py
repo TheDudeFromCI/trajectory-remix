@@ -34,7 +34,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import RequestUsage
 
-from .content_first import RequestBudget, assemble_streams, summarize_requests, validate_content
+from .content_first import RequestBudget, assemble_streams, summarize_requests, validate_content, public_tool_contracts
 from .dataset import evaluation_source, reject_constant
 from .generation_stats import RequestStats
 from .trajectory_review import build_checklist
@@ -319,6 +319,7 @@ class ScenarioRunner:
             "roles": roles,
             "steps": {},
             "tools": self.compiler.tools.schemas(),
+            "tool_contracts": public_tool_contracts(self.compiler.tools.schemas()),
         }
         self.builder = SampleBuilder(self.compiler, self.config)
         self.builder.sample["metadata"].update(
@@ -326,6 +327,7 @@ class ScenarioRunner:
             origin="automation",
             validation_level=0,
             scenario=name,
+            scenario_family=getattr(self.scenario, 'family', name),
             generation_batch=self.status["batch"]["id"],
             context_tags=self.context["scenario"]["tags"],
             roles=roles,
@@ -1247,8 +1249,10 @@ class ScenarioRunner:
                 )
             case "remix.assemble":
                 result = assemble_streams(self.builder, inputs)
-                if inputs.get('calls'):
-                    result.update(self.simulate({'calls': [inputs['calls']]}, start_tick=result['start_tick']))
+                if 'calls' in inputs and 'call_groups' in inputs:
+                    raise ValueError('Supply calls or call_groups, not both')
+                groups = inputs['call_groups'] if 'call_groups' in inputs else [inputs['calls']] if inputs.get('calls') else []
+                result.update(self.simulate({'calls': groups}, start_tick=result['start_tick']))
                 self.publish()
                 return result
             case "remix.novelty":

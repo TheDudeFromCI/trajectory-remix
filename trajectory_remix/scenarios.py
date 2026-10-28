@@ -270,17 +270,51 @@ class UniqueLoader(yaml.SafeLoader):
 
 
 class Scenario:
-    def __init__(self, path):
+    def __init__(self, path, resolve_parent=None):
         self.path = path.resolve()
         self.name = path.name
         raw = (path / "flow.yaml").read_text()
         if len(raw) > 1_000_000:
             raise ValueError("flow.yaml exceeds 1 MB")
         try:
-            self.flow = Flow.model_validate(yaml.load(raw, Loader=UniqueLoader))
+            definition = yaml.load(raw, Loader=UniqueLoader)
+            if not isinstance(definition, dict):
+                raise ValueError('Scenario definition must be an object')
+            parent_name = definition.pop('extends', None)
+            self.parent_name = parent_name
+            self.family = self.name
+            parent = None
+            if parent_name is not None:
+                if not isinstance(parent_name, str) or not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_-]*', parent_name):
+                    raise ValueError('extends must name a registered scenario')
+                if resolve_parent is None:
+                    raise ValueError('Load scenario variations through ScenarioRegistry')
+                parent = resolve_parent(parent_name)
+                self.family = parent.family
+                inherited = parent.flow.model_dump()
+                # Input pools and schemas inherit automatically. An explicit
+                # steps block defines its own scaffold; inherit:true imports an
+                # individual step without pulling in unrelated parent stages.
+                for section in ('steps', 'schemas'):
+                    overrides = definition.get(section, {})
+                    if not isinstance(overrides, dict):
+                        raise ValueError(f'{section} must be an object')
+                    overrides = copy.deepcopy(overrides)
+                    if section == 'steps':
+                        for key, value in overrides.items():
+                            if isinstance(value, dict) and 'inherit' in value:
+                                if value.pop('inherit') is not True or key not in inherited[section]:
+                                    raise ValueError(f'Cannot inherit undefined step: {key}')
+                                overrides[key] = {**inherited[section][key], **value}
+                    definition[section] = (overrides if section == 'steps' and section in definition
+                                           else {**inherited[section], **overrides})
+                    if section == 'steps':
+                        definition[section] = {k: v for k, v in definition[section].items() if v is not None}
+                definition = {**inherited, **definition}
+            self.flow = Flow.model_validate(definition)
         except (yaml.YAMLError, ValueError) as error:
             raise ValueError(f"Invalid scenario {self.name}: {error}") from error
-        self.prompts = {}
+        self.prompts = copy.deepcopy(parent.prompts) if parent else {}
 
         def collect(steps):
             for step in steps.values():
@@ -302,6 +336,8 @@ class Scenario:
                             raise ValueError(
                                 "Prompts must be Markdown files inside their scenario"
                             )
+                        if not target.exists() and parent and filename in parent.prompts:
+                            continue
                         text = target.read_text()
                         if len(text) > 200_000:
                             raise ValueError("Prompt exceeds 200 KB")
@@ -318,24 +354,42 @@ class ScenarioRegistry:
         if self.root is not None:
             if not self.root.is_dir():
                 raise ValueError(f"Scenario directory does not exist: {self.root}")
+            paths = {}
             for filename in sorted(self.root.rglob("flow.yaml")):
                 if not filename.resolve().is_relative_to(self.root):
-                    raise ValueError(
-                        "Scenario files must stay inside the scenario directory"
-                    )
-                scenario = Scenario(filename.parent)
-                if scenario.name in self.scenarios:
-                    raise ValueError(f"Duplicate scenario type: {scenario.name}")
+                    raise ValueError("Scenario files must stay inside the scenario directory")
+                name = filename.parent.name
+                if name in paths:
+                    raise ValueError(f"Duplicate scenario type: {name}")
+                paths[name] = filename.parent
+            loading = set()
+
+            def load(name):
+                if name in self.scenarios:
+                    return self.scenarios[name]
+                if name not in paths:
+                    raise ValueError(f"Unknown parent scenario: {name}")
+                if name in loading:
+                    raise ValueError(f"Scenario inheritance cycle: {name}")
+                loading.add(name)
+                scenario = Scenario(paths[name], resolve_parent=load)
+                loading.remove(name)
                 tag = scenario.flow.tag or scenario.name
-                if any((s.flow.tag or s.name).casefold() == tag.casefold() for s in self.scenarios.values()):
+                if any((s.flow.tag or s.name).casefold() == tag.casefold() and s.family != scenario.family
+                       for s in self.scenarios.values()):
                     raise ValueError(f"Duplicate scenario tag: {tag}")
-                self.scenarios[scenario.name] = scenario
+                self.scenarios[name] = scenario
+                return scenario
+
+            for name in paths:
+                load(name)
 
     def listing(self):
         return [
             {
                 "name": s.name,
                 "tag": s.flow.tag or s.name,
+                "variation_of": s.parent_name,
                 "description": s.flow.description,
                 "tag_pools": {
                     "scenario": {

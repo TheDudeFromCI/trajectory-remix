@@ -91,6 +91,11 @@ def assemble_streams(builder, inputs):
         if not isinstance(stream, dict) or set(stream) - {'window', 'type', 'content', 'op', 'source', 'offset', 'close', 'loss'}:
             raise ValueError('Unknown content stream field')
         window, text = stream.get('window'), stream.get('content')
+        if 'window' not in stream:
+            while f'reasoning-{builder.serial}' in windows or f'reasoning-{builder.serial}' in occupied:
+                builder.serial += 1
+            window = f'reasoning-{builder.serial}'
+            builder.serial += 1
         if not isinstance(window, str) or not window or window in occupied:
             raise ValueError('Each concurrent stream needs a distinct window')
         occupied.add(window)
@@ -199,3 +204,31 @@ def dataset_generation_metrics(samples):
         bucket['candidate_throughput_per_second'] = bucket['retained_candidates'] / elapsed if elapsed else None
         bucket['usable_throughput_per_second'] = bucket['approved_samples'] / elapsed if elapsed else None
     return modes
+
+
+def public_tool_contracts(schemas):
+    """Keep complete argument constraints and tool purposes, without wire wrappers.
+
+    Documentation on individual fields is redundant with their schema contract;
+    executable schema keywords, defaults and every tool remain present.
+    """
+    def strip(value):
+        if isinstance(value, dict):
+            result = {}
+            for key, child in value.items():
+                if key in ('description', 'title', '$schema', '$comment', 'examples'):
+                    continue
+                if key in ('properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas', 'dependentRequired') and isinstance(child, dict):
+                    result[key] = {name: strip(schema) for name, schema in child.items()}
+                elif key in ('const', 'enum', 'default'):
+                    result[key] = copy.deepcopy(child)
+                else:
+                    result[key] = strip(child)
+            return result
+        if isinstance(value, list):
+            return [strip(v) for v in value]
+        return value
+    return {entry['function']['name']: {
+        'purpose': entry['function'].get('description', ''),
+        'arguments': strip(entry['function']['parameters']),
+    } for entry in schemas}

@@ -33,7 +33,7 @@ Configure endpoints through the existing JSON API: `PUT /api/config` with body `
 }
 ```
 
-This is a content-only configuration example. Preserve existing legacy tasks/endpoints if you also use the legacy generation loop. Legacy tasks still require their referenced endpoints even when disabled. Content-first scenario review steps need no validator endpoint.
+This is a content-only configuration example. Preserve existing legacy tasks/endpoints if you also use the legacy generation loop. Legacy tasks still require their referenced endpoints even when disabled. The content-first runner needs no validator endpoint for deferred review. The settings API still checks endpoints required by other loaded scenarios; retain the original validator alias when loading the standard scenario alongside its fast variation.
 
 `inference_tokenizer` is a **local Hugging Face tokenizer directory**, with the tokenizer artifacts and the exact `chat_template` used by the inference server. It is independent of the embedded Kidra training tokenizer. Files are loaded locally with remote code disabled; the generator does not download models. The endpoint and tokenizer template must agree about roles, special tokens, and generation prefixes. There is no heuristic fallback. Missing tokenizer configuration fails before inference, leaving a recoverable draft and diagnostics.
 
@@ -84,13 +84,27 @@ Independent model steps run concurrently up to the existing `max_parallel` limit
 
 `remix.assemble` schedules each stream at the current committed frontier plus an optional nonnegative `offset`. No absolute/backdated start is accepted. Streams in a batch use distinct windows and overlap naturally, emitting one training token per tick. A later assembly step can continue an open window. Optional fields are `type`, `op` (`generate` or external `append`), `source`, `offset`, `close`, and `loss`. Generated streams retain the compiler's normal loss policy; external appends are masked by default. `close: true` emits EOS for generated streams. External windows close through a later generated lifecycle operation. Special trajectory tokens or anchors inside prose fail construction and are retained for repair.
 
-A batch may also take `calls`, a flat list of **model-generated** `{tool, arguments}` decisions. Their request windows start alongside its reasoning streams. The compiler serializes and supervises the requests; actual tool results remain external observations with their normal masks. `remix.tools` retains its existing sequential groups of parallel calls. Custom tools use the existing registry and compiler. `duration-ticks` and `delivery` are accepted in content-first tool plans, with tool-specific semantics: the calculator completes immediately; file latency is configured by `hardware_load_set`; timers and synthetic subagents implement their own delays. An optional `outcome` is allowed only for an externally authored synthetic subagent reply, as in the existing simulator. Never put a fabricated result in a generated request's arguments.
+Omitting a stream window allocates a unique reasoning window automatically. A batch may take `call_groups` (sequential groups of parallel calls), or `calls`, a flat list of **model-generated** `{tool, arguments}` decisions. Their request windows start alongside its reasoning streams. The compiler serializes and supervises the requests; actual tool results remain external observations with their normal masks. `remix.tools` retains its existing sequential groups of parallel calls. Custom tools use the existing registry and compiler. `duration-ticks` and `delivery` are accepted in content-first tool plans, with tool-specific semantics: the calculator completes immediately; file latency is configured by `hardware_load_set`; timers and synthetic subagents implement their own delays. An optional `outcome` is allowed only for an externally authored synthetic subagent reply, as in the existing simulator. Never put a fabricated result in a generated request's arguments.
 
 `remix.setup` supports files in `idea.files` and, in content-first mode, optional invisible `operations: [{tool, arguments}]` for environment conditions such as file latency, web state, permission changes, or failure injection. These are external operations with no model loss. They occur at the current frontier and cannot rewrite earlier world state. The original idea and success criteria are retained as `metadata.concept`.
 
 Use `remix.message` for user dialogue, and `remix.draft` for generated reasoning and responses. Assistant replies are delivered through generated `chat` requests and masked external chat writes. Final publication closes remaining windows through generated EOS. BOS, implicit NOOP, causal masks, tool result scheduling, and lifecycle validity remain owned by the existing compiler. Review stages receive a closed draft while generation checkpoints retain continuable open windows.
 
-## Run the demonstration
+## Fast user-scenario variation
+
+Select **`user_scenario_noval`** to generate the same class of samples as `user_problem` (`#user_scenario`) with no local validation. It inherits the original system prompt, all domain/difficulty pools and weights, user/Kidra roles and traits, idea-generation requirements, user-message prompt, schemas, and semantic review checklist. Manual selections and randomized inputs are identical in the dashboard. Future changes to those parent input pools are inherited automatically.
+
+The variation creates one idea and uses three bounded content requests per exchange: the fictional user message, Kidra's private planning/tool decisions, and a grounded reasoning/response/continuation object after actual observations. A one-exchange sample therefore uses **four** generation requests. There is no reference-solution request, novelty judge, separate answer writer, assessment request, validator, or local semantic repair loop. The completion flag controls whether another meaningful user exchange is needed; it never validates or approves the sample. Up to four exchanges remain supported.
+
+Planning notes and independent tool requests start together. Public tool purposes and complete argument constraints are supplied in a compact contract catalogue; redundant field documentation and OpenAI wire wrappers are omitted. No tool or executable constraint is silently truncated. Automatic reasoning-window IDs and lifecycle operations require no model-generated syntax. Results remain actual simulator observations, and external review/Ready approval remain separate from generation.
+
+The scenario uses `extends: user_problem`. Omitted top-level input sections inherit; schemas merge by name. An explicit `steps` block defines the variation's scaffold, and `inherit: true` imports a named parent step before applying its field overrides. Prompt files fall back to the parent's saved prompt contents. Parents must be registered inside the configured scenario root; cycles, unknown parents, and unrelated duplicate tags are rejected. Only scenarios in the same inheritance family may share a tag.
+
+Both variants retain `#user_scenario` for analysis and distribution tracking. `metadata.scenario` distinguishes the exact generator and `metadata.scenario_family` identifies the parent family. MCP uses that provenance and the saved original checklist; legacy tag-only samples continue resolving to `user_problem`. Existing datasets and unrelated scenario tags retain their original behavior.
+
+Launch the existing dashboard with `--scenarios-dir examples/scenarios`, configure the inference tokenizer, then select `user_scenario_noval`. The run API accepts `{"scenario":"user_scenario_noval"}` and the same optional manual tags, batch size and concurrency settings as `user_problem`. No validator is contacted. When the original scenario is loaded too, the existing settings checks still require its validator alias; it may point at the same server and remains unused by the fast variation.
+
+## Parallel construction demonstration
 
 The bundled `examples/scenarios/content_first` scenario generates a brief, independently generates two reasoning streams and tool decisions, runs the streams and tool requests together, then generates a reaction from real observations. The local model never authors replay structure. It exercises arithmetic discrepancies, missing evidence, tool failures, and user-facing delivery. Tags vary the domain and complication; model outputs determine quantities, facts, tools, and response content.
 
@@ -128,7 +142,7 @@ Run a reproducible offline integration comparison:
 python scripts/benchmark_content_first.py --samples 3 --output-dir work/content-first-demo
 ```
 
-It writes two SQLite projects, inspectable samples, and `report.json`. The offline fixture uses scripted content, a local fixture inference tokenizer, and **explicitly simulated inference latency**, so its timings are not local-model/GPU benchmarks. It compares the same scenario in existing mode (including a local validator) and content-first mode. The existing YAML pipeline already separates much content from replay syntax; this benchmark isolates bounded assembly and deferred validation. See [recorded results](content-first-benchmark.md).
+It writes two SQLite projects, inspectable samples, and `report.json`. The offline fixture uses scripted content, a local fixture inference tokenizer, and **explicitly simulated inference latency**, so its timings are not local-model/GPU benchmarks. By default it compares `user_problem` with `user_scenario_noval`, sharing generation input pools and fixture content. `--scenario-family content-demo` retains the earlier parallel-construction comparison. The existing YAML pipeline already separates much content from replay syntax; this benchmark isolates bounded assembly and deferred validation. See [recorded results](content-first-benchmark.md).
 
 For actual endpoint measurements, use a fresh directory:
 
@@ -136,6 +150,7 @@ For actual endpoint measurements, use a fresh directory:
 python scripts/benchmark_content_first.py --live --samples 3 \
   --base-url http://127.0.0.1:8080/v1 --model your-local-model \
   --inference-tokenizer /models/your-local-model \
+  --training-tokenizer /models/kidra/tokenizer.json \
   --output-dir work/content-first-live
 ```
 

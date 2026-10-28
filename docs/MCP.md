@@ -917,3 +917,5 @@ Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins,
 ## Content-first generation evidence
 
 `get_generation_record(sample_id, request_index?, include_failures=false)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
+
+The `user_scenario_noval` variation shares `#user_scenario` and the parent input pools. Review resolves exact `metadata.scenario` provenance and its saved checklist; older tag-only samples resolve to the family root (`user_problem`). Shared family tags do not create multiple-scenario ambiguity.

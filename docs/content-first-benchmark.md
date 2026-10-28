@@ -1,34 +1,34 @@
-# Content-first comparison
+# Content-first user-scenario comparison
 
-Recorded October 28, 2026. Command:
+Recorded October 28, 2026:
 
 ```sh
-python scripts/benchmark_content_first.py --samples 3 --seed 42 --output-dir work/integrated-comparison
+python scripts/benchmark_content_first.py --samples 3 --seed 42 --output-dir work/noval-final-comparison
 ```
 
-This is an **offline integration benchmark with scripted outputs and simulated inference delays**, not a measurement of local LLM hardware or semantic quality. Both runs use the bundled `content_first` scenario, identical content outputs and condition seed, three concurrent content requests, the same fixture inference tokenizer, an 8192-token content-first request limit, and a 1024-token total completion cap. Existing mode runs its local semantic validator; content-first retains the original checklist and defers review. The original YAML workflow already generates content; this comparison does not claim the baseline model authors full replay syntax.
+This **offline integration benchmark uses scripted content and simulated inference delays**. It compares the original `user_problem` generator with `user_scenario_noval`, using the same inherited domain/difficulty pools, roles/traits, tag seed, authored arithmetic problem and actual calculator tool results. Both produce `#user_scenario` samples. The fast variation keeps the original external checklist but does no local semantic review. Optimized content prompts intentionally differ.
 
-| Metric | Existing YAML mode | Content-first |
+The fixture trains an offline byte-level BPE inference tokenizer from bundled scenario text and tool contracts. Its training tokenizer adds Kidra lifecycle tokens. These are fixture token counts, not measurements of a deployed model. Both endpoints use an 8192-token configured context and 1024-token total completion cap. Every fast request passes its own context preflight. No download or inference hardware is required.
+
+| Metric | `user_problem` | `user_scenario_noval` |
 | --- | ---: | ---: |
 | Candidates attempted / retained | 3 / 3 | 3 / 3 |
 | Successfully constructed drafts | 3 | 3 |
-| LLM requests | 18 | 15 |
-| Prompt tokens, fixture tokenizer | 55,737 | 14,812 |
-| Completion tokens, fixture tokenizer | 1,836 | 1,743 |
-| Total tokens | 57,573 | 16,555 |
-| Sum of simulated request durations | 2.307 s | 1.605 s |
-| Measured fixture/orchestration elapsed | 5.774 s | 3.749 s |
-| Constructed candidates / elapsed second | 0.520 | 0.800 |
+| Model requests | 45 | 12 |
+| Prompt tokens, fixture tokenizer | 61,151 | 16,833 |
+| Completion tokens, fixture tokenizer | 5,577 | 441 |
+| Total tokens | 66,728 | 17,274 |
+| Sum of simulated request durations | 4.195 s | 0.923 s |
+| Measured fixture/orchestration elapsed | 9.708 s | 4.310 s |
+| Constructed candidates / elapsed second | 0.309 | 0.696 |
 | Candidate retention | 100% | 100% |
 | Externally repaired / Ready approved | 0 / 0 | 0 / 0 |
 | Usable training samples / second | 0 | 0 |
 
-The fixture removes 16.7% of requests and 71.2% of total tokens, primarily by eliminating whole-draft validator input. Summed simulated request durations decrease 30.4%; measured fixture elapsed decreases 35.1%. Those timing percentages depend on artificial delays, host scheduling and deterministic compilation overhead. They do not establish GPU inference savings. No provider reasoning-token counters exist in this fixture; zero recorded reasoning usage is not evidence about real reasoning models.
+The fixture uses **73.3% fewer requests and 74.1% fewer tokens**, retaining all candidates in both modes. The fast path uses four calls per one-exchange sample: idea, user message, private planning/tool decisions, and grounded reasoning/response/continuation. Subsequent exchanges use three calls. It removes reference-solution, novelty-judging, separate reasoning/answer, assessment, validation and repair requests. The original uses its existing review grouping and novelty configuration, so its request count can vary with stored candidates and review groups.
 
-The fixture latency model is explicit in the script: 10ms per request, 100,000 simulated prompt tokens/second, and 5,000 simulated generated tokens/second. A fresh output directory is required, so prior measurements and candidate projects are preserved. `report.json` contains the counters, provenance and limitations; each mode's SQLite project and sample JSON support replay inspection. Reductions are reported only when both modes construct the requested number of candidates.
+Simulated request time falls 78.0% and measured fixture elapsed falls 55.6%. These percentages reflect an artificial latency model (10ms per request, 100k prompt tokens/s and 5k generated tokens/s), local tokenization/compilation, and host scheduling. They do not establish GPU savings. No reasoning counters exist in this fixture. The [recorded JSON report](content-first-benchmark.json) retains exact counters and limitations; the script preserves SQLite projects and inspectable samples in a fresh output directory.
 
-Structural fidelity is covered separately by regression tests: model-authored tool requests become supervised request tokens, actual calculator/file results become masked observations, parallel reasoning and requests overlap, delayed file results remain unavailable to earlier decisions, BOS/EOS/NOOP and visibility masks retain compiler semantics, and trajectories longer than 8192 tokens are assembled from individually bounded requests. Failure tests retain invalid JSON/schema responses, partial responses, and failed construction proposals; external MCP repair uses the original saved checklist and cannot grant export approval.
+The earlier standalone parallel-construction comparison remains available with `--scenario-family content-demo`. It is a construction demonstration; `user_scenario_noval` is the production variation sharing the original generation inputs.
 
-No live local inference endpoint or model artifacts were supplied in this environment. Real inference time, model-specific token savings, semantic quality, diversity, repair effort and approved-sample throughput remain unmeasured. Use the documented `--live` command with the server's actual tokenizer/template and total-completion parameter, externally review equivalent scenario outputs, and compare approved yield before drawing hardware or training-quality conclusions.
-
-The [recorded JSON report](content-first-benchmark.json) preserves these exact counters and measurement limitations. The integrated revision passed all 948 Python tests and 120 optional frontend DOM checks.
+Use `--live --base-url ... --model ... --inference-tokenizer ... --training-tokenizer ...` for real model measurements. No live endpoint/model artifacts were supplied here. Semantic quality, diversity, repair effort, hardware savings and approved-sample throughput remain unmeasured. The benchmark never approves samples and reports reductions only when both modes construct the requested candidate count.

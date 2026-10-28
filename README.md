@@ -631,3 +631,5 @@ profiles, inspection, lifecycle details, and the current implementation limits.
 ### Content-first generation
 
 Opt into `generation_mode: content-first` in a YAML scenario to generate bounded content requests, deterministically assemble parallel windows and tool requests, and defer semantic review/repair to Codex or other MCP agents. Configure a separate inference-model tokenizer and total request budget (8192 by default). Raw proposals and failed constructions remain recoverable; training export still requires Ready approval. See [configuration, demonstration, recovery, analytics, and limitations](docs/content-first-generation.md) and [benchmark findings](docs/content-first-benchmark.md).
+
+Use **`user_scenario_noval`** for the fast variation of `user_problem`: the same `#user_scenario` tag, randomized domains/difficulty, roles, traits and manual inputs, with four content requests for a one-exchange sample and no local semantic validation. Inputs and external review rules inherit from the original scenario; samples remain pending external review and Ready approval.

@@ -127,3 +127,5 @@ result, then emits EOS to release it.
   existing-mode/scenario compatibility. `scripts/benchmark_content_first.py`
   provides offline and real-endpoint end-to-end comparisons; offline inference
   delays are explicitly simulated.
+
+- User-scenario variation regressions verify inherited domains/difficulty/roles and weights, identical manual inputs and shared tags, exact original checklists, four calls for a one-exchange sample, multi-turn continuation, parallel planning/tool requests, no validator endpoint or semantic calls, inherited prompt loading, archived review provenance, safe family-tag resolution, and preserved tool-schema constraints.

@@ -806,7 +806,21 @@ class TrajectoryCommands:
         scenarios = scenario_runner.registry.scenarios if scenario_runner else {}
         matches = [s for s in scenarios.values() if (s.flow.tag or s.name).casefold() in tags]
         if len(matches) > 1:
-            raise CommandError("Multiple scenario tags; select one scenario before reviewing", "scenario_conflict")
+            families = {s.family for s in matches}
+            if len(families) > 1:
+                raise CommandError("Multiple scenario tags; select one scenario before reviewing", "scenario_conflict")
+            # Variations intentionally share a domain tag. Explicit provenance
+            # selects its exact contract; tag-only legacy samples use the root.
+            selected = metadata.get('scenario')
+            exact = [s for s in matches if s.name == selected] if selected else []
+            if exact:
+                matches = exact
+            elif not selected or (metadata.get('review_checklist') and metadata.get('scenario_family') in families):
+                matches = [s for s in matches if s.name in families]
+            else:
+                matches = []
+            if not matches:
+                raise CommandError('Scenario metadata disagrees with its family tag', 'scenario_conflict')
         snapshot = metadata.get("review_checklist")
         if snapshot is not None:
             try:
@@ -815,7 +829,11 @@ class TrajectoryCommands:
                 raise CommandError(f"Invalid saved review checklist: {error}") from error
             origin = "generation_snapshot"
             if matches and matches[0].name != checklist.scenario:
-                raise CommandError("Scenario tag disagrees with the saved checklist", "scenario_conflict")
+                same_family = (metadata.get('scenario_family') == matches[0].family
+                               and metadata.get('scenario') == checklist.scenario
+                               and (matches[0].flow.tag or matches[0].name).casefold() == checklist.tag.casefold())
+                if not same_family:
+                    raise CommandError("Scenario tag disagrees with the saved checklist", "scenario_conflict")
             if checklist.tag.casefold() not in tags and not metadata.get("scenario"):
                 raise CommandError("Saved checklist has no matching scenario tag or metadata", "scenario_conflict")
         else:

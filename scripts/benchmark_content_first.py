@@ -43,8 +43,35 @@ class FixtureProvider:
             assert 'false' in messages[1]['content']
             output = {'reasoning': 'Calculator confirms 4. The file could not be read.',
                       'response': '2 + 2 = 4. I could not read invoice.txt, so its contents remain unverified.'}
+        elif prompt.startswith('Invent'):
+            output = {'identifier': 'arithmetic-check-example', 'problem': 'What is 2 + 2?',
+                      'situation': 'A user wants a verified arithmetic result.', 'success_criteria': 'Answer 4', 'files': []}
+        elif prompt.startswith('Judge'):
+            output = {'similarity': 0, 'feedback': 'Distinct fixture concept'}
+        elif prompt.startswith('Solve'):
+            output = {'answer': '4', 'verification': '2 + 2 = 4'}
+        elif prompt.startswith('Write the next fictional'):
+            output = {'text': 'What is 2 + 2?'}
+        elif prompt.startswith(('Plan ONLY', 'Plan Kidra')):
+            output = {'calls': [[{'tool': 'calculator', 'arguments': {'expression': '2 + 2'}}]]}
+            if prompt.startswith('Plan Kidra'):
+                output['reasoning'] = 'Verify the arithmetic with the calculator.'
+        elif prompt.startswith("Write Kidra's private reasoning and next"):
+            output = {'reasoning': 'The calculator gives 4, confirming two pairs total four.',
+                      'response': 'The answer is 4.', 'resolved': True, 'next_exchange': ''}
+        elif prompt.startswith("Write Kidra's brief reasoning"):
+            output = {'text': 'The calculator gives 4, confirming two pairs total four.'}
+        elif prompt.startswith("Write Kidra's next response"):
+            output = {'text': 'The answer is 4.'}
+        elif prompt.startswith('Decide'):
+            output = {'resolved': True, 'next_exchange': ''}
         elif prompt.startswith('Validate'):
-            output = {'valid': True, 'feedback': []}
+            schema = json.loads(prompt.split('Return JSON matching this schema:\n')[-1])
+            if 'checks' in schema['properties']:
+                output = {'checks': {name: {'evidence': 'replay[0][0]: fixture evidence inspected', 'status': 'pass', 'feedback': ''}
+                                     for name in schema['properties']['checks']['required']}}
+            else:
+                output = {'valid': True, 'feedback': []}
         else:
             raise ValueError('Unknown fixture prompt')
         text = output if isinstance(output, str) else json.dumps(output)
@@ -63,7 +90,19 @@ async def benchmark(args):
     tokenizer_path = args.inference_tokenizer
     if not args.live:
         from transformers import PreTrainedTokenizerFast
-        fixture = PreTrainedTokenizerFast(tokenizer_object=Tokenizer.from_file(str(ROOT / 'examples/demo-tokenizer.json')))
+        if args.scenario_family == 'user-scenario':
+            # An offline BPE fixture, independent of Kidra's character tokenizer.
+            from tokenizers import models, pre_tokenizers, decoders, trainers
+            backend = Tokenizer(models.BPE(unk_token='[UNK]'))
+            backend.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+            backend.decoder = decoders.ByteLevel()
+            from trajectory_remix.tools import default_registry
+            corpus = [p.read_text() for p in (ROOT / 'examples/scenarios').rglob('*') if p.suffix in ('.md', '.yaml')]
+            corpus += [json.dumps(default_registry().schemas()), 'reasoning response resolved next_exchange observations history request']
+            backend.train_from_iterator(corpus, trainers.BpeTrainer(vocab_size=8192, special_tokens=['[UNK]']))
+        else:
+            backend = Tokenizer.from_file(str(ROOT / 'examples/demo-tokenizer.json'))
+        fixture = PreTrainedTokenizerFast(tokenizer_object=backend)
         fixture.chat_template = "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}\n{% endfor %}{% if add_generation_prompt %}assistant: {% endif %}"
         tokenizer_path = str(output / 'fixture-tokenizer')
         fixture.save_pretrained(tokenizer_path)
@@ -72,18 +111,24 @@ async def benchmark(args):
     counter = inference_tokenizer(tokenizer_path)
     report = {'measurement': 'live-endpoint' if args.live else 'offline-fixture-simulated-inference',
               'seed': args.seed, 'samples_per_mode': args.samples,
-              'scenario': 'content_first', 'context_budget': args.context_budget, 'modes': {}}
+              'scenario_family': args.scenario_family, 'context_budget': args.context_budget, 'modes': {}}
     for mode in ('existing', 'content-first'):
         random.seed(args.seed)
         project = output / (mode + '.sqlite')
         if project.exists():
             raise ValueError(f'Refusing to overwrite {project}; select a new --output-dir')
-        compiler = Compiler(Tokenizer.from_file(str(ROOT / 'examples/demo-tokenizer.json')))
+        if not args.live and args.scenario_family == 'user-scenario':
+            training = Tokenizer.from_str(counter.backend_tokenizer.to_str())
+            training.add_special_tokens(['<|bos|>', '<|eos|>', '<|noop|>'])
+        else:
+            training = Tokenizer.from_file(str(args.training_tokenizer))
+        compiler = Compiler(training)
         DatasetStore.initialize(project, compiler)
         app = create_app(project, scenarios_dir=ROOT / 'examples/scenarios',
                          client=None if args.live else FixtureProvider(counter))
         runner = app.state.scenario_runner
-        runner.registry.scenarios['content_first'].flow.generation_mode = mode
+        scenario = ('user_problem' if mode == 'existing' else 'user_scenario_noval') if args.scenario_family == 'user-scenario' else 'content_first'
+        runner.registry.scenarios[scenario].flow.generation_mode = mode
         config = copy.deepcopy(app.state.dataset['config'])
         for endpoint in config['endpoints']:
             endpoint.update(model=args.model or 'offline-fixture-model', inference_tokenizer=tokenizer_path,
@@ -94,11 +139,12 @@ async def benchmark(args):
         config['content_first'] = {'context_budget': args.context_budget, 'reserve_tokens': 256}
         config['single_generation'] = {'max_attempts': 1, 'api_retries': 0}
         app.state.dataset.set_config(config, app.state.dataset['revision'])
-        runner.start('content_first', max_parallel=args.parallel, batch_size=args.samples)
+        runner.start(scenario, max_parallel=args.parallel, batch_size=args.samples)
         await runner.job
         samples = list(app.state.dataset['samples'])
         metrics = dataset_generation_metrics(samples)[mode]
         metrics['total_tokens'] = metrics['prompt_tokens'] + metrics['completion_tokens']
+        metrics['scenario'] = scenario
         metrics['generation_phase'] = runner.status['phase']
         metrics['candidate_retention'] = len(samples) / max(runner.status['batch']['attempts'], 1)
         report['modes'][mode] = metrics
@@ -110,9 +156,9 @@ async def benchmark(args):
                                      for key in ('request_count', 'total_tokens', 'inference_seconds', 'elapsed_seconds')}
     report['limitations'] = [
         'Offline results use scripted text and simulated delays, not real LLM quality or GPU timing.',
-        'Equivalent scenario prompts and tag seed; live model outputs may differ even at temperature zero.',
+        'Same generation input pools and tag seed; optimized content prompts differ, and live outputs may vary even at temperature zero.',
         'All candidates remain unapproved. Usable training throughput requires independent review and Ready approval.',
-        'The existing YAML runner already generates content; this comparison isolates bounded construction and deferred validation.',
+        'The existing YAML runner already generates content; user-scenario comparison also combines content requests and removes reference/assessment work.',
     ]
     (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
@@ -122,10 +168,12 @@ async def benchmark(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'work/content-first-demo')
+    parser.add_argument('--scenario-family', choices=['user-scenario', 'content-demo'], default='user-scenario')
     parser.add_argument('--live', action='store_true')
     parser.add_argument('--base-url')
     parser.add_argument('--model')
     parser.add_argument('--inference-tokenizer')
+    parser.add_argument('--training-tokenizer', type=Path, default=ROOT / 'examples/demo-tokenizer.json')
     parser.add_argument('--context-budget', type=int, default=8192)
     parser.add_argument('--completion-cap', type=int, default=1024)
     parser.add_argument('--completion-limit-parameter', choices=['max_tokens', 'max_completion_tokens'], default='max_tokens')

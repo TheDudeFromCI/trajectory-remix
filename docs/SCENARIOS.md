@@ -658,3 +658,9 @@ Replay scheduling accepts `max({N_TICK:7}+1, {N_TICK:8}+1)` and nested maxima to
 join independent branches. The compiler waits for all dependencies and preserves
 cycle, undefined-anchor, tick-limit, and same-tick visibility checks. Authoring
 offsets distribute over operands rather than detaching anchors.
+
+## Scenario variations
+
+`user_scenario_noval` extends `user_problem`, retaining its `#user_scenario` tag, input pools, role profiles and original external checklist while using the bounded content-first generator without local validation. It removes reference-solution, novelty-judging and assessment requests and combines grounded notes, the reply and conversation continuation in one request. A one-exchange candidate uses four model calls.
+
+Declare `extends: parent_name` to inherit system/input sections and prompt files. An explicit `steps` mapping defines the child scaffold; `inherit: true` on a step imports that named parent step before field overrides. Schemas merge by name. Only inheritance-related scenarios can share a tag; the dataset retains exact scenario/family provenance for unambiguous MCP review. Unknown/cyclic parents and unrelated duplicate tags remain errors. See [content-first configuration and recovery](content-first-generation.md#fast-user-scenario-variation).
