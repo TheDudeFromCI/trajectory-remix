@@ -178,6 +178,7 @@ Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry run
 
 | Tool | Purpose |
 | --- | --- |
+| `get_guidance` | Read the complete editor guidance bundle: standard guides, custom dataset/scenario Markdown, scenario creation/review/repair prompts and checklists. Select `scenario` before creation or `sample_id` for the saved review contract. |
 | `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns Skill.md and `example` returns the complete build-graph JSON trajectory. |
 | `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
 | `get_review_checklist` | Automatically resolve a trajectory's scenario tag/provenance and fetch its semantic checklist and results schema. |
@@ -506,6 +507,33 @@ compiler errors still return diagnostics with HTTP 422.
 frames with at most 16 frames and 4 MB per response; `/api/frame/{plan_id}/{tick}`
 returns one bounded snapshot. Preview output limits return HTTP 413 with
 `code: "preview_limit"`, independently of compilation validity.
+
+## Custom dataset guidance
+
+`get_guidance()` returns the exact bundle shown in **View → Trajectory Guidelines**.
+Each entry in `documents` has an ID, title, content, format, source and editable
+flag. Standard files are read-only. `get_guidance(scenario="user_problem")` includes
+that scenario's prompts and rules before creation; `get_guidance(sample_id="id")`
+uses the sample's saved checklist when present. Select only one of these arguments.
+The response lists available scenarios, including custom scopes retained without
+scenario files. The dashboard uses the same command via `GET /api/guidance`.
+
+Edit custom Markdown in **Generation Settings → Custom Guidelines**. The project's
+`review_guidance` configuration accepts `guide`, `checklist`, and `scenarios`, a map
+from scenario names to additional `guide`/`checklist` pairs. Each text field accepts
+up to 200,000 characters. Configuration persists with the SQLite dataset and its
+normal configuration import/export. Clearing the text removes the requirement.
+
+Current dataset and matching scenario additions supplement the saved standard
+scenario checklist. `review_trajectory` and `repair_trajectory` return the guidance
+bundle. Each nonempty custom scope adds a `$custom.dataset` or `$custom.scenario`
+check whose result is `{"valid": true/false, "feedback": [...]}`; follow the returned
+`results_schema`, including all existing per-rule scenario results. The custom
+text participates in `checklist_hash`, so repairs and review recording reject an
+outdated contract even if the sample's saved scenario snapshot is unchanged.
+Dataset-only custom requirements can also be reviewed without a scenario registry.
+Compiler validation remains separate from an agent's semantic assessment;
+`validate_trajectory` points agents to the guidance tool before that assessment.
 
 ## Scenario review and repair
 
