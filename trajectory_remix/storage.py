@@ -83,6 +83,12 @@ class DatasetStore:
                     source_hash TEXT NOT NULL, cache_key TEXT NOT NULL,
                     errors INTEGER NOT NULL, warnings INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS trajectory_metrics (
+                    trajectory_uuid TEXT PRIMARY KEY REFERENCES samples(uuid) ON DELETE CASCADE,
+                    source_hash TEXT NOT NULL, cache_key TEXT NOT NULL,
+                    metrics TEXT NOT NULL CHECK(json_valid(metrics)),
+                    error TEXT
+                );
             """)
             if row[0] < self.SCHEMA_VERSION:
                 db.execute("BEGIN IMMEDIATE")

@@ -250,6 +250,7 @@ async function refresh(initial = false) {
     } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges() && !migrationBusy)
       await selectSample(state.samples[state.samples.length - 1].index, true);
     if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
+    if (changed && !$("metrics-panel").hidden && !metricsCalculating) await loadMetrics();
   } finally {
     pollBusy = false;
     renderValidationState();
@@ -967,6 +968,7 @@ function showMetadataNames(metadata) {
   $("user-name").value =
     typeof metadata?.user_name === "string" ? metadata.user_name : "";
   $("tick-rate").value = metadata?.synthetic_clock?.tick_rate ?? 10;
+  showCoverageMetadata(metadata || {});
 }
 function loadMetadata(trajectory) {
   $("trajectory-uuid").value = trajectory?.uuid || "";
@@ -2740,6 +2742,244 @@ window.addEventListener("beforeunload", (e) => {
     e.returnValue = "";
   }
 });
+// Coverage annotations remain ordinary source metadata, so existing revision
+// guards, JSON editing, immediate saves and undo/redo apply to every field.
+const metricDomains = ["software", "scheduling", "organization", "research", "writing", "general_assistance"];
+const metricOutcomes = ["completed", "partial", "blocked", "clarified", "cancelled", "declined"];
+const metricLabels = [
+  ...["focused_task", "cross_window_synthesis", "memory_retrieval", "planning", "algorithmic", "delegation", "multistep_tools", "tool_observation", "skill_use", "conversation"].map(k => "capability." + k),
+  ...["missing", "false", "ambiguous"].map(k => "information." + k),
+  ...["followup", "interruption", "correction", "background_work"].map(k => "interaction." + k),
+  ...["failure", "partial_output"].map(k => "tool_condition." + k),
+  ...["annoyed", "uncertain", "technically_experienced"].map(k => "user." + k),
+];
+const coverageFields = [
+  ["primary_domain", "Primary domain", metricDomains],
+  ["terminal_outcome", "Terminal outcome", metricOutcomes],
+  ["scenario_family_id", "Scenario family ID"],
+  ["template_family_id", "Template family ID"],
+  ["split", "Split", ["train", "development", "test"]],
+  ["is_original", "Original source?", [["true", "Original"], ["false", "Remix / descendant"]]],
+  ["provenance.author", "Author / generator identity"],
+  ["provenance.source", "Source / endpoint / license reference"],
+  ["provenance.version", "Prompt / source version"],
+];
+function metadataValue(metadata, path) {
+  return path.split(".").reduce((value, key) => value?.[key], metadata);
+}
+function setMetadataPath(path, value) {
+  try {
+    const metadata = readMetadata(), parts = path.split(".");
+    let target = metadata;
+    for (const key of parts.slice(0, -1)) {
+      if (!target[key] || typeof target[key] !== "object" || Array.isArray(target[key])) target[key] = {};
+      target = target[key];
+    }
+    if (value === undefined) delete target[parts.at(-1)];
+    else target[parts.at(-1)] = value;
+    $("metadata-json").value = JSON.stringify(metadata, null, 2);
+    updateMetadata();
+  } catch (error) { $("metadata-status").textContent = error.message; }
+}
+for (const [path, title, choices] of coverageFields) {
+  const id = "coverage-" + path.replaceAll(".", "-"), label = node("label", "", title);
+  label.htmlFor = id;
+  const field = choices ? select([["", "Unknown / not recorded"], ...choices], "", () => {}) : node("input");
+  field.id = id;
+  field.oninput = () => setMetadataPath(path, field.value === "" ? undefined : path === "is_original" ? field.value === "true" : field.value);
+  $("coverage-metadata-fields").append(label, field);
+}
+const observedSelector = select(metricLabels, metricLabels[0], () => showObservedLabel(readMetadata()));
+observedSelector.id = "observed-label-selector";
+const observedLabel = node("label", "", "Observed behavior / condition");
+observedLabel.htmlFor = observedSelector.id;
+$("observed-label-fields").append(observedLabel, observedSelector);
+const observedFields = [
+  ["present", "Present", ["unknown", "true", "false"]],
+  ["required", "Required for success", ["unknown", "true", "false"]],
+  ["demonstrated_correctly", "Demonstrated correctly", ["unknown", "true", "false"]],
+  ["value", "Observed condition", ["unknown", "true", "false"]],
+  ["confidence", "Confidence (0–1)"], ["annotator", "Annotator / validator ID"],
+  ["version", "Annotation version"], ["evidence", "Evidence event paths (one per line)"],
+  ["justification", "Justification"], ["review_status", "Review status", ["pending", "reviewed"]],
+];
+for (const [key, title, choices] of observedFields) {
+  const label = node("label", "", title), id = "observed-" + key;
+  label.htmlFor = id;
+  const field = choices ? select(choices, choices[0], () => {}) : node(key === "evidence" || key === "justification" ? "textarea" : "input");
+  field.id = id;
+  if (key === "confidence") { field.type = "number"; field.min = "0"; field.max = "1"; field.step = "0.01"; }
+  field.oninput = () => {
+    try {
+      const metadata = readMetadata(), name = observedSelector.value;
+      const labels = metadata.observed_labels && typeof metadata.observed_labels === "object" && !Array.isArray(metadata.observed_labels) ? metadata.observed_labels : {};
+      const previous = labels[name] && typeof labels[name] === "object" && !Array.isArray(labels[name]) ? labels[name] : {};
+      const value = field.value === "true" ? true : field.value === "false" ? false : key === "confidence" ? (field.value === "" ? "unknown" : Number(field.value)) : key === "evidence" ? field.value.split("\n").map(v => v.trim()).filter(Boolean) : field.value;
+      metadata.observed_labels = {...labels, [name]: {...previous, [key]: value}};
+      $("metadata-json").value = JSON.stringify(metadata, null, 2);
+      updateMetadata();
+    } catch (error) { $("metadata-status").textContent = error.message; }
+  };
+  $("observed-label-fields").append(label, field);
+}
+function showObservedLabel(metadata) {
+  const label = metadata.observed_labels?.[observedSelector.value] || {};
+  const capability = observedSelector.value.startsWith("capability.");
+  for (const [key] of observedFields) {
+    const field = $("observed-" + key), value = label[key];
+    field.hidden = key === "value" ? capability : ["present", "required", "demonstrated_correctly"].includes(key) && !capability;
+    field.previousElementSibling.hidden = field.hidden;
+    field.value = key === "evidence" ? (Array.isArray(value) ? value.join("\n") : "") : value ?? (key === "review_status" ? "pending" : field.tagName === "SELECT" ? "unknown" : "");
+  }
+}
+function showCoverageMetadata(metadata) {
+  const missing = [];
+  for (const [path, title, choices] of coverageFields) {
+    const value = metadataValue(metadata, path), field = $("coverage-" + path.replaceAll(".", "-"));
+    field.value = value === undefined ? "" : String(value);
+    const valid = path === "is_original" ? typeof value === "boolean" : typeof value === "string" && value.trim() && (!choices || choices.includes(value));
+    field.setAttribute("aria-invalid", String(!valid));
+    if (!valid) missing.push(title);
+  }
+  $("coverage-metadata-alerts").textContent = sample && missing.length ? "Coverage needs: " + missing.join(", ") + "." : "";
+  showObservedLabel(metadata);
+}
+
+let metricsData = null, metricsCalculating = false, metricsStop = false, metricsOffset = 0, metricsRequest = 0;
+const metricFormat = value => value == null ? "Insufficient support" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
+function metricBars(title, groups) {
+  const card = node("section", "metric-card");
+  card.append(node("h2", "", title));
+  const max = Math.max(1, ...groups.map(g => g.count || 0));
+  for (const group of groups) {
+    const row = node("div", "metric-bar-row"), track = node("div", "metric-bar-track"), fill = node("div", "metric-bar-fill");
+    fill.style.width = (100 * (group.count || 0) / max) + "%";
+    track.append(fill);
+    track.setAttribute("aria-hidden", "true");
+    row.append(node("span", "metric-bar-label", group.value), track, node("span", "metric-bar-value", metricFormat(group.count)));
+    row.title = `${group.value}: ${group.count}`;
+    card.append(row);
+  }
+  if (!groups.length) card.append(node("p", "", "No measured records in this population."));
+  return card;
+}
+function renderMetricDistribution() {
+  const name = $("metrics-distribution").value, data = metricsData?.distributions[name];
+  if (!data) return;
+  $("metrics-distribution-description").textContent = metricsData.registry[name] || ({window_lengths: "Pooled durable token lengths per window, including boundary/header tokens and empty windows. Idle predictions are excluded.", idle_runs: "Pooled consecutive per-window NOOP decision runs, measured in ticks.", tool_latency_ticks: "Pooled invocation completion tick minus dispatch tick."})[name];
+  $("metrics-histogram").replaceChildren(metricBars("Distribution · " + data.unit.replaceAll("_", " "), data.bins.map(b => ({value: b.lower == null ? `< ${b.upper}` : b.upper == null ? `≥ ${b.lower}` : `[${b.lower}, ${b.upper})`, count: b.count}))));
+  $("metrics-distribution-stats").textContent = ["count", "missing", "mean", "stddev", "min", "max", "p50", "p90", "p95", "p99"].map(k => `${k}: ${metricFormat(data[k])}`).join(" · ");
+}
+function renderMetrics(data) {
+  metricsData = data;
+  const s = data.summary;
+  $("metrics-status").textContent = `Saved revision ${data.revision} · ${s.cached}/${s.samples} measured in this population · ${s.pending} pending · ${s.compile_errors} compiler errors.`;
+  if (data.family_split_conflicts.length) $("metrics-status").textContent += ` Alert: ${data.family_split_conflicts.length} scenario/template families span multiple splits (project-wide).`;
+  $("metrics-summary").replaceChildren(...[["Source samples", s.samples], ["Compiled successfully", s.valid_compiled], ["Need metadata", s.samples_missing_metadata], ["Have unknown labels", s.samples_with_unknown_labels], ["Exact replay duplicate candidates", s.exact_replay_duplicate_extras], ["Scenario families", s.scenario_families], ["Template families", s.template_families]].map(([title, value]) => {
+    const card = node("div", "metric-card"); card.append(node("b", "", metricFormat(value)), node("small", "", title)); return card;
+  }));
+  $("metrics-charts").replaceChildren(
+    metricBars(`Primary domain · ${data.unknown_domains} unknown`, data.domains.map(g => ({...g, value: g.value.replaceAll("_", " ")}))),
+    metricBars(`Terminal outcome · ${data.unknown_outcomes} unknown`, data.outcomes.map(g => ({...g, value: g.value.replaceAll("_", " ")}))),
+    metricBars("Model content concurrency · pooled ticks", data.concurrency.model.map(g => ({value: g.generators + " generators", count: g.ticks}))),
+    metricBars("External content activity · pooled ticks", data.concurrency.external.map(g => ({value: g.generators + " windows", count: g.ticks}))),
+    metricBars("Raw loss allocation · before trainer normalization", data.raw_loss_allocation.map(g => ({value: g.target, count: g.weight}))),
+    metricBars("Tool presence · sources, not invocation share", data.tools.map(g => ({value: `${g.tool} (${g.invocations} calls)`, count: g.samples}))),
+    metricBars("Window categories · instances", data.window_categories.map(g => ({value: g.category, count: g.instances}))),
+  );
+  const choice = $("metrics-distribution").value;
+  $("metrics-distribution").replaceChildren(...Object.keys(data.distributions).map(key => { const option = node("option", "", key.replaceAll("_", " ")); option.value = key; return option; }));
+  $("metrics-distribution").value = choice && data.distributions[choice] ? choice : "generated_content_tokens";
+  renderMetricDistribution();
+  $("metrics-coverage-table").replaceChildren();
+  if (!data.coverage.length) $("metrics-coverage-table").append(node("p", "", "Select Accepted train originals to inspect launch coverage gaps."));
+  else {
+    const wrap = node("div", "metrics-table-wrap"), table = node("table", "metrics-table"), head = node("tr");
+    for (const title of ["Rule", "Observed / eligible", "Unknown", "Families", "Lower-bound shortfall", "Status"]) head.append(node("th", "", title));
+    const thead = node("thead"); thead.append(head); table.append(thead);
+    const body = node("tbody");
+    for (const rule of data.coverage) {
+      const row = node("tr");
+      for (const value of [rule.id, rule.numerator == null ? "Unavailable" : `${rule.numerator} / ${rule.denominator} (${rule.fraction == null ? "n/a" : (100 * rule.fraction).toFixed(1) + "%"})`, rule.unknown ?? "—", rule.distinct_families ?? "—", rule.shortfall ?? "—", rule.status.replaceAll("_", " ")]) row.append(node("td", "", value));
+      row.title = rule.reason || (rule.target_range ? `Provisional range: ${rule.target_range.map(v => 100 * v + "%").join("–")}` : `Minimum ${rule.minimum} distinct families`);
+      body.append(row);
+    }
+    table.append(body); wrap.append(table); $("metrics-coverage-table").append(wrap);
+  }
+  $("metrics-unavailable").replaceChildren(...data.unavailable.map(item => node("p", "", `${item.metric.replaceAll("_", " ")}: ${item.reason}.`)));
+}
+async function loadMetricIssues() {
+  const population = $("metrics-population").value, issue = $("metrics-issue").value, offset = metricsOffset;
+  const result = await json("metrics/query", "POST", {population, issue, offset, limit: 10});
+  if (population !== $("metrics-population").value || issue !== $("metrics-issue").value || offset !== metricsOffset) return;
+  $("metrics-issues").replaceChildren(...result.samples.map(item => {
+    const row = node("div", "metric-issue"), text = node("div");
+    text.append(node("b", "", item.id || item.uuid), node("small", "", item.error?.message || (issue === "unknown_labels" ? `${item.unknown_labels.length} unknown labels` : item.missing_metadata.join(", ")) || "Not calculated yet"));
+    row.append(text, button("Open metadata", action(async () => {
+      await selectSample(item.index);
+      if (selected !== item.index || sample?.uuid !== item.uuid) return;
+      setMetricsVisible(false);
+      setDatasetPanelVisible(true);
+      $("coverage-metadata-details").open = true;
+      $("observed-label-details").open = issue === "unknown_labels";
+      if (issue === "unknown_labels") { observedSelector.value = item.unknown_labels[0] || metricLabels[0]; showObservedLabel(readMetadata()); observedSelector.focus(); }
+      else $("coverage-primary_domain").focus();
+    })));
+    return row;
+  }));
+  if (!result.total) $("metrics-issues").append(node("p", "", "No matching issues in this population."));
+  $("metrics-issues-page").textContent = result.total ? `${offset + 1}–${Math.min(offset + 10, result.total)} of ${result.total}` : "0 issues";
+  $("metrics-issues-prev").disabled = offset === 0;
+  $("metrics-issues-next").disabled = offset + 10 >= result.total;
+}
+async function loadMetrics() {
+  const request = ++metricsRequest, population = $("metrics-population").value;
+  try {
+    const data = await json("metrics", "POST", {population});
+    if (request !== metricsRequest) return;
+    renderMetrics(data);
+    await loadMetricIssues();
+  } catch (error) {
+    if (request === metricsRequest) $("metrics-status").textContent = error.message;
+    throw error;
+  }
+}
+function setMetricsVisible(visible) {
+  $("metrics-panel").hidden = !visible;
+  $("toggle-metrics-panel").setAttribute("aria-checked", String(visible));
+  if (!visible) metricsStop = true;
+}
+$("toggle-metrics-panel").onclick = action(async () => {
+  closeMenus();
+  const visible = $("metrics-panel").hidden;
+  setMetricsVisible(visible);
+  if (visible) { pause(); await loadMetrics(); }
+});
+$("close-metrics-panel").onclick = () => setMetricsVisible(false);
+$("metrics-refresh").onclick = action(loadMetrics);
+$("metrics-population").onchange = action(async () => { metricsOffset = 0; await loadMetrics(); });
+$("metrics-distribution").onchange = renderMetricDistribution;
+$("metrics-issue").onchange = action(async () => { metricsOffset = 0; await loadMetricIssues(); });
+$("metrics-issues-prev").onclick = action(async () => { metricsOffset = Math.max(0, metricsOffset - 10); await loadMetricIssues(); });
+$("metrics-issues-next").onclick = action(async () => { metricsOffset += 10; await loadMetricIssues(); });
+$("metrics-stop").onclick = () => { metricsStop = true; };
+$("metrics-analyze").onclick = action(async () => {
+  if (metricsCalculating) return;
+  metricsCalculating = true; metricsStop = false;
+  $("metrics-analyze").disabled = true; $("metrics-stop").hidden = false;
+  try {
+    let result;
+    do {
+      $("metrics-status").textContent = "Calculating up to 10 pending sources; other editing remains available…";
+      result = await json("metrics/refresh", "POST", {limit: 10});
+      await loadMetrics();
+    } while (!metricsStop && result.processed === 10);
+  } finally {
+    metricsCalculating = false;
+    $("metrics-analyze").disabled = false; $("metrics-stop").hidden = true;
+  }
+});
+
 await action(() => refresh(true))();
 setInterval(
   () =>

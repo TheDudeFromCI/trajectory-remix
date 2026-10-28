@@ -262,6 +262,22 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def metadata_counts(request: Request):
         return await commands.call("get_metadata_counts", await body(request))
 
+    @app.post("/api/metrics")
+    async def metrics_overview(request: Request):
+        return await commands.call("get_dataset_metrics", await body(request))
+
+    @app.post("/api/metrics/refresh")
+    async def metrics_refresh(request: Request):
+        return await commands.call("refresh_dataset_metrics", await body(request))
+
+    @app.post("/api/metrics/distribution")
+    async def metrics_distribution(request: Request):
+        return await commands.call("get_dataset_metric_distribution", await body(request))
+
+    @app.post("/api/metrics/query")
+    async def metrics_query(request: Request):
+        return await commands.call("query_dataset_metrics", await body(request))
+
     @app.get("/api/mcp/tools")
     async def mcp_tools():
         return {"tools": commands.tools()}

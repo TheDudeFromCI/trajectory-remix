@@ -56,7 +56,20 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "review_trajectory",
                     "repair_trajectory",
                     "record_trajectory_review",
+                    "get_dataset_metrics",
+                    "refresh_dataset_metrics",
+                    "get_dataset_metric_distribution",
+                    "query_dataset_metrics",
                 } <= set(tools)
+                assert tools["get_dataset_metrics"].annotations.readOnlyHint
+                metric_guide = await session.call_tool("get_authoring_guide", {"topic": "metrics"})
+                assert not metric_guide.isError and "Coverage annotations" in metric_guide.structuredContent["content"]
+                metric_snapshot = await session.call_tool("get_dataset_metrics", {"population": "accepted_train_originals"})
+                assert not metric_snapshot.isError and metric_snapshot.structuredContent["summary"]["samples"] == 0
+                metric_refresh = await session.call_tool("refresh_dataset_metrics", {"limit": 1})
+                assert not metric_refresh.isError and metric_refresh.structuredContent["processed"] == 0
+                metric_distribution = await session.call_tool("get_dataset_metric_distribution", {"metric": "duration_ticks"})
+                assert not metric_distribution.isError and metric_distribution.structuredContent["mean"] is None
                 assert tools["get_trajectory"].annotations.readOnlyHint
                 assert tools["review_trajectory"].annotations.readOnlyHint
                 assert not tools["repair_trajectory"].annotations.readOnlyHint

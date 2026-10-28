@@ -1,0 +1,190 @@
+# Proposed schema v0.1; all ratios are provisional.
+schema_version: kidra.coverage.v0.1
+profile: coordinator_launch
+population: accepted_train_originals
+planned_train_originals: 50000
+# Dev/test counts are additional, grouped by family before remixing.
+splits:
+  grouping: scenario_and_near_duplicate_template_family
+  development_min_originals: 2000
+  final_test_min_originals: 2000
+  observer_access: train_and_development_only
+  remix_within_split_only: true
+
+measurement:
+  capability_match: required_and_demonstrated_correctly
+  semantic_unknowns: denominator_only
+  zero_denominator: null
+  loss_weight_basis: after_trainer_normalization
+  percentiles: [50, 90, 95, 99]
+  domains: primary_only
+  source_identity: immutable_original_revision
+
+controller:
+  batch_candidates: 32
+  max_inflight_candidates: 64
+  recompute_after_accepted: 32
+  recompute_on_batch_completion: true
+  max_consecutive_rejected_batches: 3
+  max_attempts_per_rule_per_cycle: 96
+  max_candidates_per_run: 1000
+  max_wall_minutes_per_run: 120
+  # Null means no currency cap; other limits still apply.
+  max_cost_currency_per_run: null
+  priority_policy: priority_times_normalized_lower_shortfall
+  sampling_changes: proposal_only
+
+quality_gates:
+  structural_valid: true
+  causal_visibility_valid: true
+  masks_and_lifecycles_valid: true
+  tool_state_consistent: true
+  semantic_verdict: pass
+  exact_duplicates: reject
+  uncertain_semantics: review
+  near_duplicate_candidates: review
+  train_test_family_overlap: reject
+
+coverage_rules:
+
+  # Primary domains: exclusive; midpoint shares sum to 1.00.
+  - {id: software, selector: domain.software,
+     target_range: [0.20, 0.30]}
+  - {id: scheduling, selector: domain.scheduling,
+     target_range: [0.10, 0.20]}
+  - {id: organization, selector: domain.organization,
+     target_range: [0.15, 0.25]}
+  - {id: research, selector: domain.research,
+     target_range: [0.10, 0.20]}
+  - {id: writing, selector: domain.writing,
+     target_range: [0.05, 0.15]}
+  - {id: general, selector: domain.general_assistance,
+     target_range: [0.10, 0.20]}
+
+  # Overlapping capabilities; do not normalize these to 100%.
+  - {id: focused, selector: capability.focused_task,
+     target_range: [0.30, 0.45]}
+  - {id: cross_window, selector: capability.cross_window_synthesis,
+     target_range: [0.20, 0.35], priority: 2}
+  - {id: memory, selector: capability.memory_retrieval,
+     target_range: [0.10, 0.20]}
+  - {id: planning, selector: capability.planning,
+     target_range: [0.20, 0.35]}
+  - {id: algorithmic, selector: capability.algorithmic,
+     target_range: [0.05, 0.15]}
+  - {id: delegation, selector: capability.delegation,
+     target_range: [0.10, 0.20], priority: 2}
+  - {id: multistep, selector: capability.multistep_tools,
+     target_range: [0.20, 0.35]}
+  - {id: observation, selector: capability.tool_observation,
+     target_range: [0.08, 0.15], priority: 2}
+  - {id: skills, selector: capability.skill_use,
+     target_range: [0.05, 0.12]}
+  - {id: conversation, selector: capability.conversation,
+     target_range: [0.20, 0.35]}
+
+  # Tool use is source presence, not invocation share.
+  - {id: tool_use, selector: uses_tools,
+     target_range: [0.65, 0.80]}
+  - {id: fileio, selector: tool.fileio, within: uses_tools,
+     target_range: [0.30, 0.50]}
+  - {id: time, selector: tool.time, within: uses_tools,
+     target_range: [0.10, 0.25]}
+  - {id: notes, selector: tool.tasks_notes, within: uses_tools,
+     target_range: [0.20, 0.35]}
+
+  # Conditions overlap. Failures are correctly handled examples.
+  - {id: tool_failure, selector: tool_condition.failure,
+     within: uses_tools, target_range: [0.15, 0.25], priority: 2}
+  - {id: partial_output, selector: tool_condition.partial_output,
+     within: uses_tools, target_range: [0.08, 0.15]}
+  - {id: missing, selector: information.missing,
+     target_range: [0.10, 0.20]}
+  - {id: false_input, selector: information.false,
+     target_range: [0.05, 0.10]}
+  - {id: ambiguous, selector: information.ambiguous,
+     target_range: [0.08, 0.15]}
+  - {id: followup, selector: interaction.followup,
+     target_range: [0.20, 0.35]}
+  - {id: interruption, selector: interaction.interruption,
+     target_range: [0.08, 0.15], priority: 2}
+  - {id: correction, selector: interaction.correction,
+     target_range: [0.08, 0.15]}
+  - {id: background, selector: interaction.background_work,
+     target_range: [0.10, 0.20]}
+  - {id: annoyed, selector: user.annoyed,
+     target_range: [0.05, 0.10]}
+  - {id: uncertain, selector: user.uncertain,
+     target_range: [0.10, 0.20]}
+  - {id: expert, selector: user.technically_experienced,
+     target_range: [0.15, 0.25]}
+
+  # Exclusive terminal outcomes; midpoint shares sum to 1.00.
+  - {id: completed, selector: outcome.completed,
+     target_range: [0.60, 0.70]}
+  - {id: partial, selector: outcome.partial,
+     target_range: [0.05, 0.11]}
+  - {id: blocked, selector: outcome.blocked,
+     target_range: [0.04, 0.10]}
+  - {id: clarified, selector: outcome.clarified,
+     target_range: [0.07, 0.13]}
+  - {id: cancelled, selector: outcome.cancelled,
+     target_range: [0.03, 0.09]}
+  - {id: declined, selector: outcome.declined,
+     target_range: [0.02, 0.06]}
+
+  # Diversity counts, not ratios; active at the 50k launch scale.
+  - {id: delegation_failure,
+     selector: {all: [capability.delegation, tool_condition.failure]},
+     measure: distinct_scenario_family_count, minimum: 40}
+  - {id: retrieval_false,
+     selector: {all: [capability.memory_retrieval, information.false]},
+     measure: distinct_scenario_family_count, minimum: 40}
+
+  - {id: background_interrupt,
+     selector: {all: [interaction.background_work,
+                      interaction.interruption]},
+     measure: distinct_scenario_family_count, minimum: 40}
+
+  # Export concurrency bins are exclusive and exhaustive.
+  # These count same-tick model content generators, not open windows.
+  - {id: generators_0, selector: peak_generators_0,
+     measure: exported_sample_fraction, target_range: [0.00, 0.00]}
+  - {id: generators_1, selector: peak_generators_1,
+     measure: exported_sample_fraction, target_range: [0.55, 0.65]}
+  - {id: generators_2, selector: peak_generators_2,
+     measure: exported_sample_fraction, target_range: [0.25, 0.35]}
+  - {id: generators_3plus, selector: peak_generators_ge_3,
+     measure: exported_sample_fraction, target_range: [0.05, 0.15]}
+
+  # Peak visible tokens / trainer's configured total context budget.
+  - {id: context_low, selector: context_fraction_le_0_25,
+     measure: exported_sample_fraction, target_range: [0.45, 0.55]}
+  - {id: context_mid, selector: context_fraction_0_25_to_0_60,
+     measure: exported_sample_fraction, target_range: [0.30, 0.40]}
+  - {id: context_high, selector: context_fraction_gt_0_60,
+     measure: exported_sample_fraction, target_range: [0.10, 0.20]}
+
+rule_defaults:
+  measure: source_sample_fraction
+  priority: 1
+  min_eligible_samples_for_fraction_action: 200
+  range_interpretation: inclusive_soft_target
+  count_minima_active_at_originals: 50000
+
+alerts:
+  semantic_unknown_fraction_above: 0.05
+  duplicate_candidate_fraction_above: 0.20
+  rejected_candidate_fraction_above: 0.30
+  template_family_source_fraction_above: 0.02
+  # Missing denominator/support produces an alert, not success.
+  insufficient_support: report
+  track_without_target:
+    - noop_effective_loss_weight_fraction
+    - eos_effective_loss_weight_fraction
+    - total_supervised_tokens
+    - generation_to_external_content_ratio
+    - tool_operation_and_argument_histograms
+    - window_category_histograms
+    - timing_and_dependency_histograms
+    - actual_training_exposure_by_rule

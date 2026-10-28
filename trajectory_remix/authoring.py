@@ -7,6 +7,7 @@ several commands; validate=True makes a single edit conditional on compilation.
 from __future__ import annotations
 
 import copy
+import asyncio
 import difflib
 import hashlib
 import inspect
@@ -28,6 +29,7 @@ from .llm import SampleBuilder
 from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
 from .metadata import query as query_metadata
+from . import metrics as dataset_metrics
 from .preview import PreviewCache
 from .review import EDIT_SCHEMA, apply_edits, checklist_report
 from .trajectory_review import (
@@ -46,6 +48,7 @@ from .tools import (
 Nonnegative = Annotated[int, Field(ge=0)]
 PageSize = Annotated[int, Field(ge=1, le=5000)]
 Revision = Nonnegative | None
+MetricsPopulation = Literal["all", "accepted", "accepted_train_originals", "development"]
 EditName = Literal[
     "create_trajectory",
     "duplicate_trajectory",
@@ -130,6 +133,7 @@ class TrajectoryCommands:
         self.edit_revision = ContextVar("trajectory_revision", default=None)
         self.tool_sessions = ToolSessions(registry=compiler.tools)
         self.previews = PreviewCache(compiler)
+        self.metrics_lock = asyncio.Lock()
         self.commands = {
             name: getattr(self, name)
             for name in dir(type(self))
@@ -331,14 +335,15 @@ class TrajectoryCommands:
     def get_authoring_guide(
         self,
         topic: Literal[
-            "start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "reference", "example"
+            "start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "metrics", "reference", "example"
         ] = "start",
     ):
         """Read a short authoring lesson, complete reference, or example trajectory.
 
         Topics: first (ticks/windows), parallel (overlapping work), edit (small repairs),
         sandbox (trajectory files), tools (starter tool selection), search (query syntax),
-        review (semantic review/context dependencies; read before reviewing or repairing), reference (full manual),
+        review (semantic review/context dependencies; read before reviewing or repairing),
+        metrics (dataset coverage, cached statistics and annotations), reference (full manual),
         example (full build-graph JSON trajectory). No source or sandbox changes.
         """
         root = Path(__file__).parent
@@ -418,6 +423,69 @@ class TrajectoryCommands:
         count each trajectory once per distinct tag. Nested objects/arrays are omitted.
         """
         return metadata_counts(self.state.store, key, filters, tags, tag_mode, limit)
+
+    @command()
+    async def get_dataset_metrics(self, population: MetricsPopulation = "all"):
+        """Read cached source metrics, coverage, annotation uncertainty and unavailable measures.
+
+        Use population=accepted_train_originals for the PDF's provisional launch
+        coverage rules; this excludes final-test data. Ready (validation_level=3)
+        is the existing project's acceptance state. Source counts, raw target
+        weights and source concurrency do not represent exports or trainer exposure.
+        Pending caches are explicit; call refresh_dataset_metrics until processed=0.
+        Semantic coverage requires reviewed, evidence-bearing observed_labels;
+        requested tags never establish correct demonstrations. No generation starts.
+        """
+        return await asyncio.to_thread(dataset_metrics.overview, self.state.store, self.compiler, population)
+
+    @command()
+    async def refresh_dataset_metrics(self, limit: Annotated[int, Field(ge=1, le=100)] = 25):
+        """Populate disposable metrics caches for at most limit stale samples.
+
+        Compiles one sample at a time in a worker, without editing source, pinning
+        tool dependencies or changing project revisions. Repeat until processed=0.
+        Edits, tokenizer/tool/compiler/metric changes invalidate cached results.
+        Compile errors are cached and reported rather than silently omitted.
+        """
+        async with self.metrics_lock:
+            return await asyncio.to_thread(dataset_metrics.refresh, self.state.store, self.compiler, limit)
+
+    @command()
+    async def get_dataset_metric_distribution(
+        self, metric: str, population: MetricsPopulation = "all",
+        edges: list[float] | None = None,
+    ):
+        """Get count, missing count, mean/stddev, min/max, p50/90/95/99 and a histogram.
+
+        Metric names come from get_dataset_metrics.registry. Additional pooled
+        metrics: window_lengths (durable tokens including boundaries, not idle
+        predictions), idle_runs and tool_latency_ticks. Pooled units are explicit.
+        Edges are finite increasing lower bounds; underflow/overflow are included
+        and bins are [lower,upper). Empty bins remain visible for gap analysis.
+        """
+        def read():
+            with dataset_metrics.snapshot(self.state.store, self.compiler, population) as (db, revision):
+                return {"revision": revision, "population": population,
+                        **dataset_metrics.distribution(db, metric, edges)}
+        return await asyncio.to_thread(read)
+
+    @command()
+    async def query_dataset_metrics(
+        self, population: MetricsPopulation = "all",
+        issue: Literal["missing_metadata", "unknown_labels", "compile_error", "pending"] | None = None,
+        metric: str | None = None, minimum: float | None = None, maximum: float | None = None,
+        offset: Nonnegative = 0, limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    ):
+        """Page source metrics and actionable annotation/compilation issues without replay.
+
+        Filter by an issue and/or an inclusive numeric range, e.g. peak_generators
+        minimum=2. Results carry UUID, current source hash, sample index, metrics,
+        missing metadata and unknown semantic labels. Use get_trajectory followed
+        by update_trajectory_metadata with expected_revision to repair annotations.
+        Prefer accepted_train_originals or development for observer analysis.
+        """
+        return await asyncio.to_thread(dataset_metrics.query_samples, self.state.store, self.compiler,
+                                       population, issue, metric, minimum, maximum, offset, limit)
 
     @command()
     def get_trajectory(self, sample_id: str):

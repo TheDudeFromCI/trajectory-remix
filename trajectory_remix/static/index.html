@@ -63,6 +63,7 @@
           <button id="view-menu-button" class="menu-trigger" aria-haspopup="menu" aria-expanded="false">View</button>
           <div id="view-menu" class="file-menu-popup" role="menu" hidden>
             <button id="toggle-dataset-panel" role="menuitemcheckbox" aria-checked="true"><span id="dataset-panel-check" class="menu-check" aria-hidden="true">✔</span> Dataset Panel</button>
+            <button id="toggle-metrics-panel" role="menuitemcheckbox" aria-checked="false">Dataset Metrics</button>
           </div>
         </div>
         <span class="menu-label">Help</span>
@@ -118,6 +119,17 @@
             <input id="user-name" placeholder="User" />
             <label for="tick-rate">Tick rate (tokens/s)</label>
             <input id="tick-rate" type="number" min="0" step="any" value="10" />
+            <details id="coverage-metadata-details" open>
+              <summary>Dataset coverage &amp; provenance</summary>
+              <div id="coverage-metadata-alerts" class="metadata-alerts" role="status"></div>
+              <div id="coverage-metadata-fields"></div>
+              <small>Unknown values stay unknown. Requested tags do not establish observed capabilities.</small>
+            </details>
+            <details id="observed-label-details">
+              <summary>Observed labels &amp; evidence</summary>
+              <div id="observed-label-fields"></div>
+              <small>Evidence uses compiler event paths, e.g. replay[1][0]. Review against the trace before marking a label reviewed.</small>
+            </details>
             <details id="metadata-details">
               <summary>All properties (JSON)</summary>
               <textarea id="metadata-json" spellcheck="false" aria-label="Metadata JSON">{}</textarea>
@@ -255,6 +267,52 @@
         </section>
       </aside>
     </div>
+    <section id="metrics-panel" class="metrics-panel" aria-label="Dataset metrics" hidden>
+      <div class="metrics-heading">
+        <div><h1>Dataset metrics</h1><small>Source originals and compiler records · Project Kidra launch proposal v0.1</small></div>
+        <button id="close-metrics-panel" aria-label="Close dataset metrics">Close</button>
+      </div>
+      <div class="metrics-toolbar">
+        <label>Population <select id="metrics-population">
+          <option value="all">All current source samples</option>
+          <option value="accepted">Accepted sources (Ready)</option>
+          <option value="accepted_train_originals">Accepted train originals · launch coverage</option>
+          <option value="development">Development sources</option>
+        </select></label>
+        <button id="metrics-refresh">Refresh graphs</button>
+        <button id="metrics-analyze" class="primary">Calculate pending metrics</button>
+        <button id="metrics-stop" hidden>Stop after current batch</button>
+      </div>
+      <p id="metrics-status" role="status" aria-live="polite"></p>
+      <div id="metrics-summary" class="metrics-summary"></div>
+      <p class="hint">These are saved source measurements. Raw loss weights precede trainer normalization; ticks are not seconds.
+        Compiler errors and unknown annotations are reported separately. Tool failures can belong to correct demonstrations.</p>
+      <div id="metrics-charts" class="metrics-charts"></div>
+      <section class="metric-card">
+        <label>Numeric distribution <select id="metrics-distribution"></select></label>
+        <p id="metrics-distribution-description"></p>
+        <div id="metrics-histogram"></div>
+        <p id="metrics-distribution-stats"></p>
+      </section>
+      <details id="metrics-coverage" class="metric-card" open>
+        <summary>Provisional launch coverage</summary>
+        <p>Only Ready, train, explicitly original sources qualify. Unknown semantic labels remain in the denominator.
+          Targets are advisory; fraction rules need 200 eligible samples and family minima activate at 50,000.</p>
+        <div id="metrics-coverage-table"></div>
+      </details>
+      <section class="metric-card">
+        <h2>Alerts &amp; repairs</h2>
+        <label>Show <select id="metrics-issue">
+          <option value="missing_metadata">Missing or invalid coverage metadata</option>
+          <option value="unknown_labels">Unknown / incomplete observed labels</option>
+          <option value="compile_error">Compiler errors</option>
+          <option value="pending">Pending calculations</option>
+        </select></label>
+        <div id="metrics-issues"></div>
+        <div class="metrics-toolbar"><button id="metrics-issues-prev">Previous</button><span id="metrics-issues-page"></span><button id="metrics-issues-next">Next</button></div>
+      </section>
+      <details class="metric-card"><summary>Measurements requiring additional evidence</summary><div id="metrics-unavailable"></div></details>
+    </section>
     <aside id="generation-panel" class="floating-panel" aria-label="Generation control" hidden>
       <div id="generation-panel-header" class="floating-header">
         <span class="side-heading">GENERATION CONTROL</span>
