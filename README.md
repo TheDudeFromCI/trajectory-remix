@@ -625,3 +625,7 @@ colored streamed output, and a configurable LLM concurrency limit (default 1).
 Automated drafts require human approval (Validation 3) before token export.
 See [Scenario workflows](docs/SCENARIOS.md) for YAML syntax, failure paths, role
 profiles, inspection, lifecycle details, and the current implementation limits.
+
+### Content-first generation
+
+Opt into `generation_mode: content-first` in a YAML scenario to generate bounded content requests, deterministically assemble parallel windows and tool requests, and defer semantic review/repair to Codex or other MCP agents. Configure a separate inference-model tokenizer and total request budget (8192 by default). Raw proposals and failed constructions remain recoverable; training export still requires Ready approval. See [configuration, demonstration, recovery, analytics, and limitations](docs/content-first-generation.md) and [benchmark findings](docs/content-first-benchmark.md).

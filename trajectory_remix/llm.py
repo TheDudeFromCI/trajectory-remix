@@ -181,6 +181,12 @@ def default_config():
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("Config must be an object")
+    content = config.get("content_first", {})
+    if not isinstance(content, dict):
+        raise ValueError("content_first must be an object")
+    for key, default, low in (("context_budget", 8192, 1), ("reserve_tokens", 256, 0)):
+        if type(content.get(key, default)) is not int or not low <= content.get(key, default) <= 1_000_000:
+            raise ValueError(f"content_first.{key} must be an integer in [{low}, 1000000]")
     single = config.get("single_generation", {})
     if not isinstance(single, dict):
         raise ValueError("single_generation must be an object")
@@ -212,6 +218,12 @@ def validate_config(config):
         ):
             raise ValueError("Endpoint IDs must be nonempty and unique")
         seen.add(ep["id"])
+        if ep.get("completion_limit_parameter", "max_tokens") not in ("max_tokens", "max_completion_tokens"):
+            raise ValueError("completion_limit_parameter must be max_tokens or max_completion_tokens")
+        if "inference_tokenizer" in ep and (not isinstance(ep["inference_tokenizer"], str) or not ep["inference_tokenizer"]):
+            raise ValueError("inference_tokenizer must be a local model tokenizer directory")
+        if type(ep.get('stream_usage', True)) is not bool:
+            raise ValueError('stream_usage must be boolean')
         context_size = ep.get("context_size", 0)
         if type(context_size) is not int or not 0 <= context_size <= 1_000_000_000:
             raise ValueError("Endpoint context_size must be an integer between 0 (unknown) and 1000000000")
@@ -415,7 +427,7 @@ class LLMClient:
             "model": endpoint["model"],
             "messages": messages,
             "temperature": endpoint.get("temperature", 0.7),
-            "max_tokens": int(endpoint.get("max_tokens", 1024)),
+            endpoint.get("completion_limit_parameter", "max_tokens"): int(endpoint.get("max_tokens", 1024)),
             "stream": False,
         }
         if tools:
@@ -445,7 +457,7 @@ class LLMClient:
         if not isinstance(data.get("choices"), list) or not data["choices"]:
             raise ValueError("LLM returned no choices")
         choice = data["choices"][0]
-        if choice.get("finish_reason") in ("length", "content_filter"):
+        if not endpoint.get("retain_incomplete") and choice.get("finish_reason") in ("length", "content_filter"):
             raise ValueError(f"Incomplete LLM response: {choice['finish_reason']}")
         message = choice.get("message")
         if not isinstance(message, dict):
@@ -454,6 +466,8 @@ class LLMClient:
             message["content"], str
         ):
             raise ValueError("Only text completion content is supported")
+        if endpoint.get("retain_incomplete"):
+            message = {**message, "_usage": data.get("usage", {}), "_finish_reason": choice.get("finish_reason")}
         return message
 
 

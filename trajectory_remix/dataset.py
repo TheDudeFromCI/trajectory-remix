@@ -46,7 +46,9 @@ def evaluation_source(sample):
     source = copy.deepcopy(sample)
     metadata = source.get("metadata", {})
     if isinstance(metadata, dict):
-        for key in ("validation_level", "evaluations", "approval"):
+        # Operational counters are not evidence reviewed by semantic sign-off.
+        # Original content-first requirements/proposals remain part of the source.
+        for key in ("validation_level", "evaluations", "approval", "generation_metrics", "generation_elapsed_seconds"):
             metadata.pop(key, None)
     return source
 

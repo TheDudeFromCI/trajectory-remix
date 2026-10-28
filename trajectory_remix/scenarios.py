@@ -57,6 +57,8 @@ class ReviewCheck(Definition):
 class Step(Definition):
     uses: Literal[
         "llm.generate",
+        "llm.content",
+        "remix.assemble",
         "flow.repeat",
         "remix.novelty",
         "remix.message",
@@ -72,6 +74,7 @@ class Step(Definition):
     profile: str | None = None
     endpoint: str = "generator"
     output_schema: str | None = None
+    visible_windows: list[str] = Field(default_factory=list)
     max_input_tokens: int | None = Field(default=None, ge=512, le=100000)
     retries: int = Field(default=0, ge=0, le=5)
     on_failure: Failure = Field(default_factory=Failure)
@@ -92,7 +95,7 @@ class Step(Definition):
     fallback: bool = True
 
 
-def check_scenario_endpoints(name, flow, endpoints):
+def check_scenario_endpoints(name, flow, endpoints, *, content_first=False):
     available = {endpoint["id"] for endpoint in endpoints}
 
     def check(steps, prefix=""):
@@ -101,7 +104,7 @@ def check_scenario_endpoints(name, flow, endpoints):
                 continue
             path = prefix + step_name
             if (
-                step.uses in ("llm.generate", "remix.validate", "remix.novelty")
+                step.uses in (("llm.generate", "llm.content") if content_first else ("llm.generate", "llm.content", "remix.validate", "remix.novelty"))
                 and step.endpoint not in available
             ):
                 raise ValueError(
@@ -124,6 +127,7 @@ class Profile(Definition):
 
 
 class Flow(Definition):
+    generation_mode: Literal["existing", "content-first"] = "existing"
     system_prompt: str = "You are Kidra, a coordinator."
     version: Literal[1] = 1
     description: str = ""
@@ -165,7 +169,7 @@ class Flow(Definition):
             if step.profile and step.profile not in self.roles:
                 raise ValueError(f"Unknown role: {step.profile}")
             if (
-                step.uses in ("llm.generate", "remix.novelty", "remix.validate")
+                step.uses in ("llm.generate", "llm.content", "remix.novelty", "remix.validate")
                 and not step.prompt
                 and not (step.uses == "remix.validate" and step.checks)
             ):
@@ -346,5 +350,7 @@ class ScenarioRegistry:
                     },
                 },
             }
-            for s in self.scenarios.values()
+            # Keep existing-mode scenarios first so adding opt-in examples does
+            # not change the dashboard's default generation workflow.
+            for s in sorted(self.scenarios.values(), key=lambda s: (s.flow.generation_mode == 'content-first', s.name))
         ]

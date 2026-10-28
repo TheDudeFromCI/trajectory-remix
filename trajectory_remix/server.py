@@ -476,7 +476,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         incoming = data.get("config")
         if isinstance(incoming, dict) and isinstance(incoming.get("endpoints"), list) and all(isinstance(ep, dict) and isinstance(ep.get("id"), str) for ep in incoming["endpoints"]):
             for scenario in scenario_runner.registry.scenarios.values():
-                check_scenario_endpoints(scenario.name, scenario.flow, incoming["endpoints"])
+                check_scenario_endpoints(scenario.name, scenario.flow, incoming["endpoints"], content_first=scenario.flow.generation_mode == "content-first")
         candidate = validate_config(incoming)
         # A blank UI key preserves an existing in-memory key; explicit clear_key clears it.
         old = {e["id"]: e for e in state["config"]["endpoints"]}
@@ -491,6 +491,11 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 endpoint["api_key"] = old[endpoint["id"]]["api_key"]
         state.set_config(candidate, revision)
         return {"ok": True}
+
+    @app.get("/api/generation/analytics")
+    async def generation_analytics():
+        from .content_first import dataset_generation_metrics
+        return {"modes": dataset_generation_metrics(state['samples'])}
 
     @app.post("/api/scenarios/run")
     async def start_scenario(request: Request):

@@ -832,6 +832,57 @@ class TrajectoryCommands:
         return checklist, origin
 
     @command()
+    def get_generation_analytics(self):
+        """Compare retained candidates, inference costs, repairs and approvals by generation mode.
+
+        Throughput uses recorded active generation elapsed time and excludes
+        external review time. Unknown legacy counters are not reconstructed.
+        """
+        from .content_first import dataset_generation_metrics
+        return {'modes': dataset_generation_metrics(self.state['samples'])}
+
+    @command()
+    def get_generation_record(self, sample_id: str, request_index: Nonnegative | None = None,
+                              include_failures: bool = False):
+        """Inspect original generation requirements, bounded requests and failed proposals.
+
+        By default return request summaries. Select request_index for its full raw
+        output/reasoning, including incomplete or schema-invalid text. Set
+        include_failures for construction inputs and uncompiled proposed replay.
+        Generation jobs are retained independently of the current active job.
+        Repair the saved trajectory with existing replay editing tools, then review
+        against get_review_checklist; this read never invokes an inference model.
+        """
+        _, sample = self._find(sample_id)
+        metadata = sample.get('metadata', {})
+        record = copy.deepcopy(metadata.get('generation_record', {}))
+        if not record and metadata.get('generation_mode') != 'content-first':
+            raise CommandError('No content-first generation record for this trajectory', 'not_found')
+        job = metadata.get('generation_job')
+        if job and hasattr(self.state, 'store'):
+            with self.state.store.connect() as db:
+                row = db.execute('SELECT snapshot FROM generation_jobs WHERE id=?', (job,)).fetchone()
+            if row:
+                saved = json.loads(row[0])
+                from .content_first import summarize_requests
+                requests = saved.get('content_requests', [])
+                record.update(job=job, requests=requests,
+                              failures=saved.get('failed_proposals', []),
+                              requirements={'flow': saved['flow'], 'prompts': saved['prompts']},
+                              metrics=summarize_requests(requests, saved.get('elapsed_seconds', 0), saved['status']['phase']))
+        if not record:
+            raise CommandError('No content-first generation record for this trajectory', 'not_found')
+        requests = record.get('requests', [])
+        if request_index is not None:
+            if request_index >= len(requests):
+                raise CommandError('Generation request index out of range')
+            record['request'] = copy.deepcopy(requests[request_index])
+        record['requests'] = [{k: v for k, v in request.items() if k not in ('raw_output', 'reasoning')} for request in requests]
+        if not include_failures:
+            record['failures'] = [{k: v for k, v in failure.items() if k not in ('sample', 'inputs')} for failure in record.get('failures', [])]
+        return {'sample_id': sample_id, 'revision': self.state['revision'], **record}
+
+    @command()
     def get_review_checklist(self, sample_id: str):
         """Fetch this trajectory's scenario checklist automatically from its tag/provenance.
 
@@ -902,6 +953,8 @@ class TrajectoryCommands:
         plan = self.compiler.compile(candidate)
         result = {"sample_id": sample_id, "revision": self.state["revision"], "saved": False}
         if not dry_run:
+            if candidate.get('metadata', {}).get('generation_mode') == 'content-first':
+                candidate['metadata']['external_repairs'] = candidate['metadata'].get('external_repairs', 0) + 1
             result = self._commit(candidate, index)
         return {**result, "diagnostics": plan["diagnostics"], "review_required": True,
                 "checklist": public_checklist(checklist, origin)}

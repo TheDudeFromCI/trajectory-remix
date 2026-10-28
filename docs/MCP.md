@@ -911,3 +911,7 @@ EOS/NOOP control events in chat are allowed. These warnings do not fail local
 compilation, and include the source event path for targeted repairs.
 
 Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.
+
+## Content-first generation evidence
+
+`get_generation_record(sample_id, request_index?, include_failures=false)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.

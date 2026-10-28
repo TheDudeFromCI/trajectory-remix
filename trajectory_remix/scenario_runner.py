@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import traceback
+import time
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
@@ -31,8 +32,10 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.usage import RequestUsage
 
-from .dataset import evaluation_source
+from .content_first import RequestBudget, assemble_streams, summarize_requests, validate_content
+from .dataset import evaluation_source, reject_constant
 from .generation_stats import RequestStats
 from .trajectory_review import build_checklist
 from .llm import SampleBuilder
@@ -135,7 +138,31 @@ class ScenarioRunner:
                     active=[],
                 )
                 self.snapshot["status"] = self.status
+                for request in self.snapshot.get('content_requests', []):
+                    if request.get('state') == 'running':
+                        request['state'] = 'interrupted'
+                        request['finished_at'] = request['started_at'] + request.get('metrics', {}).get('generation_seconds', 0)
                 self.persist()
+
+    @property
+    def content_first(self):
+        return hasattr(self, 'scenario') and self.scenario.flow.generation_mode == 'content-first'
+
+    def elapsed_seconds(self):
+        if hasattr(self, '_attempt_started'):
+            return self._attempt_elapsed_base + time.monotonic() - self._attempt_started
+        return self.snapshot.get('elapsed_seconds', 0)
+
+    def generation_record(self):
+        requests = self.snapshot.get('content_requests', [])
+        elapsed = self.elapsed_seconds()
+        return {
+            'job': self.snapshot['id'],
+            'requirements': {'flow': self.snapshot['flow'], 'prompts': self.snapshot['prompts']},
+            'requests': copy.deepcopy(requests),
+            'failures': copy.deepcopy(self.snapshot.get('failed_proposals', [])),
+            'metrics': summarize_requests(requests, elapsed, self.status['phase']),
+        }
 
     def clean(self, value):
         text = (
@@ -152,6 +179,7 @@ class ScenarioRunner:
     def persist(self):
         if self.snapshot is None:
             return
+        self.snapshot['elapsed_seconds'] = self.elapsed_seconds()
         self.snapshot.update(status=copy.deepcopy(self.status), logs=list(self.logs))
         if hasattr(self, "builder"):
             self.snapshot["checkpoint"] = {
@@ -235,7 +263,7 @@ class ScenarioRunner:
         self.endpoints = {e["id"]: e for e in self.config["endpoints"]}
 
         try:
-            check_scenario_endpoints(name, self.scenario.flow, self.config["endpoints"])
+            check_scenario_endpoints(name, self.scenario.flow, self.config["endpoints"], content_first=self.content_first)
         except ValueError as error:
             self.log(str(error), "error")
             raise
@@ -294,6 +322,7 @@ class ScenarioRunner:
         }
         self.builder = SampleBuilder(self.compiler, self.config)
         self.builder.sample["metadata"].update(
+            generation_mode=self.scenario.flow.generation_mode,
             origin="automation",
             validation_level=0,
             scenario=name,
@@ -550,13 +579,15 @@ class ScenarioRunner:
             self.persist()
 
     async def run_attempt(self):
+        self._attempt_elapsed_base = self.snapshot.get('elapsed_seconds', 0)
+        self._attempt_started = time.monotonic()
         try:
             await self.execute(self.scenario.flow.steps, self.context)
             if not self.status["draft_id"]:
                 raise Rejected("Scenario completed without publishing a draft")
             self.builder.sample["metadata"]["generation_phase"] = "complete"
-            self.publish()
             self.status["phase"] = "complete"
+            self.publish()
             if self.snapshot.get("validation_passed"):
                 self.status["accepted"] += 1
             self.log("Scenario complete", "success")
@@ -583,7 +614,7 @@ class ScenarioRunner:
             self.status.update(phase="evaluation_failed", last_error=self.clean(str(error)))
             self.log("Evaluation failed; batch paused with a resumable draft: " + self.clean(str(error)), "error")
         except Rejected as error:
-            if self.status["draft_id"]:
+            if self.status["draft_id"] and not self.content_first:
                 rejected = copy.deepcopy(self.expected_draft)
                 rejected["metadata"]["generation_phase"] = "rejected"
                 rejected["metadata"]["validation_level"] = min(
@@ -609,6 +640,16 @@ class ScenarioRunner:
             )
             self.log(self.status["last_error"], "error")
         finally:
+            if self.content_first:
+                # Keep the last compilable draft and every rejected proposal. A
+                # failed attempt remains pending review and resumable, never approved.
+                try:
+                    self.publish()
+                except ValueError as error:
+                    self.log(f"Could not update retained draft: {error}", "error")
+            self.snapshot['elapsed_seconds'] = self.elapsed_seconds()
+            del self._attempt_started
+            del self._attempt_elapsed_base
             self.status.update(
                 running=False,
                 paused=self.status["phase"] in ("api_paused", "evaluation_failed"),
@@ -627,7 +668,7 @@ class ScenarioRunner:
             await self.gate()
             ready = [(n, s) for n, s in pending.items() if set(s.needs) <= done]
             # Model-only siblings are safe to run together. Draft operations stay ordered.
-            batch = [item for item in ready if item[1].uses == "llm.generate"] or ready[
+            batch = [item for item in ready if item[1].uses in ("llm.generate", "llm.content")] or ready[
                 :1
             ]
             tasks = [
@@ -677,7 +718,7 @@ class ScenarioRunner:
                     self.builder.serial,
                 )
                 if step.uses
-                in ("remix.message", "remix.tools", "remix.draft", "remix.setup")
+                in ("remix.message", "remix.tools", "remix.draft", "remix.setup", "remix.assemble")
                 else None
             )
             try:
@@ -711,6 +752,12 @@ class ScenarioRunner:
                 if isinstance(error, Rejected) and step.uses == "remix.reject":
                     record["state"] = "rejected"
                     raise
+                if self.content_first:
+                    self.snapshot.setdefault('failed_proposals', []).append({
+                        'path': path, 'attempt': attempt, 'inputs': inputs,
+                        'sample': copy.deepcopy(self.builder.sample) if checkpoint else None,
+                        'error': self.clean(str(error))[:4000],
+                    })
                 if checkpoint is not None:
                     self.builder.sample, self.builder.next_tick, self.builder.serial = (
                         checkpoint
@@ -806,10 +853,29 @@ class ScenarioRunner:
         max_input_tokens=None,
         rules=None,
     ):
+        if step.visible_windows:
+            from .llm import selected_windows
+            plan = self.compiler.compile(self.builder.sample)
+            visible = selected_windows(plan, self.compiler, {'visible': step.visible_windows})
+            if self.content_first:
+                visible = [window for window in visible if not window['closed']]
+                unavailable = set(step.visible_windows) - {w['window'] for w in visible} - {'*'}
+                if unavailable:
+                    raise ValueError(f'Requested context windows are not open: {sorted(unavailable)}')
+            inputs = {**inputs, 'visible_windows': visible}
         instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
+        budget, budget_metrics = None, {}
+        endpoint = self.endpoints[step.endpoint]
+        if self.content_first:
+            if not endpoint.get('inference_tokenizer'):
+                raise ValueError(f"Endpoint {step.endpoint} needs inference_tokenizer for content-first requests")
+            budget = RequestBudget(endpoint, self.config.get('content_first', {}))
+            budget_metrics = budget.check([
+                {'role': 'system', 'content': instructions}, {'role': 'user', 'content': data}
+            ], max_input_tokens if max_input_tokens is not None else step.max_input_tokens)
         if max_input_tokens is None:
             max_input_tokens = step.max_input_tokens
-        if max_input_tokens is not None:
+        if max_input_tokens is not None and not self.content_first:
             endpoint = self.endpoints[step.endpoint]
             if endpoint.get("context_size"):
                 max_input_tokens = min(
@@ -824,7 +890,7 @@ class ScenarioRunner:
                 raise ValueError(
                     f"{path}: prompt exceeds configured {max_input_tokens} token input budget"
                 )
-        system_tokens = count(self.compiler.tokenizer, instructions)
+        system_tokens = budget.output_tokens(instructions) if budget else count(self.compiler.tokenizer, instructions)
         async with self.model_slot():
             self.status["active"].append(path)
             self.status["paused"] = False
@@ -833,14 +899,25 @@ class ScenarioRunner:
             stats = RequestStats(
                 endpoint["model"],
                 endpoint.get("context_size", 0),
-                self.compiler.tokenizer,
+                budget.tokenizer if budget else self.compiler.tokenizer,
             )
             self.status["model_requests"] = self.status.get("model_requests", 0) + 1
             active_stream = None
+            stream_usage = None
             streamed_text, streamed_reasoning, prompt_text = "", "", ""
+            injected_usage = None
+            proposal = None
+            if budget:
+                proposal = {'path': path, 'state': 'running', 'model': endpoint['model'],
+                            'endpoint': endpoint['id'], 'budget': budget_metrics,
+                            'decision_tick': self.builder.next_tick, 'started_at': time.time(), 'raw_output': '', 'reasoning': ''}
+                self.snapshot.setdefault('content_requests', []).append(proposal)
 
             def sample_stats(final=False):
-                usage = active_stream.get().usage if active_stream is not None else None
+                usage = active_stream.get().usage if active_stream is not None else stream_usage
+                if injected_usage and 'prompt_tokens' in injected_usage and 'completion_tokens' in injected_usage:
+                    usage = RequestUsage(input_tokens=injected_usage['prompt_tokens'], output_tokens=injected_usage['completion_tokens'],
+                                         details=injected_usage.get('completion_tokens_details') or {})
                 self.first_prompt_paths.setdefault(step.endpoint, path)
                 if (
                     usage
@@ -860,6 +937,30 @@ class ScenarioRunner:
                         current["first_prompt_tokens"] = self.first_prompts[
                             step.endpoint
                         ]
+                if budget:
+                    # Provider completion counts include reasoning; never add it twice.
+                    provider = injected_usage
+                    if usage and (usage.input_tokens or usage.output_tokens):
+                        provider = {'prompt_tokens': usage.input_tokens, 'completion_tokens': usage.output_tokens,
+                                    'completion_tokens_details': usage.details}
+                    if provider and 'prompt_tokens' in provider and 'completion_tokens' in provider:
+                        current.update(prompt_tokens=provider['prompt_tokens'], completion_tokens=provider['completion_tokens'],
+                                       total_tokens=provider['prompt_tokens'] + provider['completion_tokens'], token_source='provider')
+                        details = provider.get('completion_tokens_details') or {}
+                        if 'reasoning_tokens' in details:
+                            current['reasoning_tokens'] = details['reasoning_tokens']
+                    else:
+                        output_count = budget.output_tokens(streamed_text + streamed_reasoning)
+                        current.update(prompt_tokens=budget_metrics['prompt_tokens_preflight'], completion_tokens=output_count,
+                                       total_tokens=budget_metrics['prompt_tokens_preflight'] + output_count,
+                                       token_source='estimated', token_estimator='inference-tokenizer')
+                        if streamed_reasoning:
+                            current['reasoning_tokens'] = budget.output_tokens(streamed_reasoning)
+                    current.update(budget_metrics)
+                    current['context_used_tokens'] = current['total_tokens']
+                    current['context_size'] = budget.context
+                    current['context_utilization'] = current['total_tokens'] / budget.context
+                    proposal.update(raw_output=streamed_text, reasoning=streamed_reasoning, metrics=current)
                 current["system_prompt_tokens_estimated"] = system_tokens
                 self.status.setdefault("metrics", {})[path] = current
                 self.status["total_model_seconds"] = round(
@@ -876,6 +977,8 @@ class ScenarioRunner:
             async def ticker():
                 while True:
                     sample_stats()
+                    if budget:
+                        self.persist()
                     await asyncio.sleep(2)
 
             timer = asyncio.create_task(ticker())
@@ -897,10 +1000,59 @@ class ScenarioRunner:
                 )
                 if self.client is not None:
                     # Injected clients use identical rendered messages and request boundaries.
-                    message = await self.client.complete(endpoint, messages)
-                    text = message.get("content", "")
+                    request_endpoint = {**endpoint, 'retain_incomplete': True} if budget else endpoint
+                    message = await self.client.complete(request_endpoint, messages)
+                    text = message.get("content", "") or ''
                     streamed_text = text
+                    streamed_reasoning = message.get('reasoning_content') or ''
+                    injected_usage = message.get('_usage')
+                    if budget and message.get('_finish_reason') in ('length', 'content_filter'):
+                        raise ValueError(f"Incomplete model output: {message['_finish_reason']}")
 
+                elif budget:
+                    # Send exactly the messages counted by preflight. Provider/model
+                    # profiles must not rewrite roles or inject schema instructions.
+                    key = endpoint.get('api_key') or os.getenv(endpoint.get('api_key_env', ''), '') or 'local'
+                    async with httpx.AsyncClient(timeout=endpoint.get('timeout', 120), follow_redirects=False) as http:
+                        api = AsyncOpenAI(base_url=endpoint['base_url'], api_key=key, http_client=http, max_retries=0)
+                        settings = {budget.parameter: budget.completion}
+                        if endpoint.get('stream_usage', True):
+                            settings['stream_options'] = {'include_usage': True}
+                        stream = await api.chat.completions.create(
+                            model=endpoint['model'], messages=messages, stream=True,
+                            temperature=endpoint.get('temperature', .7), **settings,
+                        )
+                        finish_reason = None
+                        text = ''
+                        async with stream:
+                            async for chunk in stream:
+                                if chunk.usage is not None:
+                                    details = chunk.usage.completion_tokens_details
+                                    stream_usage = RequestUsage(
+                                        input_tokens=chunk.usage.prompt_tokens,
+                                        output_tokens=chunk.usage.completion_tokens,
+                                        details={'reasoning_tokens': details.reasoning_tokens}
+                                        if details and details.reasoning_tokens is not None else {},
+                                    )
+                                if chunk.choices:
+                                    choice = chunk.choices[0]
+                                    delta = choice.delta
+                                    content = delta.content or ''
+                                    reasoning = getattr(delta, 'reasoning_content', '') or ''
+                                    if content or reasoning:
+                                        stats.first_token()
+                                    text += content
+                                    streamed_text = text
+                                    streamed_reasoning += reasoning
+                                    finish_reason = choice.finish_reason or finish_reason
+                                    if len(text) + len(streamed_reasoning) > 4_000_000:
+                                        raise ValueError('Model output exceeds 4 MB')
+                        if finish_reason in ('length', 'content_filter'):
+                            raise ValueError(f'Incomplete model output: {finish_reason}')
+                        if finish_reason is None:
+                            raise ValueError('Interrupted model stream: missing finish reason')
+                        if not text.strip():
+                            raise ValueError('Model returned no text')
                 else:
                     key = (
                         endpoint.get("api_key")
@@ -932,7 +1084,7 @@ class ScenarioRunner:
                             [request],
                             {
                                 "temperature": endpoint.get("temperature", 0.7),
-                                "max_tokens": endpoint.get("max_tokens", 1024),
+                                'max_tokens': endpoint.get('max_tokens', 1024),
                             },
                             parameters,
                         ) as stream:
@@ -1000,8 +1152,8 @@ class ScenarioRunner:
                 self.log(text, "output", path)
                 if schema:
                     result = (
-                        json.loads(text, object_pairs_hook=unique_json_object)
-                        if rules else json.loads(text)
+                        json.loads(text, object_pairs_hook=unique_json_object, parse_constant=reject_constant)
+                        if rules or budget else json.loads(text)
                     )
                 else:
                     result = text
@@ -1013,6 +1165,13 @@ class ScenarioRunner:
                     and result.get("identifier")
                 ):
                     self.assign_identifier(result["identifier"])
+                if proposal is not None:
+                    metrics = sample_stats(final=True)
+                    if metrics['prompt_tokens'] + budget.completion + budget.reserve > budget.context:
+                        raise ValueError('Provider prompt usage exceeds preflight budget; verify inference tokenizer/chat template')
+                    if metrics['completion_tokens'] > budget.completion:
+                        raise ValueError('Provider exceeded the total completion cap (including reasoning)')
+                    proposal['state'] = 'complete'
                 return result
             except (httpx.HTTPError, APIError, ModelAPIError) as error:
                 # Console-only diagnostics, with configured credentials redacted.
@@ -1030,6 +1189,14 @@ class ScenarioRunner:
                 timer.cancel()
                 await asyncio.gather(timer, return_exceptions=True)
                 metrics = sample_stats(final=True)
+                if proposal is not None:
+                    proposal['finished_at'] = time.time()
+                    if proposal['state'] != 'complete':
+                        proposal['state'] = 'incomplete'
+                self.snapshot.setdefault('request_metrics', []).append({
+                    'path': path, 'metrics': metrics, 'mode': self.scenario.flow.generation_mode,
+                    'raw_proposal': bool(streamed_text),
+                })
                 self.status["completed_model_seconds"] = (
                     self.status.get("completed_model_seconds", 0)
                     + metrics["generation_seconds"]
@@ -1050,7 +1217,7 @@ class ScenarioRunner:
 
     async def dispatch(self, step, inputs, context, path):
         match step.uses:
-            case "llm.generate":
+            case "llm.generate" | "llm.content":
                 return await self.llm(step, inputs, context, path)
             case "flow.repeat":
                 history = []
@@ -1078,7 +1245,16 @@ class ScenarioRunner:
                 raise ValueError(
                     "Conversation reached its iteration limit without resolution"
                 )
+            case "remix.assemble":
+                result = assemble_streams(self.builder, inputs)
+                if inputs.get('calls'):
+                    result.update(self.simulate({'calls': [inputs['calls']]}, start_tick=result['start_tick']))
+                self.publish()
+                return result
             case "remix.novelty":
+                if self.content_first:
+                    self.builder.sample['metadata']['concept'] = copy.deepcopy(inputs['idea'])
+                    return inputs['idea']
                 return await self.novelty(step, inputs, context, path)
             case "remix.message":
                 source = inputs.get("source", "user")
@@ -1087,6 +1263,8 @@ class ScenarioRunner:
                 text = inputs["text"]
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("Message cannot be empty")
+                if self.content_first:
+                    validate_content(self.compiler, text)
                 if not any(
                     event["op"] == "open" and event.get("window") == "chat"
                     for events in self.builder.sample["replay"].values()
@@ -1121,8 +1299,18 @@ class ScenarioRunner:
                 )
                 return {"text": text}
             case "remix.setup":
-                for item in inputs["idea"].get("files", []):
-                    self.builder.sample["replay"].setdefault("0", []).append(
+                if self.content_first:
+                    if inputs.get('idea'):
+                        self.builder.sample['metadata']['concept'] = copy.deepcopy(inputs['idea'])
+                setup_tick = str(self.builder.next_tick) if self.content_first else '0'
+                for operation in inputs.get('operations', []) if self.content_first else []:
+                    if not isinstance(operation, dict) or set(operation) != {'tool', 'arguments'}:
+                        raise ValueError('Setup operations require tool and arguments')
+                    self.builder.sample['replay'].setdefault(setup_tick, []).append(
+                        {'op': 'invisible-tool-call', **operation}
+                    )
+                for item in inputs.get('idea', {}).get("files", []):
+                    self.builder.sample["replay"].setdefault(setup_tick, []).append(
                         {
                             "op": "invisible-tool-call",
                             "tool": "file_write",
@@ -1143,6 +1331,8 @@ class ScenarioRunner:
                 if type(release_tools) is not bool or (release_tools and not inputs.get("reasoning")):
                     raise ValueError("release_tool_context requires a boolean and nonempty reasoning")
                 if inputs.get("reasoning"):
+                    if self.content_first:
+                        validate_content(self.compiler, inputs['reasoning'])
                     self.builder.add_stream(
                         "reasoning-" + str(self.builder.serial),
                         inputs["reasoning"],
@@ -1170,6 +1360,8 @@ class ScenarioRunner:
                 )
                 return result
             case "remix.validate":
+                if self.content_first:
+                    return {'deferred': True, 'valid': None, 'feedback': ['External scenario review required']}
                 return await self.validate(step, inputs, context, path)
             case "remix.reject":
                 raise Rejected(inputs.get("reason", "Rejected by scenario"))
@@ -1183,7 +1375,7 @@ class ScenarioRunner:
                 )
         self.builder.next_tick = self.compiler.compile(self.builder.sample)["max_tick"] + 1
 
-    def simulate(self, inputs):
+    def simulate(self, inputs, start_tick=None):
         calls = inputs.get("calls", [])
         if not isinstance(calls, list) or len(calls) > 32:
             raise ValueError("Tool plan must contain at most 32 calls")
@@ -1194,7 +1386,8 @@ class ScenarioRunner:
                 raise ValueError(
                     "Tool calls must be grouped into nonempty parallel batches"
                 )
-            tick = str(self.builder.next_tick)
+            tick = str(self.builder.next_tick if start_tick is None else start_tick)
+            start_tick = None
             if not any(
                 event["op"] == "open" and event.get("window") == "tools"
                 for events in self.builder.sample["replay"].values()
@@ -1212,7 +1405,10 @@ class ScenarioRunner:
             )
             windows = []
             for call in group:
-                if set(call) - {"tool", "arguments", "outcome"}:
+                allowed = {'tool', 'arguments', 'outcome'}
+                if self.content_first:
+                    allowed |= {'duration-ticks', 'delivery'}
+                if set(call) - allowed:
                     raise ValueError("Unknown tool plan field")
                 window = f"tool-{self.builder.serial}"
                 self.builder.serial += 1
@@ -1222,6 +1418,10 @@ class ScenarioRunner:
                     "tool": call["tool"],
                     "arguments": call["arguments"],
                 }
+                if self.content_first:
+                    for field in ('duration-ticks', 'delivery'):
+                        if field in call:
+                            event[field] = call[field]
                 if "outcome" in call:
                     if call["tool"] != "subagent":
                         raise ValueError(
@@ -1256,7 +1456,14 @@ class ScenarioRunner:
 
     def publish(self, draft=None):
         draft = draft or self.closed_draft()
-        self.compiler.compile(draft)
+        if self.content_first:
+            draft['metadata']['generation_record'] = self.generation_record()
+        elif self.snapshot.get('request_metrics'):
+            draft['metadata']['generation_metrics'] = copy.deepcopy(self.snapshot['request_metrics'])
+            draft['metadata']['generation_elapsed_seconds'] = self.elapsed_seconds()
+        compiled = self.compiler.compile(draft)
+        if self.content_first:
+            draft['metadata']['generation_record']['diagnostics'] = compiled['diagnostics']
         if self.state_override is not None:
             draft["metadata"]["validation_level"] = self.state_override
         samples = self.state["samples"].copy()

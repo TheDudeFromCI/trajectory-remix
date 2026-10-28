@@ -112,3 +112,14 @@ Re-run the tests when changing compiler visibility, stream timing, tokenization,
 window closure, tool capabilities or generation task assembly. The reactive
 fixture keeps the tool window open until the final response has consumed its
 result, then emits EOS to release it.
+
+- Content-first regressions cover exact inference chat-template budgets (install
+  `.[inference,test,mcp]` for the real tokenizer integration), both OpenAI completion
+  limit parameters on the streaming wire, reasoning usage, concurrent content
+  requests and windows, tool requests/results and delayed observations, causal
+  visibility and loss masks, BOS/EOS/NOOP, trajectories beyond individual request
+  limits, invalid output/construction retention, cancellation/resume, archived
+  generation evidence, original-checklist MCP repair, export approval, and
+  existing-mode/scenario compatibility. `scripts/benchmark_content_first.py`
+  provides offline and real-endpoint end-to-end comparisons; offline inference
+  delays are explicitly simulated.

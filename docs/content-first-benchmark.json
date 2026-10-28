@@ -1,0 +1,62 @@
+{
+  "measurement": "offline-fixture-simulated-inference",
+  "seed": 42,
+  "samples_per_mode": 3,
+  "scenario": "content_first",
+  "context_budget": 8192,
+  "modes": {
+    "existing": {
+      "retained_candidates": 3,
+      "constructed_drafts": 3,
+      "unsuccessful_drafts": 0,
+      "pending_drafts": 0,
+      "repaired_samples": 0,
+      "approved_samples": 0,
+      "request_count": 18,
+      "raw_proposals": 18,
+      "prompt_tokens": 55737,
+      "completion_tokens": 1836,
+      "reasoning_tokens": 0,
+      "inference_seconds": 2.307000000000001,
+      "elapsed_seconds": 5.774045862000094,
+      "candidate_throughput_per_second": 0.5195663615600065,
+      "usable_throughput_per_second": 0.0,
+      "total_tokens": 57573,
+      "generation_phase": "complete",
+      "candidate_retention": 1.0
+    },
+    "content-first": {
+      "retained_candidates": 3,
+      "constructed_drafts": 3,
+      "unsuccessful_drafts": 0,
+      "pending_drafts": 0,
+      "repaired_samples": 0,
+      "approved_samples": 0,
+      "request_count": 15,
+      "raw_proposals": 15,
+      "prompt_tokens": 14812,
+      "completion_tokens": 1743,
+      "reasoning_tokens": 0,
+      "inference_seconds": 1.605,
+      "elapsed_seconds": 3.7487765649998437,
+      "candidate_throughput_per_second": 0.8002610846453915,
+      "usable_throughput_per_second": 0.0,
+      "total_tokens": 16555,
+      "generation_phase": "complete",
+      "candidate_retention": 1.0
+    }
+  },
+  "comparable_completed_candidates": true,
+  "reductions_fraction": {
+    "request_count": 0.16666666666666663,
+    "total_tokens": 0.7124520174387299,
+    "inference_seconds": 0.30429128738621614,
+    "elapsed_seconds": 0.3507539332738707
+  },
+  "limitations": [
+    "Offline results use scripted text and simulated delays, not real LLM quality or GPU timing.",
+    "Equivalent scenario prompts and tag seed; live model outputs may differ even at temperature zero.",
+    "All candidates remain unapproved. Usable training throughput requires independent review and Ready approval.",
+    "The existing YAML runner already generates content; this comparison isolates bounded construction and deferred validation."
+  ]
+}
