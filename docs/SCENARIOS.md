@@ -71,8 +71,14 @@ remaining quota. Original prompts, requirements and sampled conditions come from
 each checkpoint; current endpoint settings apply. Compiler and approval rules stay
 the same, and semantic validation is not invoked.
 
-Generation Control shows processed/completed/failed/skipped counts and recent
-issues. Provider or construction failures retain their proposals and let the next
+Generation Control adapts to the current action. During a resume pass it hides
+scenario selection, creation counts and condition settings. Dataset progress and
+the current draft appear first, with separate completed/failed/skipped/to-process
+counts. Pause/Cancel are shown while running; a new resume pass is offered only
+after stopping and when unfinished entries remain. **Needs attention** groups
+issues by draft, with original technical details available on expansion. Inference
+usage is a separate collapsible section. Creation setup remains available from
+Single Sample or Batch, without mixing in a previous resume pass's results. Provider or construction failures retain their proposals and let the next
 entry proceed. Edited, missing or incompatible checkpoints are reported without
 overwriting source. Entries deleted, completed or reassigned before their turn
 are skipped. Only the active draft is locked against editing.

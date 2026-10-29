@@ -223,6 +223,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "query": query,
             "selected_index": selected_index,
             "can_resume_generation": scenario_runner.can_resume(selected_id),
+            "can_resume_active_generation": scenario_runner.can_resume(scenario_runner.status.get("draft_id")),
             "unfinished_generation_count": scenario_runner.resume_queue.count(),
             "generation_resume": dict(scenario_runner.resume_queue.status),
             "config": public_config(state["config"]),

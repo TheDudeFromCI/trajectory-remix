@@ -15,6 +15,9 @@
   no replacement samples or original batch-quota filling, independent failures,
   edit conflicts, missing/corrupt checkpoints, queue changes, pause/cancel/restart,
   unfiltered API selection, paginated results and toolbar progress/locking.
+  Frontend checks cover distinct setup/running/paused/completed views, hidden
+  creation controls during resumption, relevant actions, separate overall and
+  per-draft progress, grouped errors and optional inference details.
 - Creation tests verify Pending drafts, canonical defaults and legacy name aliases,
   generator-only configuration, retired task API errors, preservation of original
   review snapshots and custom guidance, provider retry budgets and recovery.

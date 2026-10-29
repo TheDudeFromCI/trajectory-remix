@@ -78,7 +78,7 @@ class GenerationResumeQueue:
                 raise ValueError('No unfinished generated trajectories are available')
             db.execute('UPDATE generation_resume_runs SET status=? WHERE id=?', (owner.clean(status), run_id))
         self.status = status
-        owner.status.update(running=True, phase='resuming_all', paused=False,
+        owner.status.update(running=True, phase='resuming_all', activity='resume-all', paused=False,
                             pause_requested=False, active=[], last_error=None)
         owner.resume_event.set()
         owner.job = asyncio.create_task(self.run())
@@ -149,6 +149,7 @@ class GenerationResumeQueue:
                         owner.__dict__.clear()
                         owner.__dict__.update(prior)
                         raise
+                    owner.status['activity'] = 'resume-all'
                     owner.status['batch'] = {'id': metadata.get('generation_batch', self.status['id']),
                         'target': 1, 'completed': 0, 'attempts': 1, 'attempt_limit': 1, 'state': 'running'}
                     with self.store.connect() as db:

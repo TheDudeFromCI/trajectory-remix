@@ -1027,6 +1027,9 @@ await click("generate-one");
 assert.equal($("generation-count").value, "1");
 assert.equal($("generation-panel").hidden, false);
 assert.equal($("scenario-type").value, "user_scenario");
+assert.equal($("generation-setup").hidden, false);
+assert.equal($("generation-work").hidden, true);
+assert.equal($("resume-issues-panel").hidden, true);
 assert.equal($("scenario-start"), null);
 assert.equal($("export-button"), null);
 assert.equal($("pause-run").textContent, "Start");
@@ -1050,6 +1053,7 @@ w.fetch = async (path, options) => {
     }
     const response = await beforeBatchStartFetch(url.pathname + url.search, options);
     const data = await response.json();
+    data.status = {...data.status, activity:"create", phase:"complete", draft_id:"test-batch-last"};
     data.status.batch = {id:"test-batch", target:3, completed:3, attempts:3, attempt_limit:9, state:"complete"};
     return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
   }
@@ -1259,10 +1263,12 @@ assert.match(confirmationMessage, /replace those edits/);
 confirmResult = true;
 await click("resume-trajectory-generation");
 assert.equal(resumeRequests, 3);
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("generation-action-title").textContent, "Resume trajectory");
 w.fetch = beforeResumeFetch;
 // Dataset-wide resume has no selected ID, filter, or scenario in its request.
 const beforeBulkResumeFetch = w.fetch;
-let bulkResumeStarted = false;
+let bulkResumeStarted = false, bulkResumePhase = "running";
 w.fetch = async (path, options) => {
   if (path === "/api/scenarios/resume-all") {
     assert.deepEqual(JSON.parse(options.body), {});
@@ -1274,9 +1280,12 @@ w.fetch = async (path, options) => {
     const data = await response.json();
     data.unfinished_generation_count = 2;
     if (bulkResumeStarted) {
-      data.status = {...data.status, running:true, paused:false, phase:"resuming_all"};
-      data.generation_resume = {running:true, state:"running", target:3, processed:1,
-        completed:0, failed:0, skipped:1, issues:[{sample_id:"edited-draft", error:"Trajectory edited since checkpoint"}]};
+      const busy = bulkResumePhase !== "complete";
+      data.status = {...data.status, activity:"resume-all", running:busy, paused:bulkResumePhase === "paused", phase:busy ? "resuming_all" : "resume_complete",
+        model_requests:1, active:busy ? ["work.5.decide"] : [], metrics:{"work.5.decide":{model:"local-model",token_source:"estimated",prompt_tokens:4917,completion_tokens:0,total_tokens:4917,generation_seconds:2.5,context_size:8192,context_used_tokens:4917,budget_enforced:false}}};
+      data.generation_resume = {running:busy, state:busy ? "running" : "complete", target:3, processed:busy ? 1 : 3,
+        current_id:busy ? "unfinished-second" : null,
+        completed:busy ? 0 : 2, failed:0, skipped:1, issues:[{sample_id:"edited-draft", state:"skipped", error:"Trajectory edited since checkpoint"}]};
     }
     return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
   }
@@ -1288,10 +1297,40 @@ await click("resume-all-generations");
 assert(bulkResumeStarted);
 assert.equal($("generation-panel").hidden, false);
 assert.match($("resume-all-progress").textContent, /1\/3 processed/);
-assert.match($("resume-all-findings").textContent, /edited-draft: Trajectory edited/);
+assert.match($("resume-all-findings").textContent, /edited-draft/);
+assert.match($("resume-all-findings").textContent, /Its edits were preserved/);
 assert.equal($("resume-all-generations").disabled, true);
 assert.equal($("resume-all-generations-panel").disabled, true);
 assert.equal($("stop-run").disabled, false);
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("generation-run-conditions").hidden, true);
+assert.equal($("generation-action-title").textContent, "Resume unfinished drafts");
+assert.equal($("resume-all-generations-panel").hidden, true);
+assert.equal($("generation-create-stats").hidden, true);
+assert.equal($("resume-remaining-stat").textContent, "2");
+assert.equal($("generation-progress").max, 3);
+assert.equal($("generation-progress").value, 1);
+assert.match($("generation-current").textContent, /unfinished-second/);
+assert.equal($("resume-issues-panel").open, false);
+assert.match($("generation-metrics").textContent, /Estimated tokens/);
+assert.equal($("generation-metrics").querySelector('[role="meter"]'), null);
+bulkResumePhase = "paused";
+await waitFor(() => $("run-status").textContent === "Paused", 5000);
+assert.equal($("pause-run").textContent, "Resume");
+assert.equal($("generation-setup").hidden, true);
+bulkResumePhase = "complete";
+await waitFor(() => $("run-status").textContent === "Resume pass complete", 5000);
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("pause-run").hidden, true);
+assert.equal($("stop-run").hidden, true);
+assert.equal($("resume-all-generations-panel").hidden, false);
+assert.equal($("resume-all-generations-panel").textContent, "Resume unfinished (2)");
+assert.equal($("resume-completed-stat").textContent, "2");
+await click("generate-one");
+assert.equal($("generation-setup").hidden, false);
+assert.equal($("resume-issues-panel").hidden, true);
+assert.equal($("generation-metrics-panel").hidden, true);
+assert.equal($("pause-run").textContent, "Start");
 w.fetch = beforeBulkResumeFetch;
 // Evaluation failures retain the existing candidate and resume the batch.
 const beforeEvaluationFetch = w.fetch;
@@ -1313,7 +1352,9 @@ w.fetch = async (path, options) => {
   }
   return response;
 };
-await waitFor(() => $("pause-run").textContent === "Resume", 5000);
+await click("status-button");
+await waitFor(() => /Evaluation failed/.test($("generation-detail").textContent), 5000);
+assert.equal($("pause-run").textContent, "Resume");
 assert.equal($("generation-count").value, "3");
 assert.match($("generation-detail").textContent, /Evaluation failed/);
 await click("pause-run");

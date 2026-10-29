@@ -267,36 +267,74 @@
       <div class="generation-layout">
         <section class="generation-log"><div class="log-toolbar"><b>ACTIVITY</b><button id="copy-generation-log">Copy Output</button><button id="export-generation-log">Export Log</button><button id="clear-generation-log">Clear Log</button></div><div id="activity-log"><small>No generation activity.</small></div></section>
         <div class="generation-controls">
-        <label for="scenario-type">Scenario</label>
-        <select id="scenario-type"></select>
-        <small id="scenario-hint"></small>
-        <label for="generation-count">Trajectories to create</label>
-        <input id="generation-count" type="number" min="1" max="1000" step="1" value="1" required />
-        <small id="batch-progress" role="status" hidden></small>
-        <small id="resume-all-progress" role="status" hidden></small>
-        <pre id="resume-all-findings" hidden></pre>
-        <button id="resume-all-generations-panel" disabled>Resume Unfinished Generations</button>
-        <div class="run-status">
-          <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
-        </div>
-        <progress id="generation-progress" max="1" value="0" aria-label="Generation progress"></progress>
-        <div id="generation-metrics" aria-live="off"></div>
-        <div id="generation-detail" role="status" aria-live="polite"></div>
-        <div class="stat-grid">
-          <div><b id="accepted-stat">0</b><small>CREATED</small></div>
-          <div><b id="attempt-stat">0</b><small>ATTEMPTS</small></div>
-        </div>
-        <div class="two-buttons">
-          <button id="pause-run">Pause</button
-          ><button id="stop-run" class="danger-text">Cancel</button>
-        </div>
-        <div class="side-heading subheading">CONDITIONS</div>
-        <label><input id="randomize-tags" type="checkbox" checked /> Randomize tags each attempt</label><fieldset id="scenario-tag-controls"></fieldset><div id="selected-tags" class="tag-list"></div>
-        <button id="edit-tags" class="text-button">
-          Generation settings
-        </button>
-        <button id="view-generation-batch" hidden>View Batch</button>
-        <button id="view-generation-draft" hidden>View Draft</button>
+          <section class="generation-summary">
+            <div class="generation-eyebrow">CURRENT ACTION</div>
+            <h2 id="generation-action-title">Create trajectories</h2>
+            <p id="generation-action-description"></p>
+            <div class="run-status"><span id="run-dot" class="dot"></span><b id="run-status">Ready</b></div>
+          </section>
+
+          <section id="generation-setup" class="generation-card">
+            <label for="scenario-type">Scenario</label>
+            <select id="scenario-type"></select>
+            <small id="scenario-hint"></small>
+            <label for="generation-count">Trajectories to create</label>
+            <input id="generation-count" type="number" min="1" max="1000" step="1" value="1" required />
+            <details class="generation-options">
+              <summary>Scenario conditions</summary>
+              <label><input id="randomize-tags" type="checkbox" checked /> Randomize tags for each trajectory</label>
+              <fieldset id="scenario-tag-controls"></fieldset>
+            </details>
+            <button id="edit-tags" class="text-button">Generation settings</button>
+          </section>
+
+          <section id="generation-work" class="generation-card" hidden>
+            <div class="generation-section-heading"><b id="generation-progress-label">Progress</b><span id="generation-progress-count"></span></div>
+            <progress id="generation-progress" max="1" value="0" aria-label="Generation progress"></progress>
+            <small id="batch-progress" role="status" hidden></small>
+            <small id="resume-all-progress" role="status" hidden></small>
+            <div id="generation-current" hidden></div>
+            <div id="generation-step" hidden>
+              <div class="generation-section-heading"><span>Current trajectory</span><span id="generation-step-count"></span></div>
+              <progress id="generation-step-progress" max="1" value="0" aria-label="Current trajectory progress"></progress>
+            </div>
+            <div id="generation-detail" role="status" aria-live="polite"></div>
+            <div id="generation-create-stats" class="stat-grid">
+              <div><b id="accepted-stat">0</b><small>CREATED</small></div>
+              <div><b id="attempt-stat">0</b><small>ATTEMPTS</small></div>
+            </div>
+            <div id="generation-resume-stats" class="generation-resume-stats" hidden>
+              <div><b id="resume-completed-stat">0</b><small>Completed</small></div>
+              <div><b id="resume-failed-stat">0</b><small>Failed</small></div>
+              <div><b id="resume-skipped-stat">0</b><small>Skipped</small></div>
+              <div><b id="resume-remaining-stat">0</b><small>To process</small></div>
+            </div>
+          </section>
+
+          <div id="generation-actions" class="generation-actions">
+            <button id="pause-run" class="primary">Start</button>
+            <button id="stop-run" class="danger-text" hidden>Cancel</button>
+            <button id="resume-all-generations-panel" class="primary" hidden>Resume remaining</button>
+            <button id="generation-create-more" hidden>Create more trajectories</button>
+          </div>
+
+          <details id="resume-issues-panel" class="generation-card generation-issues" hidden>
+            <summary><span id="resume-issues-summary">Needs attention</span></summary>
+            <p class="generation-help">These drafts are saved. Review the issues before resuming them again.</p>
+            <div id="resume-all-findings"></div>
+            <small id="resume-issues-limit" hidden>Showing the latest 25 issues.</small>
+          </details>
+          <details id="generation-metrics-panel" class="generation-card" hidden>
+            <summary>Inference usage <span id="generation-metrics-summary"></span></summary>
+            <div id="generation-metrics" aria-live="off"></div>
+          </details>
+          <details id="generation-run-conditions" class="generation-card" hidden>
+            <summary>Scenario details</summary><div id="selected-tags" class="tag-list"></div>
+          </details>
+          <div class="generation-links">
+            <button id="view-generation-batch" class="text-button" hidden>View Batch</button>
+            <button id="view-generation-draft" class="text-button" hidden>View Draft</button>
+          </div>
         </div>
       </div>
     </aside>

@@ -234,6 +234,7 @@ class ScenarioRunner(ModelSession):
             total_model_seconds=0,
             attempts=self.status["attempts"] + 1,
             scenario=name,
+            activity=self.status.get("activity", "create") if _retry else "create",
             last_error=None,
         )
         roles = {
@@ -417,6 +418,7 @@ class ScenarioRunner(ModelSession):
         self.status.update(
             running=True,
             phase="generating",
+            activity="resume",
             paused=False,
             pause_requested=False,
             active=[],

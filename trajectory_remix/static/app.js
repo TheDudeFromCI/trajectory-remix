@@ -1,3 +1,4 @@
+let generationPanelIntent = null, renderedRecoveryIssues = "";
 let lastGenerationDraft = null, configBaseline = null, renderedLog = "", renderedTagScenario = "";
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="remix-token"]').content;
@@ -293,21 +294,6 @@ function renderStatus() {
   $("scenario-hint").textContent = scenarioNames.length
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
     : "No generation scenarios are available.";
-  $("generation-progress").max = Math.max(1, s.total || 1);
-  $("generation-progress").title = `${s.completed || 0}/${s.total || 0} steps complete`;
-  $("generation-progress").value = s.phase === "complete" ? Math.max(1, s.total || 1) : (s.completed || 0);
-  $("generation-detail").textContent = s.active?.length
-    ? s.active.join(" · ")
-    : (s.last_error || s.phase || "Ready");
-  $("view-generation-draft").hidden = !s.draft_id;
-  $("run-status").textContent = s.running
-    ? s.paused
-      ? "Paused"
-      : s.pause_requested ? "Pausing after active calls finish" : "Generating"
-    : (s.phase || "Idle");
-  $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
-  $("accepted-stat").textContent = s.accepted;
-  $("attempt-stat").textContent = s.attempts;
   $("generate-one").disabled = s.running || migrationBusy || !!state.validation_status?.running;
   $("generate-batch").disabled = s.running || migrationBusy || !!state.validation_status?.running;
   $("validate-trajectory").disabled = !sample || s.running || migrationBusy;
@@ -315,25 +301,16 @@ function renderStatus() {
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
   $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
-  const recovery = state.generation_resume;
   const recoveryDisabled = s.running || migrationBusy || !!state.validation_status?.running || !state.unfinished_generation_count;
-  for (const id of ["resume-all-generations", "resume-all-generations-panel"]) {
-    $(id).disabled = recoveryDisabled;
-    $(id).title = `Resume ${state.unfinished_generation_count || 0} unfinished generated trajectories across the dataset`;
-  }
-  $("resume-all-progress").hidden = !recovery?.target;
-  $("resume-all-progress").textContent = recovery?.target ? `Resume pass: ${recovery.processed}/${recovery.target} processed · ${recovery.completed} completed · ${recovery.failed} failed · ${recovery.skipped} skipped · ${s.running && s.paused && recovery.running ? "paused" : recovery.state}` : "";
-  $("resume-all-findings").hidden = !recovery?.issues?.length;
-  $("resume-all-findings").textContent = (recovery?.issues || []).map(issue => `${issue.sample_id}: ${issue.error}`).join("\n");
-  if (recovery?.running) $("run-status").textContent = s.paused ? "Resume pass paused" : "Resuming unfinished generations";
+  $("resume-all-generations").disabled = recoveryDisabled;
+  $("resume-all-generations").title = `Resume ${state.unfinished_generation_count || 0} unfinished generated trajectories across the dataset`;
+  renderGenerationAction(recoveryDisabled);
   renderValidationState();
-  $("pause-run").textContent = !s.running ? (["api_paused", "evaluation_failed"].includes(s.phase) ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
-  $("pause-run").disabled = !s.running && !scenarioNames.length && !(["api_paused", "evaluation_failed"].includes(s.phase) && s.draft_id);
-  $("stop-run").disabled = !s.running;
   renderHistoryActions();
   $("selected-tags").replaceChildren(
     ...Object.entries(s.conditions || {}).flatMap(([scope, tags]) => Object.entries(tags).map(([dimension, tag]) => node("span", "tag", `${scope} · ${dimension}: ${tag.name}${tag.description ? " — " + tag.description : ""}`))),
   );
+  for (const id of ["copy-generation-log", "export-generation-log", "clear-generation-log"]) $(id).hidden = !state.logs?.length;
   const logBox = $("activity-log"), logSignature = JSON.stringify(state.logs);
   if (logSignature !== renderedLog) {
     const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight <= 2;
@@ -377,25 +354,112 @@ function selectedScenarioTags() {
 }
 $("randomize-tags").onchange = () => renderScenarioTags();
 $("scenario-type").onchange = () => { renderScenarioTags(); };
+function generationAction() {
+  const s = state.status, recovery = state.generation_resume;
+  if (s.running) return recovery?.running ? "resume-all" : s.activity || generationPanelIntent || "create";
+  return generationPanelIntent || s.activity || (s.phase === "resume_complete" ? "resume-all" : s.draft_id && ["interrupted","cancelled","api_paused","evaluation_failed"].includes(s.phase) ? "resume" : "create");
+}
+function renderGenerationAction(recoveryDisabled) {
+  const s = state.status, recovery = state.generation_resume || {}, mode = generationAction();
+  const bulk = mode === "resume-all", setup = mode === "create" && !s.running && (generationPanelIntent === "create" || !s.draft_id);
+  $("generation-panel").dataset.action = mode;
+  $("generation-action-title").textContent = bulk ? "Resume unfinished drafts" : mode === "resume" ? "Resume trajectory" : "Create trajectories";
+  $("generation-action-description").textContent = bulk
+    ? "Continue saved work across the dataset. Manual trajectories are excluded."
+    : mode === "resume" ? "Continue from the saved checkpoint, reusing completed work."
+    : setup ? "Choose a scenario and how many samples to create."
+    : `${s.scenario || $("scenario-type").value} · ${s.batch?.target || 1} ${(s.batch?.target || 1) === 1 ? "trajectory" : "trajectories"}`;
+  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", api_paused:"Connection interrupted", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
+  $("run-status").textContent = setup ? "Ready" : s.running
+    ? s.paused ? "Paused" : s.pause_requested ? "Pausing after active requests finish" : bulk ? "Resuming saved drafts" : mode === "resume" ? "Resuming trajectory" : "Generating"
+    : bulk ? ({complete:"Resume pass complete", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
+  $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
+  $("generation-setup").hidden = !setup;
+  $("generation-work").hidden = setup;
+  $("batch-progress").hidden = bulk || setup || !s.batch || s.batch.target <= 1;
+  $("view-generation-batch").hidden = setup || bulk || !s.batch || s.batch.target <= 1;
+  $("view-generation-draft").hidden = setup || !s.draft_id;
+  $("view-generation-draft").parentElement.hidden = $("view-generation-draft").hidden && $("view-generation-batch").hidden;
+  $("generation-run-conditions").hidden = mode !== "create" || setup || !Object.keys(s.conditions || {}).length;
+  $("generation-create-stats").hidden = mode !== "create" || setup;
+  $("accepted-stat").textContent = s.batch?.completed ?? s.accepted ?? 0;
+  $("attempt-stat").textContent = s.batch?.attempts ?? s.attempts ?? 0;
+  $("generation-resume-stats").hidden = !bulk;
+  for (const [id, value] of [["completed",recovery.completed], ["failed",recovery.failed], ["skipped",recovery.skipped], ["remaining",Math.max(0, (recovery.target || 0) - (recovery.processed || 0))]]) $("resume-" + id + "-stat").textContent = value || 0;
+  $("resume-all-progress").hidden = !bulk || !recovery.target;
+  $("resume-all-progress").textContent = bulk && recovery.target ? `${recovery.processed}/${recovery.target} processed` : "";
+  const overall = bulk ? {done: recovery.processed || 0, total: recovery.target || 1} : s.batch?.target > 1 ? {done:s.batch.completed, total:s.batch.target} : {done:s.completed || 0, total:s.total || 1};
+  $("generation-progress-label").textContent = bulk ? "Dataset progress" : s.batch?.target > 1 ? "Batch progress" : "Trajectory progress";
+  $("generation-progress-count").textContent = `${Math.round(100 * overall.done / Math.max(1, overall.total))}%`;
+  $("generation-progress").max = Math.max(1, overall.total);
+  $("generation-progress").value = overall.done;
+  $("generation-progress").title = bulk ? `${overall.done}/${overall.total} drafts processed` : `${s.completed || 0}/${s.total || 0} steps complete`;
+  const current = bulk ? recovery.current_id : s.draft_id;
+  $("generation-current").hidden = !s.running || !current;
+  $("generation-current").textContent = current ? `Current draft: ${current}` : "";
+  $("generation-step").hidden = !s.running || !(bulk || s.batch?.target > 1) || !s.total;
+  $("generation-step-progress").max = Math.max(1, s.total || 1);
+  $("generation-step-progress").value = s.completed || 0;
+  $("generation-step-count").textContent = `${s.completed || 0}/${s.total || 0} steps`;
+  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : bulk ? recovery.failed || recovery.skipped ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
+  const canContinue = !s.running && s.draft_id && (state.can_resume_active_generation ?? ["api_paused","evaluation_failed","cancelled","interrupted","error","rejected"].includes(s.phase));
+  $("pause-run").hidden = !s.running && !setup && !(mode !== "resume-all" && canContinue);
+  $("pause-run").textContent = s.running ? s.paused || s.pause_requested ? "Resume" : "Pause" : setup ? "Start" : "Resume";
+  $("pause-run").disabled = migrationBusy || !!state.validation_status?.running || (setup && !state.scenarios?.length);
+  $("stop-run").hidden = !s.running;
+  $("stop-run").disabled = !s.running;
+  $("resume-all-generations-panel").hidden = !bulk || s.running || !state.unfinished_generation_count;
+  $("resume-all-generations-panel").disabled = recoveryDisabled;
+  $("resume-all-generations-panel").textContent = `Resume unfinished (${state.unfinished_generation_count || 0})`;
+  $("generation-create-more").hidden = mode !== "create" || setup || s.running;
+  $("generation-actions").hidden = [...$("generation-actions").children].every(child => child.hidden);
+  $("generation-metrics-panel").hidden = setup || !(s.model_requests || Object.keys(s.metrics || {}).length);
+  $("resume-issues-panel").hidden = !bulk || !recovery.issues?.length;
+  $("resume-issues-summary").textContent = `Needs attention · ${(recovery.failed || 0) + (recovery.skipped || 0)}`;
+  $("resume-issues-limit").hidden = (recovery.failed || 0) + (recovery.skipped || 0) <= 25;
+  const issueSignature = JSON.stringify(recovery.issues || []);
+  if (renderedRecoveryIssues !== issueSignature) {
+    renderedRecoveryIssues = issueSignature;
+    $("resume-all-findings").replaceChildren(...(recovery.issues || []).map(issue => {
+      const entry = node("article", "generation-issue"), heading = node("div", "generation-section-heading");
+      heading.append(node("strong", "", issue.sample_id), node("span", "generation-issue-state", issue.state === "failed" ? "Failed" : "Skipped"));
+      const error = issue.error || "No details supplied.";
+      const explanation = /Tokenizer or tools changed/i.test(error) ? "The tokenizer or tools changed after this checkpoint was saved."
+        : /edited since checkpoint/i.test(error) ? "This draft was edited after its checkpoint was saved. Its edits were preserved."
+        : /checkpoint not found/i.test(error) ? "The saved checkpoint is missing. This draft needs manual recovery."
+        : /rejected after|generation could not finish/i.test(error) ? "A generation step could not finish. Its output is retained for review."
+        : error;
+      const details = node("details", "generation-issue-details"); details.append(node("summary", "", "Technical details"), node("pre", "", error));
+      entry.append(heading, node("p", "", explanation), details); return entry;
+    }));
+  }
+}
 function renderGenerationMetrics() {
   const root = $("generation-metrics"); root.replaceChildren();
   const entries = Object.entries(state.status.metrics || {}).filter(([path]) => !state.status.active?.length || state.status.active.includes(path));
+  const format = value => typeof value === "number" ? value.toLocaleString(undefined, {maximumFractionDigits:1}) : value;
+  $("generation-metrics-summary").textContent = `${state.status.model_requests || 0} requests`;
   for (const [path, metric] of entries.slice(-4)) {
-    const row = node("div", "request-metrics");
-    const names = {prompt_tokens:"Prompt", completion_tokens:"Completion", reasoning_tokens:"Reasoning", cache_read_tokens:"Cache read", total_tokens:"Total", current_tokens_per_second:"Current tok/s", average_tokens_per_second:"Average tok/s", time_to_first_token_seconds:"TTFT (s)", generation_seconds:"Time (s)"};
-    row.append(node("b", "", `${path} · ${metric.model}${metric.token_source === "estimated" ? " · estimated tokens" : ""}`), node("div", "", Object.entries(names).filter(([key]) => metric[key] !== undefined).map(([key, label]) => `${label}: ${metric[key]}`).join(" · ")));
-    if (metric.context_size && metric.context_used_tokens !== undefined) {
-      const percent = 100 * metric.context_used_tokens / metric.context_size;
-      const bar = node("div", "context-meter"); bar.title = `${Math.round(percent)}% used (${metric.context_used_tokens}/${metric.context_size} tokens)`;
-      bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Model context usage"); bar.setAttribute("aria-valuenow", String(Math.min(100, Math.round(percent)))); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
-      const baseline = Math.min(metric.system_prompt_tokens_estimated ?? 0, metric.context_used_tokens, metric.context_size);
-      const base = node("span", "context-base"); base.style.width = `${100 * baseline / metric.context_size}%`; base.title = `${Math.round(percent)}% used. Blue: estimated current system instructions and output schema; excludes task inputs`;
-      const used = node("span", "context-used"); used.style.width = `${Math.max(0, Math.min(100, percent) - 100 * baseline / metric.context_size)}%`; used.style.background = percent <= 50 ? "#7b8799" : percent <= 75 ? "#e4bd56" : "#ef6b73";
-      bar.append(base, used); row.append(bar);
-    } else { row.append(node("small", "", "Set this endpoint’s Context size in Generation Settings to show the context budget bar.")); }
-    root.append(row);
+    const row = node("div", "request-metrics"), heading = node("div", "generation-section-heading");
+    heading.append(node("b", "", metric.model || "Model"), node("span", "generation-token-source", metric.token_source === "estimated" ? "Estimated tokens" : "Provider tokens"));
+    const counts = node("div", "generation-token-grid");
+    for (const [key,label] of [["prompt_tokens","Prompt"],["completion_tokens","Generated"],["total_tokens","Total"]]) {
+      const stat = node("div"); stat.append(node("strong", "", format(metric[key] ?? 0)), node("small", "", label)); counts.append(stat);
+    }
+    row.append(heading, counts);
+    if (metric.context_size && metric.context_used_tokens !== undefined && metric.budget_enforced !== false) {
+      const percent = Math.min(100, 100 * metric.context_used_tokens / metric.context_size);
+      const bar = node("div", "context-meter"); bar.title = `${Math.round(percent)}% context used`;
+      bar.setAttribute("role", "meter"); bar.setAttribute("aria-label", "Model context usage"); bar.setAttribute("aria-valuenow", String(Math.round(percent))); bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", "100");
+      const used = node("span", "context-used"); used.style.width = `${percent}%`; bar.append(used); row.append(bar);
+    }
+    const timing = [metric.generation_seconds !== undefined ? `${format(metric.generation_seconds)} s` : null, metric.current_tokens_per_second !== undefined ? `${format(metric.current_tokens_per_second)} tokens/s` : metric.average_tokens_per_second !== undefined ? `${format(metric.average_tokens_per_second)} tokens/s` : null].filter(Boolean);
+    row.append(node("small", "generation-request-timing", timing.join(" · ")));
+    const details = node("details", "generation-request-details"); details.append(node("summary", "", "Request details"), node("code", "", path));
+    for (const [key,label] of [["reasoning_tokens","Reasoning tokens"],["cache_read_tokens","Cached tokens"],["time_to_first_token_seconds","First token (s)"]]) if (metric[key] !== undefined) details.append(node("div", "", `${label}: ${format(metric[key])}`));
+    row.append(details); root.append(row);
   }
-  root.append(node("small", "", `Model requests: ${state.status.model_requests || 0} · Total model time: ${(state.status.total_model_seconds || 0).toFixed(1)} s. Stream token estimates are used until provider counters arrive.`));
+  root.append(node("small", "generation-help", `This trajectory · ${state.status.model_requests || 0} requests · ${(state.status.total_model_seconds || 0).toFixed(1)} s inference time`));
 }
 $("clear-generation-log").onclick = action(async () => { await json("scenarios/log/clear", "POST"); await refresh(); });
 function renderHistoryActions() {
@@ -2737,7 +2801,7 @@ $("settings-button").onclick = () => {
   closeMenus();
   openSettings();
 };
-$("status-button").onclick = openGenerationPanel;
+$("status-button").onclick = () => { generationPanelIntent = null; renderStatus(); openGenerationPanel(); };
 $("set-state-menu-button").onclick = () => { if (sample) $("set-state-menu").hidden = false; };
 for (const button of document.querySelectorAll("[data-validation-state]")) button.onclick = action(async () => {
   closeMenus(); $("set-state-menu").hidden = true;
@@ -2757,14 +2821,16 @@ async function resumeGeneration(id) {
 $("resume-trajectory-generation").onclick = action(async () => {
   closeMenus();
   if (hasPendingChanges()) await compileSample(true);
-  await resumeGeneration(sample.id);
+  if (!await resumeGeneration(sample.id)) return;
+  generationPanelIntent = "resume";
   openGenerationPanel(); await refresh();
 });
 
 async function resumeAllGenerations() {
   closeMenus();
-  if (hasPendingChanges()) await compileSample(true);
+  if (sample && hasPendingChanges()) await compileSample(true);
   await json("scenarios/resume-all", "POST", {});
+  generationPanelIntent = "resume-all";
   openGenerationPanel();
   await refresh();
 }
@@ -2811,18 +2877,21 @@ for (const b of document.querySelectorAll("[data-config]"))
     renderConfig();
   };
 $("generate-one").onclick = action(async () => {
+  generationPanelIntent = "create"; renderStatus();
   openGenerationPanel();
-  if (hasPendingChanges()) await compileSample(true);
+  if (sample && hasPendingChanges()) await compileSample(true);
   $("generation-count").value = "1";
   // Starting is explicit so the user can select a scenario and request limit.
   $("scenario-type").focus();
 });
 $("generate-batch").onclick = action(async () => {
+  generationPanelIntent = "create"; renderStatus();
   openGenerationPanel();
-  if (hasPendingChanges()) await compileSample(true);
+  if (sample && hasPendingChanges()) await compileSample(true);
   $("generation-count").value = "10";
   $("generation-count").focus();
 });
+$("generation-create-more").onclick = () => { generationPanelIntent = "create"; renderStatus(); $("scenario-type").focus(); };
 $("view-generation-batch").onclick = action(async () => {
   if (!state.status.batch) return;
   if (hasPendingChanges()) await compileSample(true);
@@ -2848,13 +2917,17 @@ $("stop-run").onclick = action(async () => {
 $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    if (["api_paused", "evaluation_failed"].includes(state.status.phase)) await resumeGeneration(state.status.draft_id);
+    if (generationPanelIntent !== "create" && ["api_paused", "evaluation_failed", "cancelled", "interrupted", "error", "rejected"].includes(state.status.phase)) {
+      if (!await resumeGeneration(state.status.draft_id)) return;
+      generationPanelIntent = "resume";
+    }
     else {
       const count = $("generation-count");
       if (!count.reportValidity()) return;
       await json("scenarios/run", "POST", {scenario: $("scenario-type").value, tags: selectedScenarioTags(), batch_size: Number(count.value)});
     }
   } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
+  generationPanelIntent = null;
   await refresh();
 });
 $("close-export").onclick = () => $("export-dialog").close();

@@ -74,6 +74,9 @@ async def test_resume_all_finishes_only_existing_automated_drafts_and_reuses_wor
     status = runner.resume_queue.status
     assert (status['target'], status['processed'], status['completed'], status['failed'], status['skipped']) == (3, 3, 3, 0, 0)
     assert not status['running'] and runner.status['phase'] == 'resume_complete'
+    assert runner.status['activity'] == 'resume-all'
+    reopened = create_app(app.state.dataset.store.path, client=fake)
+    assert reopened.state.scenario_runner.status['activity'] == 'resume-all'
     assert [s['id'] for s in app.state.dataset['samples']] == ids
     assert all(app.state.dataset['samples'][i]['metadata']['generation_phase'] == 'complete' for i in range(3))
     assert sum(m[0]['content'].startswith('Create a fictional') for m in fake.messages) == ideas
