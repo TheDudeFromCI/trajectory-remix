@@ -143,8 +143,8 @@ def validate_config(config):
         seen.add(ep["id"])
         if ep.get("completion_limit_parameter", "max_tokens") not in ("max_tokens", "max_completion_tokens"):
             raise ValueError("completion_limit_parameter must be max_tokens or max_completion_tokens")
-        if "inference_tokenizer" in ep and (not isinstance(ep["inference_tokenizer"], str) or not ep["inference_tokenizer"]):
-            raise ValueError("inference_tokenizer must be a local model tokenizer directory")
+        if "inference_tokenizer" in ep and not isinstance(ep["inference_tokenizer"], str):
+            raise ValueError("inference_tokenizer must be text (blank disables token budget checks)")
         if type(ep.get('stream_usage', True)) is not bool:
             raise ValueError('stream_usage must be boolean')
         context_size = ep.get("context_size", 0)

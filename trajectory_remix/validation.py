@@ -47,7 +47,7 @@ class ValidationRunner(ModelSession):
 
     @property
     def content_first(self):
-        return bool(getattr(self, 'endpoint', {}).get('inference_tokenizer'))
+        return True
 
     def elapsed_seconds(self):
         return time.monotonic() - self.started if hasattr(self, 'started') else 0
@@ -100,10 +100,8 @@ class ValidationRunner(ModelSession):
                     self.endpoint['inference_tokenizer'] = candidate['inference_tokenizer']
                     break
         self.endpoints[endpoint] = self.endpoint
-        inference_fingerprint = None
-        if self.content_first:
-            from .content_first import RequestBudget
-            inference_fingerprint = RequestBudget(self.endpoint, self.config.get('content_first', {})).fingerprint
+        counter = self.request_budget(endpoint)
+        inference_fingerprint = counter.fingerprint if counter else None
         source_hash = hashlib.sha256(compact([evaluation_source(sample), self.checklist_hash,
             self.compiler.fingerprint, self.compiler.tools.fingerprint, self.endpoint,
             inference_fingerprint, self.config.get('validation', {}), self.config.get('content_first', {})]).encode()).hexdigest()
@@ -148,6 +146,7 @@ class ValidationRunner(ModelSession):
             inputs = {'original_requirements': sample.get('metadata', {}).get('concept', {}),
                       'roles': sample.get('metadata', {}).get('roles', {})}
             reports = {}
+            input_limit = self.config.get('validation', {}).get('max_input_tokens', 6000)
             for index, (name, check) in enumerate(checklist.checks.items()):
                 prompt = f'check-{index}.md'
                 self.scenario.prompts[prompt] = check.prompt
@@ -156,14 +155,14 @@ class ValidationRunner(ModelSession):
                 if check.view:
                     definition = ReviewCheck(prompt=prompt, view=check.view, rules=check.rules,
                         inputs=['original_requirements', 'roles'],
-                        max_input_tokens=self.config.get('validation', {}).get('max_input_tokens', 6000))
+                        max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
                     result, _ = await self.review_groups(step, definition, inputs, context, path,
                                                         sample, plan, self.snapshot['source_hash'])
                 else:
                     # Legacy and custom prose checklists use the same bounded
                     # evidence protocol without inventing per-rule requirements.
                     definition = ReviewCheck(prompt=prompt, view='layout', inputs=['original_requirements', 'roles'],
-                        max_input_tokens=self.config.get('validation', {}).get('max_input_tokens', 6000))
+                        max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
                     result, _ = await self.review_groups(step, definition, inputs, context, path,
                                                         sample, plan, self.snapshot['source_hash'])
                 reports[name] = result
@@ -252,9 +251,9 @@ class ValidationRunner(ModelSession):
                 events.update({u["id"]: u for u in extra})
                 expanded = {**payload, "events": list(events.values())}
                 expanded.pop("retry_feedback", None)
-                if not extra or self.prompt_tokens(
+                if not extra or (budget is not None and self.prompt_tokens(
                     step, expanded, context, schema, prompt, definition.rules
-                ) > budget:
+                ) > budget):
                     raise ValueError("Requested evidence is unavailable, already supplied, or exceeds max_input_tokens; request specific missing unit IDs instead of an entire window")
                 payload = expanded
                 rounds += 1
@@ -273,25 +272,15 @@ class ValidationRunner(ModelSession):
         self, step, definition, inputs, context, path, draft, plan, source_hash
     ):
         schema = checklist_schema(definition.rules) if definition.rules else CHUNK_REPORT
-        budget = definition.max_input_tokens
-        endpoint = self.endpoints[step.endpoint]
-        if endpoint.get("context_size"):
-            budget = min(
-                budget, endpoint["context_size"] - endpoint.get("max_tokens", 1024)
-            )
-        if self.content_first:
-            from .content_first import RequestBudget
-            request_budget = RequestBudget(endpoint, self.config.get('content_first', {}))
-            budget = min(budget, request_budget.context - request_budget.completion - request_budget.reserve)
-        if budget <= 0:
-            raise ValueError(
-                "Endpoint completion limit leaves no room for review input"
-            )
+        counter = self.request_budget(step.endpoint)
+        budget = min(definition.max_input_tokens, counter.context - counter.completion - counter.reserve) if counter else None
+        if budget is not None and budget <= 0:
+            raise ValueError("Endpoint completion limit leaves no room for review input")
         view = ReviewView(
             draft, plan, definition, self.compiler.tokenizer, tools=self.compiler.tools
         )
         fits = lambda payload: (
-            self.prompt_tokens(
+            budget is None or self.prompt_tokens(
                 step, payload, context, schema, definition.prompt, definition.rules
             )
             <= budget - (min(128, budget // 4) if step.review_retries else 0)

@@ -6,7 +6,8 @@ In this mode, the local model writes content and decisions. The application supp
 
 ## Configure inference
 
-Install the optional tokenizer support:
+Generation works without an inference tokenizer. Install optional tokenizer support
+only if you want local token-budget checks:
 
 ```sh
 pip install -e '.[inference,mcp,test]'
@@ -35,9 +36,12 @@ Configure endpoints through the existing JSON API: `PUT /api/config` with body `
 
 Creation needs only the generator endpoint. Configure a separate validator endpoint if you want explicit local review; it is never required or contacted by content creation. Imported legacy task settings do not enable another generator or impose unused endpoint requirements.
 
-`inference_tokenizer` is a **local Hugging Face tokenizer directory**, with the tokenizer artifacts and the exact `chat_template` used by the inference server. It is independent of the embedded Kidra training tokenizer. Files are loaded locally with remote code disabled; the generator does not download models. The endpoint and tokenizer template must agree about roles, special tokens, and generation prefixes. There is no heuristic fallback. Missing tokenizer configuration fails before inference, leaving a recoverable draft and diagnostics.
+`inference_tokenizer` is a **local Hugging Face tokenizer directory**, with the tokenizer artifacts and the exact `chat_template` used by the inference server. It is independent of the embedded Kidra training tokenizer. Files are loaded locally with remote code disabled; the generator does not download models. The endpoint and tokenizer template must agree about roles, special tokens, and generation prefixes. Leave this setting absent or blank to skip local token-budget checks. If the files,
+chat template or optional tokenizer dependency are unavailable, generation also
+continues without checks and records the reason. The training tokenizer is used
+only for labeled analytics estimates; it never substitutes a hard inference limit.
 
-Each request must satisfy:
+When an inference tokenizer is available, each request is checked against:
 
 ```text
 actual chat-template prompt tokens
@@ -46,13 +50,13 @@ actual chat-template prompt tokens
 <= min(content_first.context_budget, endpoint.context_size if known)
 ```
 
-Schemas embedded in instructions, selected windows, role profiles, tags, and the assistant generation prefix are all counted. `max_input_tokens` optionally imposes an additional per-step input cap using the same inference tokenizer. Required inputs are never truncated. A rejected preflight preserves inputs and the original prompt for repair; it makes no inference request. For larger tasks, split requests and select relevant inputs/windows explicitly. A completed trajectory may exceed every individual request budget.
+Schemas embedded in instructions, selected windows, role profiles, tags, and the assistant generation prefix are all counted. `max_input_tokens` optionally imposes an additional per-step input cap using the same inference tokenizer. Without an available inference tokenizer, context, reserve and per-step token-budget checks are skipped; the provider still receives the configured completion limit. Required inputs are never truncated. A rejected preflight preserves inputs and the original prompt for repair; it makes no inference request. For larger tasks, split requests and select relevant inputs/windows explicitly. A completed trajectory may exceed every individual request budget.
 
-The direct OpenAI-compatible streaming boundary sends exactly the counted messages. Use `completion_limit_parameter: max_completion_tokens` for servers expecting that parameter. The configured server must enforce the chosen parameter as a **total completion cap including reasoning**. A server interpreting it only as visible text cannot provide this guarantee; use its total-completion parameter. Reported usage exceeding the cap or contradicting preflight is retained as a failed proposal. `stream_usage: false` supports servers without streaming usage counters; metrics then identify tokenizer estimates, and unreported hidden reasoning remains unknown. Full completion capacity is still reserved before inference.
+The direct OpenAI-compatible streaming boundary sends the rendered messages unchanged, whether or not local token counting is enabled. Use `completion_limit_parameter: max_completion_tokens` for servers expecting that parameter. The configured server must enforce the chosen parameter as a **total completion cap including reasoning**. A server interpreting it only as visible text cannot provide this guarantee; use its total-completion parameter. When local budget checks are enabled, reported usage exceeding the cap or contradicting preflight is retained as a failed proposal. `stream_usage: false` supports servers without streaming usage counters; metrics then identify tokenizer estimates, and unreported hidden reasoning remains unknown. With checks enabled, full completion capacity is reserved before inference.
 
 ## Author content and decisions
 
-`llm.content` is the content-oriented spelling of `llm.generate`. Both share the bounded boundary inside a content-first flow. Requests can return plain text or objects validated against existing scenario schemas. Dependencies, `when`, `flow.repeat`, roles, randomized tags, retries, and fallback configuration remain available.
+`llm.content` is the content-oriented spelling of `llm.generate`. Both share the same inference boundary inside a content-first flow. Requests can return plain text or objects validated against existing scenario schemas. Dependencies, `when`, `flow.repeat`, roles, randomized tags, retries, and fallback configuration remain available.
 
 ```yaml
 generation_mode: content-first
@@ -129,7 +133,7 @@ A construction failure can depend on a schema-valid but semantically unusable ca
 
 ## Analytics and comparison
 
-`GET /api/generation/analytics` and MCP `get_generation_analytics` aggregate current dataset candidates by mode: retained, constructed, unsuccessful, pending, externally repaired, approved, requests, raw proposals, token counters, inference time, elapsed time, and candidate/usable throughput. Content-first provenance additionally stores per-request speed, bounds/utilization, provider-vs-estimated token sources, summed inference time, union of concurrent request intervals, and generation overhead. Completion tokens include reported reasoning; reasoning is never added twice. Unknown provider counters remain estimates, not hardware measurements.
+`GET /api/generation/analytics` and MCP `get_generation_analytics` aggregate current dataset candidates by mode: retained, constructed, unsuccessful, pending, externally repaired, approved, requests, raw proposals, token counters, inference time, elapsed time, and candidate/usable throughput. Every request records `budget_enforced`; skipped checks include `budget_skipped_reason`. Provider counts remain available without a tokenizer. Fallback estimates identify `token_estimator: training-tokenizer` and are never used for rejection. Content-first provenance additionally stores per-request speed, available bounds/utilization, provider-vs-estimated token sources, summed inference time, union of concurrent request intervals, and generation overhead. Completion tokens include reported reasoning; reasoning is never added twice. Unknown provider counters remain estimates, not hardware measurements.
 
 Elapsed time includes orchestration and pauses within an attempt but excludes time between stopped attempts and external review. Inference seconds measure occupied request wall time, including provider latency, transport, and request bookkeeping; OpenAI-compatible APIs expose no standard GPU compute-time counter. Inference request durations may overlap, so their sum can exceed elapsed time; `inference_wall_seconds` measures their interval union. Dataset throughput sums recorded candidate elapsed times and is intended for equivalent workload comparisons, not server-wide concurrent-session capacity. Usable throughput requires actual Ready approvals. Legacy datasets without instrumentation are not backfilled with invented counters. Repair counts cover the explicit MCP `repair_trajectory` operation; arbitrary manual edits are not classified as repairs.
 
@@ -145,6 +149,6 @@ quality or GPU performance.
 
 - Causal scaffolds are scenario-defined; model decisions can vary calls, content, branches, and repeats. The assembler does not invent reasoning or autonomously discover new scenario topologies. Richer domains need additional scenario graphs and externally reviewed requirements.
 - Each assembly stage waits for its committed batch before requesting reactions. It supports overlapping replay streams and tools, but does not perform incremental per-token LLM intervention into an uncommitted batch.
-- Oversized required inputs fail explicitly. Authors must divide evidence into meaningful bounded requests; there is no automatic lossy summarization or unbounded-context fallback.
-- The inference tokenizer/template and total-completion parameter must match the server. Other than returned usage, OpenAI-compatible APIs do not provide a portable way to attest a remote server's hidden tokenization or reasoning accounting.
+- With local token-budget checks enabled, oversized required inputs fail explicitly. Authors must divide evidence into meaningful bounded requests; there is no automatic lossy summarization or unbounded-context fallback.
+- When token-budget checks are enabled, the inference tokenizer/template and total-completion parameter must match the server. Other than returned usage, OpenAI-compatible APIs do not provide a portable way to attest a remote server's hidden tokenization or reasoning accounting.
 - Full semantic quality, diversity, and usable training throughput need external review of real model outputs. The offline demonstration establishes construction/recovery behavior and cost accounting, not semantic equivalence of different local models.

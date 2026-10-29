@@ -27,10 +27,13 @@ Use **Edit → Generation → Single Sample** or **Batch**. Choose the scenario,
 randomized/manual conditions and count, then Start. Endpoint configuration,
 concurrency and attempt limits are under **Generation Settings**. Generation
 Defaults contains request budgets and synthetic-clock defaults. Configure the
-local inference tokenizer directory for the generation model under Endpoints.
+optional local inference tokenizer directory for the generation model under Endpoints.
+Leave it blank to skip local token-budget checks; unavailable tokenizer files or
+optional dependencies also skip checks with a recorded reason.
 
-Each content request must fit its inference-model budget, including the prompt,
-total completion capacity and reserve. Code supplies trajectory syntax, windows,
+When an inference tokenizer is available, each content request is checked against
+its inference-model budget, including the prompt, total completion capacity and
+reserve. Otherwise those checks are skipped without truncating context. Code supplies trajectory syntax, windows,
 timing, tool execution, observations and masks. Meaningful notes, actions and
 continuation/termination decisions remain generated targets. Compiler checks
 always run; semantic validators and semantic repair models never run during
@@ -88,9 +91,9 @@ as separate operations; neither starts the other.
 Semantic review may request specific missing evidence within bounded context
 rounds. Missing evidence and malformed reports are not passes. Configure an exact
 inference tokenizer for bounded model-specific validation accounting; a matching
-model/base URL may reuse the generator tokenizer. Older unconfigured validator
-endpoints retain the existing training-tokenizer input estimate and must be given
-an appropriate input budget. Raw responses, errors and progress are journaled in
+model/base URL may reuse the generator tokenizer. Without an available inference
+tokenizer, validation also skips local token-budget enforcement. Training-tokenizer
+estimates remain analytics only; provider limits still apply. Raw responses, errors and progress are journaled in
 `validation_jobs`, separate from `generation_jobs` and generation throughput.
 
 Use MCP `review_trajectory`, `get_review_checklist` and `get_guidance` for API-free

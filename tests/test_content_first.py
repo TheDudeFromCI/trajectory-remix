@@ -252,7 +252,8 @@ async def test_exact_huggingface_template(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('parameter', ['max_tokens', 'max_completion_tokens'])
-async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypatch, parameter):
+@pytest.mark.parametrize('with_tokenizer', [True, False])
+async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypatch, parameter, with_tokenizer):
     fake = ContentClient()
     wire = []
 
@@ -286,6 +287,9 @@ async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypa
     app, runner = setup(tmp_path, compiler, None)
     config = copy.deepcopy(app.state.dataset['config'])
     config['endpoints'][0]['completion_limit_parameter'] = parameter
+    if not with_tokenizer:
+        config['endpoints'][0].pop('inference_tokenizer')
+        config['content_first']['context_budget'] = 1
     app.state.dataset.set_config(config, app.state.dataset['revision'])
     runner.start('content_first', max_parallel=3)
     await finish(runner)
@@ -293,7 +297,9 @@ async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypa
     requests = sample['metadata']['generation_record']['requests']
     assert len(requests) == len(wire) == 5
     for record in requests:
-        assert record['metrics']['prompt_tokens'] == record['budget']['prompt_tokens_preflight']
+        assert record['budget']['budget_enforced'] is with_tokenizer
+        if with_tokenizer:
+            assert record['metrics']['prompt_tokens'] == record['budget']['prompt_tokens_preflight']
         assert record['metrics']['token_source'] == 'provider'
         assert record['metrics']['reasoning_tokens'] == 7
         assert record['metrics']['total_tokens'] == record['metrics']['prompt_tokens'] + record['metrics']['completion_tokens']
@@ -492,7 +498,8 @@ def test_operational_metrics_do_not_invalidate_review_but_original_requirements_
     assert evaluation_source(sample) != evaluation_source(updated)
 
 
-async def test_cancelled_native_stream_retains_partial_content(compiler, tmp_path, monkeypatch):
+@pytest.mark.parametrize('with_tokenizer', [True, False])
+async def test_cancelled_native_stream_retains_partial_content(compiler, tmp_path, monkeypatch, with_tokenizer):
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -516,6 +523,10 @@ async def test_cancelled_native_stream_retains_partial_content(compiler, tmp_pat
 
     monkeypatch.setattr('trajectory_remix.model_session.httpx.AsyncClient', Intercepted)
     app, runner = setup(tmp_path, compiler, None)
+    if not with_tokenizer:
+        config = copy.deepcopy(app.state.dataset['config'])
+        config['endpoints'][0].pop('inference_tokenizer')
+        app.state.dataset.set_config(config, app.state.dataset['revision'])
     runner.start('content_first')
     await asyncio.wait_for(entered.wait(), 5)
     # Capture a live, periodically journaled checkpoint as if its worker died.

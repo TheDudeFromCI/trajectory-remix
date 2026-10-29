@@ -56,7 +56,7 @@ class RequestBudget:
                 f'or input cap {max_input_tokens}; required context was retained'
             )
         return {
-            'prompt_tokens_preflight': prompt, 'completion_cap': self.completion,
+            'budget_enforced': True, 'prompt_tokens_preflight': prompt, 'completion_cap': self.completion,
             'reserved_tokens': self.reserve, 'context_budget': self.context,
             'context_utilization_reserved': (prompt + self.completion + self.reserve) / self.context,
             'inference_tokenizer': self.identity, 'inference_tokenizer_sha256': self.fingerprint,

@@ -417,8 +417,10 @@ file and requests to 40 MB. Large imports should be split into batches; the SQLi
 The application loads two bundled content-first flows by default:
 **`user_scenario`** for user conversations, and **`idle_scenario`** for autonomous
 TODO, project, memory and alarm work. Select **Edit → Generation → Single Sample**
-or **Batch**. Configure endpoints, the exact local inference tokenizer and request
-budgets in Generation Settings. No task-based or inline-validated generator is
+or **Batch**. Configure endpoints and optional token budgets in Generation Settings.
+Local budget checks use the inference model’s tokenizer when available; leave its
+directory blank to skip checks. Missing tokenizer files or optional dependencies
+also skip checks, with the reason recorded in generation provenance. No task-based or inline-validated generator is
 available. Creation always retains Pending drafts and expensive failed proposals.
 
 To review a saved trajectory, select **Edit → Generation → Validate Trajectory**.

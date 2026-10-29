@@ -76,7 +76,7 @@ limit retains an incomplete pending candidate, not an approved success.
 
 ## Run and inspect
 
-Configure the generator endpoint and its local inference tokenizer, then choose
+Configure the generator endpoint and optional local inference tokenizer, then choose
 `idle_scenario` in the existing Single Sample or Batch UI. The run API accepts:
 
 ```json
@@ -86,10 +86,11 @@ Configure the generator endpoint and its local inference tokenizer, then choose
 The action requests are sequential because each depends on previous observations;
 raising `max_parallel` does not create independent inference branches inside this
 flow. Multiple generated reasoning streams and independent tool requests still
-execute concurrently in replay. Each request independently obeys the configured
-context budget (default 8,192, including completion and reserve). Required context
-is never silently truncated. Large retained windows/TODOs can exceed that budget;
-external repair or a smaller world is then necessary.
+execute concurrently in replay. When an inference tokenizer is available, each
+request is checked against the configured context budget (default 8,192, including
+completion and reserve). Missing or unavailable tokenizers skip local budget checks.
+Required context is never silently truncated. With checks enabled, large retained
+windows/TODOs can exceed the budget; use a larger budget or smaller context.
 
 For a repeatable **scripted offline demonstration**, install the inference extra and
 use a fresh output directory:

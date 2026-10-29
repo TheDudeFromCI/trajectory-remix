@@ -260,10 +260,13 @@ async def test_unresolved_evidence_is_bounded_and_never_recorded(studio, context
     assert validator.snapshot['content_requests'][-1]['raw_output']
 
 
-async def test_oversized_explicit_review_never_truncates_or_calls_model(studio):
+async def test_oversized_explicit_review_never_truncates_or_calls_model(studio, monkeypatch):
+    from test_scenario_variations import FourByteTokenizer
+    monkeypatch.setattr("trajectory_remix.content_first.inference_tokenizer", lambda _: FourByteTokenizer())
     app, _ = studio
     config = copy.deepcopy(app.state.dataset['config'])
     config['validation'] = {'endpoint': 'validator', 'max_input_tokens': 512}
+    config['endpoints'][1]['inference_tokenizer'] = 'fixture'
     app.state.dataset.set_config(config, app.state.dataset['revision'])
     reviewer = Reviewer()
     validator = attach(app, reviewer)
@@ -297,7 +300,7 @@ async def test_shared_validation_counts_model_template_completion_and_reserve(st
     config['endpoints'][1]['model'] = 'another-model'
     app.state.dataset.set_config(config, app.state.dataset['revision'])
     validator.start('test')
-    assert not validator.content_first
+    assert validator.request_budget('validator') is None
     await validator.job
 
 

@@ -135,6 +135,10 @@ window closure, tool capabilities or generation task assembly. The reactive
 fixture keeps the tool window open until the final response has consumed its
 result, then emits EOS to release it.
 
+- Optional-tokenizer regressions verify omitted/blank settings, missing files,
+  dependencies and chat templates; unbudgeted creation and validation; provider
+  usage/reasoning accounting; native streaming and cancellation; labeled estimates;
+  and preserved enforcement when a matching tokenizer is available.
 - Content-first regressions cover exact inference chat-template budgets (install
   `.[inference,test,mcp]` for the real tokenizer integration), both OpenAI completion
   limit parameters on the streaming wire, reasoning usage, concurrent content

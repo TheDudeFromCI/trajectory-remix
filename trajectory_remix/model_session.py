@@ -89,20 +89,34 @@ class ModelSession:
             instructions += "\nReturn JSON matching this schema:\n" + compact(schema)
         return instructions, compact(inputs)
 
+    def request_budget(self, endpoint_id):
+        """An unavailable inference tokenizer disables local token-budget checks."""
+        if getattr(self, '_budget_endpoints', None) is not self.endpoints:
+            self._budget_endpoints = self.endpoints
+            self._request_budgets, self._budget_errors, self._budget_logged = {}, {}, set()
+        if endpoint_id not in self._request_budgets:
+            endpoint = self.endpoints[endpoint_id]
+            budget = None
+            if not (endpoint.get('inference_tokenizer') or '').strip():
+                self._budget_errors[endpoint_id] = 'inference_tokenizer_unconfigured'
+            else:
+                try:
+                    budget = RequestBudget(endpoint, self.config.get('content_first', {}))
+                except (OSError, ValueError, ImportError) as error:
+                    self._budget_errors[endpoint_id] = 'inference_tokenizer_unavailable'
+                    self._budget_errors[endpoint_id + ':detail'] = str(error)
+            self._request_budgets[endpoint_id] = budget
+        return self._request_budgets[endpoint_id]
+
     def prompt_tokens(self, step, inputs, context, schema, prompt, rules=None):
-        if self.content_first:
-            instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
-            counter = RequestBudget(self.endpoints[step.endpoint], self.config.get('content_first', {}))
+        instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
+        counter = self.request_budget(step.endpoint)
+        if counter:
             return len(counter.tokenizer.apply_chat_template(
                 [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': data}],
                 tokenize=True, add_generation_prompt=True, return_dict=False))
-        return (
-            sum(
-                count(self.compiler.tokenizer, text)
-                for text in self.render_prompt(step, inputs, context, schema, prompt, rules)
-            )
-            + 128
-        )
+        # A training-tokenizer estimate is for analytics only, never enforcement.
+        return count(self.compiler.tokenizer, instructions) + count(self.compiler.tokenizer, data) + 128
 
     async def llm(
         self,
@@ -126,32 +140,21 @@ class ModelSession:
                     raise ValueError(f'Requested context windows are not open: {sorted(unavailable)}')
             inputs = {**inputs, 'visible_windows': visible}
         instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
-        budget, budget_metrics = None, {}
         endpoint = self.endpoints[step.endpoint]
-        if self.content_first:
-            if not endpoint.get('inference_tokenizer'):
-                raise ValueError(f"Endpoint {step.endpoint} needs inference_tokenizer for content-first requests")
-            budget = RequestBudget(endpoint, self.config.get('content_first', {}))
+        budget = self.request_budget(step.endpoint)
+        if budget:
             budget_metrics = budget.check([
                 {'role': 'system', 'content': instructions}, {'role': 'user', 'content': data}
             ], max_input_tokens if max_input_tokens is not None else step.max_input_tokens)
-        if max_input_tokens is None:
-            max_input_tokens = step.max_input_tokens
-        if max_input_tokens is not None and not self.content_first:
-            endpoint = self.endpoints[step.endpoint]
-            if endpoint.get("context_size"):
-                max_input_tokens = min(
-                    max_input_tokens,
-                    endpoint["context_size"] - endpoint.get("max_tokens", 1024),
-                )
-            if (
-                max_input_tokens <= 0
-                or self.prompt_tokens(step, inputs, context, schema, prompt, rules)
-                > max_input_tokens
-            ):
-                raise ValueError(
-                    f"{path}: prompt exceeds configured {max_input_tokens} token input budget"
-                )
+        else:
+            budget_metrics = {'budget_enforced': False,
+                              'budget_skipped_reason': self._budget_errors[step.endpoint]}
+            if step.endpoint not in self._budget_logged:
+                detail = self._budget_errors.get(step.endpoint + ':detail')
+                self.log(f"Endpoint '{step.endpoint}': token budget checks skipped; " +
+                         (f'inference tokenizer unavailable ({detail})' if detail else 'no inference tokenizer configured'),
+                         'warning' if detail else 'info', path)
+                self._budget_logged.add(step.endpoint)
         system_tokens = budget.output_tokens(instructions) if budget else count(self.compiler.tokenizer, instructions)
         async with self.model_slot():
             self.status["active"].append(path)
@@ -217,10 +220,12 @@ class ModelSession:
                                        token_source='estimated', token_estimator='inference-tokenizer')
                         if streamed_reasoning:
                             current['reasoning_tokens'] = budget.output_tokens(streamed_reasoning)
-                    current.update(budget_metrics)
                     current['context_used_tokens'] = current['total_tokens']
                     current['context_size'] = budget.context
                     current['context_utilization'] = current['total_tokens'] / budget.context
+                current.update(budget_metrics)
+                if not budget and current.get('token_source') == 'estimated':
+                    current['token_estimator'] = 'training-tokenizer'
                 proposal.update(raw_output=streamed_text, reasoning=streamed_reasoning, metrics=current)
                 current["system_prompt_tokens_estimated"] = system_tokens
                 self.status.setdefault("metrics", {})[path] = current
@@ -238,8 +243,7 @@ class ModelSession:
             async def ticker():
                 while True:
                     sample_stats()
-                    if budget:
-                        self.persist()
+                    self.persist()
                     await asyncio.sleep(2)
 
             timer = asyncio.create_task(ticker())
@@ -261,22 +265,22 @@ class ModelSession:
                 )
                 if self.client is not None:
                     # Injected clients use identical rendered messages and request boundaries.
-                    request_endpoint = {**endpoint, 'retain_incomplete': True} if budget else endpoint
+                    request_endpoint = {**endpoint, 'retain_incomplete': True}
                     message = await self.client.complete(request_endpoint, messages)
                     text = message.get("content", "") or ''
                     streamed_text = text
                     streamed_reasoning = message.get('reasoning_content') or ''
                     injected_usage = message.get('_usage')
-                    if budget and message.get('_finish_reason') in ('length', 'content_filter'):
+                    if message.get('_finish_reason') in ('length', 'content_filter'):
                         raise ValueError(f"Incomplete model output: {message['_finish_reason']}")
 
-                elif budget:
+                elif self.content_first or budget:
                     # Send exactly the messages counted by preflight. Provider/model
                     # profiles must not rewrite roles or inject schema instructions.
                     key = endpoint.get('api_key') or os.getenv(endpoint.get('api_key_env', ''), '') or 'local'
                     async with httpx.AsyncClient(timeout=endpoint.get('timeout', 120), follow_redirects=False) as http:
                         api = AsyncOpenAI(base_url=endpoint['base_url'], api_key=key, http_client=http, max_retries=0)
-                        settings = {budget.parameter: budget.completion}
+                        settings = {endpoint.get('completion_limit_parameter', 'max_tokens'): int(endpoint.get('max_tokens', 1024))}
                         if endpoint.get('stream_usage', True):
                             settings['stream_options'] = {'include_usage': True}
                         stream = await api.chat.completions.create(
@@ -414,7 +418,7 @@ class ModelSession:
                 if schema:
                     result = (
                         json.loads(text, object_pairs_hook=unique_json_object, parse_constant=reject_constant)
-                        if rules or budget else json.loads(text)
+                        if rules or self.content_first or budget else json.loads(text)
                     )
                 else:
                     result = text

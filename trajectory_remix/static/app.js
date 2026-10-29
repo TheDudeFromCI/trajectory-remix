@@ -2119,12 +2119,13 @@ function renderConfig() {
         ["max_tokens", "Max completion tokens", "number"],
         ["timeout", "Timeout (seconds)", "number"],
         ["context_size", "Context size (tokens, 0 = unknown)", "number"],
-        ["inference_tokenizer", "Local inference tokenizer directory", "text"],
+        ["inference_tokenizer", "Local inference tokenizer directory (optional)", "text"],
       ]) {
         const box = input(ep[name] ?? (name === "context_size" ? 0 : undefined), (v) => (ep[name] = v), type);
         box.dataset.configPath = `endpoints.${i}.${name}`;
         form.append(field(label, box, name === "base_url" ? "wide" : ""));
       }
+      form.append(node("small", "hint", "Token budget checks run only when the inference tokenizer is available. Leave its directory blank to skip checks."));
       form.append(
         field(
           "Clear stored session key",
