@@ -1049,6 +1049,22 @@ h2 {
 .event-options .source-input {
   max-width: 120px;
 }
+.show-tools-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 8px 12px;
+}
+.show-tools-options label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.show-tools-options input[type="checkbox"] {
+  flex-shrink: 0;
+  margin: 0;
+}
+.show-tools-random {
+  grid-column: 1 / -1;
+}
 .event-marker {
   color: #e8c483;
   font:
