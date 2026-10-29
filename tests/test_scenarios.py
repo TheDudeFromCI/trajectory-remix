@@ -266,7 +266,7 @@ async def test_pause_finishes_current_call_and_blocks_next_request(compiler, tmp
     await finish(runner)
 
 
-async def test_approval_export_and_human_edit_invalidate_evaluation(compiler, tmp_path):
+async def test_human_edit_preserves_approval_and_export(compiler, tmp_path):
     app = app_for(tmp_path, compiler, ScenarioClient())
     runner = app.state.scenario_runner
     runner.start("user_problem")
@@ -289,8 +289,8 @@ async def test_approval_export_and_human_edit_invalidate_evaluation(compiler, tm
         ).status_code == 200
         assert (await client.get("/api/samples/0")).json()["metadata"][
             "validation_level"
-        ] == 0
-        assert (await client.post("/api/export", json={})).text == ""
+        ] == 3
+        assert (await client.post("/api/export", json={})).text
 
 
 def write_scenario(tmp_path, flow, prompts=None):

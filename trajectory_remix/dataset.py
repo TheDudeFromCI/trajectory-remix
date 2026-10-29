@@ -62,13 +62,10 @@ def invalidate_automation(sample, existing):
             metadata = sample["metadata"] = {}
         if previous.get("origin") == "automation":
             metadata["origin"] = "automation"
+        # Editing source invalidates old assessments, not the chosen state.
+        metadata["validation_level"] = previous.get("validation_level", -3)
         if evaluation_source(sample) != evaluation_source(existing):
-            metadata["validation_level"] = (
-                0 if previous.get("origin") == "automation" else -3
-            )
             metadata.pop("evaluations", None)
-        else:
-            metadata["validation_level"] = previous.get("validation_level", -3)
     return sample
 
 

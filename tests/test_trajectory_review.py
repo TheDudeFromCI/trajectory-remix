@@ -132,7 +132,7 @@ async def test_repair_is_atomic_compiled_undoable_and_returns_checklist(studio):
     assert repaired['revision'] == prepared['revision'] + 1
     current = await source(studio)
     assert not current['metadata'].get('evaluations')
-    assert current['metadata']['validation_level'] == 0
+    assert current['metadata']['validation_level'] == 2
     assert current['replay']['1'][0]['content'] == 'New evidence'
     stale = await studio[1].post('/api/mcp/call', json={'name': 'repair_trajectory', 'arguments': args})
     assert stale.status_code == 409

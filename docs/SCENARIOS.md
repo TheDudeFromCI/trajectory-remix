@@ -538,8 +538,8 @@ in a system window. These diagnostics include event paths and appear in both
 editor and MCP validation results without making compilation fail.
 
 Use **Edit → Set State → Ready** after human review to approve training export.
-Content or metadata edits to automated samples invalidate previous evaluation and approval.
-Human samples begin unfinished at level -3, including historical samples without an explicit level. Human review promotes them to 3; subsequent edits invalidate that approval. Both
+Content or metadata edits clear previous evaluations and preserve the trajectory's current state, including Ready (3).
+Human samples begin unfinished at level -3, including historical samples without an explicit level. Human review promotes them to 3; subsequent edits preserve that approval. Both
 CLI token export and dashboard token export exclude levels other than 3, including
 explicitly selected pending samples. Project backups retain all samples.
 

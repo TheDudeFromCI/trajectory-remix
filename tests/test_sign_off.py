@@ -69,8 +69,8 @@ async def test_sign_off_persists_review_without_model_calls_and_is_undoable(stud
     assert await source(studio) == sample
 
 
-@pytest.mark.parametrize('automated,expected', [(True, 0), (False, -3)])
-async def test_edit_after_sign_off_invalidates_review(studio, automated, expected):
+@pytest.mark.parametrize('automated', [True, False])
+async def test_edit_after_sign_off_invalidates_review_but_preserves_state(studio, automated):
     if automated:
         await call(studio, 'update_trajectory_metadata', sample_id='test', patch={
             'metadata': {'origin': 'automation'},
@@ -80,9 +80,9 @@ async def test_edit_after_sign_off_invalidates_review(studio, automated, expecte
         'op': 'append', 'window': 'a', 'content': 'New evidence requires another review.',
     })
     sample = await source(studio)
-    assert sample['metadata']['validation_level'] == expected
+    assert sample['metadata']['validation_level'] == 2
     assert 'evaluations' not in sample['metadata']
-    assert (await call(studio, 'list_trajectories', query='@state:validated'))['total'] == 0
+    assert (await call(studio, 'list_trajectories', query='@state:validated'))['total'] == 1
 
 
 async def test_compile_failure_cannot_be_signed_off_but_can_be_rejected(studio):
