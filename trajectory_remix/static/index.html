@@ -38,6 +38,7 @@
                 <button id="settings-button" role="menuitem" title="Open the generation settings">Generation Settings</button>
                 <button id="validate-trajectory" role="menuitem" disabled>Validate Trajectory</button>
                 <button id="resume-trajectory-generation" role="menuitem" disabled>Resume Trajectory Generation</button>
+                <button id="resume-all-generations" role="menuitem" disabled>Resume Unfinished Generations</button>
                 <button id="status-button" role="menuitem" title="Open the generation status panel">Status</button>
                 <button id="generate-one" role="menuitem">Single Sample</button>
                 <button id="generate-batch" role="menuitem">Batch</button>
@@ -272,6 +273,9 @@
         <label for="generation-count">Trajectories to create</label>
         <input id="generation-count" type="number" min="1" max="1000" step="1" value="1" required />
         <small id="batch-progress" role="status" hidden></small>
+        <small id="resume-all-progress" role="status" hidden></small>
+        <pre id="resume-all-findings" hidden></pre>
+        <button id="resume-all-generations-panel" disabled>Resume Unfinished Generations</button>
         <div class="run-status">
           <span id="run-dot" class="dot"></span><b id="run-status">Idle</b>
         </div>

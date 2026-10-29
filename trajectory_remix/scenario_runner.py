@@ -81,6 +81,9 @@ class ScenarioRunner(ModelSession):
                         request['finished_at'] = request['started_at'] + request.get('metrics', {}).get('generation_seconds', 0)
                 self.persist()
 
+        from .generation_resume import GenerationResumeQueue
+        self.resume_queue = GenerationResumeQueue(self)
+
     @property
     def content_first(self):
         return hasattr(self, 'scenario') and self.scenario.flow.generation_mode == 'content-first'
@@ -343,7 +346,7 @@ class ScenarioRunner(ModelSession):
             and bool(metadata.get("generation_job"))
         )
 
-    def resume_saved(self, sample_id, *, confirm_edited=False):
+    def resume_saved(self, sample_id, *, confirm_edited=False, _schedule=True):
         validator = getattr(self.legacy, "validation_runner", None)
         if validator and validator.status.get("running"):
             raise ValueError("Finish or cancel trajectory validation before generation")
@@ -372,6 +375,8 @@ class ScenarioRunner(ModelSession):
                 "Tokenizer or tools changed since checkpoint; refusing an inconsistent resume"
             )
         cp = saved["checkpoint"]
+        if cp["sample"].get("uuid") != sample.get("uuid"):
+            raise ValueError("Generation checkpoint belongs to another trajectory")
         if confirm_edited:
             cp["expected_draft"] = copy.deepcopy(sample)
             cp["sample"]["id"] = sample["id"]
@@ -422,9 +427,10 @@ class ScenarioRunner(ModelSession):
         self.limit = asyncio.Semaphore(self.snapshot.get("max_parallel", 1))
         self.resume_event.set()
         self.log("Resuming saved generation checkpoint; completed steps will be reused")
-        self.job = asyncio.create_task(
-            self.run(self.scenario.name, self.snapshot.get("max_parallel", 1))
-        )
+        if _schedule:
+            self.job = asyncio.create_task(
+                self.run(self.scenario.name, self.snapshot.get("max_parallel", 1))
+            )
 
     async def gate(self):
         if not self.resume_event.is_set():
@@ -449,6 +455,13 @@ class ScenarioRunner(ModelSession):
                 await self.job
             except asyncio.CancelledError:
                 pass
+        # Cancellation before a newly scheduled queue first runs has no async
+        # finally block; still make its status durable and release the UI locks.
+        if self.resume_queue.status['running'] and self.job and self.job.done():
+            self.resume_queue.status.update(running=False, state='cancelled', current_id=None)
+            self.resume_queue.persist()
+            self.status.update(running=False, phase='cancelled', paused=False, pause_requested=False, active=[])
+            self.persist()
 
     async def run(self, name, max_parallel):
         batch = self.status.setdefault(

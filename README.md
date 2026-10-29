@@ -423,6 +423,11 @@ directory blank to skip checks. Missing tokenizer files or optional dependencies
 also skip checks, with the reason recorded in generation provenance. No task-based or inline-validated generator is
 available. Creation always retains Pending drafts and expensive failed proposals.
 
+Use **Edit → Generation → Resume Unfinished Generations** (also in Generation
+Control) to complete existing generated drafts across the whole dataset in one
+pass. Manual entries are ignored. Completed steps are reused; failures and edited
+checkpoints are reported while the pass continues. Pause/Cancel preserve work.
+
 To review a saved trajectory, select **Edit → Generation → Validate Trajectory**.
 It runs the same shared checklist service used by explicit MCP semantic validation,
 against original saved requirements plus current custom guidance. Review has its

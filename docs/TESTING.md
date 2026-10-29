@@ -10,6 +10,11 @@
   reuse, stale-source/requirements rejection and immutable creation metrics.
   UI and MCP semantic validation use the same service; read-only reviews never
   alter samples, and recorded reviews never grant Ready approval.
+- Dataset-wide resume tests cover generated-only selection, manual copies and
+  checkpoint ownership, bounded per-entry attempts, reuse of completed requests,
+  no replacement samples or original batch-quota filling, independent failures,
+  edit conflicts, missing/corrupt checkpoints, queue changes, pause/cancel/restart,
+  unfiltered API selection, paginated results and toolbar progress/locking.
 - Creation tests verify Pending drafts, canonical defaults and legacy name aliases,
   generator-only configuration, retired task API errors, preservation of original
   review snapshots and custom guidance, provider retry budgets and recovery.

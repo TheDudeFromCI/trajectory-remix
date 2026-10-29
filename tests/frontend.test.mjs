@@ -1260,6 +1260,39 @@ confirmResult = true;
 await click("resume-trajectory-generation");
 assert.equal(resumeRequests, 3);
 w.fetch = beforeResumeFetch;
+// Dataset-wide resume has no selected ID, filter, or scenario in its request.
+const beforeBulkResumeFetch = w.fetch;
+let bulkResumeStarted = false;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/resume-all") {
+    assert.deepEqual(JSON.parse(options.body), {});
+    bulkResumeStarted = true;
+    return new w.Response(JSON.stringify({job_id: "recovery-pass"}), {status: 202});
+  }
+  const response = await beforeBulkResumeFetch(path, options);
+  if (path.startsWith("/api/state?")) {
+    const data = await response.json();
+    data.unfinished_generation_count = 2;
+    if (bulkResumeStarted) {
+      data.status = {...data.status, running:true, paused:false, phase:"resuming_all"};
+      data.generation_resume = {running:true, state:"running", target:3, processed:1,
+        completed:0, failed:0, skipped:1, issues:[{sample_id:"edited-draft", error:"Trajectory edited since checkpoint"}]};
+    }
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+assert.equal($("resume-all-generations").parentElement, $("generation-menu"));
+await waitFor(() => !$("resume-all-generations").disabled, 5000);
+await click("resume-all-generations");
+assert(bulkResumeStarted);
+assert.equal($("generation-panel").hidden, false);
+assert.match($("resume-all-progress").textContent, /1\/3 processed/);
+assert.match($("resume-all-findings").textContent, /edited-draft: Trajectory edited/);
+assert.equal($("resume-all-generations").disabled, true);
+assert.equal($("resume-all-generations-panel").disabled, true);
+assert.equal($("stop-run").disabled, false);
+w.fetch = beforeBulkResumeFetch;
 // Evaluation failures retain the existing candidate and resume the batch.
 const beforeEvaluationFetch = w.fetch;
 let evaluationResumed = false;

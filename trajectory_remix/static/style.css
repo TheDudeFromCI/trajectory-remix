@@ -1372,3 +1372,5 @@ dialog::backdrop {
 .validation-body { padding: 0 24px 20px; display: grid; gap: 12px; }
 #validation-findings { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
 #validation-progress { width: 100%; }
+
+#resume-all-findings { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow: auto; font-size: 0.8rem; }

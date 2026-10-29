@@ -57,6 +57,38 @@ The scenario defaults to `user_scenario` when omitted. `user_problem` and
 old task-based creation API, returns HTTP 410. Legacy task settings and automatic
 validation flags in imported configurations do not enable a creation pipeline.
 
+## Resume unfinished generations across the dataset
+
+Choose **Edit → Generation → Resume Unfinished Generations**, or the matching
+button in Generation Control. No trajectory selection is required. This takes a
+snapshot of unfinished generated entries throughout the dataset, ignoring the
+current search, pagination and manually authored trajectories. Generated copies
+whose UUID does not own the checkpoint are excluded as well.
+
+Each existing draft is resumed once in dataset order, reusing completed model
+requests. The pass never creates replacement samples or fills the original batch's
+remaining quota. Original prompts, requirements and sampled conditions come from
+each checkpoint; current endpoint settings apply. Compiler and approval rules stay
+the same, and semantic validation is not invoked.
+
+Generation Control shows processed/completed/failed/skipped counts and recent
+issues. Provider or construction failures retain their proposals and let the next
+entry proceed. Edited, missing or incompatible checkpoints are reported without
+overwriting source. Entries deleted, completed or reassigned before their turn
+are skipped. Only the active draft is locked against editing.
+
+Pause/Resume and Cancel apply to the whole pass. Cancellation or restart retains
+checkpoints and per-entry results. Running the action again scans the remaining
+unfinished entries; completed drafts are not regenerated. A pass processes only
+entries captured at its start, so each is attempted at most once per pass.
+
+- `POST /api/scenarios/resume-all`: starts a pass, returns 202; no selection/filter.
+- `GET /api/state`: `unfinished_generation_count` and `generation_resume` summary.
+- `GET /api/scenarios/resume-all/results?offset=0&limit=100`: durable paginated results
+  for the latest pass. The UI displays at most 25 recent issues.
+- Existing `/api/pause` and `/api/stop` control the pass. Creation, semantic validation
+  and tokenizer migration cannot run concurrently with it.
+
 ## Validate existing trajectories
 
 Select a saved trajectory and choose **Edit → Generation → Validate Trajectory**.

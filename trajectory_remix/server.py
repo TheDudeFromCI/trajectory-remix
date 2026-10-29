@@ -223,6 +223,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "query": query,
             "selected_index": selected_index,
             "can_resume_generation": scenario_runner.can_resume(selected_id),
+            "unfinished_generation_count": scenario_runner.resume_queue.count(),
+            "generation_resume": dict(scenario_runner.resume_queue.status),
             "config": public_config(state["config"]),
             "revision": revision,
             "history": runner.history.view(),
@@ -561,6 +563,15 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                     return JSONResponse({"detail": str(error), "confirmation_required": True}, status_code=409)
                 raise
         return {"ok": True}
+
+    @app.post('/api/scenarios/resume-all', status_code=202)
+    async def resume_all_generations():
+        job_id = scenario_runner.resume_queue.start()
+        return {'job_id': job_id, 'status': dict(scenario_runner.resume_queue.status)}
+
+    @app.get('/api/scenarios/resume-all/results')
+    async def resume_all_results(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
+        return scenario_runner.resume_queue.results(offset, limit)
 
     @app.post("/api/endpoints/test")
     async def test_endpoint(request: Request):

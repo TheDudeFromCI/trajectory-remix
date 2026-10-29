@@ -315,6 +315,17 @@ function renderStatus() {
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
   $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
+  const recovery = state.generation_resume;
+  const recoveryDisabled = s.running || migrationBusy || !!state.validation_status?.running || !state.unfinished_generation_count;
+  for (const id of ["resume-all-generations", "resume-all-generations-panel"]) {
+    $(id).disabled = recoveryDisabled;
+    $(id).title = `Resume ${state.unfinished_generation_count || 0} unfinished generated trajectories across the dataset`;
+  }
+  $("resume-all-progress").hidden = !recovery?.target;
+  $("resume-all-progress").textContent = recovery?.target ? `Resume pass: ${recovery.processed}/${recovery.target} processed · ${recovery.completed} completed · ${recovery.failed} failed · ${recovery.skipped} skipped · ${s.running && s.paused && recovery.running ? "paused" : recovery.state}` : "";
+  $("resume-all-findings").hidden = !recovery?.issues?.length;
+  $("resume-all-findings").textContent = (recovery?.issues || []).map(issue => `${issue.sample_id}: ${issue.error}`).join("\n");
+  if (recovery?.running) $("run-status").textContent = s.paused ? "Resume pass paused" : "Resuming unfinished generations";
   renderValidationState();
   $("pause-run").textContent = !s.running ? (["api_paused", "evaluation_failed"].includes(s.phase) ? "Resume" : "Start") : s.paused || s.pause_requested ? "Resume" : "Pause";
   $("pause-run").disabled = !s.running && !scenarioNames.length && !(["api_paused", "evaluation_failed"].includes(s.phase) && s.draft_id);
@@ -2749,6 +2760,16 @@ $("resume-trajectory-generation").onclick = action(async () => {
   await resumeGeneration(sample.id);
   openGenerationPanel(); await refresh();
 });
+
+async function resumeAllGenerations() {
+  closeMenus();
+  if (hasPendingChanges()) await compileSample(true);
+  await json("scenarios/resume-all", "POST", {});
+  openGenerationPanel();
+  await refresh();
+}
+$("resume-all-generations").onclick = action(resumeAllGenerations);
+$("resume-all-generations-panel").onclick = action(resumeAllGenerations);
 
 function renderTrajectoryValidation(status = {}) {
   const busy = !!status.running;
