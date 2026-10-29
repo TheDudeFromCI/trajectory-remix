@@ -181,6 +181,8 @@ def default_config():
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("Config must be an object")
+    from .guidance import validate_guidance
+    validate_guidance(config.get("review_guidance", {}))
     single = config.get("single_generation", {})
     if not isinstance(single, dict):
         raise ValueError("single_generation must be an object")

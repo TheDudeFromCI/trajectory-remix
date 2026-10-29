@@ -35,6 +35,10 @@
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
   API-free per-item recording, and transport tool discovery.
+- Guidance tests verify identical dashboard/MCP bundles, unchanged read-only standard
+  files, persistent dataset/scenario Markdown, portable saved prompts, custom-check
+  result coverage and stale checklist rejection. DOM checks edit both scopes, switch
+  guide tabs and scenarios, view exact source, and render user Markdown as safe text.
 - Streamable HTTP checks cover direct POST initialization, initialized notifications,
   tool discovery/calls, session and protocol headers, deletion, malformed requests,
   HTTP methods, CORS preflight/exposed session headers and explicit origin/Host

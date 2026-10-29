@@ -1866,6 +1866,149 @@ async function download(path, filename, method = "GET", body) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+// Markdown is built as DOM text, so user guides cannot inject HTML or scripts.
+function markdownInline(root, text) {
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  let offset = 0;
+  for (const match of text.matchAll(pattern)) {
+    root.append(document.createTextNode(text.slice(offset, match.index)));
+    const token = match[0];
+    if (token.startsWith("[")) {
+      const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
+      if (/^https?:\/\//i.test(link[2])) {
+        const a = node("a", "", link[1]); a.href = link[2]; a.target = "_blank"; a.rel = "noopener noreferrer"; root.append(a);
+      } else root.append(document.createTextNode(token));
+    } else {
+      const marker = token.startsWith("**") ? 2 : 1;
+      const element = node(token[0] === "`" ? "code" : marker === 2 ? "strong" : "em", "", token.slice(marker, -marker));
+      root.append(element);
+    }
+    offset = match.index + token.length;
+  }
+  root.append(document.createTextNode(text.slice(offset)));
+}
+function renderMarkdown(root, text) {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  let list = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim().startsWith("```")) {
+      const code = [];
+      while (++i < lines.length && !lines[i].trim().startsWith("```")) code.push(lines[i]);
+      const pre = node("pre"); pre.append(node("code", "", code.join("\n"))); root.append(pre); list = null; continue;
+    }
+    if (!line.trim()) { list = null; continue; }
+    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
+      const table = node("table");
+      const cells = value => value.trim().replace(/^\||\|$/g, "").split("|");
+      const row = (value, tag) => { const tr = node("tr"); for (const valueCell of cells(value)) { const cell = node(tag); markdownInline(cell, valueCell.trim()); tr.append(cell); } table.append(tr); };
+      row(line, "th"); i++;
+      while (i + 1 < lines.length && lines[i + 1].includes("|") && lines[i + 1].trim()) row(lines[++i], "td");
+      root.append(table); list = null; continue;
+    }
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    const item = /^\s*(?:[-*+] |\d+\. )(.*)$/.exec(line);
+    if (heading) { const h = node("h" + heading[1].length); markdownInline(h, heading[2]); root.append(h); list = null; }
+    else if (item) {
+      const type = /^\s*\d+\./.test(line) ? "ol" : "ul";
+      if (!list || list.tagName.toLowerCase() !== type) { list = node(type); root.append(list); }
+      const li = node("li"), task = /^\[([ xX])\] (.*)$/.exec(item[1]);
+      if (task) { const check = node("input"); check.type = "checkbox"; check.disabled = true; check.checked = task[1] !== " "; li.append(check, document.createTextNode(" ")); }
+      markdownInline(li, task ? task[2] : item[1]); list.append(li);
+    } else {
+      list = null;
+      const p = node(line.startsWith("> ") ? "blockquote" : "p"); markdownInline(p, line.replace(/^> /, "")); root.append(p);
+    }
+  }
+}
+let guidanceBundle = null, guidanceTab = "standard.start", guidanceRequest = 0, customGuidanceScope = "";
+function renderGuidelines() {
+  const tabs = $("guidelines-tabs"), root = $("guidelines-content");
+  tabs.replaceChildren(); root.replaceChildren();
+  const documents = guidanceBundle?.documents || [];
+  if (!documents.some(d => d.id === guidanceTab)) guidanceTab = documents[0]?.id;
+  for (const guide of documents) {
+    const tab = button(guide.title, () => { guidanceTab = guide.id; renderGuidelines(); });
+    tab.id = "guide-tab-" + tabs.childElementCount; tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", "guidelines-content"); tab.setAttribute("aria-selected", String(guide.id === guidanceTab));
+    tab.tabIndex = guide.id === guidanceTab ? 0 : -1;
+    tab.onkeydown = event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const index = documents.findIndex(d => d.id === guidanceTab);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? documents.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + documents.length) % documents.length;
+      guidanceTab = documents[next].id; renderGuidelines(); $("guidelines-tabs").children[next].focus();
+    };
+    tabs.append(tab);
+  }
+  const guide = documents.find(d => d.id === guidanceTab);
+  if (!guide) return;
+  root.setAttribute("aria-labelledby", [...tabs.children].find(t => t.getAttribute("aria-selected") === "true").id);
+  $("guidelines-provenance").textContent = `${guide.editable ? "Custom · Edit in dashboard settings" : "Read-only"} · ${guide.source} · Dataset revision ${guidanceBundle.revision}`;
+  if (!guide.content) root.append(node("p", "hint", "No custom requirements configured for this guide."));
+  else if ($("guidelines-source").checked || guide.format !== "markdown") root.append(node("pre", "guide-source", guide.content));
+  else renderMarkdown(root, guide.content);
+}
+async function loadGuidelines(scope = $("guidelines-scenario").value) {
+  const request = ++guidanceRequest;
+  const query = scope === "sample" && sample ? "?sample_id=" + encodeURIComponent(sample.id) : scope.startsWith("scenario:") ? "?scenario=" + encodeURIComponent(scope.slice(9)) : "";
+  guidanceBundle = null;
+  $("guidelines-tabs").replaceChildren(); $("guidelines-provenance").textContent = "";
+  $("guidelines-error").hidden = true;
+  if (!$("guidelines-scenario").options.length) {
+    const names = [...new Set([...(state.scenarios || []).map(s => s.name), ...Object.keys(state.config.review_guidance?.scenarios || {})])].sort();
+    for (const [value, label] of [...(sample ? [["sample", "Current trajectory (saved checklist)"]] : []), ["dataset", "Dataset / Standard guides"], ...names.map(n => ["scenario:" + n, n])]) {
+      const option = node("option", "", label); option.value = value; $("guidelines-scenario").append(option);
+    }
+    $("guidelines-scenario").value = scope;
+  }
+  $("guidelines-content").textContent = "Loading guidelines…";
+  try {
+    const bundle = await json("guidance" + query);
+    if (request !== guidanceRequest) return;
+    guidanceBundle = bundle;
+    const select = $("guidelines-scenario"); select.replaceChildren();
+    if (sample) { const option = node("option", "", "Current trajectory (saved checklist)"); option.value = "sample"; select.append(option); }
+    const dataset = node("option", "", "Dataset / Standard guides"); dataset.value = "dataset"; select.append(dataset);
+    for (const name of bundle.scenarios) { const option = node("option", "", name); option.value = "scenario:" + name; select.append(option); }
+    select.value = scope;
+    renderGuidelines();
+  } catch (error) {
+    if (request !== guidanceRequest) return;
+    $("guidelines-error").hidden = false; $("guidelines-error").textContent = error.message;
+    $("guidelines-content").replaceChildren(); $("guidelines-tabs").replaceChildren();
+  }
+}
+$("guidelines-button").onclick = action(async () => { closeMenus(); $("guidelines-dialog").showModal(); await loadGuidelines(sample ? "sample" : "dataset"); });
+$("close-guidelines").onclick = () => $("guidelines-dialog").close();
+$("guidelines-scenario").onchange = action(() => loadGuidelines());
+$("guidelines-source").onchange = renderGuidelines;
+$("edit-guidelines").onclick = () => { $("guidelines-dialog").close(); customGuidanceScope = guidanceBundle?.scenario || ""; configTab = "guidance"; openSettings(); };
+function renderCustomGuidance(root) {
+  root.append(node("p", "hint", "Additional requirements for MCP trajectory creation, validation and repair. Dataset requirements apply everywhere; scenario requirements apply to that scenario. Standard guides remain read-only. Markdown is supported."));
+  const guidance = configDraft.review_guidance || {}, select = node("select");
+  select.id = "custom-guidance-scenario";
+  const names = [...new Set([...(state.scenarios || []).map(s => s.name), ...Object.keys(guidance.scenarios || {})])].sort();
+  for (const [value, label] of [["", "Entire dataset"], ...names.map(n => [n, n])]) { const option = node("option", "", label); option.value = value; select.append(option); }
+  if (!names.includes(customGuidanceScope)) customGuidanceScope = "";
+  select.value = customGuidanceScope;
+  select.onchange = () => { customGuidanceScope = select.value; renderConfig(); };
+  root.append(field("Apply to", select));
+  const pair = customGuidanceScope ? guidance.scenarios?.[customGuidanceScope] || {} : guidance;
+  for (const kind of ["guide", "checklist"]) {
+    const area = node("textarea"); area.id = "custom-" + kind; area.rows = 10; area.maxLength = 200000;
+    area.value = pair[kind] || ""; area.placeholder = kind === "guide" ? "Use randomly generated usernames…" : "- [ ] Check dataset-specific requirements…";
+    area.oninput = () => {
+      configDraft.review_guidance ??= {};
+      let target = configDraft.review_guidance;
+      if (customGuidanceScope) {
+        target.scenarios = {...target.scenarios, [customGuidanceScope]: {...target.scenarios?.[customGuidanceScope], [kind]: area.value}};
+      } else target[kind] = area.value;
+      updateSettingsState();
+    };
+    root.append(field(kind === "guide" ? "Custom Guide (Markdown)" : "Custom Checklist (Markdown)", area));
+  }
+}
 function configIssues() {
   const errors = {};
   const range = (path, value, lo, hi, integer = false) => {
@@ -1937,6 +2080,7 @@ function renderConfig() {
   const root = $("config-content");
   root.replaceChildren();
   const eps = configDraft.endpoints.map((e) => e.id);
+  if (configTab === "guidance") renderCustomGuidance(root);
   if (configTab === "endpoints") {
     configDraft.single_generation = {max_parallel: 1, max_attempts: 3, ...configDraft.single_generation};
     root.append(field("Maximum simultaneous LLM calls", Object.assign(input(configDraft.single_generation.max_parallel, v => configDraft.single_generation.max_parallel = v, "number"), {id: "scenario-parallel"})), field("Maximum attempts per single sample", input(configDraft.single_generation.max_attempts, v => configDraft.single_generation.max_attempts = v, "number")));

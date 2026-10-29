@@ -33,8 +33,9 @@ from . import metrics as dataset_metrics
 from .preview import PreviewCache
 from .review import EDIT_SCHEMA, apply_edits, checklist_report
 from .trajectory_review import (
-    ScenarioChecklist, build_checklist, fingerprint, public_checklist, result_schema,
+    ChecklistCheck, ScenarioChecklist, build_checklist, fingerprint, public_checklist, result_schema,
 )
+from .guidance import GUIDE_TOPICS, GUIDE_TITLES, checklist_markdown, custom_documents
 from .search import SearchQuery
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
@@ -329,6 +330,7 @@ class TrajectoryCommands:
             "status": self.runner.status,
             "tokenizer_sha256": self.compiler.fingerprint,
             "special_tokens": self.compiler.special,
+            "guidance": {"tool": "get_guidance", "instruction": "Read dataset and scenario guidance before creating, validating or repairing trajectories."},
         }
 
     @command()
@@ -337,6 +339,7 @@ class TrajectoryCommands:
         topic: Literal[
             "start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "metrics", "reference", "example"
         ] = "start",
+        scenario: str | None = None,
     ):
         """Read a short authoring lesson, complete reference, or example trajectory.
 
@@ -344,7 +347,9 @@ class TrajectoryCommands:
         sandbox (trajectory files), tools (starter tool selection), search (query syntax),
         review (semantic review/context dependencies; read before reviewing or repairing),
         metrics (dataset coverage, cached statistics and annotations), reference (full manual),
-        example (full build-graph JSON trajectory). No source or sandbox changes.
+        example (full build-graph JSON trajectory). Also returns current dataset custom
+        guidance; pass scenario for its additional requirements. get_guidance exposes
+        every guide and checklist in the editor. No source or sandbox changes.
         """
         root = Path(__file__).parent
         if topic == "reference":
@@ -353,7 +358,9 @@ class TrajectoryCommands:
             path = root / "build-graph-analysis.json"
         else:
             path = root / "guides" / f"{topic}.md"
-        return {"content": path.read_text(encoding="utf-8")}
+        return {"content": path.read_text(encoding="utf-8"),
+                "custom_guidance": custom_documents(self.state["config"], scenario),
+                "guidance_tool": "get_guidance"}
 
     @command()
     def list_trajectories(
@@ -864,7 +871,7 @@ class TrajectoryCommands:
                             )
         return {**self._commit(sample, index, validate), "events_changed": len(chosen)}
 
-    def _review_checklist(self, sample):
+    def _review_checklist(self, sample, *, allow_empty=False):
         metadata = sample.get("metadata", {})
         if not isinstance(metadata, dict):
             raise CommandError("Trajectory metadata must be an object to resolve its scenario")
@@ -892,17 +899,101 @@ class TrajectoryCommands:
                 raise CommandError("Saved checklist has no matching scenario tag or metadata", "scenario_conflict")
         else:
             scenario = matches[0] if matches else scenarios.get(metadata.get("scenario"))
-            if scenario is None:
+            custom_scenarios = self.state["config"].get("review_guidance", {}).get("scenarios", {})
+            custom_scenario = metadata.get("scenario")
+            if scenario is None and custom_scenario in custom_scenarios:
+                checklist, origin = ScenarioChecklist(scenario=custom_scenario, tag=custom_scenario), "dataset_config"
+            elif scenario is None and not custom_scenario and custom_documents(self.state["config"]):
+                checklist, origin = ScenarioChecklist(scenario="dataset", tag="dataset"), "dataset_config"
+            elif scenario is None:
                 raise CommandError(
                     "No scenario checklist found. Configure --scenarios-dir and assign its scenario tag, or retain the generated review_checklist snapshot.",
                     "scenario_not_found",
                 )
-            checklist, origin = build_checklist(scenario), "scenario_registry"
+            else:
+                checklist, origin = build_checklist(scenario), "scenario_registry"
         if metadata.get("scenario") and metadata["scenario"] != checklist.scenario:
             raise CommandError("Scenario metadata disagrees with its tag/checklist", "scenario_conflict")
-        if not checklist.checks:
+        checklist = self._with_custom_guidance(checklist, include_scenario=origin != "dataset_config" or bool(metadata.get("scenario")))
+        if not checklist.checks and not allow_empty:
             raise CommandError("This scenario defines no review checks", "checklist_not_found")
         return checklist, origin
+
+    def _with_custom_guidance(self, checklist, *, include_scenario=True):
+        checklist = checklist.model_copy(deep=True)
+        for scope in ("dataset", "scenario"):
+            documents = [d for d in custom_documents(self.state["config"], checklist.scenario if include_scenario else None)
+                         if d["id"].startswith(f"custom.{scope}.")]
+            if documents:
+                checklist.checks[f"$custom.{scope}"] = ChecklistCheck(prompt="\n\n".join(
+                    f"# {d['title']}\n\n{d['content']}" for d in documents))
+        return checklist
+
+    @command()
+    def get_guidance(self, sample_id: str | None = None, scenario: str | None = None):
+        """Read all guides available to MCP, also shown in View > Trajectory Guidelines.
+
+        Read before creating, validating or repairing. Without a sample, select a
+        scenario to see creation prompts, review/repair guides and its checklist.
+        With sample_id, use its original saved checklist plus current custom guidance.
+        Dataset and scenario requirements supplement the read-only standard guides.
+        Custom checks require their own valid/feedback results in record_trajectory_review.
+        No model calls, credentials or dataset changes.
+        """
+        if sample_id is not None and scenario is not None:
+            raise CommandError("Select either sample_id or scenario")
+        scenario_runner = getattr(self.runner, "scenario_runner", None)
+        scenarios = scenario_runner.registry.scenarios if scenario_runner else {}
+        names = sorted(set(scenarios) | set(self.state["config"].get("review_guidance", {}).get("scenarios", {})))
+        checklist, origin = None, None
+        if sample_id is not None:
+            sample = self._find(sample_id)[1]
+            try:
+                checklist, origin = self._review_checklist(sample, allow_empty=True)
+                scenario = checklist.scenario if origin != "dataset_config" or sample.get("metadata", {}).get("scenario") else None
+            except CommandError as error:
+                if error.code != "scenario_not_found":
+                    raise
+        elif scenario is not None:
+            if scenario not in names:
+                raise CommandError(f"Unknown guidance scenario: {scenario}", "not_found")
+            if scenario in scenarios:
+                checklist, origin = self._with_custom_guidance(build_checklist(scenarios[scenario])), "scenario_registry"
+            else:
+                checklist, origin = self._with_custom_guidance(ScenarioChecklist(scenario=scenario, tag=scenario)), "dataset_config"
+        elif custom_documents(self.state["config"]):
+            checklist, origin = self._with_custom_guidance(ScenarioChecklist(scenario="dataset", tag="dataset"), include_scenario=False), "dataset_config"
+        documents = []
+        for topic, title in zip(GUIDE_TOPICS, GUIDE_TITLES):
+            documents.append({"id": f"standard.{topic}", "title": title,
+                              "content": self.get_authoring_guide(topic)["content"],
+                              "format": "json" if topic == "example" else "markdown",
+                              "source": "standard", "editable": False})
+        documents.extend(custom_documents(self.state["config"], scenario, include_empty=True))
+        if checklist is not None:
+            documents.append({"id": "scenario.contract", "title": "Review Contract (JSON)",
+                              "content": json.dumps(public_checklist(checklist, origin), indent=2, ensure_ascii=False),
+                              "format": "json", "source": origin, "editable": False})
+            documents.append({"id": "scenario.checklist", "title": "Review Checklist",
+                              "content": checklist_markdown(checklist), "format": "markdown",
+                              "source": origin, "editable": False})
+            # Saved review/repair prompts remain visible even without the scenario files.
+            for name, check in checklist.checks.items():
+                if name.startswith("$custom."):
+                    continue
+                for kind, text in [("Review", check.prompt), ("Repair", check.repair_prompt),
+                                   *[(f"Repair Guide {i}", g) for i, g in enumerate(check.repair_guides, 1)]]:
+                    if text:
+                        documents.append({"id": f"check.{name}.{kind}", "title": f"{name}: {kind}",
+                                          "content": text, "format": "markdown", "source": origin, "editable": False})
+        if scenario in scenarios:
+            for filename, text in scenarios[scenario].prompts.items():
+                documents.append({"id": f"scenario.prompt.{filename}", "title": filename,
+                                  "content": text, "format": "markdown", "source": "scenario_registry", "editable": False})
+        result = {"revision": self.state["revision"], "scenario": scenario, "scenarios": names, "documents": documents}
+        if checklist is not None:
+            result["checklist"] = public_checklist(checklist, origin)
+        return result
 
     @command()
     def get_review_checklist(self, sample_id: str):
@@ -912,9 +1003,12 @@ class TrajectoryCommands:
         Older/tag-only samples use the configured scenario registry. Conflicting or
         unknown scenarios fail explicitly. No model API calls or dataset changes.
         """
-        checklist, origin = self._review_checklist(self._find(sample_id)[1])
+        sample = self._find(sample_id)[1]
+        checklist, origin = self._review_checklist(sample)
+        scenario = checklist.scenario if origin != "dataset_config" or sample.get("metadata", {}).get("scenario") else None
         return {"sample_id": sample_id, "revision": self.state["revision"],
-                "checklist": public_checklist(checklist, origin)}
+                "checklist": public_checklist(checklist, origin),
+                "custom_guidance": custom_documents(self.state["config"], scenario)}
 
     @command()
     def review_trajectory(self, sample_id: str, include_source: bool = True):
@@ -938,6 +1032,7 @@ class TrajectoryCommands:
             source_hash=hashlib.sha256(json.dumps(evaluation_source(sample), sort_keys=True).encode()).hexdigest(),
             compilation=compilation,
             guide=self.get_authoring_guide("review")["content"],
+            guidance=self.get_guidance(sample_id=sample_id),
             context={k: sample.get("metadata", {}).get(k) for k in ("concept", "roles", "context_tags")},
         )
         if include_source:
@@ -977,7 +1072,8 @@ class TrajectoryCommands:
         if not dry_run:
             result = self._commit(candidate, index)
         return {**result, "diagnostics": plan["diagnostics"], "review_required": True,
-                "checklist": public_checklist(checklist, origin)}
+                "checklist": public_checklist(checklist, origin),
+                "guidance": self.get_guidance(sample_id=sample_id)}
 
     @command(write=True)
     def record_trajectory_review(
@@ -1096,12 +1192,15 @@ class TrajectoryCommands:
         This does not sign off a review; use sign_off_trajectory after your own review.
         """
         revision = self.state["revision"]
+        guidance = {"tool": "get_guidance", "sample_id": sample_id,
+                    "instruction": "Read the complete guidance bundle before semantic validation or repair."}
         try:
             plan = self._plan(sample_id)
         except CompileError as error:
             return {
                 "valid": False,
                 "diagnostics": [error.diagnostic()],
+                "guidance": guidance,
                 "revision": revision,
             }
         result = {
@@ -1109,6 +1208,7 @@ class TrajectoryCommands:
             "diagnostics": plan["diagnostics"],
             "max_tick": plan["max_tick"],
             "row_count": len(plan["rows"]),
+            "guidance": guidance,
             "revision": revision,
         }
         if semantic:

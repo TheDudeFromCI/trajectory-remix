@@ -232,7 +232,10 @@ def create_mcp_server(bridge):
         version="0.1.0",
         instructions=(
             "Tools edit the running Trajectory Remix dashboard session. Read get_session "
-            "and get_authoring_guide first for a short starting guide. Request one topic at a time; "
+            "and get_authoring_guide first for a short starting guide. "
+            "Read get_guidance before creating, validating or repairing trajectories; select "
+            "sample_id or scenario for scenario-specific prompts and current dataset requirements. "
+            "Custom guides supplement the standard rules and are part of the review contract. Request one topic at a time; "
             'before reviewing or repairing, read get_authoring_guide(topic="review"). '
             "For scenario trajectories, review_trajectory automatically includes the matching "
             "scenario checklist, source, guide and compiler diagnostics; get_review_checklist "

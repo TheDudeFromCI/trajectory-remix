@@ -1387,3 +1387,18 @@ dialog::backdrop {
 #scenario-tag-controls label { margin-bottom: 6px; }
 #randomize-tags { width: auto; }
 .log-toolbar { flex-wrap: wrap; }
+
+#guidelines-dialog { width: min(1200px, 94vw); max-width: 94vw; }
+.guidelines-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.guidelines-controls label { display: flex; align-items: center; gap: 8px; }
+#guidelines-tabs { display: flex; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow: auto; padding: 8px 0; border-bottom: 1px solid var(--border); }
+#guidelines-tabs [aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
+.markdown-guide { overflow: auto; height: min(55vh, 650px); padding: 8px 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.markdown-guide pre { white-space: pre-wrap; background: var(--bg); padding: 12px; border-radius: 6px; }
+.markdown-guide table { border-collapse: collapse; width: 100%; }
+.markdown-guide th, .markdown-guide td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.markdown-guide li { margin: 4px 0; }
+.markdown-guide blockquote { border-left: 3px solid var(--border); padding-left: 12px; margin-left: 0; }
+#custom-guide, #custom-checklist { width: 100%; font-family: monospace; }
+
+#guidelines-dialog > .hint, #guidelines-dialog > .guidelines-controls, #guidelines-tabs, #guidelines-error { margin: 12px 16px; }

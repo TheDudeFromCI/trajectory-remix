@@ -195,6 +195,10 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             (static / "index.html").read_text().replace("__REMIX_TOKEN__", token)
         )
 
+    @app.get("/api/guidance")
+    async def get_guidance(sample_id: str | None = None, scenario: str | None = None):
+        return await commands.call("get_guidance", {"sample_id": sample_id, "scenario": scenario})
+
     @app.get("/api/state")
     async def get_state(
         offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000),
