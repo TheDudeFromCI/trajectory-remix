@@ -1,5 +1,5 @@
 digraph idle {
-  graph [rankdir=TB, bgcolor="white", fontname="DejaVu Sans", fontsize=20, labelloc=t, label="idle_scenario_noval — autonomous idle work\nBlue: content LLM | Gray: code / observations | Purple: external review", pad=0.3, nodesep=0.25, ranksep=0.35];
+  graph [rankdir=TB, bgcolor="white", fontname="DejaVu Sans", fontsize=20, labelloc=t, label="idle_scenario — autonomous idle work\nBlue: content LLM | Gray: code / observations | Orange: explicit validation | Purple: external review", pad=0.3, nodesep=0.25, ranksep=0.35];
   node [shape=box, style="rounded,filled", fillcolor="#F1F5F9", color="#64748B", fontname="DejaVu Sans", fontsize=14, margin="0.16,0.1"];
   edge [fontname="DejaVu Sans", fontsize=11, color="#475569"];
   tags [label="Randomize domain, wake trigger and complication\nInitialize Kidra, metadata and saved checklist\nNo user role or conversation"];
@@ -12,6 +12,7 @@ digraph idle {
   partial [label="Keep incomplete draft, expensive proposals\nand diagnostics for external repair"];
   pending [label="Stop quietly; no chat reply\nFinalize ordinary window lifecycles\nKeep Pending draft (level 0)\nNo local semantic validation or repair"];
   original [label="Retain original requirements, tags,\nworld, prompts and semantic checklist"];
+  validate [label="Optional: Edit > Generation > Validate Trajectory\nShared checklist + saved original requirements\nJournaled, cancellable model review; no content rewriting\nRecord Validated / Rejected, never Ready", fillcolor="#FFEDD5", color="#EA580C"];
   external [label="External MCP review and repair\nLayout / tasks / reasoning / correctness\nEvaluate repaired source against original requirements", fillcolor="#EDE9FE", color="#7C3AED"];
   ready [label="External sign-off, then human Ready approval\nOnly Ready (level 3) permits training export", fillcolor="#EDE9FE", color="#7C3AED"];
   tags -> world -> setup -> decide -> act -> done;
@@ -20,7 +21,9 @@ digraph idle {
   done -> limit [label="No"];
   limit -> decide [label="Yes: actual observations and retained task state"];
   limit -> partial [label="No"];
+  pending -> validate [label="Explicit action only"];
   pending -> external;
+  validate -> external;
   partial -> external;
   original -> external [style=dashed];
   external -> external [label="Findings → targeted edits → recompile / review"];

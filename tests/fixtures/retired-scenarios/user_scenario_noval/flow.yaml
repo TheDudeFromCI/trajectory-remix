@@ -1,4 +1,3 @@
-# Shares user_problem inputs, tags, roles, prompts and external review rules.
 extends: user_problem
 generation_mode: content-first
 description: The user_scenario inputs and review contract, with streamlined content

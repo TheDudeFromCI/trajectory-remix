@@ -31,8 +31,9 @@ from .metadata import query as query_metadata
 from .preview import PreviewCache
 from .review import EDIT_SCHEMA, apply_edits, checklist_report
 from .trajectory_review import (
-    ChecklistCheck, ScenarioChecklist, build_checklist, fingerprint, public_checklist, result_schema,
+    ChecklistCheck, ScenarioChecklist, build_checklist, fingerprint, public_checklist, result_schema, standard_checklist,
 )
+from .scenarios import canonical_scenario
 from .guidance import GUIDE_TOPICS, GUIDE_TITLES, checklist_markdown, custom_documents
 from .search import SearchQuery
 from .storage import SampleDraft, SQLiteSamples, StorageConflict
@@ -839,7 +840,7 @@ class TrajectoryCommands:
             except ValidationError as error:
                 raise CommandError(f"Invalid saved review checklist: {error}") from error
             origin = "generation_snapshot"
-            if matches and matches[0].name != checklist.scenario:
+            if matches and canonical_scenario(matches[0].name) != canonical_scenario(checklist.scenario):
                 same_family = (metadata.get('scenario_family') == matches[0].family
                                and metadata.get('scenario') == checklist.scenario
                                and (matches[0].flow.tag or matches[0].name).casefold() == checklist.tag.casefold())
@@ -848,22 +849,21 @@ class TrajectoryCommands:
             if checklist.tag.casefold() not in tags and not metadata.get("scenario"):
                 raise CommandError("Saved checklist has no matching scenario tag or metadata", "scenario_conflict")
         else:
-            scenario = matches[0] if matches else scenarios.get(metadata.get("scenario"))
+            scenario = matches[0] if matches else scenarios.get(metadata.get("scenario"), scenarios.get(canonical_scenario(metadata.get("scenario"))))
             custom_scenarios = self.state["config"].get("review_guidance", {}).get("scenarios", {})
             custom_scenario = metadata.get("scenario")
             if scenario is None and custom_scenario in custom_scenarios:
-                checklist, origin = ScenarioChecklist(scenario=custom_scenario, tag=custom_scenario), "dataset_config"
+                checklist, origin = standard_checklist(custom_scenario), "dataset_config"
             elif scenario is None and not custom_scenario and custom_documents(self.state["config"]):
-                checklist, origin = ScenarioChecklist(scenario="dataset", tag="dataset"), "dataset_config"
+                checklist, origin = standard_checklist("dataset"), "dataset_config"
             elif scenario is None:
-                raise CommandError(
-                    "No scenario checklist found. Configure --scenarios-dir and assign its scenario tag, or retain the generated review_checklist snapshot.",
-                    "scenario_not_found",
-                )
+                checklist, origin = standard_checklist(custom_scenario or 'manual'), "standard"
             else:
                 checklist, origin = build_checklist(scenario), "scenario_registry"
-        if metadata.get("scenario") and metadata["scenario"] != checklist.scenario:
+        if metadata.get("scenario") and canonical_scenario(metadata["scenario"]) != canonical_scenario(checklist.scenario):
             raise CommandError("Scenario metadata disagrees with its tag/checklist", "scenario_conflict")
+        if not checklist.checks:
+            checklist = standard_checklist(checklist.scenario, checklist.tag)
         checklist = self._with_custom_guidance(checklist, include_scenario=origin != "dataset_config" or bool(metadata.get("scenario")))
         if not checklist.checks and not allow_empty:
             raise CommandError("This scenario defines no review checks", "checklist_not_found")
@@ -910,9 +910,9 @@ class TrajectoryCommands:
             if scenario in scenarios:
                 checklist, origin = self._with_custom_guidance(build_checklist(scenarios[scenario])), "scenario_registry"
             else:
-                checklist, origin = self._with_custom_guidance(ScenarioChecklist(scenario=scenario, tag=scenario)), "dataset_config"
+                checklist, origin = self._with_custom_guidance(standard_checklist(scenario)), "dataset_config"
         elif custom_documents(self.state["config"]):
-            checklist, origin = self._with_custom_guidance(ScenarioChecklist(scenario="dataset", tag="dataset"), include_scenario=False), "dataset_config"
+            checklist, origin = self._with_custom_guidance(standard_checklist("dataset"), include_scenario=False), "dataset_config"
         documents = []
         for topic, title in zip(GUIDE_TOPICS, GUIDE_TITLES):
             documents.append({"id": f"standard.{topic}", "title": title,
@@ -1217,15 +1217,11 @@ class TrajectoryCommands:
         if semantic:
             self._editable(None, sample_id)
             sample = copy.deepcopy(self._find(sample_id)[1])
-            builder = SampleBuilder(
-                self.compiler, copy.deepcopy(self.state["config"]), self.client
-            )
-            scenario = getattr(self.runner, "scenario_runner", None)
-            if scenario and scenario.status["running"]:
-                async with scenario.limit:
-                    result["semantic"] = await builder.validators(sample)
-            else:
-                result["semantic"] = await builder.validators(sample)
+            validator = getattr(self.runner, 'validation_runner', None)
+            if validator is None:
+                from .validation import ValidationRunner
+                validator = self.runner.validation_runner = ValidationRunner(self)
+            result["semantic"] = await validator.validate(sample_id, record=False)
             result["valid"] = result["semantic"]["valid"]
         return result
 

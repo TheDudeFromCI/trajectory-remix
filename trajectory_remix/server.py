@@ -32,6 +32,7 @@ from .llm import TAGS, SampleBuilder, validate_config
 from .runner import Runner
 from .scenarios import ScenarioRegistry, check_scenario_endpoints
 from .scenario_runner import ScenarioRunner
+from .validation import ValidationRunner
 from .mcp_server import StreamableHTTP
 from .tools import ToolRegistry, default_registry
 from .storage import DatasetState, DatasetStore, StorageConflict
@@ -47,7 +48,6 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     runner = Runner(state, compiler, dataset, client)
     scenario_runner = ScenarioRunner(runner, ScenarioRegistry(scenarios_dir), client)
     runner.scenario_runner = scenario_runner
-    generation_mode = {"scenario": bool(scenario_runner.snapshot)}
     token = secrets.token_urlsafe(32)
     static = Path(__file__).parent / "static"
 
@@ -71,6 +71,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                     await asyncio.shield(migration.task)
                 try:
                     await scenario_runner.stop()
+                    await validator.stop()
                     await runner.stop()
                 finally:
                     commands.tool_sessions.close()
@@ -85,6 +86,9 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     app.state.compiler = compiler
     app.state.tool_diagnostics = tool_diagnostics
     app.state.commands = commands
+    validator = ValidationRunner(commands)
+    runner.validation_runner = validator
+    app.state.validation_runner = validator
     app.state.tool_sessions = commands.tool_sessions
 
     def activate_tokenizer(candidate, revision):
@@ -205,7 +209,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         query: str = "", selected_id: str | None = None,
     ):
         revision = state["revision"]
-        active_runner = scenario_runner if generation_mode["scenario"] else runner
+        active_runner = scenario_runner
         total, samples = store.listing(query, offset, limit, dashboard=True)
         selected_index = store.samples.index_of(selected_id) if selected_id is not None else None
         return {
@@ -234,12 +238,13 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 "special": compiler.special,
             },
             "tokenizer_migration": dict(migration.status),
+            "validation_status": dict(validator.status),
         }
 
     @app.post("/api/tokenizer/migrate", status_code=202)
     async def migrate_tokenizer(request: Request):
         data = await body(request)
-        if runner.status["running"] or scenario_runner.status["running"] or migration.running:
+        if runner.status["running"] or scenario_runner.status["running"] or validator.status.get("running") or migration.running:
             raise HTTPException(409, "Stop generation and wait for any tokenizer migration to finish")
         return migration.start(data, compiler)
 
@@ -538,8 +543,9 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/scenarios/run")
     async def start_scenario(request: Request):
         data = await body(request)
+        if validator.status.get("running"):
+            raise HTTPException(409, "Finish or cancel trajectory validation before generation")
         scenario_runner.start(data.get("scenario"), data.get("max_parallel"), tags=data.get("tags"), batch_size=data.get("batch_size", 1))
-        generation_mode["scenario"] = True
         return {"ok": True}
 
     @app.post("/api/scenarios/resume")
@@ -554,7 +560,6 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 if "edited since checkpoint" in str(error):
                     return JSONResponse({"detail": str(error), "confirmation_required": True}, status_code=409)
                 raise
-        generation_mode["scenario"] = True
         return {"ok": True}
 
     @app.post("/api/endpoints/test")
@@ -646,32 +651,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.post("/api/run")
     async def start(request: Request):
-        data = await body(request)
-        if scenario_runner.status["running"]:
-            raise ValueError("Scenario generation is already running")
-        task_ids = data.get("task_ids")
-        if task_ids is not None and (
-            not isinstance(task_ids, list)
-            or any(not isinstance(t, str) for t in task_ids)
-        ):
-            raise ValueError("task_ids must be an array of task identifiers")
-        seed_index = data.get("seed_index")
-        if seed_index is not None:
-            if type(seed_index) is not int:
-                raise ValueError("seed_index must be an integer")
-            sample_at(seed_index)
-            if data.get("automatic"):
-                raise ValueError(
-                    "Filling an existing sample is only supported for a single run"
-                )
-        generation_mode["scenario"] = False
-        runner.start(
-            single=not data.get("automatic", False),
-            task_ids=task_ids,
-            seed_index=seed_index,
-            validate=data.get("validate"),
-        )
-        return {"ok": True}
+        raise HTTPException(410, "Task-based generation is retired; use /api/scenarios/run with user_scenario or idle_scenario")
 
     @app.post("/api/stop")
     async def stop():
@@ -691,14 +671,31 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/validate")
     async def validate(request: Request):
         data = await body(request)
+        if 'index' in data and type(data['index']) is not int:
+            raise ValueError('index must be an integer')
         sample = data.get("sample") or sample_at(data.get("index", -1))
+        if data.get('sample') and commands._find(sample.get('id'))[1] != sample:
+            raise ValueError('Save the submitted trajectory before validation')
         editable(sample.get("id"))
-        compiler.compile(sample)
-        builder = SampleBuilder(compiler, copy.deepcopy(state["config"]), client)
-        if scenario_runner.status["running"]:
-            async with scenario_runner.limit:
-                return await builder.validators(sample)
-        return await builder.validators(sample)
+        return await validator.validate(sample['id'], record=data.get('record', True), endpoint=data.get('endpoint'))
+
+    @app.post('/api/validation/run', status_code=202)
+    async def start_validation(request: Request):
+        data = await body(request)
+        sample_id = data.get('sample_id')
+        editable(sample_id)
+        job_id = validator.start(sample_id, record=data.get('record', True),
+                                 endpoint=data.get('endpoint'), resume=data.get('resume', False))
+        return {'job_id': job_id, 'status': dict(validator.status)}
+
+    @app.get('/api/validation/status')
+    async def validation_status():
+        return dict(validator.status)
+
+    @app.post('/api/validation/stop')
+    async def stop_validation():
+        await validator.stop()
+        return dict(validator.status)
 
     @app.middleware("http")
     async def no_cache_static(request, call_next):

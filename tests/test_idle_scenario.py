@@ -105,7 +105,7 @@ class IdleClient:
 
 def setup_idle(tmp_path, compiler, monkeypatch, client):
     monkeypatch.setattr('trajectory_remix.content_first.inference_tokenizer', lambda _: FourByteTokenizer())
-    app = app_for(tmp_path, compiler, client, legacy_reviews=False)
+    app = app_for(tmp_path, compiler, client, scenarios=None, legacy_reviews=False)
     config = copy.deepcopy(app.state.dataset['config'])
     config['tasks'] = []
     config['endpoints'] = [config['endpoints'][0]]
@@ -115,11 +115,28 @@ def setup_idle(tmp_path, compiler, monkeypatch, client):
     return app, app.state.scenario_runner
 
 
+async def test_tool_budget_retains_last_valid_draft_and_generated_proposal(compiler, tmp_path, monkeypatch):
+    app, runner = setup_idle(tmp_path, compiler, monkeypatch, IdleClient())
+    config = copy.deepcopy(app.state.dataset['config'])
+    config['max_tool_calls'] = 1
+    app.state.dataset.set_config(config, app.state.dataset['revision'])
+    runner.start('idle_scenario')
+    await runner.job
+    assert runner.status['accepted'] == 0
+    sample = app.state.dataset['samples'][0]
+    plan = compiler.compile(sample)
+    assert [c['tool'] for c in plan['tool_calls'] if not c.get('invisible')] == ['file_read']
+    record = sample['metadata']['generation_record']
+    assert 'tool-call budget' in json.dumps(record['failures'])
+    assert any('file_write' in r['raw_output'] for r in record['requests'])
+    assert sample['metadata']['validation_level'] == 0
+
+
 @pytest.mark.parametrize('kind,requests', [('project', 5), ('parallel', 5), ('alarm', 5), ('blocked', 4), ('quiet', 2)])
 async def test_idle_adaptive_work_without_user_or_local_validation(compiler, tmp_path, monkeypatch, kind, requests):
     client = IdleClient(kind)
     app, runner = setup_idle(tmp_path, compiler, monkeypatch, client)
-    runner.start('idle_scenario_noval')
+    runner.start('idle_scenario')
     await asyncio.wait_for(runner.job, 30)
     assert runner.status['phase'] == 'complete', list(runner.logs)
     sample = app.state.dataset['samples'][0]
@@ -183,14 +200,14 @@ async def test_idle_adaptive_work_without_user_or_local_validation(compiler, tmp
     reopened = create_app(app.state.dataset.store.path, scenarios_dir=None)
     assert reopened.state.dataset['samples'][0] == sample
     checklist = await reopened.state.commands.call('get_review_checklist', {'sample_id': sample['id']})
-    assert checklist['checklist']['scenario'] == 'idle_scenario_noval'
+    assert checklist['checklist']['scenario'] == 'idle_scenario'
     assert checklist['checklist']['source'] == 'generation_snapshot'
 
 
 async def test_idle_lifecycle_failure_keeps_content_for_external_repair(compiler, tmp_path, monkeypatch):
     client = IdleClient(fail_release=True)
     app, runner = setup_idle(tmp_path, compiler, monkeypatch, client)
-    runner.start('idle_scenario_noval')
+    runner.start('idle_scenario')
     await asyncio.wait_for(runner.job, 30)
     assert runner.status['phase'] == 'rejected', list(runner.logs)
     sample = app.state.dataset['samples'][0]
@@ -221,7 +238,7 @@ async def test_idle_lifecycle_failure_keeps_content_for_external_repair(compiler
 async def test_idle_cancellation_and_restart_resume_without_regenerating_world(compiler, tmp_path, monkeypatch):
     client = IdleClient(hold_cycle=1)
     app, runner = setup_idle(tmp_path, compiler, monkeypatch, client)
-    runner.start('idle_scenario_noval')
+    runner.start('idle_scenario')
     await asyncio.wait_for(client.entered.wait(), 30)
     await runner.stop()
     sample = app.state.dataset['samples'][0]
@@ -241,7 +258,7 @@ async def test_idle_cancellation_and_restart_resume_without_regenerating_world(c
 
 def test_idle_only_has_kidra_and_enforces_honest_finished_decisions():
     from trajectory_remix.scenarios import ScenarioRegistry
-    scenario = ScenarioRegistry(EXAMPLES).scenarios['idle_scenario_noval']
+    scenario = ScenarioRegistry().scenarios['idle_scenario']
     assert scenario.parent_name is None and scenario.flow.generation_mode == 'content-first'
     assert set(scenario.flow.roles) == {'kidra'}
     assert len(build_checklist(scenario).checks) == 4
@@ -257,7 +274,7 @@ def test_idle_only_has_kidra_and_enforces_honest_finished_decisions():
 @pytest.mark.parametrize('names', [None, 'system', ['unknown'], ['system'], ['system', 'system']])
 def test_window_release_rejects_bad_lifecycle_choices_without_mutation(compiler, tmp_path, monkeypatch, names):
     _, runner = setup_idle(tmp_path, compiler, monkeypatch, IdleClient())
-    runner.start('idle_scenario_noval', _schedule=False)
+    runner.start('idle_scenario', _schedule=False)
     before = copy.deepcopy(runner.builder.sample)
     with pytest.raises(ValueError):
         runner.release_windows(names)
@@ -270,7 +287,7 @@ async def test_idle_budget_failure_keeps_original_inputs_without_calling_model(c
     config = copy.deepcopy(app.state.dataset['config'])
     config['content_first'] = {'context_budget': 256, 'reserve_tokens': 32}
     app.state.dataset.set_config(config, app.state.dataset['revision'])
-    runner.start('idle_scenario_noval')
+    runner.start('idle_scenario')
     await asyncio.wait_for(runner.job, 15)
     assert not client.messages
     record = app.state.dataset['samples'][0]['metadata']['generation_record']
@@ -289,7 +306,7 @@ async def test_idle_iteration_limit_retains_incomplete_work(compiler, tmp_path, 
             return await super().complete(endpoint, messages, tools)
     client = NeverFinished()
     app, runner = setup_idle(tmp_path, compiler, monkeypatch, client)
-    runner.start('idle_scenario_noval')
+    runner.start('idle_scenario')
     await asyncio.wait_for(runner.job, 30)
     assert runner.status['phase'] == 'rejected'
     sample = app.state.dataset['samples'][0]
@@ -302,7 +319,7 @@ async def test_idle_iteration_limit_retains_incomplete_work(compiler, tmp_path, 
 
 async def test_idle_training_export_requires_explicit_ready_approval(compiler, tmp_path, monkeypatch):
     app, runner = setup_idle(tmp_path, compiler, monkeypatch, IdleClient('quiet'))
-    runner.start('idle_scenario_noval')
+    runner.start('idle_scenario')
     await runner.job
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://testserver',
                                  headers={'X-Remix-Token': app.state.csrf}) as client:
@@ -321,10 +338,8 @@ async def test_idle_training_export_requires_explicit_ready_approval(compiler, t
 @pytest.mark.parametrize('mode,expected', [('content-first', 1), ('existing', 2)])
 def test_adaptive_requests_reuse_visible_contracts_without_changing_existing_mode(compiler, tmp_path, monkeypatch, mode, expected):
     _, runner = setup_idle(tmp_path, compiler, monkeypatch, IdleClient())
-    runner.registry.scenarios['idle_scenario_noval'].flow.generation_mode = mode
-    if mode == 'existing':
-        runner.registry.scenarios['idle_scenario_noval'].flow.steps['validate'].when = False
-    runner.start('idle_scenario_noval', _schedule=False)
+    runner.registry.scenarios['idle_scenario'].flow.generation_mode = mode
+    runner.start('idle_scenario', _schedule=False)
     for expression in ('2 + 2', '2 + 3'):
         runner.simulate({'calls': [[{'tool': 'calculator', 'arguments': {'expression': expression}}]]})
     shown = [e for es in runner.builder.sample['replay'].values() for e in es if e['op'] == 'show_tools']

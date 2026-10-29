@@ -1,6 +1,6 @@
 # Idle-work generation without local validation
 
-Select **`idle_scenario_noval`** with `--scenarios-dir examples/scenarios`. This is a
+Select the bundled **`idle_scenario`**; no scenario-directory option is needed. This is a
 standalone content-first scenario with tag **`#idle_scenario`**. Only a Kidra role
 exists: there is no fictional user, user-message generator, reference solution,
 novelty judge, required chat reply, local semantic validator or local repair model.
@@ -77,10 +77,10 @@ limit retains an incomplete pending candidate, not an approved success.
 ## Run and inspect
 
 Configure the generator endpoint and its local inference tokenizer, then choose
-`idle_scenario_noval` in the existing Single Sample or Batch UI. The run API accepts:
+`idle_scenario` in the existing Single Sample or Batch UI. The run API accepts:
 
 ```json
-{"scenario":"idle_scenario_noval","batch_size":1,"max_parallel":1}
+{"scenario":"idle_scenario","batch_size":1,"max_parallel":1}
 ```
 
 The action requests are sequential because each depends on previous observations;
@@ -116,8 +116,9 @@ journal. Cancellation/restart resume successful work without regenerating the
 workspace. Schema-valid but unusable construction proposals remain available for
 external repair rather than an automatic local semantic repair loop.
 
-The saved checklist has layout, task/tool, private-reasoning and correctness
-categories. Through MCP, inspect `get_generation_record`, `review_trajectory` and
+The saved shared checklist has layout, tools, private-reasoning and correctness
+categories. Local model review is available separately through **Edit → Generation
+→ Validate Trajectory**, using the same explicit service as MCP semantic validation. Through MCP, inspect `get_generation_record`, `review_trajectory` and
 `get_review_checklist`; repair with `repair_trajectory` or targeted edits, then
 record a review against the original checklist. No local inference is required.
 External sign-off and human Ready approval remain separate; **only level 3 exports

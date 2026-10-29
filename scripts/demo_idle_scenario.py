@@ -86,9 +86,9 @@ async def demo(output):
     backend = Tokenizer(models.BPE(unk_token='[UNK]'))
     backend.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
     backend.decoder = decoders.ByteLevel()
-    corpus = [p.read_text() for p in (ROOT / 'examples/scenarios/idle_scenario_noval').iterdir()]
+    corpus = [p.read_text() for p in (ROOT / 'trajectory_remix/scenario_templates/idle_scenario').iterdir()]
     corpus += [json.dumps(default_registry().schemas()), json.dumps(WORLD), Path(__file__).read_text()]
-    backend.train_from_iterator(corpus, trainers.BpeTrainer(vocab_size=8192, special_tokens=['[UNK]']))
+    backend.train_from_iterator(corpus, trainers.BpeTrainer(vocab_size=8192, special_tokens=['[UNK]'], initial_alphabet=pre_tokenizers.ByteLevel.alphabet()))
     fixture = PreTrainedTokenizerFast(tokenizer_object=backend)
     fixture.chat_template = "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}\n{% endfor %}{% if add_generation_prompt %}assistant: {% endif %}"
     model_dir = output / 'fixture-tokenizer'
@@ -98,7 +98,7 @@ async def demo(output):
     training.save(str(output / 'training-tokenizer.json'))
     compiler = Compiler(training)
     DatasetStore.initialize(project, compiler)
-    app = create_app(project, scenarios_dir=ROOT / 'examples/scenarios', client=ScriptedIdleProvider())
+    app = create_app(project, client=ScriptedIdleProvider())
     config = copy.deepcopy(app.state.dataset['config'])
     config['tasks'] = []
     config['endpoints'] = [config['endpoints'][0]]
@@ -109,7 +109,7 @@ async def demo(output):
     tags = {'scenario': {'domain': 'project maintenance', 'trigger': 'alarm fired',
                          'complication': 'contradictory files'}, 'kidra': {}}
     runner = app.state.scenario_runner
-    runner.start('idle_scenario_noval', tags=tags)
+    runner.start('idle_scenario', tags=tags)
     await runner.job
     sample = app.state.dataset['samples'][0]
     plan = compiler.compile(sample)

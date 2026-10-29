@@ -362,8 +362,9 @@ assert($("settings-dialog").hasAttribute("open"));
 assert.equal(w.document.querySelector('[data-config="tasks"]'), null);
 assert.equal(w.document.querySelector('[data-config="conditions"]'), null);
 assert.match($("settings-dialog").textContent, /Generation Settings/);
-await w.document.querySelector('[data-config="automatic"]').onclick();
-assert.match($("config-content").textContent, /Consecutive failure limit/);
+await w.document.querySelector('[data-config="defaults"]').onclick();
+assert.match($("config-content").textContent, /Request context budget/);
+assert.doesNotMatch($("config-content").textContent, /Validate with LLM|Regenerations per attempt|Failure behavior/);
 await click("save-config");
 await click("close-settings");
 assert.equal($("file-save"), null);
@@ -1018,7 +1019,7 @@ assert.equal($("generation-count").value, "10");
 await click("generate-one");
 assert.equal($("generation-count").value, "1");
 assert.equal($("generation-panel").hidden, false);
-assert.equal($("scenario-type").value, "user_problem");
+assert.equal($("scenario-type").value, "user_scenario");
 assert.equal($("scenario-start"), null);
 assert.equal($("export-button"), null);
 assert.equal($("pause-run").textContent, "Start");
@@ -1050,7 +1051,7 @@ w.fetch = async (path, options) => {
 $("generation-count").value = "3";
 await click("pause-run");
 assert.equal(batchStartBody.batch_size, 3);
-assert.equal(batchStartBody.scenario, "user_problem");
+assert.equal(batchStartBody.scenario, "user_scenario");
 assert.match($("batch-progress").textContent, /3\/3 completed/);
 await click("view-generation-batch");
 assert.equal($("sample-search").value, "@batch:test-batch");
@@ -1070,6 +1071,45 @@ assert.equal($("view-generation-draft").hidden, true);
 assert.equal($("stop-run").textContent, "Cancel");
 await click("close-generation-panel");
 assert.equal($("generation-panel").hidden, true);
+// Semantic validation is an explicit operation on the saved current sample.
+assert.equal($("validate-trajectory").parentElement.id, "generation-menu");
+assert.equal($("validate-trajectory").textContent, "Validate Trajectory");
+await click("validate-trajectory");
+assert($("validation-dialog").hasAttribute("open"));
+assert.equal($("validation-record").checked, true);
+const beforeValidationFetch = w.fetch;
+let validationBody, validationStatus = {running:false, phase:"idle", completed:0, total:4, active:[]};
+w.fetch = async (path, options) => {
+  if (path === "/api/validation/run") {
+    validationBody = JSON.parse(options.body);
+    validationStatus = {running:true, phase:"validating", completed:1, total:4, active:["layout"], sample_id:validationBody.sample_id};
+    return new w.Response(JSON.stringify({job_id:"review",status:validationStatus}), {status:202,headers:{"content-type":"application/json"}});
+  }
+  if (path === "/api/validation/stop") {
+    validationStatus = {...validationStatus,running:false,phase:"cancelled",active:[]};
+    return new w.Response(JSON.stringify(validationStatus), {status:200,headers:{"content-type":"application/json"}});
+  }
+  const response = await beforeValidationFetch(path, options);
+  if (String(path).startsWith("/api/state?")) {
+    const data = await response.json(); data.validation_status = validationStatus;
+    return new w.Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+await click("start-validation");
+assert.equal(validationBody.record, true);
+assert.equal(validationBody.endpoint, "validator");
+assert.equal($("validation-progress").value, 1);
+assert.equal($("start-validation").disabled, true);
+assert.equal($("generate-one").disabled, true);
+await click("cancel-validation");
+assert.equal($("resume-validation").hidden, false);
+await click("resume-validation");
+assert.equal(validationBody.resume, true);
+await click("cancel-validation");
+await click("close-validation");
+w.fetch = beforeValidationFetch;
+
 await click("settings-button");
 await w.document.querySelector('[data-config="endpoints"]').onclick();
 assert.equal($("save-config").disabled, true);
@@ -1119,14 +1159,14 @@ assert.equal($("guidelines-content").querySelector('input[type="checkbox"]').dis
 $("guidelines-source").checked = true; $("guidelines-source").onchange();
 assert.equal($("guidelines-content").textContent, customMarkdown);
 $("guidelines-source").checked = false; $("guidelines-source").onchange();
-$("guidelines-scenario").value = "scenario:user_problem";
+$("guidelines-scenario").value = "scenario:user_scenario";
 await $("guidelines-scenario").onchange();
 assert(guideTab("Review Checklist"));
 assert(guideTab("idea.md"));
 guideTab("Review Checklist").onclick();
-assert.match($("guidelines-content").textContent, /user_problem/);
+assert.match($("guidelines-content").textContent, /user_scenario/);
 await click("edit-guidelines");
-assert.equal($("custom-guidance-scenario").value, "user_problem");
+assert.equal($("custom-guidance-scenario").value, "user_scenario");
 $("custom-guide").value = "# Scenario Guide\nMake a pun.";
 $("custom-guide").dispatchEvent(new w.Event("input", {bubbles: true}));
 await click("save-config");
@@ -1134,13 +1174,13 @@ $("custom-guidance-scenario").value = ""; $("custom-guidance-scenario").onchange
 assert.equal($("custom-guide").value, customMarkdown);
 await click("close-settings");
 await click("guidelines-button");
-$("guidelines-scenario").value = "scenario:user_problem"; await $("guidelines-scenario").onchange();
-guideTab("Scenario user_problem Guide").onclick();
+$("guidelines-scenario").value = "scenario:user_scenario"; await $("guidelines-scenario").onchange();
+guideTab("Scenario user_scenario Guide").onclick();
 assert.match($("guidelines-content").textContent, /Make a pun/);
 const sharedGuidance = await (await w.fetch("/api/mcp/call", {method: "POST", headers: {
   "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
   "Content-Type": "application/json",
-}, body: JSON.stringify({name: "get_guidance", arguments: {scenario: "user_problem"}})})).json();
+}, body: JSON.stringify({name: "get_guidance", arguments: {scenario: "user_scenario"}})})).json();
 assert.equal(sharedGuidance.documents.find(d => d.id === "custom.dataset.guide").content, customMarkdown);
 assert.equal(sharedGuidance.documents.find(d => d.id === "custom.scenario.guide").content, "# Scenario Guide\nMake a pun.");
 await click("close-guidelines");

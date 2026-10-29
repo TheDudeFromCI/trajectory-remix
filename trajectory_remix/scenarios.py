@@ -14,6 +14,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 REFERENCE = re.compile(r"^\$\{([a-zA-Z0-9_.-]+)\}$")
+BUNDLED_SCENARIOS = Path(__file__).with_name('scenario_templates')
+SCENARIO_ALIASES = {'user_problem': 'user_scenario', 'user_scenario_noval': 'user_scenario',
+                    'idle_scenario_noval': 'idle_scenario'}
+
+
+def canonical_scenario(name):
+    return SCENARIO_ALIASES.get(name, name)
 
 
 class Definition(BaseModel):
@@ -104,7 +111,7 @@ def check_scenario_endpoints(name, flow, endpoints, *, content_first=False):
                 continue
             path = prefix + step_name
             if (
-                step.uses in (("llm.generate", "llm.content") if content_first else ("llm.generate", "llm.content", "remix.validate", "remix.novelty"))
+                step.uses in (("llm.generate", "llm.content") if content_first else ("llm.generate", "llm.content", "remix.novelty"))
                 and step.endpoint not in available
             ):
                 raise ValueError(
@@ -127,7 +134,7 @@ class Profile(Definition):
 
 
 class Flow(Definition):
-    generation_mode: Literal["existing", "content-first"] = "existing"
+    generation_mode: Literal["existing", "content-first"] = "content-first"
     system_prompt: str = "You are Kidra, a coordinator."
     version: Literal[1] = 1
     description: str = ""
@@ -349,7 +356,7 @@ class Scenario:
 
 class ScenarioRegistry:
     def __init__(self, root=None):
-        self.root = Path(root).resolve() if root is not None else None
+        self.root = Path(root if root is not None else BUNDLED_SCENARIOS).resolve()
         self.scenarios = {}
         if self.root is not None:
             if not self.root.is_dir():
@@ -404,7 +411,5 @@ class ScenarioRegistry:
                     },
                 },
             }
-            # Keep existing-mode scenarios first so adding opt-in examples does
-            # not change the dashboard's default generation workflow.
-            for s in sorted(self.scenarios.values(), key=lambda s: (s.flow.generation_mode == 'content-first', s.name))
+            for s in sorted(self.scenarios.values(), key=lambda s: (s.name != 'user_scenario', s.name))
         ]

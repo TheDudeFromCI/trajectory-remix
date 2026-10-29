@@ -1,0 +1,697 @@
+generation_mode: content-first
+system_prompt: You are Kidra, a patient, competent coordinator. Use available observations
+  and ask for clarification when needed.
+version: 1
+description: User problems with bounded content generation, simulated tools and separate
+  trajectory validation.
+tag: user_scenario
+schemas:
+  Idea:
+    type: object
+    properties:
+      problem:
+        type: string
+        minLength: 1
+      situation:
+        type: string
+        minLength: 1
+      success_criteria:
+        type: string
+        minLength: 1
+      files:
+        type: array
+        maxItems: 12
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+              minLength: 1
+            content:
+              type: string
+          required:
+          - path
+          - content
+          additionalProperties: false
+      identifier:
+        type: string
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+){2,3}$
+    required:
+    - problem
+    - situation
+    - success_criteria
+    - files
+    - identifier
+    additionalProperties: false
+  Solution:
+    type: object
+    properties:
+      answer:
+        type: string
+        minLength: 1
+      verification:
+        type: string
+        minLength: 1
+    required:
+    - answer
+    - verification
+    additionalProperties: false
+  Message:
+    type: object
+    properties:
+      text:
+        type: string
+        minLength: 1
+    required:
+    - text
+    additionalProperties: false
+  ToolPlan:
+    type: object
+    properties:
+      calls:
+        type: array
+        maxItems: 8
+        items:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            properties:
+              tool:
+                type: string
+                minLength: 1
+              arguments:
+                type: object
+              outcome:
+                type: object
+            required:
+            - tool
+            - arguments
+            additionalProperties: false
+    required:
+    - calls
+    additionalProperties: false
+  Assessment:
+    type: object
+    properties:
+      resolved:
+        type: boolean
+      next_exchange:
+        type: string
+    required:
+    - resolved
+    - next_exchange
+    additionalProperties: false
+  ContentPlan:
+    type: object
+    properties:
+      calls:
+        type: array
+        maxItems: 8
+        items:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            properties:
+              tool:
+                type: string
+                minLength: 1
+              arguments:
+                type: object
+              outcome:
+                type: object
+            required:
+            - tool
+            - arguments
+            additionalProperties: false
+      reasoning:
+        type: string
+        minLength: 1
+    required:
+    - calls
+    - reasoning
+    additionalProperties: false
+  ContentReply:
+    type: object
+    properties:
+      reasoning:
+        type: string
+        minLength: 1
+      response:
+        type: string
+        minLength: 1
+      resolved:
+        type: boolean
+      next_exchange:
+        type: string
+    required:
+    - reasoning
+    - response
+    - resolved
+    - next_exchange
+    additionalProperties: false
+tags:
+  complexity:
+  - name: simple
+    description: A focused problem with few dependencies.
+    weight: 1.0
+  - name: moderate
+    description: A few related steps with a clear goal and manageable constraints.
+    weight: 1.0
+  - name: complex
+    description: Several interacting constraints or dependent steps.
+    weight: 1.0
+  - name: underspecified
+    description: Missing or ambiguous requirements need clarification before a reliable
+      answer.
+    weight: 1.0
+  - name: competing priorities
+    description: Tradeoffs between explicit goals require explaining and choosing
+      a compromise.
+    weight: 1.0
+  domain:
+  - name: coding
+    description: Implement, debug, review, or explain code using supplied source and
+      requirements.
+    weight: 1.0
+  - name: planning
+    description: Turn a goal and constraints into an actionable plan.
+    weight: 1.0
+  - name: mathematics
+    description: Solve or explain arithmetic, algebra, geometry, or other mathematical
+      problems.
+    weight: 1.0
+  - name: science
+    description: Explain a scientific concept or evaluate a claim against supplied
+      observations.
+    weight: 1.0
+  - name: history
+    description: Interpret historical sources, compare accounts, or explain a historical
+      sequence.
+    weight: 1.0
+  - name: memory retrieval
+    description: Recover relevant details from supplied earlier conversations, notes,
+      or memory records.
+    weight: 1.0
+  - name: TODOs
+    description: Extract, prioritize, reconcile, or update action items from supplied
+      lists and messages.
+    weight: 1.0
+  - name: politics
+    description: Analyze political institutions, arguments, or supplied policy proposals
+      and evidence.
+    weight: 1.0
+  - name: creative writing
+    description: Draft or revise fiction, poetry, dialogue, or a story outline under
+      explicit constraints.
+    weight: 1.0
+  - name: data analysis
+    description: Interpret a supplied dataset, identify patterns, or check a data-driven
+      conclusion.
+    weight: 1.0
+  - name: statistics
+    description: Reason about probability, uncertainty, sampling, or the interpretation
+      of a study.
+    weight: 1.0
+  - name: logic
+    description: Solve a logic puzzle or examine whether a conclusion follows from
+      its premises.
+    weight: 1.0
+  - name: physics
+    description: Explain physical behavior or solve a problem using stated quantities
+      and assumptions.
+    weight: 1.0
+  - name: chemistry
+    description: Interpret chemical concepts, equations, or supplied experimental
+      observations.
+    weight: 1.0
+  - name: biology
+    description: Explain biological mechanisms or interpret supplied observations
+      about living systems.
+    weight: 1.0
+  - name: earth science
+    description: Reason about geology, weather, climate, or environmental observations
+      from supplied information.
+    weight: 1.0
+  - name: astronomy
+    description: Explain astronomical concepts or interpret a supplied observation
+      or dataset.
+    weight: 1.0
+  - name: geography
+    description: Reason about places, maps, spatial relationships, or supplied geographic
+      information.
+    weight: 1.0
+  - name: civics
+    description: Explain public institutions, civic processes, or responsibilities
+      using supplied reference material.
+    weight: 1.0
+  - name: economics
+    description: Analyze incentives, tradeoffs, markets, or a simplified economic
+      model with stated assumptions.
+    weight: 1.0
+  - name: personal finance
+    description: Compare budgets, savings plans, fees, or household costs using supplied
+      figures and terms.
+    weight: 1.0
+  - name: law and policy
+    description: Compare or explain supplied rules, contracts, or policy language
+      and identify ambiguities.
+    weight: 1.0
+  - name: philosophy
+    description: Clarify a philosophical question, distinguish concepts, or evaluate
+      an argument.
+    weight: 1.0
+  - name: ethics
+    description: Explore an ethical dilemma, competing responsibilities, or the consequences
+      of a decision.
+    weight: 1.0
+  - name: education
+    description: Teach a concept, diagnose a misunderstanding, or adapt a lesson to
+      a learner's needs.
+    weight: 1.0
+  - name: language learning
+    description: Explain grammar, vocabulary, usage, or a learner's mistakes with
+      concrete examples.
+    weight: 1.0
+  - name: translation
+    description: Translate or compare wording while preserving meaning, register,
+      and relevant cultural context.
+    weight: 1.0
+  - name: editing
+    description: Improve supplied prose for clarity, structure, tone, or consistency
+      while preserving its intent.
+    weight: 1.0
+  - name: technical writing
+    description: Create or improve instructions, documentation, or an explanation
+      from supplied technical facts.
+    weight: 1.0
+  - name: document review
+    description: Summarize, compare, or reconcile supplied documents, including conflicting
+      statements and missing details.
+    weight: 1.0
+  - name: research synthesis
+    description: Combine supplied sources into an evidence-based answer while tracking
+      disagreements and uncertainty.
+    weight: 1.0
+  - name: knowledge organization
+    description: Organize notes, classify information, link related records, or design
+      a useful retrieval structure.
+    weight: 1.0
+  - name: scheduling
+    description: Reconcile calendars, durations, availability, time zones, or deadlines
+      from supplied records.
+    weight: 1.0
+  - name: project management
+    description: Identify dependencies, milestones, risks, or responsibilities in
+      a supplied project brief.
+    weight: 1.0
+  - name: logistics
+    description: Plan routing, inventory, packing, staffing, or resource allocation
+      under explicit constraints.
+    weight: 1.0
+  - name: troubleshooting
+    description: Diagnose a malfunction from supplied symptoms, logs, instructions,
+      and test results.
+    weight: 1.0
+  - name: design
+    description: Develop or critique a product, interface, or visual concept against
+      a concrete brief.
+    weight: 1.0
+  - name: accessibility
+    description: Review supplied content or a design for barriers and propose practical
+      accessible alternatives.
+    weight: 1.0
+  - name: health literacy
+    description: Explain supplied health information, interpret instructions, or prepare
+      questions for a clinician.
+    weight: 1.0
+  - name: cooking
+    description: Adapt a recipe, plan a meal, or solve a cooking problem with supplied
+      ingredients and constraints.
+    weight: 1.0
+  - name: gardening
+    description: Interpret plant-care records or plan planting and maintenance from
+      supplied conditions.
+    weight: 1.0
+  - name: travel
+    description: Compare supplied itinerary options, packing needs, costs, or travel
+      constraints without live booking.
+    weight: 1.0
+  - name: music
+    description: Explain music theory, analyze supplied musical material, or plan
+      practice around a learner's goals.
+    weight: 1.0
+  - name: games
+    description: Explain rules, analyze a game state, or design a puzzle or game mechanic
+      with checkable constraints.
+    weight: 1.0
+  - name: communication
+    description: Draft or revise a message, handle a disagreement, or adapt an explanation
+      to its audience.
+    weight: 1.0
+roles:
+  user:
+    instructions: Write only the fictional user. Preserve their domain knowledge and
+      behavior naturally.
+    tags:
+      behavior:
+      - name: angry
+        description: Frustrated and willing to challenge an answer; not automatically
+          abusive.
+        weight: 1.0
+      - name: polite
+        description: Courteous and cooperative without necessarily agreeing with every
+          suggestion.
+        weight: 1.0
+      - name: impatient
+        description: Wants progress quickly and may interrupt explanations or push
+          for a shorter answer.
+        weight: 1.0
+      - name: skeptical
+        description: Questions assumptions and asks for evidence before accepting
+          an answer.
+        weight: 1.0
+      - name: terse
+        description: Gives short replies with little elaboration; clarify important
+          omissions naturally.
+        weight: 1.0
+      - name: verbose
+        description: Provides lengthy explanations and tangents that require identifying
+          the relevant details.
+        weight: 1.0
+      - name: anxious
+        description: Worried about making a mistake and may need clear explanations
+          or reassurance.
+        weight: 1.0
+      - name: enthusiastic
+        description: Eager to explore ideas and may propose additions beyond the original
+          request.
+        weight: 1.0
+      - name: distracted
+        description: Loses track of details or shifts focus, requiring concise reminders
+          of the current goal.
+        weight: 1.0
+      - name: indecisive
+        description: Finds tradeoffs difficult and benefits from a clear comparison
+          and recommendation.
+        weight: 1.0
+      - name: blunt
+        description: Speaks directly with little social cushioning, without necessarily
+          being hostile.
+        weight: 1.0
+      - name: sarcastic
+        description: Uses dry or ironic remarks while still expressing an identifiable
+          underlying need.
+        weight: 1.0
+      - name: demanding
+        description: Has high expectations and challenges incomplete results or unmet
+          requirements.
+        weight: 1.0
+      knowledge:
+      - name: novice
+        description: Has little domain knowledge and needs concepts and assumptions
+          explained plainly.
+        weight: 1.0
+      - name: expert
+        description: Knows the domain well and expects precise reasoning, relevant
+          details, and justified conclusions.
+        weight: 1.0
+      - name: confidently mistaken
+        description: Strongly believes a specific misconception that must be identified
+          and corrected with evidence.
+        weight: 1.0
+      - name: intermediate
+        description: Understands common concepts but needs help with unfamiliar cases
+          or deeper implications.
+        weight: 1.0
+      - name: uneven knowledge
+        description: Knows some parts of the domain well but has important gaps in
+          related areas.
+        weight: 1.0
+      - name: outdated knowledge
+        description: Relies on an older version of a method or rule that differs from
+          the supplied current reference.
+        weight: 1.0
+      - name: practical experience
+        description: Can perform familiar tasks but may lack formal terminology or
+          an explanation of why they work.
+        weight: 1.0
+      - name: theoretical knowledge
+        description: Understands concepts but has little experience applying them
+          to concrete situations.
+        weight: 1.0
+  kidra:
+    instructions: Kidra is patient, competent, direct, and helpful. Clarify missing
+      facts; never assume unseen tool results.
+    tags: {}
+steps:
+  idea:
+    uses: llm.content
+    needs: []
+    inputs:
+      requirements: Create a concrete user problem suitable for the virtual tool environment.
+      tags: ${scenario.tags}
+      user_profile: ${roles.user}
+    prompt: idea.md
+    endpoint: generator
+    output_schema: Idea
+    visible_windows: []
+    retries: 0
+    on_failure:
+      action: reject
+    when: true
+    steps: {}
+    max_iterations: 1
+    history: {}
+    checks: {}
+    repair_mode: replay
+    repair_max_input_tokens: 8000
+    repair_guides: []
+    max_repairs: 0
+    review_retries: 2
+    level: 1
+    attempts: 3
+    fallback: true
+  environment:
+    uses: remix.setup
+    needs:
+    - idea
+    inputs:
+      idea: ${steps.idea.output}
+    endpoint: generator
+    visible_windows: []
+    retries: 0
+    on_failure:
+      action: reject
+    when: true
+    steps: {}
+    max_iterations: 1
+    history: {}
+    checks: {}
+    repair_mode: replay
+    repair_max_input_tokens: 8000
+    repair_guides: []
+    max_repairs: 0
+    review_retries: 2
+    level: 1
+    attempts: 3
+    fallback: true
+  conversation:
+    uses: flow.repeat
+    needs:
+    - environment
+    inputs:
+      idea: ${steps.idea.output}
+    endpoint: generator
+    visible_windows: []
+    retries: 0
+    on_failure:
+      action: reject
+    when: true
+    steps:
+      user:
+        uses: llm.content
+        needs: []
+        inputs:
+          situation: ${inputs.idea.situation}
+          problem: ${inputs.idea.problem}
+          history: ${iteration.history}
+          round: ${iteration.index}
+          files: ${inputs.idea.files}
+        prompt: user.md
+        profile: user
+        endpoint: generator
+        output_schema: Message
+        visible_windows: []
+        retries: 0
+        on_failure:
+          action: reject
+        when: true
+        steps: {}
+        max_iterations: 1
+        history: {}
+        checks: {}
+        repair_mode: replay
+        repair_max_input_tokens: 8000
+        repair_guides: []
+        max_repairs: 0
+        review_retries: 2
+        level: 1
+        attempts: 3
+        fallback: true
+      message:
+        uses: remix.message
+        needs:
+        - user
+        inputs:
+          text: ${steps.user.output.text}
+        endpoint: generator
+        visible_windows: []
+        retries: 0
+        on_failure:
+          action: reject
+        when: true
+        steps: {}
+        max_iterations: 1
+        history: {}
+        checks: {}
+        repair_mode: replay
+        repair_max_input_tokens: 8000
+        repair_guides: []
+        max_repairs: 0
+        review_retries: 2
+        level: 1
+        attempts: 3
+        fallback: true
+      decisions:
+        uses: llm.content
+        needs:
+        - message
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          tools: ${tool_contracts}
+        prompt: decisions.md
+        profile: kidra
+        endpoint: generator
+        output_schema: ContentPlan
+        visible_windows: []
+        retries: 0
+        on_failure:
+          action: reject
+        when: true
+        steps: {}
+        max_iterations: 1
+        history: {}
+        checks: {}
+        repair_mode: replay
+        repair_max_input_tokens: 8000
+        repair_guides: []
+        max_repairs: 0
+        review_retries: 2
+        level: 1
+        attempts: 3
+        fallback: true
+      planning:
+        uses: remix.assemble
+        needs:
+        - decisions
+        inputs:
+          streams:
+          - type: reasoning
+            content: ${steps.decisions.output.reasoning}
+          call_groups: ${steps.decisions.output.calls}
+        endpoint: generator
+        visible_windows: []
+        retries: 0
+        on_failure:
+          action: reject
+        when: true
+        steps: {}
+        max_iterations: 1
+        history: {}
+        checks: {}
+        repair_mode: replay
+        repair_max_input_tokens: 8000
+        repair_guides: []
+        max_repairs: 0
+        review_retries: 2
+        level: 1
+        attempts: 3
+        fallback: true
+      reply:
+        uses: llm.content
+        needs:
+        - planning
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          planning: ${steps.decisions.output.reasoning}
+          observations: ${steps.planning.output.results}
+        prompt: reply.md
+        profile: kidra
+        endpoint: generator
+        output_schema: ContentReply
+        visible_windows: []
+        retries: 0
+        on_failure:
+          action: reject
+        when: true
+        steps: {}
+        max_iterations: 1
+        history: {}
+        checks: {}
+        repair_mode: replay
+        repair_max_input_tokens: 8000
+        repair_guides: []
+        max_repairs: 0
+        review_retries: 2
+        level: 1
+        attempts: 3
+        fallback: true
+      draft:
+        uses: remix.draft
+        needs:
+        - reply
+        inputs:
+          reasoning: ${steps.reply.output.reasoning}
+          response: ${steps.reply.output.response}
+          release_tool_context: true
+        endpoint: generator
+        visible_windows: []
+        retries: 0
+        on_failure:
+          action: reject
+        when: true
+        steps: {}
+        max_iterations: 1
+        history: {}
+        checks: {}
+        repair_mode: replay
+        repair_max_input_tokens: 8000
+        repair_guides: []
+        max_repairs: 0
+        review_retries: 2
+        level: 1
+        attempts: 3
+        fallback: true
+    max_iterations: 4
+    until: ${steps.reply.output.resolved}
+    history:
+      user: ${steps.user.output.text}
+      response: ${steps.reply.output.response}
+      assessment:
+        resolved: ${steps.reply.output.resolved}
+        next_exchange: ${steps.reply.output.next_exchange}
+    checks: {}
+    repair_mode: replay
+    repair_max_input_tokens: 8000
+    repair_guides: []
+    max_repairs: 0
+    review_retries: 2
+    level: 1
+    attempts: 3
+    fallback: true

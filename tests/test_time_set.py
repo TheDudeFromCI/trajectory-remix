@@ -178,29 +178,20 @@ async def test_workbench_reset_and_session_isolation():
 
 
 @pytest.mark.parametrize("continue_existing", [False, True])
-async def test_generation_and_replay_agree_on_randomized_time(compiler, sample, continue_existing):
-    config = default_config()
-    config["tasks"] = [config["tasks"][2]]
-    config["tasks"][0]["tools"] = True
+async def test_generation_and_replay_agree_on_randomized_time(compiler, sample, continue_existing, tmp_path):
+    from trajectory_remix.server import create_app
+    from trajectory_remix.storage import DatasetStore
+    path = tmp_path / 'clock.sqlite'
+    DatasetStore.initialize(path, compiler)
+    app = create_app(path)
+    runner = app.state.scenario_runner
+    runner.start('idle_scenario', _schedule=False)
     if continue_existing:
-        sample["replay"]["1"] = [{"op": "tool-call", "window": "clock", "tool": "time_set", "arguments": NULL_TIME}]
-
-    class Client:
-        def __init__(self):
-            self.outcome = None
-
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[-1]["role"] == "tool":
-                self.outcome = json.loads(messages[-1]["content"])
-                return {"content": "Time set."}
-            return {"content": None, "tool_calls": [{
-                "id": "set-time", "type": "function",
-                "function": {"name": "time_set", "arguments": json.dumps(NULL_TIME)},
-            }]}
-
-    client = Client()
-    result = await SampleBuilder(compiler, config, client).generate(seed=copy.deepcopy(sample) if continue_existing else None)
-    plan = compiler.compile(result)
-    assert client.outcome["ok"]
-    assert plan["tool_calls"][-1]["outcome"] == client.outcome
-    assert compiler.frame(plan, plan["max_tick"])["sandbox"]["clock"] == client.outcome["result"]["timestamp"]
+        sample['replay']['1'] = [{'op': 'tool-call', 'window': 'clock', 'tool': 'time_set', 'arguments': NULL_TIME}]
+        runner.builder.sample = copy.deepcopy(sample)
+        runner.builder.next_tick = compiler.compile(sample)['max_tick'] + 1
+    outcome = runner.simulate({'calls': [[{'tool': 'time_set', 'arguments': NULL_TIME}]]})['results'][0]['outcome']
+    plan = compiler.compile(runner.builder.sample)
+    assert outcome['ok']
+    assert plan['tool_calls'][-1]['outcome'] == outcome
+    assert compiler.frame(plan, plan['max_tick'])['sandbox']['clock'] == outcome['result']['timestamp']

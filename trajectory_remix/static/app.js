@@ -209,6 +209,7 @@ async function refresh(initial = false) {
     const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
     state = next;
     renderTokenizerMigration(next.tokenizer_migration);
+    renderTrajectoryValidation(next.validation_status);
     renderStatus();
     if (changed || initial || searchWasInvalid) renderSamples();
     if (initial && state.samples.length && !migrationBusy)
@@ -269,7 +270,7 @@ function renderValidationState() {
 function renderStatus() {
   $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
-  $("migrate-tokenizer-button").disabled = s.running;
+  $("migrate-tokenizer-button").disabled = s.running || !!state.validation_status?.running;
   const scenarioSelect = $("scenario-type");
   const scenarioNames = (state.scenarios || []).map((item) => item.name);
   if (Array.from(scenarioSelect.options).map((option) => option.value).join() !== scenarioNames.join()) {
@@ -291,7 +292,7 @@ function renderStatus() {
   $("view-generation-batch").hidden = !batch || batch.target <= 1;
   $("scenario-hint").textContent = scenarioNames.length
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
-    : "Start Remix with --scenarios-dir to load scenarios.";
+    : "No generation scenarios are available.";
   $("generation-progress").max = Math.max(1, s.total || 1);
   $("generation-progress").title = `${s.completed || 0}/${s.total || 0} steps complete`;
   $("generation-progress").value = s.phase === "complete" ? Math.max(1, s.total || 1) : (s.completed || 0);
@@ -307,8 +308,9 @@ function renderStatus() {
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("accepted-stat").textContent = s.accepted;
   $("attempt-stat").textContent = s.attempts;
-  $("generate-one").disabled = s.running || migrationBusy;
-  $("generate-batch").disabled = s.running || migrationBusy;
+  $("generate-one").disabled = s.running || migrationBusy || !!state.validation_status?.running;
+  $("generate-batch").disabled = s.running || migrationBusy || !!state.validation_status?.running;
+  $("validate-trajectory").disabled = !sample || s.running || migrationBusy;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
@@ -2025,9 +2027,12 @@ function configIssues() {
   const single = configDraft.single_generation;
   range("single_generation.max_parallel", single.max_parallel, 1, 128, true);
   range("single_generation.max_attempts", single.max_attempts, 1, 100, true);
-  for (const [key, lo, hi] of [["max_samples",0,100000],["max_attempts",0,1000000],["autosave_every",1,10000],["regenerations",0,10],["max_consecutive_failures",1,1000],["delay_seconds",0.1,3600]]) range("automatic." + key, configDraft.automatic[key], lo, hi, key !== "delay_seconds");
+
+  range("content_first.context_budget", configDraft.content_first?.context_budget ?? 8192, 1, 1000000, true);
+  range("content_first.reserve_tokens", configDraft.content_first?.reserve_tokens ?? 256, 0, 1000000, true);
+  range("validation.max_input_tokens", configDraft.validation?.max_input_tokens ?? 6000, 512, 100000, true);
   range("max_tool_calls", configDraft.max_tool_calls, 1, 256, true);
-  range("max_tool_rounds", configDraft.max_tool_rounds, 1, 32, true);
+
   return errors;
 }
 function updateSettingsState() {
@@ -2036,7 +2041,7 @@ function updateSettingsState() {
   for (const box of $("config-content").querySelectorAll("input")) {
     if (!box.dataset.configPath) {
       const label = box.closest("label")?.textContent || box.parentElement?.textContent || "";
-      const keys = {"Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Maximum new samples":"automatic.max_samples", "Maximum candidate attempts":"automatic.max_attempts", "Autosave every N accepted":"automatic.autosave_every", "Regenerations per attempt":"automatic.regenerations", "Consecutive failure limit":"automatic.max_consecutive_failures", "Delay between attempts (s)":"automatic.delay_seconds", "Tool calls per sample":"max_tool_calls", "Tool rounds per task":"max_tool_rounds"};
+      const keys = {"Request context budget":"content_first.context_budget", "Reserved tokens":"content_first.reserve_tokens", "Validation input token budget":"validation.max_input_tokens", "Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Tool calls per sample":"max_tool_calls"};
       for (const [name, path] of Object.entries(keys)) if (label.includes(name)) box.dataset.configPath = path;
     }
     const message = issues[box.dataset.configPath] || "";
@@ -2114,6 +2119,7 @@ function renderConfig() {
         ["max_tokens", "Max completion tokens", "number"],
         ["timeout", "Timeout (seconds)", "number"],
         ["context_size", "Context size (tokens, 0 = unknown)", "number"],
+        ["inference_tokenizer", "Local inference tokenizer directory", "text"],
       ]) {
         const box = input(ep[name] ?? (name === "context_size" ? 0 : undefined), (v) => (ep[name] = v), type);
         box.dataset.configPath = `endpoints.${i}.${name}`;
@@ -2149,60 +2155,17 @@ function renderConfig() {
       }),
     );
   }
-  if (configTab === "automatic") {
-    const a = configDraft.automatic,
-      form = node("div", "form-grid");
-    root.append(
-      node(
-        "div",
-        "hint",
-        "Global batch limits, tool budgets, and synthetic clock defaults. Single sample concurrency and retry limits are configured under Endpoints.",
-      ),
-    );
-    for (const [key, label] of [
-      ["max_samples", "Maximum new samples"],
-      ["max_attempts", "Maximum candidate attempts"],
-      ["autosave_every", "Autosave every N accepted"],
-      ["regenerations", "Regenerations per attempt"],
-      ["max_consecutive_failures", "Consecutive failure limit"],
-      ["delay_seconds", "Delay between attempts (s)"],
-    ])
-      form.append(
-        field(
-          label,
-          input(a[key], (v) => (a[key] = v), "number"),
-        ),
-      );
+  if (configTab === "defaults") {
+    const form = node("div", "form-grid");
+    configDraft.content_first ??= {context_budget: 8192, reserve_tokens: 256};
+    configDraft.validation ??= {endpoint: "validator", max_input_tokens: 6000};
+    root.append(node("div", "hint", "Content creation never performs semantic validation. Validate an existing trajectory separately from Edit → Generation."));
     form.append(
-      field(
-        "Failure behavior",
-        select(
-          ["stop", "pause", "skip"],
-          a.failure_action,
-          (v) => (a.failure_action = v),
-        ),
-      ),
-      field(
-        "Validate with LLM",
-        checkbox(a.validate, (v) => (a.validate = v)),
-        "check",
-      ),
-      field(
-        "Tool calls per sample",
-        input(
-          configDraft.max_tool_calls,
-          (v) => (configDraft.max_tool_calls = v),
-          "number",
-        ),
-      ),
-      field(
-        "Tool rounds per task",
-        input(
-          configDraft.max_tool_rounds,
-          (v) => (configDraft.max_tool_rounds = v),
-          "number",
-        ),
-      ),
+      field("Request context budget", input(configDraft.content_first.context_budget, v => configDraft.content_first.context_budget = v, "number")),
+      field("Reserved tokens", input(configDraft.content_first.reserve_tokens, v => configDraft.content_first.reserve_tokens = v, "number")),
+      field("Default validation endpoint", select(eps, configDraft.validation.endpoint, v => configDraft.validation.endpoint = v)),
+      field("Validation input token budget", input(configDraft.validation.max_input_tokens, v => configDraft.validation.max_input_tokens = v, "number")),
+      field("Tool calls per sample", input(configDraft.max_tool_calls, v => configDraft.max_tool_calls = v, "number")),
     );
     configDraft.clock ??= {
       seed: "2030-01-01T09:00:00+00:00",
@@ -2786,6 +2749,38 @@ $("resume-trajectory-generation").onclick = action(async () => {
   openGenerationPanel(); await refresh();
 });
 
+function renderTrajectoryValidation(status = {}) {
+  const busy = !!status.running;
+  $("validation-progress").max = Math.max(1, status.total || 1);
+  $("validation-progress").value = status.completed || 0;
+  $("validation-status").textContent = status.last_error || (busy ? `Validating ${status.sample_id}: ${status.active?.join(" · ") || "preparing"}` : status.result ? (status.result.valid ? "Validation passed." : "Validation found issues.") : status.phase === "idle" ? "Ready to validate." : status.phase || "Ready to validate.");
+  $("validation-findings").textContent = status.result ? JSON.stringify(status.result, null, 2) : "";
+  $("start-validation").disabled = busy || !sample || !!state?.status.running;
+  $("cancel-validation").disabled = !busy;
+  $("resume-validation").hidden = !["cancelled", "interrupted", "incomplete"].includes(status.phase) || status.sample_id !== sample?.id;
+  $("validation-endpoint").disabled = busy;
+  $("validation-record").disabled = busy;
+}
+$("validate-trajectory").onclick = action(async () => {
+  closeMenus();
+  if (hasPendingChanges()) await compileSample(true);
+  const choices = state.config.endpoints.map(ep => ep.id);
+  const previous = $("validation-endpoint").value;
+  $("validation-endpoint").replaceChildren(...choices.map(id => { const option = node("option", "", id); option.value = id; return option; }));
+  $("validation-endpoint").value = choices.includes(previous) ? previous : choices.includes(state.config.validation?.endpoint || "validator") ? (state.config.validation?.endpoint || "validator") : (choices[0] || "");
+  renderTrajectoryValidation(state.validation_status);
+  $("validation-dialog").showModal();
+});
+$("close-validation").onclick = () => $("validation-dialog").close();
+async function startTrajectoryValidation(resume = false) {
+  if (hasPendingChanges()) await compileSample(true);
+  await json("validation/run", "POST", {sample_id: sample.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, resume});
+  await refresh();
+}
+$("start-validation").onclick = action(() => startTrajectoryValidation());
+$("resume-validation").onclick = action(() => startTrajectoryValidation(true));
+$("cancel-validation").onclick = action(async () => { await json("validation/stop", "POST"); await refresh(); });
+
 $("close-settings").onclick = () => $("settings-dialog").close();
 $("save-config").onclick = action(saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
@@ -2889,10 +2884,10 @@ setInterval(
   () =>
     action(async () => {
       const wasRunning = state?.status.running;
+      const wasValidating = state?.validation_status?.running;
       await refresh();
       if (
-        wasRunning &&
-        !state.status.running &&
+        ((wasRunning && !state.status.running) || (wasValidating && !state.validation_status?.running)) &&
         selected >= 0 &&
         !hasPendingChanges()
       )

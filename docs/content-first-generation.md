@@ -1,8 +1,8 @@
 # Content-first generation
 
-Set `generation_mode: content-first` in a scenario's `flow.yaml`. The existing YAML mode remains the default (`existing`); legacy task generation, replay syntax, storage schema, and export formats are unchanged.
+Content-first is the default generation workflow. The bundled `user_scenario` and `idle_scenario` flows create Pending drafts without semantic validation. Validation is an explicit operation on existing trajectories under **Edit → Generation → Validate Trajectory**. Replay syntax, saved datasets and Ready export requirements are unchanged.
 
-In this mode, the local model writes content and decisions. The application supplies replay events, tick schedules, protocol framing, and window lifecycle operations. `remix.validate` returns a deferred result without calling its endpoint or attempting local repairs. `remix.novelty` passes through the proposed idea and retains it as the concept without running a model judge. Scenario review prompts, semantic rules, original flow, randomized conditions, role profiles, and raw responses remain available for external review. Candidates stay at validation level **0** until reviewed; generation never approves training exports.
+In this mode, the local model writes content and decisions. The application supplies replay events, tick schedules, protocol framing, and window lifecycle operations. Legacy `remix.validate` steps are deferred without calling an endpoint or attempting repairs. The current standard flows have no validation step at all. `remix.novelty` passes through the proposed idea and retains it as the concept without running a model judge. Scenario review prompts, semantic rules, original flow, randomized conditions, role profiles, and raw responses remain available for external review. Candidates stay at validation level **0** until reviewed; generation never approves training exports.
 
 ## Configure inference
 
@@ -33,7 +33,7 @@ Configure endpoints through the existing JSON API: `PUT /api/config` with body `
 }
 ```
 
-This is a content-only configuration example. Preserve existing legacy tasks/endpoints if you also use the legacy generation loop. Legacy tasks still require their referenced endpoints even when disabled. The content-first runner needs no validator endpoint for deferred review. The settings API still checks endpoints required by other loaded scenarios; retain the original validator alias when loading the standard scenario alongside its fast variation.
+Creation needs only the generator endpoint. Configure a separate validator endpoint if you want explicit local review; it is never required or contacted by content creation. Imported legacy task settings do not enable another generator or impose unused endpoint requirements.
 
 `inference_tokenizer` is a **local Hugging Face tokenizer directory**, with the tokenizer artifacts and the exact `chat_template` used by the inference server. It is independent of the embedded Kidra training tokenizer. Files are loaded locally with remote code disabled; the generator does not download models. The endpoint and tokenizer template must agree about roles, special tokens, and generation prefixes. There is no heuristic fallback. Missing tokenizer configuration fails before inference, leaving a recoverable draft and diagnostics.
 
@@ -90,40 +90,27 @@ Omitting a stream window allocates a unique reasoning window automatically. A ba
 
 Use `remix.message` for user dialogue, and `remix.draft` for generated reasoning and responses. Assistant replies are delivered through generated `chat` requests and masked external chat writes. Final publication closes remaining windows through generated EOS. BOS, implicit NOOP, causal masks, tool result scheduling, and lifecycle validity remain owned by the existing compiler. Review stages receive a closed draft while generation checkpoints retain continuable open windows.
 
-## Fast user-scenario variation
+## Standard user and idle flows
 
-Select **`user_scenario_noval`** to generate the same class of samples as `user_problem` (`#user_scenario`) with no local validation. It inherits the original system prompt, all domain/difficulty pools and weights, user/Kidra roles and traits, idea-generation requirements, user-message prompt, schemas, and semantic review checklist. Manual selections and randomized inputs are identical in the dashboard. Future changes to those parent input pools are inherited automatically.
+The bundled **`user_scenario`** (`#user_scenario`) is the former fast user variation,
+now standalone. All domain/difficulty pools, weights, roles, traits and manual
+inputs are retained. A workspace request is followed by three requests per exchange:
+user content, planning/tool decisions, then grounded notes/response/continuation.
+One exchange uses four content requests; up to four exchanges remain supported.
+There is no reference solution, novelty judge, separate assessment, semantic
+validator or repair request during creation.
 
-The variation creates one idea and uses three bounded content requests per exchange: the fictional user message, Kidra's private planning/tool decisions, and a grounded reasoning/response/continuation object after actual observations. A one-exchange sample therefore uses **four** generation requests. There is no reference-solution request, novelty judge, separate answer writer, assessment request, validator, or local semantic repair loop. The completion flag controls whether another meaningful user exchange is needed; it never validates or approves the sample. Up to four exchanges remain supported.
+**`idle_scenario`** (`#idle_scenario`) covers autonomous TODO, file, memory and alarm
+work with no user. It preserves working state between observation-dependent tool
+decisions and permits honest quiet/blocked endings. See the
+[idle guide and offline demo](idle-scenario-generation.md).
 
-Planning notes and independent tool requests start together. Public tool purposes and complete argument constraints are supplied in a compact contract catalogue; redundant field documentation and OpenAI wire wrappers are omitted. No tool or executable constraint is silently truncated. Automatic reasoning-window IDs and lifecycle operations require no model-generated syntax. Results remain actual simulator observations, and external review/Ready approval remain separate from generation.
-
-The scenario uses `extends: user_problem`. Omitted top-level input sections inherit; schemas merge by name. An explicit `steps` block defines the variation's scaffold, and `inherit: true` imports a named parent step before applying its field overrides. Prompt files fall back to the parent's saved prompt contents. Parents must be registered inside the configured scenario root; cycles, unknown parents, and unrelated duplicate tags are rejected. Only scenarios in the same inheritance family may share a tag.
-
-Both variants retain `#user_scenario` for analysis and distribution tracking. `metadata.scenario` distinguishes the exact generator and `metadata.scenario_family` identifies the parent family. MCP uses that provenance and the saved original checklist; legacy tag-only samples continue resolving to `user_problem`. Existing datasets and unrelated scenario tags retain their original behavior.
-
-Launch the existing dashboard with `--scenarios-dir examples/scenarios`, configure the inference tokenizer, then select `user_scenario_noval`. The run API accepts `{"scenario":"user_scenario_noval"}` and the same optional manual tags, batch size and concurrency settings as `user_problem`. No validator is contacted. When the original scenario is loaded too, the existing settings checks still require its validator alias; it may point at the same server and remains unused by the fast variation.
-
-## Idle-work scenario without a user
-
-Select **`idle_scenario_noval`** (`#idle_scenario`) for autonomous TODO processing,
-project review, memory organization and alarm follow-up. It has only a Kidra role
-and uses a bounded observe–decide–act loop rather than user/assistant exchanges.
-The model chooses actions, retained private state, context releases and a quiet
-or blocked ending from actual observations. No local semantic review is invoked.
-See [configuration, coverage and offline demo](idle-scenario-generation.md) and the
-[PDF flow chart](idle-scenario-flow.pdf).
-
-## Parallel construction demonstration
-
-The bundled `examples/scenarios/content_first` scenario generates a brief, independently generates two reasoning streams and tool decisions, runs the streams and tool requests together, then generates a reaction from real observations. The local model never authors replay structure. It exercises arithmetic discrepancies, missing evidence, tool failures, and user-facing delivery. Tags vary the domain and complication; model outputs determine quantities, facts, tools, and response content.
-
-```sh
-trajectory-remix init --dataset work/content.sqlite --tokenizer examples/demo-tokenizer.json
-trajectory-remix --dataset work/content.sqlite --scenarios-dir examples/scenarios
-```
-
-Configure the generator as above, select `content_first`, and run it in the existing dashboard. The same action is available through `POST /api/scenarios/run` with `{"scenario":"content_first","max_parallel":3}` and the dashboard's CSRF token. Existing scenarios can opt in with one flow field, though large inherited inputs may need explicit selection or a larger request budget.
+Both are installed with the application and load without `--scenarios-dir`.
+The old `user_problem` and `content_first` examples are no longer selectable.
+Old noval IDs resolve to their canonical surviving flow when starting a new run;
+saved original checklists remain authoritative for historical samples. Custom
+flows can still use explicit `extends` inheritance, but the standard user flow has
+no dependency on a retired parent.
 
 ## Recover and review externally
 
@@ -146,25 +133,13 @@ A construction failure can depend on a schema-valid but semantically unusable ca
 
 Elapsed time includes orchestration and pauses within an attempt but excludes time between stopped attempts and external review. Inference seconds measure occupied request wall time, including provider latency, transport, and request bookkeeping; OpenAI-compatible APIs expose no standard GPU compute-time counter. Inference request durations may overlap, so their sum can exceed elapsed time; `inference_wall_seconds` measures their interval union. Dataset throughput sums recorded candidate elapsed times and is intended for equivalent workload comparisons, not server-wide concurrent-session capacity. Usable throughput requires actual Ready approvals. Legacy datasets without instrumentation are not backfilled with invented counters. Repair counts cover the explicit MCP `repair_trajectory` operation; arbitrary manual edits are not classified as repairs.
 
-Run a reproducible offline integration comparison:
-
-```sh
-python scripts/benchmark_content_first.py --samples 3 --output-dir work/content-first-demo
-```
-
-It writes two SQLite projects, inspectable samples, and `report.json`. The offline fixture uses scripted content, a local fixture inference tokenizer, and **explicitly simulated inference latency**, so its timings are not local-model/GPU benchmarks. By default it compares `user_problem` with `user_scenario_noval`, sharing generation input pools and fixture content. `--scenario-family content-demo` retains the earlier parallel-construction comparison. The existing YAML pipeline already separates much content from replay syntax; this benchmark isolates bounded assembly and deferred validation. See [recorded results](content-first-benchmark.md).
-
-For actual endpoint measurements, use a fresh directory:
-
-```sh
-python scripts/benchmark_content_first.py --live --samples 3 \
-  --base-url http://127.0.0.1:8080/v1 --model your-local-model \
-  --inference-tokenizer /models/your-local-model \
-  --training-tokenizer /models/kidra/tokenizer.json \
-  --output-dir work/content-first-live
-```
-
-Both modes use the same tag seed and temperature zero. Live outputs can still differ; compare original criteria, quality, diversity, repairs, and approval yield alongside inference savings. The tool reports reductions only when both modes construct the requested candidate count. It never grants training approval.
+The earlier comparison and six-agent experiment are preserved as historical
+results in [the benchmark report](content-first-benchmark.md) and `experiments/`.
+They describe pre-consolidation versions; the retired comparison generator is not
+part of the current application. For an executable current-flow demonstration use
+`python scripts/demo_idle_scenario.py --output-dir work/idle-demo` with a fresh
+output directory. Its scripted responses establish mechanics, not real-model
+quality or GPU performance.
 
 ## Remaining limits
 

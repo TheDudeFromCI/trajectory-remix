@@ -4,18 +4,17 @@
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic
   edits, revision conflicts, patches, metadata, diagnostics and timeline inspection.
-- Scenario checklist tests cover exact rule coverage, typed statuses, evidence,
-  applicability, code-derived acceptance/findings, missing-context handling,
-  bounded cross-view evidence requests, saved group reuse, and complete reviews
-  after targeted repair. Legacy single-prompt/string/object checks remain covered.
-- Repair recovery regressions cover malformed JSON/schema, review-wrapper edits,
-  invalid source pointers, edit conflicts, compilation failures, atomic retention,
-  bounded retry exhaustion, full-replay repairs, and repair budgets across provider
-  interruption/resume. Review regressions cover malformed/unknown/repeated context
-  requests, exhausted rounds, narrowing over-budget evidence requests, and batch
-  pause/resume with Pending rather than rejected drafts. Lifecycle checks verify
-  tool evidence survives reasoning and retained reasoning survives chat delivery;
-  the dashboard test resumes evaluation failures without starting a fresh sample.
+- Standalone validation tests cover the shared user/idle/manual checklist, typed
+  statuses and evidence, complete rule coverage, malformed responses, bounded
+  missing-context requests, input budgets, cancellation/restart, completed-group
+  reuse, stale-source/requirements rejection and immutable creation metrics.
+  UI and MCP semantic validation use the same service; read-only reviews never
+  alter samples, and recorded reviews never grant Ready approval.
+- Creation tests verify Pending drafts, canonical defaults and legacy name aliases,
+  generator-only configuration, retired task API errors, preservation of original
+  review snapshots and custom guidance, provider retry budgets and recovery.
+  Imported automatic-validation flags and legacy flow validation steps cannot
+  invoke semantic review or repair during creation.
 - MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
@@ -41,7 +40,8 @@
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
   loading, playback controls, event and JSON editing, marker diagnostics and
-  task/endpoint/condition/automatic configuration surfaces, external MCP edits,
+  scenario/endpoint/condition/default configuration surfaces and the independent
+  Validate Trajectory dialog, external MCP edits,
   and protection of pending browser edits during conflicts.
   Large-preview checks compile over 50,000 rows from little source text, seek
   forward/backward without fetching a row prefix, cross streamed-output and
@@ -121,7 +121,8 @@
   SQL/draft parity, invalid boolean values, grouping/negation, filtering before
   pagination, lazy cache reuse, source/tool invalidation, reopening, and dashboard/MCP
   agreement through edits and undo/redo without changing pinned dependencies.
-- A Python wheel builds successfully and contains all dashboard assets.
+- Package checks build a Python wheel and verify dashboard assets, bundled standard
+  flows and shared review templates load outside the source checkout.
 
 LLM integrations are tested against deterministic fake completions and an
 HTTPX mocked OpenAI-compatible transport. No live provider credentials were
@@ -141,8 +142,13 @@ result, then emits EOS to release it.
   visibility and loss masks, BOS/EOS/NOOP, trajectories beyond individual request
   limits, invalid output/construction retention, cancellation/resume, archived
   generation evidence, original-checklist MCP repair, export approval, and
-  existing-mode/scenario compatibility. `scripts/benchmark_content_first.py`
-  provides offline and real-endpoint end-to-end comparisons; offline inference
-  delays are explicitly simulated.
+  legacy checkpoint/scenario parsing compatibility. Historical performance reports
+  remain in `docs/content-first-benchmark.*` and `experiments/`; the retired
+  comparison generator is not shipped with the current workflow.
 
-- User-scenario variation regressions verify inherited domains/difficulty/roles and weights, identical manual inputs and shared tags, exact original checklists, four calls for a one-exchange sample, multi-turn continuation, parallel planning/tool requests, no validator endpoint or semantic calls, inherited prompt loading, archived review provenance, safe family-tag resolution, and preserved tool-schema constraints.
+- User-scenario regressions verify preserved domains/difficulty/roles and weights,
+  manual inputs and shared tags, portable original checklists, four calls for a
+  one-exchange sample, multi-turn continuation, parallel planning/tool requests,
+  no validator endpoint or semantic calls, archived review provenance, safe
+  family-tag resolution and tool-schema constraints. Retired flow definitions
+  live only under test fixtures to exercise old saved datasets/checkpoints.

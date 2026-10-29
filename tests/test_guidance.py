@@ -57,8 +57,10 @@ async def test_custom_requirements_apply_without_scenario_and_bind_review_and_re
     missing = await studio[1].post('/api/mcp/call', json={
         'name': 'record_trajectory_review', 'arguments': {**arguments, 'results': {}}})
     assert missing.status_code == 422
-    recorded = await call(studio, 'record_trajectory_review', **arguments,
-                          results={'$custom.dataset': {'valid': False, 'feedback': ['No joke.']}})
+    from test_trajectory_review import results_for
+    results = results_for(check)
+    results['$custom.dataset'] = {'valid': False, 'feedback': ['No joke.']}
+    recorded = await call(studio, 'record_trajectory_review', **arguments, results=results)
     assert recorded['validation_level'] == -2
     await save_guidance(studio, {'guide': 'Use different generated names.'})
     revision = studio[0].state.dataset['revision']
@@ -74,7 +76,7 @@ async def test_custom_requirements_apply_without_scenario_and_bind_review_and_re
 
 
 async def test_scenario_selection_and_saved_checklist_show_all_prompts(studio):
-    registry = ScenarioRegistry(Path(__file__).parents[1] / 'examples/scenarios')
+    registry = ScenarioRegistry(Path(__file__).parent / 'fixtures/retired-scenarios')
     studio[0].state.scenario_runner.registry = registry
     scenario = registry.scenarios['user_problem']
     snapshot = build_checklist(scenario).model_dump()
@@ -124,7 +126,7 @@ async def test_invalid_guidance_rejected_without_saving(studio, guidance):
 async def test_scenario_named_dataset_does_not_apply_to_unscoped_samples(studio):
     await save_guidance(studio, {'guide': 'Global.', 'scenarios': {'dataset': {'guide': 'Only for the named scenario.'}}})
     unscoped = await call(studio, 'get_review_checklist', sample_id='test')
-    assert set(unscoped['checklist']['checks']) == {'$custom.dataset'}
+    assert set(unscoped['checklist']['checks']) == {'validate.layout', 'validate.tools', 'validate.reasoning', 'validate.correctness', '$custom.dataset'}
     assert len(unscoped['custom_guidance']) == 1
     scoped = await call(studio, 'get_guidance', scenario='dataset')
-    assert set(scoped['checklist']['checks']) == {'$custom.dataset', '$custom.scenario'}
+    assert set(scoped['checklist']['checks']) == {'validate.layout', 'validate.tools', 'validate.reasoning', 'validate.correctness', '$custom.dataset', '$custom.scenario'}

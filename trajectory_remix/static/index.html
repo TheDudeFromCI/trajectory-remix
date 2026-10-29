@@ -36,6 +36,7 @@
               <button id="generation-menu-button" role="menuitem" aria-haspopup="menu" aria-expanded="false">Generation ▸</button>
               <div id="generation-menu" class="file-menu-popup submenu-popup" role="menu" hidden>
                 <button id="settings-button" role="menuitem" title="Open the generation settings">Generation Settings</button>
+                <button id="validate-trajectory" role="menuitem" disabled>Validate Trajectory</button>
                 <button id="resume-trajectory-generation" role="menuitem" disabled>Resume Trajectory Generation</button>
                 <button id="status-button" role="menuitem" title="Open the generation status panel">Status</button>
                 <button id="generate-one" role="menuitem">Single Sample</button>
@@ -278,7 +279,7 @@
         <div id="generation-metrics" aria-live="off"></div>
         <div id="generation-detail" role="status" aria-live="polite"></div>
         <div class="stat-grid">
-          <div><b id="accepted-stat">0</b><small>ACCEPTED</small></div>
+          <div><b id="accepted-stat">0</b><small>CREATED</small></div>
           <div><b id="attempt-stat">0</b><small>ATTEMPTS</small></div>
         </div>
         <div class="two-buttons">
@@ -361,6 +362,26 @@
         </div>
       </form>
     </dialog>
+    <dialog id="validation-dialog" aria-labelledby="validation-title">
+      <div class="dialog-header">
+        <h2 id="validation-title">Validate Trajectory</h2>
+        <button id="close-validation" class="square" aria-label="Close validation">×</button>
+      </div>
+      <div class="validation-body">
+        <p>Review the saved trajectory against its original requirements and current guidelines. Validation is separate from content creation and never grants Ready approval.</p>
+        <label for="validation-endpoint">Validation endpoint</label>
+        <select id="validation-endpoint"></select>
+        <label class="check"><input id="validation-record" type="checkbox" checked /> Record the result as Validated or Rejected</label>
+        <progress id="validation-progress" max="1" value="0" aria-label="Trajectory validation progress"></progress>
+        <p id="validation-status" role="status">Ready to validate.</p>
+        <pre id="validation-findings"></pre>
+      </div>
+      <div class="dialog-footer">
+        <button id="cancel-validation" disabled>Cancel Validation</button>
+        <button id="resume-validation" hidden>Resume Validation</button>
+        <button id="start-validation" class="primary">Validate</button>
+      </div>
+    </dialog>
     <dialog id="settings-dialog">
       <div class="dialog-header">
         <div>
@@ -378,7 +399,7 @@
       <div class="config-tabs">
         <button class="active" data-config="endpoints">Endpoints</button
 
-        ><button data-config="automatic">Automatic mode</button>
+        ><button data-config="defaults">Generation Defaults</button>
         <button data-config="guidance">Custom Guidelines</button>
       </div>
       <div id="settings-errors" role="alert"></div>

@@ -30,11 +30,11 @@ async def test_batch_creates_searchable_candidates_and_keeps_model_metrics_local
     samples = list(app.state.dataset["samples"])
     assert len(samples) == 3
     assert len({s["id"] for s in samples}) == 3
-    assert all(s["metadata"]["validation_level"] == 1 for s in samples)
+    assert all(s["metadata"]["validation_level"] == 0 for s in samples)
     assert all(s["metadata"]["generation_batch"] == batch["id"] for s in samples)
     assert app.state.dataset.store.listing(query=batch["id"])[0] == 3
     assert app.state.dataset.store.listing(
-        query=f"@state:candidate @batch:{batch['id']}", limit=5
+        query=f"@state:pending @batch:{batch['id']}", limit=5
     )[0] == 3
     assert runner.status["model_requests"] < len(fake.messages)
 
@@ -42,7 +42,12 @@ async def test_batch_creates_searchable_candidates_and_keeps_model_metrics_local
 async def test_failed_candidates_do_not_fulfill_batch_target_and_attempts_are_bounded(
     compiler, tmp_path
 ):
-    app = app_for(tmp_path, compiler, ScenarioClient(valid=False))
+    class InvalidContent(ScenarioClient):
+        async def complete(self, endpoint, messages, tools=None):
+            if messages[0]['content'].startswith('Invent'):
+                return {'content': 'malformed generated content'}
+            return await super().complete(endpoint, messages, tools)
+    app = app_for(tmp_path, compiler, InvalidContent())
     app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 2
     runner = app.state.scenario_runner
     runner.registry.scenarios["user_problem"].flow.steps["validate"].max_repairs = 0
@@ -65,7 +70,7 @@ async def test_api_outage_pauses_batch_and_resume_finishes_remaining_samples(
         broken = True
 
         async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Validate") and self.broken:
+            if messages[0]["content"].startswith("Invent") and self.broken:
                 raise httpx.ConnectError("offline")
             return await super().complete(endpoint, messages, tools)
 
@@ -151,7 +156,7 @@ async def test_batch_keeps_shared_request_limit_between_samples(compiler, tmp_pa
             if messages[0]["content"].startswith("Invent"):
                 self.ideas += 1
             if (
-                messages[0]["content"].startswith("Validate ONLY factual correctness")
+                messages[0]["content"].startswith("Decide")
                 and self.ideas == 1
             ):
 

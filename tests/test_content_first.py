@@ -15,7 +15,7 @@ from trajectory_remix.storage import DatasetStore
 from trajectory_remix.training import query_batch
 from test_scenarios import app_for, finish, ScenarioClient
 
-EXAMPLES = Path(__file__).parents[1] / 'examples/scenarios'
+EXAMPLES = Path(__file__).parent / 'fixtures/retired-scenarios'
 
 
 class ByteChatTokenizer:
@@ -82,7 +82,7 @@ class ContentClient:
 def setup(tmp_path, compiler, client, *, mode='content-first'):
     app = app_for(tmp_path, compiler, client)
     runner = app.state.scenario_runner
-    assert runner.registry.listing()[0]['name'] == 'user_problem'
+    assert 'user_problem' in runner.registry.scenarios
     runner.registry.scenarios['content_first'].flow.generation_mode = mode
     config = copy.deepcopy(app.state.dataset['config'])
     config['endpoints'][0].update(inference_tokenizer='synthetic-byte-model', max_tokens=1024)
@@ -225,9 +225,9 @@ async def test_existing_mode_and_original_scenario_still_validate(compiler, tmp_
     app, runner = setup(tmp_path, compiler, fake, mode='existing')
     runner.start('content_first')
     await finish(runner)
-    assert any(m[0]['content'].startswith('Validate') for m in fake.messages)
-    assert app.state.dataset['samples'][0]['metadata']['validation_level'] == 1
-    assert len(app.state.dataset['samples'][0]['metadata']['generation_metrics']) == 6
+    assert not any(m[0]['content'].startswith('Validate') for m in fake.messages)
+    assert app.state.dataset['samples'][0]['metadata']['validation_level'] == 0
+    assert len(app.state.dataset['samples'][0]['metadata']['generation_metrics']) == 5
 
 
 async def test_exact_huggingface_template(tmp_path, monkeypatch):
@@ -239,7 +239,7 @@ async def test_exact_huggingface_template(tmp_path, monkeypatch):
     # The implementation is independently loaded so monkeypatch cannot mask it.
     import runpy
     loader = runpy.run_path(str(Path(module.__file__)))['inference_tokenizer']
-    fast = transformers.PreTrainedTokenizerFast(tokenizer_object=Tokenizer.from_file(str(EXAMPLES.parent / 'demo-tokenizer.json')))
+    fast = transformers.PreTrainedTokenizerFast(tokenizer_object=Tokenizer.from_file(str(Path(__file__).parents[1] / 'examples/demo-tokenizer.json')))
     fast.chat_template = "{% for m in messages %}{{ m['role'] }}:{{ m['content'] }}\n{% endfor %}{% if add_generation_prompt %}assistant:{% endif %}"
     fast.save_pretrained(tmp_path / 'model')
     loaded = loader(str(tmp_path / 'model'))
@@ -282,7 +282,7 @@ async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypa
             kwargs.setdefault('transport', httpx.MockTransport(respond))
             super().__init__(**kwargs)
 
-    monkeypatch.setattr('trajectory_remix.scenario_runner.httpx.AsyncClient', client)
+    monkeypatch.setattr('trajectory_remix.model_session.httpx.AsyncClient', client)
     app, runner = setup(tmp_path, compiler, None)
     config = copy.deepcopy(app.state.dataset['config'])
     config['endpoints'][0]['completion_limit_parameter'] = parameter
@@ -514,7 +514,7 @@ async def test_cancelled_native_stream_retains_partial_content(compiler, tmp_pat
             kwargs.setdefault('transport', httpx.MockTransport(respond))
             super().__init__(**kwargs)
 
-    monkeypatch.setattr('trajectory_remix.scenario_runner.httpx.AsyncClient', Intercepted)
+    monkeypatch.setattr('trajectory_remix.model_session.httpx.AsyncClient', Intercepted)
     app, runner = setup(tmp_path, compiler, None)
     runner.start('content_first')
     await asyncio.wait_for(entered.wait(), 5)
