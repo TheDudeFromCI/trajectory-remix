@@ -882,7 +882,7 @@ shared open-window attention, redundant file operations, evidence lifetimes
 throughout generation, and independent correctness checks. Zero compiler
 warnings do not establish these properties.
 
-After repairing a candidate, edits reset its previous review state. To sign off
+After repairing a candidate, edits clear previous evaluations while preserving its state. To sign off
 your own review, reread the repaired source, inspect compiler diagnostics and
 semantic correctness, then call:
 
@@ -898,7 +898,8 @@ responsibility. The tool records a self-reported reviewer label, summary,
 timestamp, reviewed revision, source hash and tokenizer/tool fingerprints in
 `metadata.evaluations`. It does not independently verify the agent's assessment
 or identity and does not invoke configured model endpoints. Subsequent content
-edits invalidate the sign-off; undo/redo includes it. It never marks Ready (3).
+edits invalidate the sign-off record while preserving the trajectory's state;
+undo/redo includes it. It never marks Ready (3).
 
 `query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
 (`all`/`any`), `offset`, and `limit`. Scalar filter operators are
