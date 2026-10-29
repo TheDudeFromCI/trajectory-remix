@@ -14,6 +14,13 @@
   changes, repair links, structured provenance/label editing and nested metadata
   preservation; the metrics panel and replay sidebar were also inspected in
   headless Chromium.
+  Follow-up checks exercise immediate MCP job replies during blocked compilation,
+  polling after the initiating client disconnects, duplicate-start coalescing,
+  cancellation/resume without recomputing completed sources, metadata-only cache
+  reuse versus changed speaker inputs, and bounded annotation-context packets
+  with definitions, custom guidance, actual event paths and explicit continuation
+  for large evidence. Legacy provenance and family/split policies are reported as
+  unresolved rather than invented.
 
 - Python tests run with `python -m pytest -q`. Install `.[mcp,test]` to also
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests

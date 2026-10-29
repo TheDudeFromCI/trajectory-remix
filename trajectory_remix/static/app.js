@@ -2989,7 +2989,8 @@ function showCoverageMetadata(metadata) {
   showObservedLabel(metadata);
 }
 
-let metricsData = null, metricsCalculating = false, metricsStop = false, metricsOffset = 0, metricsRequest = 0;
+let metricsData = null, metricsCalculating = false, metricsOffset = 0, metricsRequest = 0;
+let metricsJob = null, metricsJobTimer = null;
 const metricFormat = value => value == null ? "Insufficient support" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
 function metricBars(title, groups) {
   const card = node("section", "metric-card");
@@ -3083,6 +3084,9 @@ async function loadMetrics() {
     if (request !== metricsRequest) return;
     renderMetrics(data);
     await loadMetricIssues();
+    const job = await json("metrics/status");
+    renderMetricsJob(job);
+    if (metricsCalculating) scheduleMetricsJobPoll();
   } catch (error) {
     if (request === metricsRequest) $("metrics-status").textContent = error.message;
     throw error;
@@ -3091,7 +3095,7 @@ async function loadMetrics() {
 function setMetricsVisible(visible) {
   $("metrics-panel").hidden = !visible;
   $("toggle-metrics-panel").setAttribute("aria-checked", String(visible));
-  if (!visible) metricsStop = true;
+  if (!visible) clearTimeout(metricsJobTimer);
 }
 $("toggle-metrics-panel").onclick = action(async () => {
   closeMenus();
@@ -3106,22 +3110,46 @@ $("metrics-distribution").onchange = renderMetricDistribution;
 $("metrics-issue").onchange = action(async () => { metricsOffset = 0; await loadMetricIssues(); });
 $("metrics-issues-prev").onclick = action(async () => { metricsOffset = Math.max(0, metricsOffset - 10); await loadMetricIssues(); });
 $("metrics-issues-next").onclick = action(async () => { metricsOffset += 10; await loadMetricIssues(); });
-$("metrics-stop").onclick = () => { metricsStop = true; };
+function renderMetricsJob(job) {
+  metricsJob = job;
+  metricsCalculating = ["running", "stopping"].includes(job.status);
+  $("metrics-analyze").disabled = metricsCalculating;
+  $("metrics-stop").hidden = !metricsCalculating;
+  $("metrics-stop").disabled = job.status === "stopping";
+  $("metrics-progress").hidden = !metricsCalculating;
+  $("metrics-progress").max = Math.max(1, job.total || 0);
+  $("metrics-progress").value = job.processed || 0;
+  if (metricsCalculating) {
+    $("metrics-status").textContent = `${job.status === "stopping" ? "Stopping after current sample" : "Calculating numeric cache"}: ${job.processed}/${job.total} · ${job.elapsed_seconds}s${job.current_sample_id ? " · " + job.current_sample_id : ""}. Work continues if this panel closes.`;
+  } else if (job.status === "failed") {
+    $("metrics-status").textContent = "Numeric cache job failed: " + job.error + ". Completed samples remain cached; retry resumes remaining work.";
+  } else if (job.status === "cancelled") {
+    $("metrics-status").textContent += ` Calculation stopped after ${job.processed} samples; resume to finish the remaining sources.`;
+  }
+}
+function scheduleMetricsJobPoll() {
+  clearTimeout(metricsJobTimer);
+  if ($("metrics-panel").hidden || !metricsCalculating) return;
+  metricsJobTimer = setTimeout(action(async () => {
+    try {
+      const job = await json("metrics/status");
+      renderMetricsJob(job);
+      if (!metricsCalculating) await loadMetrics();
+    } catch (error) {
+      $("metrics-status").textContent = "Could not read cache progress; reconnecting to the existing job…";
+    }
+    scheduleMetricsJobPoll();
+  }), 1000);
+}
+$("metrics-stop").onclick = action(async () => {
+  renderMetricsJob(await json("metrics/cancel", "POST", {job_id: metricsJob?.job_id}));
+  scheduleMetricsJobPoll();
+});
 $("metrics-analyze").onclick = action(async () => {
   if (metricsCalculating) return;
-  metricsCalculating = true; metricsStop = false;
-  $("metrics-analyze").disabled = true; $("metrics-stop").hidden = false;
-  try {
-    let result;
-    do {
-      $("metrics-status").textContent = "Calculating up to 10 pending sources; other editing remains available…";
-      result = await json("metrics/refresh", "POST", {limit: 10});
-      await loadMetrics();
-    } while (!metricsStop && result.processed === 10);
-  } finally {
-    metricsCalculating = false;
-    $("metrics-analyze").disabled = false; $("metrics-stop").hidden = true;
-  }
+  renderMetricsJob(await json("metrics/refresh", "POST", {}));
+  if (metricsCalculating) scheduleMetricsJobPoll();
+  else await loadMetrics();
 });
 
 await action(() => refresh(true))();

@@ -125,7 +125,7 @@
               <summary>Dataset coverage &amp; provenance</summary>
               <div id="coverage-metadata-alerts" class="metadata-alerts" role="status"></div>
               <div id="coverage-metadata-fields"></div>
-              <small>Unknown values stay unknown. Requested tags do not establish observed capabilities.</small>
+              <small>Unknown values stay unknown. Family IDs, splits and provenance need recorded history or a dataset policy. Requested tags do not establish observed capabilities.</small>
             </details>
             <details id="observed-label-details">
               <summary>Observed labels &amp; evidence</summary>
@@ -283,9 +283,10 @@
         </select></label>
         <button id="metrics-refresh">Refresh graphs</button>
         <button id="metrics-analyze" class="primary">Calculate pending metrics</button>
-        <button id="metrics-stop" hidden>Stop after current batch</button>
+        <button id="metrics-stop" hidden>Stop after current sample</button>
       </div>
       <p id="metrics-status" role="status" aria-live="polite"></p>
+      <progress id="metrics-progress" value="0" max="1" aria-label="Numeric cache progress" hidden></progress>
       <div id="metrics-summary" class="metrics-summary"></div>
       <p class="hint">These are saved source measurements. Raw loss weights precede trainer normalization; ticks are not seconds.
         Compiler errors and unknown annotations are reported separately. Tool failures can belong to correct demonstrations.</p>

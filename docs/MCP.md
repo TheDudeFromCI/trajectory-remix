@@ -950,3 +950,9 @@ The shared commands are `get_dataset_metrics`, `refresh_dataset_metrics`,
 `get_dataset_metric_distribution` and `query_dataset_metrics`; they work over both
 stdio and Streamable HTTP without starting generation. Prefer
 `population="accepted_train_originals"` for observer gap analysis.
+Use `population="all"` when finding legacy examples missing split/original metadata.
+`get_metric_annotation_context` bundles sample evidence, field/label definitions
+and dataset/scenario guidance for backfilling annotations. Cache rebuilds return
+immediately with a job ID: poll `get_dataset_metrics_status` and use
+`cancel_dataset_metrics_refresh` to stop after the current sample. Retrying joins
+the running job, including after the initiating MCP client disconnects.

@@ -67,6 +67,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             finally:
                 expiry.cancel()
                 await asyncio.gather(expiry, return_exceptions=True)
+                await commands.metrics_refresh.close()
                 if migration.task is not None:
                     await asyncio.shield(migration.task)
                 try:
@@ -274,6 +275,14 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def metrics_refresh(request: Request):
         return await commands.call("refresh_dataset_metrics", await body(request))
 
+    @app.get("/api/metrics/status")
+    async def metrics_status(job_id: str | None = None):
+        return await commands.call("get_dataset_metrics_status", {"job_id": job_id})
+
+    @app.post("/api/metrics/cancel")
+    async def metrics_cancel(request: Request):
+        return await commands.call("cancel_dataset_metrics_refresh", await body(request))
+
     @app.post("/api/metrics/distribution")
     async def metrics_distribution(request: Request):
         return await commands.call("get_dataset_metric_distribution", await body(request))
@@ -281,6 +290,10 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/metrics/query")
     async def metrics_query(request: Request):
         return await commands.call("query_dataset_metrics", await body(request))
+
+    @app.post("/api/metrics/annotation-context")
+    async def metrics_annotation_context(request: Request):
+        return await commands.call("get_metric_annotation_context", await body(request))
 
     @app.get("/api/mcp/tools")
     async def mcp_tools():

@@ -61,6 +61,9 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "refresh_dataset_metrics",
                     "get_dataset_metric_distribution",
                     "query_dataset_metrics",
+                    "get_dataset_metrics_status",
+                    "cancel_dataset_metrics_refresh",
+                    "get_metric_annotation_context",
                 } <= set(tools)
                 assert tools["get_dataset_metrics"].annotations.readOnlyHint
                 metric_guide = await session.call_tool("get_authoring_guide", {"topic": "metrics"})
@@ -130,6 +133,9 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert not created.isError
                 assert created.structuredContent["sample_id"] == "from-mcp"
                 assert json.loads(created.content[0].text) == created.structuredContent
+                annotation = await session.call_tool("get_metric_annotation_context", {"sample_id": "from-mcp"})
+                assert not annotation.isError and annotation.structuredContent["events"]
+                assert "provenance" in annotation.structuredContent["unrecoverable_without_history_or_policy"]
                 result = await session.call_tool(
                     "get_trajectory", {"sample_id": "from-mcp"}
                 )

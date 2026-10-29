@@ -7,6 +7,7 @@ Semantic labels are observations supplied by reviewers, never inferred from tags
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 from collections import Counter, defaultdict
@@ -87,9 +88,15 @@ def cache_key(compiler):
 def implementation_hash():
     root = Path(__file__).parent
     digest = hashlib.sha256()
-    for path in sorted([*root.glob("*.py"), *root.glob("tools/*.py"), root / "coverage_launch.yaml"]):
+    # Context/transport/UI changes do not change compiled numeric records.
+    # Hash execution dependencies and the actual calculation definitions.
+    for path in sorted([*(root / name for name in ("compiler.py", "sandbox_replay.py", "dataset.py", "storage.py", "coverage_launch.yaml")), *root.glob("tools/*.py")]):
         digest.update(str(path.relative_to(root)).encode())
         digest.update(path.read_bytes())
+    for function in (measure, ratio, execution_hash):
+        digest.update(inspect.getsource(function).encode())
+    digest.update(json.dumps(REGISTRY, sort_keys=True).encode())
+    digest.update(b"numeric-cache-v2")
     return digest.hexdigest()
 
 
@@ -183,39 +190,76 @@ def measure(plan, compiler):
     }
 
 
-def refresh(store, compiler, limit=25):
+def pending(store, compiler):
+    with store.connect() as db:
+        return db.execute("""SELECT count(*) FROM samples s LEFT JOIN trajectory_metrics c
+            ON c.trajectory_uuid=s.uuid WHERE c.source_hash IS NOT s.content_hash OR c.cache_key IS NOT ?""",
+                          (cache_key(compiler),)).fetchone()[0]
+
+
+def execution_hash(source):
+    """Coverage annotations and review bookkeeping do not change execution."""
+    value = dict(source)
+    metadata = value.get("metadata")
+    if isinstance(metadata, dict):
+        metadata = {k: v for k, v in metadata.items() if k not in
+                    {*REQUIRED, "observed_labels", "validation_level", "evaluations", "approval"}}
+        if metadata:
+            value["metadata"] = metadata
+        else:
+            value.pop("metadata", None)
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def refresh(store, compiler, limit=25, *, cancel=None, progress=None):
     """Compile one source at a time. Never hold a project write lock to compile."""
-    key, processed = cache_key(compiler), 0
-    # Keep a stable read snapshot. Separate WAL connections publish cache rows
-    # only if the source still matches, so concurrent edits cannot poison caches.
-    with store.connect() as snapshot:
-        snapshot.execute("BEGIN")
-        revision = snapshot.execute("SELECT revision FROM project").fetchone()[0]
-        rows = snapshot.execute("""
-            SELECT s.uuid,s.content_hash FROM samples s
+    key, processed, reused, stored, position = cache_key(compiler), 0, 0, 0, -1
+    revision = store.info()[0]
+    while processed < limit and not (cancel and cancel.is_set()):
+        # Short read transactions release WAL snapshots between samples. A long
+        # compilation never holds a reader open across the whole project.
+        with store.connect() as snapshot:
+            snapshot.execute("BEGIN")
+            row = snapshot.execute("""
+            SELECT s.uuid,s.content_hash,s.position,s.sample_id,c.cache_key,c.metrics,c.error FROM samples s
             LEFT JOIN trajectory_metrics c ON c.trajectory_uuid=s.uuid
-            WHERE c.source_hash IS NOT s.content_hash OR c.cache_key IS NOT ?
-            ORDER BY s.position LIMIT ?
-        """, (key, limit))
-        for ident, digest in rows:
+            WHERE s.position>? AND (c.source_hash IS NOT s.content_hash OR c.cache_key IS NOT ?)
+            ORDER BY s.position LIMIT 1
+            """, (position, key)).fetchone()
+            if row is None:
+                break
+            ident, digest, position, sample_id, old_key, old_metrics, old_error = row
             raw = snapshot.execute("SELECT source FROM samples WHERE uuid=?", (ident,)).fetchone()[0]
-            try:
-                source = json.loads(raw)
+        if progress:
+            progress(processed, sample_id, ident)
+        source = json.loads(raw)
+        signature = execution_hash(source)
+        previous = json.loads(old_metrics) if old_metrics and old_key == key else {}
+        try:
+            if previous.get("execution_hash") == signature:
+                metrics, error = previous, old_error
+                reused += 1
+            else:
                 metrics = measure(compiler.compile(source, record_dependencies=False), compiler)
                 normalized = {k: v for k, v in source.items() if k not in ("id", "uuid", "metadata")}
                 metrics["normalized_replay_hash"] = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
                 error = None
-            except CompileError as problem:
-                metrics, error = {}, json.dumps(problem.diagnostic())
-            with store.connect() as db:
-                db.execute("""
+        except CompileError as problem:
+            metrics, error = {}, json.dumps(problem.diagnostic())
+        metrics["execution_hash"] = signature
+        with store.connect() as db:
+            changed = db.execute("""
                     INSERT INTO trajectory_metrics
                     SELECT uuid,content_hash,?,?,? FROM samples WHERE uuid=? AND content_hash=?
                     ON CONFLICT(trajectory_uuid) DO UPDATE SET source_hash=excluded.source_hash,
                         cache_key=excluded.cache_key,metrics=excluded.metrics,error=excluded.error
-                """, (key, json.dumps(metrics, allow_nan=False), error, ident, digest))
-            processed += 1
-    return {"revision": revision, "processed": processed, "cache_key": key}
+                """, (key, json.dumps(metrics, allow_nan=False), error, ident, digest)).rowcount
+            stored += changed
+        processed += 1
+        if progress:
+            progress(processed, None, None)
+    return {"revision": revision, "processed": processed, "stored": stored,
+            "reused": reused, "cache_key": key, "remaining": pending(store, compiler)}
 
 
 def label_status(metadata, selector, metrics=None):
@@ -311,6 +355,25 @@ class Moments:
         return math.sqrt(max(0, self.m2 / self.n)) if self.n else None
 
 
+def numeric_projection(db):
+    """Extract numeric values once, then reuse a disk-backed sorted index.
+
+    Repeated percentile/bin queries must not repeatedly decode every large
+    per-source JSON blob or sort the same values on every percentile request.
+    """
+    if db.execute("SELECT 1 FROM sqlite_temp_master WHERE name='metric_values'").fetchone():
+        return
+    db.execute("CREATE TEMP TABLE metric_values(metric TEXT NOT NULL,value REAL NOT NULL)")
+    placeholders = ",".join("?" for _ in REGISTRY)
+    db.execute(f"""INSERT INTO metric_values
+        SELECT v.key,v.atom FROM metric_population p,json_each(p.metrics) v
+        WHERE p.error IS NULL AND v.key IN ({placeholders}) AND v.type IN ('integer','real')""", list(REGISTRY))
+    for name in ("window_lengths", "idle_runs", "tool_latency_ticks"):
+        db.execute(f"""INSERT INTO metric_values SELECT ?,v.atom FROM metric_population p,
+            json_each(p.metrics,'$.{name}') v WHERE p.error IS NULL AND v.type IN ('integer','real')""", (name,))
+    db.execute("CREATE INDEX metric_value_lookup ON metric_values(metric,value)")
+
+
 def distribution(db, metric, edges=None):
     if metric not in REGISTRY and metric not in ("window_lengths", "idle_runs", "tool_latency_ticks"):
         raise ValueError("Unknown numeric metric")
@@ -319,13 +382,13 @@ def distribution(db, metric, edges=None):
     if (not 1 <= len(edges) <= 64 or any(type(v) not in (int, float) or not math.isfinite(v) for v in edges)
             or any(a >= b for a, b in zip(edges, edges[1:]))):
         raise ValueError("Histogram edges must be 1–64 finite, strictly increasing numbers")
+    numeric_projection(db)
     # Metric is allowlisted above; no caller-controlled SQL identifiers or paths.
     if metric in ("window_lengths", "idle_runs", "tool_latency_ticks"):
-        source = f"SELECT v.value AS x FROM metric_population p,json_each(p.metrics,'$.{metric}') v WHERE p.error IS NULL"
         population = "pooled_windows" if metric == "window_lengths" else "pooled_runs" if metric == "idle_runs" else "pooled_calls"
     else:
-        source = f"SELECT json_extract(metrics,'$.{metric}') AS x FROM metric_population WHERE error IS NULL"
         population = "source_samples"
+    source = f"SELECT value AS x FROM metric_values WHERE metric='{metric}'"
     db.create_aggregate("metric_stddev", 1, Moments)
     count, low, high, mean, stddev, total = db.execute(
         f"SELECT count(x),min(x),max(x),avg(x),metric_stddev(x),sum(x) FROM ({source})"
@@ -458,7 +521,9 @@ def overview(store, compiler, population="all"):
                 {"metric": "generation_cost", "reason": "Historical samples do not consistently retain per-request counters, retries, costs and wall times"},
             ],
             "metadata_contract": {"required": list(REQUIRED), "domains": DOMAINS, "outcomes": OUTCOMES,
-                                  "semantic_selectors": semantic_selectors()},
+                                  "semantic_selectors": semantic_selectors(),
+                                  "annotation_context_tool": "get_metric_annotation_context",
+                                  "instruction": "Request sample-specific context before annotation; provenance, split and lineage may require owner-supplied history or policy."},
         }
 
 
@@ -505,4 +570,6 @@ def query_samples(store, compiler, population="all", issue=None, metric=None, mi
                             "missing_metadata": json.loads(row[5]),
                             "unknown_labels": [s for s in semantic_selectors() if compiled is None or label_status(metadata, s, compiled) is None],
                             "index": row[7]})
+            if issue in ("missing_metadata", "unknown_labels"):
+                samples[-1]["annotation_context"] = {"name": "get_metric_annotation_context", "arguments": {"sample_id": row[1]}}
         return {"revision": revision, "population": population, "total": total, "offset": offset, "limit": limit, "samples": samples}

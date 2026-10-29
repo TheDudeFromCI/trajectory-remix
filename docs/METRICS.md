@@ -1,9 +1,13 @@
 # Dataset metrics
 
 Open **View → Dataset Metrics**. Choose a source population and press **Calculate
-pending metrics** for a first pass. Compilation runs in bounded batches outside
-the server event loop. **Stop after current batch** pauses further work. Refreshing
+pending metrics** for a first pass. Compilation runs as a server-owned background
+job outside the server event loop. **Stop after current sample** pauses further work. Refreshing
 graphs reuses cached values; browsing and ordinary startup do not calculate them.
+The initiating request returns immediately, with pollable processed/total counts,
+elapsed time and current sample. Work survives a disconnected MCP client or closed
+panel; repeated starts join the same active job. After cancellation or server
+restart, another start resumes from completed per-source caches.
 
 Graphs cover primary domains, terminal outcomes, same-tick model concurrency,
 external streaming activity, raw loss allocation, tool presence and window
@@ -25,9 +29,20 @@ JSON/JSONL imports and exports. No metadata is fabricated during database upgrad
 The [MCP metrics guide](../trajectory_remix/guides/metrics.md) documents the exact
 metadata contract, vocabulary and observer query workflow. Both stdio and
 Streamable HTTP expose `get_dataset_metrics`, `refresh_dataset_metrics`,
-`get_dataset_metric_distribution` and `query_dataset_metrics`; the dashboard REST
+`get_dataset_metric_distribution`, `query_dataset_metrics`,
+`get_dataset_metrics_status`, `cancel_dataset_metrics_refresh` and
+`get_metric_annotation_context`; the dashboard REST
 routes call the same validated command handlers. Agents can request the guide
 with `get_authoring_guide(topic="metrics")`.
+
+For old sources without coverage fields, query the **all** population first.
+`get_metric_annotation_context` prepares the definitions, existing annotations,
+paginated trace evidence and dataset/scenario guidance in one bounded response.
+It requires no numeric compilation. Explicitly marked excerpts provide complete
+source/guidance continuation commands. Trace review can support domain/outcome
+and behavior labels; absent historical provenance or family/split policy remains
+unresolved until supplied by the owner or recorded lineage. Alerts are not cleared
+by fabricated history or blanket train/original assignments.
 
 ## Interpretation and limits
 
@@ -83,4 +98,9 @@ implementation reuses metrics. Source edits/imports/undo/redo and tokenizer
 migration automatically hide stale values through hash matching. A background
 calculation only publishes its result if the source hash still matches; no project
 write lock is held during compilation, and metric reads never pin tool schemas.
+Read snapshots are released between samples. Coverage annotation and review-only
+edits can reuse numeric execution records; changes to executable source, speaker
+names, clock, defaults, tokenizer or tools cannot. Numeric projections and their
+sorted index are built once per query snapshot, avoiding repeated JSON decoding
+and sorting for every percentile and histogram.
 The cache is derived data and can be discarded without losing source information.

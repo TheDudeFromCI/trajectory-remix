@@ -160,7 +160,7 @@ hash, so changed requirements require a fresh review.
 
 **View → Dataset Metrics** opens source coverage graphs, compiler-derived token,
 window, concurrency and timing statistics, and actionable annotation alerts.
-Calculate pending values in bounded batches; use **Open metadata** to repair
+Calculate pending values in a background job; use **Open metadata** to repair
 coverage/provenance and evidence-bearing labels in replay. Both MCP transports
 expose the same metrics queries. See [dataset metrics](docs/METRICS.md) for
 populations, compatible caching, metadata fields and measurements requiring logs.

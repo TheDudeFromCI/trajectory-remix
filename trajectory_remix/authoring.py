@@ -30,6 +30,8 @@ from .metadata import MetadataFilter
 from .metadata import counts as metadata_counts
 from .metadata import query as query_metadata
 from . import metrics as dataset_metrics
+from .metric_jobs import MetricsRefresh
+from .metric_annotations import context as metric_annotation_context
 from .preview import PreviewCache
 from .review import EDIT_SCHEMA, apply_edits, checklist_report
 from .trajectory_review import (
@@ -37,7 +39,7 @@ from .trajectory_review import (
 )
 from .guidance import GUIDE_TOPICS, GUIDE_TITLES, checklist_markdown, custom_documents
 from .search import SearchQuery
-from .storage import SampleDraft, SQLiteSamples, StorageConflict
+from .storage import DatasetStore, SampleDraft, SQLiteSamples, StorageConflict
 from .tool_sessions import ToolSessionError, ToolSessions
 from .tools import (
     WindowProperties,
@@ -134,7 +136,7 @@ class TrajectoryCommands:
         self.edit_revision = ContextVar("trajectory_revision", default=None)
         self.tool_sessions = ToolSessions(registry=compiler.tools)
         self.previews = PreviewCache(compiler)
-        self.metrics_lock = asyncio.Lock()
+        self.metrics_refresh = MetricsRefresh(getattr(state, "store", None))
         self.commands = {
             name: getattr(self, name)
             for name in dir(type(self))
@@ -439,23 +441,45 @@ class TrajectoryCommands:
         coverage rules; this excludes final-test data. Ready (validation_level=3)
         is the existing project's acceptance state. Source counts, raw target
         weights and source concurrency do not represent exports or trainer exposure.
-        Pending caches are explicit; call refresh_dataset_metrics until processed=0.
+        Pending caches are explicit; start refresh_dataset_metrics, then poll
+        get_dataset_metrics_status until status is completed/cancelled/failed.
         Semantic coverage requires reviewed, evidence-bearing observed_labels;
         requested tags never establish correct demonstrations. No generation starts.
         """
         return await asyncio.to_thread(dataset_metrics.overview, self.state.store, self.compiler, population)
 
     @command()
-    async def refresh_dataset_metrics(self, limit: Annotated[int, Field(ge=1, le=100)] = 25):
-        """Populate disposable metrics caches for at most limit stale samples.
+    def refresh_dataset_metrics(self, limit: Annotated[int, Field(ge=1, le=100)] | None = None):
+        """Start or join a background numeric-cache job and return immediately.
 
-        Compiles one sample at a time in a worker, without editing source, pinning
-        tool dependencies or changing project revisions. Repeat until processed=0.
-        Edits, tokenizer/tool/compiler/metric changes invalidate cached results.
-        Compile errors are cached and reported rather than silently omitted.
+        Omit limit for all pending sources; explicit limit bounds this job to at
+        most 100. Poll get_dataset_metrics_status(job_id=...) every 1–2 seconds
+        until status is completed/cancelled/failed. A retry joins the running job;
+        transport disconnects do not cancel it. cancel_dataset_metrics_refresh
+        stops after the current sample. Completed source caches survive restarts.
+        No source edits, dependency pinning or project revision changes occur.
         """
-        async with self.metrics_lock:
-            return await asyncio.to_thread(dataset_metrics.refresh, self.state.store, self.compiler, limit)
+        return self.metrics_refresh.start(self.compiler, limit)
+
+    @command()
+    def get_dataset_metrics_status(self, job_id: str | None = None):
+        """Poll numeric-cache job progress without waiting for compilation.
+
+        Returns status, job_id, processed/total, current sample, elapsed time,
+        remaining count after completion, and any failure. Poll every 1–2 seconds.
+        A stopping job finishes its current sample; saved results can be resumed.
+        """
+        return self.metrics_refresh.snapshot(job_id)
+
+    @command()
+    def cancel_dataset_metrics_refresh(self, job_id: str | None = None):
+        """Request numeric-cache cancellation after the current sample, returning immediately.
+
+        Does not cancel generation or discard already cached results. Poll
+        get_dataset_metrics_status until cancelled; refresh_dataset_metrics resumes
+        the remaining sources later. Pass job_id to avoid cancelling another job.
+        """
+        return self.metrics_refresh.cancel(job_id)
 
     @command()
     async def get_dataset_metric_distribution(
@@ -493,6 +517,43 @@ class TrajectoryCommands:
         """
         return await asyncio.to_thread(dataset_metrics.query_samples, self.state.store, self.compiler,
                                        population, issue, metric, minimum, maximum, offset, limit)
+
+    @command()
+    def get_metric_annotation_context(
+        self, sample_id: str, event_offset: Nonnegative = 0,
+        event_limit: Annotated[int, Field(ge=1, le=200)] = 50,
+        max_chars: Annotated[int, Field(ge=24000, le=120000)] = 40000,
+    ):
+        """Prepare a metadata review with definitions, trace evidence and dataset/scenario guidance.
+
+        Call this before filling missing metadata or observed labels on legacy
+        examples. Includes exact vocabulary, per-field evidence requirements,
+        existing/requested labels, event paths, current custom guidance and the
+        saved scenario contract. No compilation, cache rebuild or model calls.
+        Excerpts are explicitly marked and provide continuation tools; read every
+        page/excerpt before asserting absence/correctness. Missing historical
+        provenance, split policy and family lineage cannot be invented from text.
+        Report those unresolved fields rather than fabricating values to clear alerts.
+        Use update_trajectory_metadata with expected_revision for reviewed repairs.
+        """
+        revision = self.state["revision"]
+        sample = self._find(sample_id)[1]
+        try:
+            guidance = self.get_guidance(sample_id=sample_id)
+        except CommandError as error:
+            guidance = {"documents": custom_documents(self.state["config"]),
+                        "error": {"code": error.code, "detail": str(error)}}
+        result = metric_annotation_context(sample, revision, guidance,
+                    self.get_authoring_guide("metrics")["content"], offset=event_offset,
+                    limit=event_limit, max_chars=max_chars)
+        if "error" in guidance:
+            result["guidance"]["error"] = guidance["error"]
+        result["special_tokens"] = self.compiler.special
+        result["content_hash"] = DatasetStore.row(sample)[-1]
+        result["expected_revision"] = revision
+        if revision != self.state["revision"]:
+            raise CommandError("Dataset changed; request annotation context again", "conflict")
+        return result
 
     @command()
     def get_trajectory(self, sample_id: str):

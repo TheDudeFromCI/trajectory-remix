@@ -236,23 +236,124 @@ async def test_rest_mcp_validation_edit_undo_and_nonblocking_cache_refresh(studi
         assert release.wait(5)
         return compile_original(*args, **kwargs)
     monkeypatch.setattr(commands.compiler, "compile", blocked_compile)
-    refresh = asyncio.create_task(client.post("/api/metrics/refresh", json={"limit": 1}))
+    response = await asyncio.wait_for(client.post("/api/metrics/refresh", json={"limit": 1}), 1)
+    assert response.status_code == 200 and response.json()["status"] == "running"
+    job_id = response.json()["job_id"]
     assert await asyncio.to_thread(started.wait, 3)
     try:
         assert (await asyncio.wait_for(client.get("/api/state"), 1)).status_code == 200
+        status = await asyncio.wait_for(client.get("/api/metrics/status"), 1)
+        assert status.json()["job_id"] == job_id and status.json()["status"] == "running"
+        assert (await client.post("/api/metrics/refresh", json={})).json()["job_id"] == job_id
         source = (await client.get("/api/samples/0")).json()
         source["metadata"] = metadata()
         assert (await client.put("/api/samples/0", json={"sample": source})).status_code == 200
     finally:
         release.set()
-    assert (await refresh).status_code == 200
+    await asyncio.wait_for(app.state.commands.metrics_refresh.task, 5)
     # The old in-flight result must not be published for the edited source.
     assert (await client.post("/api/metrics", json={})).json()["summary"]["pending"] == 1
     monkeypatch.setattr(commands.compiler, "compile", compile_original)
     assert (await client.post("/api/metrics/refresh", json={})).status_code == 200
+    await asyncio.wait_for(app.state.commands.metrics_refresh.task, 5)
     overview = (await client.post("/api/metrics", json={})).json()
     assert overview["summary"]["samples_missing_metadata"] == 0
     mcp = await client.post("/api/mcp/call", json={"name": "get_dataset_metrics", "arguments": {}})
     assert mcp.json() == overview
     assert (await client.post("/api/mcp/call", json={"name": "undo_edits", "arguments": {}})).status_code == 200
     assert (await client.post("/api/metrics", json={})).json()["summary"]["samples_missing_metadata"] == 1
+
+
+async def test_job_cancel_resume_and_retry_do_not_duplicate_work(studio, monkeypatch):
+    app, client = studio
+    commands, store = app.state.commands, app.state.dataset.store
+    source = store.samples[0]
+    store.samples.append({**source, "id": "second", "uuid": "2957d8e5-aa40-4260-9f93-48a778d3fd5a"})
+    started, release = threading.Event(), threading.Event()
+    compile_original, calls = commands.compiler.compile, []
+    def slow(*args, **kwargs):
+        calls.append(args[0]["id"])
+        started.set()
+        assert release.wait(5)
+        return compile_original(*args, **kwargs)
+    monkeypatch.setattr(commands.compiler, "compile", slow)
+    import httpx
+    # The initiating MCP bridge disconnects while work remains blocked; a new
+    # client must still see and join the same backend-owned job.
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://testserver",
+                                 headers={"X-Remix-Token": app.state.csrf}) as initiating:
+        start_response = await asyncio.wait_for(initiating.post("/api/mcp/call", json={"name": "refresh_dataset_metrics", "arguments": {}}), 1)
+        started_job = start_response.json()
+    assert await asyncio.to_thread(started.wait, 2)
+    for _ in range(2):
+        retry = await asyncio.wait_for(client.post("/api/mcp/call", json={"name": "refresh_dataset_metrics", "arguments": {}}), 1)
+        assert retry.json()["job_id"] == started_job["job_id"]
+    cancelled = await client.post("/api/metrics/cancel", json={"job_id": started_job["job_id"]})
+    assert cancelled.json()["status"] == "stopping"
+    release.set()
+    await asyncio.wait_for(commands.metrics_refresh.task, 5)
+    status = (await client.get("/api/metrics/status")).json()
+    assert status["status"] == "cancelled" and status["processed"] == 1 and status["remaining"] == 1
+    assert len(calls) == 1
+    resumed = (await client.post("/api/metrics/refresh", json={})).json()
+    assert resumed["job_id"] != started_job["job_id"]
+    await asyncio.wait_for(commands.metrics_refresh.task, 5)
+    assert commands.get_dataset_metrics_status()["remaining"] == 0
+    assert len(calls) == 2  # the completed first source was not compiled again
+    assert (await client.get("/api/metrics/status", params={"job_id": started_job["job_id"]})).status_code == 422
+
+
+def test_annotation_only_changes_reuse_numeric_execution_but_speaker_changes_do_not(store, compiler, sample, monkeypatch):
+    store.samples.append(sample)
+    metrics.refresh(store, compiler)
+    source = store.samples[0]
+    source["metadata"] = metadata(observed_labels={"capability.delegation": label()})
+    store.samples[0] = source
+    original_compile = compiler.compile
+    monkeypatch.setattr(compiler, "compile", lambda *_a, **_k: pytest.fail("Coverage-only edits must not require compilation"))
+    assert metrics.refresh(store, compiler)["reused"] == 1
+    source["metadata"]["agent_name"] = "New speaker"
+    store.samples[0] = source
+    calls = []
+    def compiled(*args, **kwargs):
+        calls.append(True)
+        return original_compile(*args, **kwargs)
+    monkeypatch.setattr(compiler, "compile", compiled)
+    assert metrics.refresh(store, compiler)["reused"] == 0
+    assert calls
+
+
+async def test_annotation_context_bundles_definitions_evidence_and_custom_guidance_without_compiling(studio, monkeypatch):
+    app, client = studio
+    config = copy.deepcopy(app.state.dataset["config"])
+    config["review_guidance"] = {"guide": "Do not assign splits without the owner's family grouping policy."}
+    app.state.dataset.set_config(config)
+    before = app.state.dataset["revision"]
+    monkeypatch.setattr(app.state.commands.compiler, "compile", lambda *_a, **_k: pytest.fail("Context must not rebuild numeric caches"))
+    response = await client.post("/api/mcp/call", json={"name": "get_metric_annotation_context", "arguments": {"sample_id": "test"}})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["source_complete"] and result["next_event_offset"] is None
+    assert result["events"][0]["path"] == "replay[0][0]"
+    assert "scenario_family_id" in result["field_definitions"] and "software" in result["field_definitions"]["primary_domain"]["values"]
+    assert "capability.cross_window_synthesis" in result["label_definitions"]
+    assert set(result["unrecoverable_without_history_or_policy"]) >= {"split", "is_original", "scenario_family_id", "provenance"}
+    assert any("grouping policy" in d.get("content", "") for d in result["guidance"]["documents"])
+    assert result["expected_revision"] == before == app.state.dataset["revision"]
+    issue = (await client.post("/api/metrics/query", json={"issue": "missing_metadata"})).json()["samples"][0]
+    assert issue["annotation_context"]["name"] == "get_metric_annotation_context"
+
+
+async def test_annotation_context_marks_large_evidence_excerpts_and_pages_explicitly(studio):
+    app, client = studio
+    source = (await client.get("/api/samples/0")).json()
+    source["replay"]["1"] = [{"op": "append", "source": "user", "window": "a", "content": "Context " * 20000}]
+    assert (await client.put("/api/samples/0", json={"sample": source})).status_code == 200
+    first = (await client.post("/api/metrics/annotation-context", json={"sample_id": "test", "event_limit": 1, "max_chars": 24000})).json()
+    assert first["next_event_offset"] == 1 and not first["source_complete"]
+    assert len(json.dumps(first, ensure_ascii=False)) <= 24000
+    second = (await client.post("/api/metrics/annotation-context", json={"sample_id": "test", "event_offset": 2, "max_chars": 24000})).json()
+    assert second["next_event_offset"] is None and not second["source_complete"]
+    assert second["events"][0]["truncated"]
+    assert second["events"][0]["continuation"]["name"] == "get_event"
+    assert len(json.dumps(second, ensure_ascii=False)) <= 24000

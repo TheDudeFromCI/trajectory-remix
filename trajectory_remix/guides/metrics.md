@@ -7,11 +7,15 @@ Use `development` for development analysis. Avoid final-test content/results in
 observer work. `all` is an explicitly labeled inventory of all source samples,
 including unfinished and rejected samples; it is not the accepted denominator.
 
-Call `refresh_dataset_metrics(limit=25)` until `processed=0` to fill missing
-compiler caches. It performs no generation, source edits, state changes, or tool
-dependency pinning. Each call handles at most 100 sources, one at a time in a
-worker. Stop between calls. Query results show pending calculations and errors;
-missing measurements never masquerade as zero.
+Call `refresh_dataset_metrics()` to start or join a server-owned background job.
+It returns immediately with `job_id`; poll `get_dataset_metrics_status(job_id=...)`
+every 1–2 seconds until status is completed, cancelled or failed. Repeated start
+calls join a running job, and an MCP timeout/disconnect does not stop it. Omit
+limit for all pending sources, or pass `limit=25` to bound one job. Cancellation
+uses `cancel_dataset_metrics_refresh(job_id=...)` and finishes the current sample.
+Retry resumes remaining sources and reuses saved caches; no source edits, project
+revision changes or tool dependency pinning occur. Inspect a failed job's error;
+do not keep blindly restarting it. Missing measurements never masquerade as zero.
 
 Use `get_dataset_metric_distribution(metric="peak_generators", edges=[0,1,2,3,4])`
 to inspect bins, including empty bins, and summary statistics. `peak_generators`
@@ -26,6 +30,35 @@ Use `issue="missing_metadata"`, `"unknown_labels"`, `"compile_error"` or
 `"pending"` to page issues. Results contain stable UUIDs, source hashes and
 dataset revisions. Read source only for the selected samples, using their `id`
 with `get_trajectory`.
+
+## Annotating existing examples
+
+Start with `query_dataset_metrics(population="all", issue="missing_metadata")`.
+Starting with accepted_train_originals hides legacy sources lacking split/original
+assignments. For each selected sample call
+`get_metric_annotation_context(sample_id=...)`. This automatically supplies the
+metric guide, exact field vocabulary, label definitions, existing annotations,
+trace events with evidence paths, current custom dataset/scenario guidance and
+saved review contracts. It does not compile or rebuild the numeric cache.
+
+Read every event page using `next_event_offset` until it is null. Excerpts are
+explicitly marked and include commands for the complete event or guidance. An
+excerpt or one partial page cannot establish absence or correct demonstration.
+The context's `expected_revision` guards your eventual metadata merge patch.
+
+Primary domain, terminal outcome and behavioral labels can be reviewed against
+the trace. Family grouping, split, original/remix ancestry and historical author,
+endpoint/model or prompt version may not be recoverable from the trace. Use
+recorded history or an explicit owner-provided policy from the guidance. If those
+facts are absent, leave them unknown and report the exact unresolved fields.
+Do not invent a provenance value, default all legacy samples to train/original,
+or assign random unique family IDs merely to remove alerts. Existing tags are
+requested labels, not independently observed evidence. A missing-metadata alert
+is a request for information, not proof that the demonstration is invalid.
+
+After coverage-only annotations, numeric rebuilds can reuse compiled measurements
+when execution inputs have not changed. Altered agent/user names, clock settings,
+events, defaults, tokenizer or tools still require fresh measurements.
 
 Coverage annotations are ordinary top-level `metadata` fields:
 

@@ -417,6 +417,7 @@ assert.equal($("toggle-metrics-panel").getAttribute("aria-checked"), "true");
 assert($("metrics-charts").querySelectorAll(".metric-card").length >= 6);
 assert.match($("metrics-status").textContent, /pending/);
 await click("metrics-analyze");
+await waitFor(() => $("metrics-status").textContent.includes("0 pending") && !$("metrics-analyze").disabled, 5000);
 assert.match($("metrics-status").textContent, /0 pending/);
 assert.match($("metrics-distribution-stats").textContent, /p99/);
 assert($("metrics-histogram").querySelectorAll(".metric-bar-row").length > 1);
