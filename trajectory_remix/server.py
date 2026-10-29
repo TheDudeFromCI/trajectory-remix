@@ -89,6 +89,9 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     validator = ValidationRunner(commands)
     runner.validation_runner = validator
     app.state.validation_runner = validator
+    from .generation_recovery import GenerationRecovery
+    recovery = GenerationRecovery(commands)
+    runner.generation_recovery = app.state.generation_recovery = recovery
     app.state.tool_sessions = commands.tool_sessions
 
     def activate_tokenizer(candidate, revision):
@@ -225,7 +228,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "can_resume_generation": scenario_runner.can_resume(selected_id),
             "can_resume_active_generation": scenario_runner.can_resume(scenario_runner.status.get("draft_id")),
             "unfinished_generation_count": scenario_runner.resume_queue.count(),
-            "generation_resume": dict(scenario_runner.resume_queue.status),
+            "generation_resume": recovery.view(),
             "config": public_config(state["config"]),
             "revision": revision,
             "history": runner.history.view(),
@@ -573,6 +576,15 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.get('/api/scenarios/resume-all/results')
     async def resume_all_results(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
         return scenario_runner.resume_queue.results(offset, limit)
+
+    @app.post('/api/scenarios/recover')
+    async def recover_generation(request: Request):
+        data = await body(request)
+        return recovery.start(data.get('run_id'), data.get('position'), data.get('action'), data.get('source_hash'))
+
+    @app.get('/api/scenarios/recovery/{recovery_id}')
+    async def recovery_archive(recovery_id: str):
+        return recovery.archive(recovery_id)
 
     @app.post("/api/endpoints/test")
     async def test_endpoint(request: Request):

@@ -98,9 +98,11 @@ class ScenarioRunner(ModelSession):
         elapsed = self.elapsed_seconds()
         return {
             'job': self.snapshot['id'],
-            'requirements': {'flow': self.snapshot['flow'], 'prompts': self.snapshot['prompts']},
+            'requirements': {'flow': self.snapshot['flow'], 'prompts': self.snapshot['prompts'],
+                             'context': copy.deepcopy({k: v for k, v in self.snapshot['context'].items() if k != 'steps'})},
             'requests': copy.deepcopy(requests),
             'failures': copy.deepcopy(self.snapshot.get('failed_proposals', [])),
+            'recoveries': list(self.snapshot.get('recovery_history', [])),
             'metrics': summarize_requests(requests, elapsed, self.status['phase']),
         }
 
@@ -234,6 +236,7 @@ class ScenarioRunner(ModelSession):
             total_model_seconds=0,
             attempts=self.status["attempts"] + 1,
             scenario=name,
+            recovery_id=None,
             activity=self.status.get("activity", "create") if _retry else "create",
             last_error=None,
         )
@@ -309,6 +312,8 @@ class ScenarioRunner(ModelSession):
             self.job = asyncio.create_task(self.run(name, max_parallel))
 
     def assign_identifier(self, proposed):
+        if self.snapshot.get("retain_identifier"):
+            return
         words = re.findall(r"[a-z0-9]+", str(proposed).lower())[:4]
         if not words:
             raise ValueError("Idea identifier needs words")
@@ -347,7 +352,7 @@ class ScenarioRunner(ModelSession):
             and bool(metadata.get("generation_job"))
         )
 
-    def resume_saved(self, sample_id, *, confirm_edited=False, _schedule=True):
+    def resume_saved(self, sample_id, *, confirm_edited=False, _schedule=True, force=False):
         validator = getattr(self.legacy, "validation_runner", None)
         if validator and validator.status.get("running"):
             raise ValueError("Finish or cancel trajectory validation before generation")
@@ -366,7 +371,7 @@ class ScenarioRunner(ModelSession):
         if row is None:
             raise ValueError("Generation checkpoint not found")
         saved = json.loads(row[0])
-        if (
+        if not force and (
             saved.get("tool_fingerprint", self.compiler.tools.fingerprint)
             != self.compiler.tools.fingerprint
             or saved.get("tokenizer_fingerprint", self.compiler.fingerprint)
@@ -378,10 +383,19 @@ class ScenarioRunner(ModelSession):
         cp = saved["checkpoint"]
         if cp["sample"].get("uuid") != sample.get("uuid"):
             raise ValueError("Generation checkpoint belongs to another trajectory")
-        if confirm_edited:
+        if force:
+            compiled = self.compiler.compile(cp["sample"])
+            cp["next_tick"] = max(cp["next_tick"], compiled["max_tick"] + 1)
+            saved["tool_fingerprint"] = self.compiler.tools.fingerprint
+            saved["tokenizer_fingerprint"] = self.compiler.fingerprint
+            cp["sample"].setdefault("metadata", {}).update(validation_level=0, generation_phase="planning")
+            for key in ("evaluations", "approval"):
+                cp["sample"]["metadata"].pop(key, None)
+            cp["state_override"] = None
+        if confirm_edited or force:
             cp["expected_draft"] = copy.deepcopy(sample)
             cp["sample"]["id"] = sample["id"]
-        if sample != cp["expected_draft"] and not confirm_edited:
+        if sample != cp["expected_draft"] and not (confirm_edited or force):
             raise ValueError(
                 "Trajectory edited since checkpoint; resume would overwrite edits"
             )
@@ -462,6 +476,13 @@ class ScenarioRunner(ModelSession):
         if self.resume_queue.status['running'] and self.job and self.job.done():
             self.resume_queue.status.update(running=False, state='cancelled', current_id=None)
             self.resume_queue.persist()
+            self.status.update(running=False, phase='cancelled', paused=False, pause_requested=False, active=[])
+            self.persist()
+
+        recovery_id = getattr(self, 'active_recovery_id', None)
+        if recovery_id and self.job and self.job.done():
+            self.legacy.generation_recovery.update(recovery_id, 'interrupted', 'Recovery cancelled before inference; checkpoint retained')
+            self.active_recovery_id = None
             self.status.update(running=False, phase='cancelled', paused=False, pause_requested=False, active=[])
             self.persist()
 

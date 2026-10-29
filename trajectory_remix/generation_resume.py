@@ -98,7 +98,7 @@ class GenerationResumeQueue:
         self.status['processed'] += 1
         self.status[{'complete': 'completed', 'failed': 'failed', 'skipped': 'skipped'}[state]] += 1
         if error:
-            self.status['issues'] = (self.status['issues'] + [{'sample_id': item['sample_id'], 'state': state, 'error': error}])[-25:]
+            self.status['issues'] = (self.status['issues'] + [{'sample_id': item['sample_id'], 'uuid': item['uuid'], 'position': item['position'], 'state': state, 'error': error}])[-25:]
         with self.store.connect() as db:
             db.execute('UPDATE generation_resume_items SET state=?,error=?,sample_id=? WHERE run_id=? AND position=?',
                        (state, error, item['sample_id'], self.status['id'], item['position']))

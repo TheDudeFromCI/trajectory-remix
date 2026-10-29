@@ -18,6 +18,13 @@
   Frontend checks cover distinct setup/running/paused/completed views, hidden
   creation controls during resumption, relevant actions, separate overall and
   per-draft progress, grouped errors and optional inference details.
+- Recovery-action regressions cover force-resume edit/fingerprint overrides,
+  compiler/ownership checks, exact restart prompts and conditions, fresh jobs with
+  stable sample identity, missing-checkpoint fallback, source-hash conflicts,
+  archive inspection through HTTP/MCP, approval invalidation, deletion/Undo,
+  failed retries, cancellation before/during inference and process restart.
+  DOM checks verify action availability, busy states, confirmations, payloads,
+  return-to-results navigation and resolved issue counts.
 - Creation tests verify Pending drafts, canonical defaults and legacy name aliases,
   generator-only configuration, retired task API errors, preservation of original
   review snapshots and custom guidance, provider retry budgets and recovery.

@@ -363,15 +363,15 @@ function renderGenerationAction(recoveryDisabled) {
   const s = state.status, recovery = state.generation_resume || {}, mode = generationAction();
   const bulk = mode === "resume-all", setup = mode === "create" && !s.running && (generationPanelIntent === "create" || !s.draft_id);
   $("generation-panel").dataset.action = mode;
-  $("generation-action-title").textContent = bulk ? "Resume unfinished drafts" : mode === "resume" ? "Resume trajectory" : "Create trajectories";
+  $("generation-action-title").textContent = bulk ? "Resume unfinished drafts" : mode === "force-resume" ? "Force resume trajectory" : mode === "restart" ? "Restart trajectory" : mode === "resume" ? "Resume trajectory" : "Create trajectories";
   $("generation-action-description").textContent = bulk
     ? "Continue saved work across the dataset. Manual trajectories are excluded."
-    : mode === "resume" ? "Continue from the saved checkpoint, reusing completed work."
+    : mode === "restart" ? "Regenerate content using the original prompts and sampled conditions." : mode === "force-resume" ? "Continue from the saved checkpoint with compatibility warnings overridden." : mode === "resume" ? "Continue from the saved checkpoint, reusing completed work."
     : setup ? "Choose a scenario and how many samples to create."
     : `${s.scenario || $("scenario-type").value} · ${s.batch?.target || 1} ${(s.batch?.target || 1) === 1 ? "trajectory" : "trajectories"}`;
   const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", api_paused:"Connection interrupted", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
   $("run-status").textContent = setup ? "Ready" : s.running
-    ? s.paused ? "Paused" : s.pause_requested ? "Pausing after active requests finish" : bulk ? "Resuming saved drafts" : mode === "resume" ? "Resuming trajectory" : "Generating"
+    ? s.paused ? "Paused" : s.pause_requested ? "Pausing after active requests finish" : bulk ? "Resuming saved drafts" : ["resume","force-resume"].includes(mode) ? "Resuming trajectory" : mode === "restart" ? "Restarting trajectory" : "Generating"
     : bulk ? ({complete:"Resume pass complete", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("generation-setup").hidden = !setup;
@@ -379,7 +379,8 @@ function renderGenerationAction(recoveryDisabled) {
   $("batch-progress").hidden = bulk || setup || !s.batch || s.batch.target <= 1;
   $("view-generation-batch").hidden = setup || bulk || !s.batch || s.batch.target <= 1;
   $("view-generation-draft").hidden = setup || !s.draft_id;
-  $("view-generation-draft").parentElement.hidden = $("view-generation-draft").hidden && $("view-generation-batch").hidden;
+  $("generation-resume-results").hidden = s.running || bulk || setup || !s.recovery_id;
+  $("view-generation-draft").parentElement.hidden = $("view-generation-draft").hidden && $("view-generation-batch").hidden && $("generation-resume-results").hidden;
   $("generation-run-conditions").hidden = mode !== "create" || setup || !Object.keys(s.conditions || {}).length;
   $("generation-create-stats").hidden = mode !== "create" || setup;
   $("accepted-stat").textContent = s.batch?.completed ?? s.accepted ?? 0;
@@ -401,7 +402,7 @@ function renderGenerationAction(recoveryDisabled) {
   $("generation-step-progress").max = Math.max(1, s.total || 1);
   $("generation-step-progress").value = s.completed || 0;
   $("generation-step-count").textContent = `${s.completed || 0}/${s.total || 0} steps`;
-  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : bulk ? recovery.failed || recovery.skipped ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
+  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : bulk ? (recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))) ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
   const canContinue = !s.running && s.draft_id && (state.can_resume_active_generation ?? ["api_paused","evaluation_failed","cancelled","interrupted","error","rejected"].includes(s.phase));
   $("pause-run").hidden = !s.running && !setup && !(mode !== "resume-all" && canContinue);
   $("pause-run").textContent = s.running ? s.paused || s.pause_requested ? "Resume" : "Pause" : setup ? "Start" : "Resume";
@@ -415,9 +416,10 @@ function renderGenerationAction(recoveryDisabled) {
   $("generation-actions").hidden = [...$("generation-actions").children].every(child => child.hidden);
   $("generation-metrics-panel").hidden = setup || !(s.model_requests || Object.keys(s.metrics || {}).length);
   $("resume-issues-panel").hidden = !bulk || !recovery.issues?.length;
-  $("resume-issues-summary").textContent = `Needs attention · ${(recovery.failed || 0) + (recovery.skipped || 0)}`;
-  $("resume-issues-limit").hidden = (recovery.failed || 0) + (recovery.skipped || 0) <= 25;
-  const issueSignature = JSON.stringify(recovery.issues || []);
+  $("resume-issues-summary").textContent = `Needs attention · ${recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))}`;
+  $("resume-issues-limit").hidden = (recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))) <= 25;
+  const recoveryBusy = s.running || !!state.validation_status?.running || migrationBusy;
+  const issueSignature = JSON.stringify([recovery.issues || [], recoveryBusy]);
   if (renderedRecoveryIssues !== issueSignature) {
     renderedRecoveryIssues = issueSignature;
     $("resume-all-findings").replaceChildren(...(recovery.issues || []).map(issue => {
@@ -430,10 +432,40 @@ function renderGenerationAction(recoveryDisabled) {
         : /rejected after|generation could not finish/i.test(error) ? "A generation step could not finish. Its output is retained for review."
         : error;
       const details = node("details", "generation-issue-details"); details.append(node("summary", "", "Technical details"), node("pre", "", error));
-      entry.append(heading, node("p", "", explanation), details); return entry;
+      entry.append(heading, node("p", "", explanation), details);
+      if (issue.actions && issue.source_hash && Number.isInteger(issue.position)) {
+        if (recoveryBusy) entry.append(node("small", "generation-help", "Recovery actions are available when generation and review are stopped."));
+        else {
+          const actions = node("div", "generation-recovery-actions"), choice = node("select");
+          choice.setAttribute("aria-label", `Recovery action for ${issue.sample_id}`);
+          const blank = node("option", "", "Choose an action…"); blank.value = ""; choice.append(blank);
+          for (const [value,label] of [["force_resume","Force resume"],["restart","Restart from beginning"],["delete","Delete sample"]]) if (issue.actions[value]) {
+            const option = node("option", "", label); option.value = value; choice.append(option);
+          }
+          const apply = button("Apply", action(() => recoverGenerationIssue(issue, choice.value)), "generation-recovery-apply");
+          apply.disabled = true; choice.onchange = () => { apply.disabled = !choice.value; apply.classList.toggle("danger-text", choice.value === "delete"); };
+          actions.append(choice, apply); entry.append(actions);
+          if (issue.action_note) entry.append(node("small", "generation-help", issue.action_note));
+        }
+      }
+      return entry;
     }));
   }
 }
+async function recoverGenerationIssue(issue, recoveryAction) {
+  const message = recoveryAction === "force_resume"
+    ? `Force resume "${issue.sample_id}"? This can replace edits with its saved checkpoint and override tokenizer or tool compatibility warnings. Compiler checks still apply.`
+    : recoveryAction === "restart"
+    ? `Restart "${issue.sample_id}" from the beginning using its original prompts and sampled conditions? Its current content will be replaced and archived.`
+    : `Delete "${issue.sample_id}" from the dataset? You can undo deletion in this session.`;
+  if (!confirm(message)) return;
+  if (sample && hasPendingChanges()) await compileSample(true);
+  await json("scenarios/recover", "POST", {run_id:state.generation_resume.id, position:issue.position, action:recoveryAction, source_hash:issue.source_hash});
+  generationPanelIntent = recoveryAction === "delete" ? "resume-all" : null;
+  await refresh();
+}
+$("generation-resume-results").onclick = () => { generationPanelIntent = "resume-all"; renderStatus(); };
+
 function renderGenerationMetrics() {
   const root = $("generation-metrics"); root.replaceChildren();
   const entries = Object.entries(state.status.metrics || {}).filter(([path]) => !state.status.active?.length || state.status.active.includes(path));

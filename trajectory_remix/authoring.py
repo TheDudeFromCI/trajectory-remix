@@ -957,33 +957,48 @@ class TrajectoryCommands:
 
     @command()
     def get_generation_record(self, sample_id: str, request_index: Nonnegative | None = None,
-                              include_failures: bool = False):
+                              include_failures: bool = False, recovery_id: str | None = None):
         """Inspect original generation requirements, bounded requests and failed proposals.
 
         By default return request summaries. Select request_index for its full raw
         output/reasoning, including incomplete or schema-invalid text. Set
         include_failures for construction inputs and uncompiled proposed replay.
         Generation jobs are retained independently of the current active job.
+        Supply a recovery_id to read a prior source/checkpoint archived by recovery.
         Repair the saved trajectory with existing replay editing tools, then review
         against get_review_checklist; this read never invokes an inference model.
         """
         _, sample = self._find(sample_id)
+        archived = None
+        saved = None
+        if recovery_id is not None:
+            recovery = getattr(self.runner, 'generation_recovery', None)
+            if recovery is None:
+                raise CommandError('Generation recovery archive is unavailable', 'not_found')
+            archived = recovery.archive(recovery_id)
+            if archived['source'].get('uuid') != sample.get('uuid'):
+                raise CommandError('Recovery archive belongs to another trajectory', 'conflict')
+            sample = archived['source']
+            saved = archived['checkpoint']
         metadata = sample.get('metadata', {})
         record = copy.deepcopy(metadata.get('generation_record', {}))
         if not record and metadata.get('generation_mode') != 'content-first':
             raise CommandError('No content-first generation record for this trajectory', 'not_found')
         job = metadata.get('generation_job')
-        if job and hasattr(self.state, 'store'):
+        if not archived and job and hasattr(self.state, 'store'):
             with self.state.store.connect() as db:
                 row = db.execute('SELECT snapshot FROM generation_jobs WHERE id=?', (job,)).fetchone()
             if row:
                 saved = json.loads(row[0])
-                from .content_first import summarize_requests
-                requests = saved.get('content_requests', [])
-                record.update(job=job, requests=requests,
-                              failures=saved.get('failed_proposals', []),
-                              requirements={'flow': saved['flow'], 'prompts': saved['prompts']},
-                              metrics=summarize_requests(requests, saved.get('elapsed_seconds', 0), saved['status']['phase']))
+        if saved:
+            from .content_first import summarize_requests
+            requests = saved.get('content_requests', [])
+            record.update(job=job, requests=requests,
+                          failures=saved.get('failed_proposals', []),
+                          recoveries=saved.get('recovery_history', []),
+                          requirements={'flow': saved['flow'], 'prompts': saved['prompts'],
+                                        'context': {k:v for k,v in saved['context'].items() if k != 'steps'}},
+                          metrics=summarize_requests(requests, saved.get('elapsed_seconds', 0), saved['status']['phase']))
         if not record:
             raise CommandError('No content-first generation record for this trajectory', 'not_found')
         requests = record.get('requests', [])
@@ -994,7 +1009,8 @@ class TrajectoryCommands:
         record['requests'] = [{k: v for k, v in request.items() if k not in ('raw_output', 'reasoning')} for request in requests]
         if not include_failures:
             record['failures'] = [{k: v for k, v in failure.items() if k not in ('sample', 'inputs')} for failure in record.get('failures', [])]
-        return {'sample_id': sample_id, 'revision': self.state['revision'], **record}
+        return {'sample_id': sample_id, 'revision': self.state['revision'], **record,
+                **({'archived_sample': archived['source'], 'recovery_id': recovery_id} if archived else {})}
 
     @command()
     def get_review_checklist(self, sample_id: str):

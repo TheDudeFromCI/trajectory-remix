@@ -1430,3 +1430,7 @@ dialog::backdrop {
 .validation-body { padding: 0 24px 20px; display: grid; gap: 12px; }
 #validation-findings { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
 #validation-progress { width: 100%; }
+
+.generation-recovery-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+#generation-panel .generation-recovery-actions select { min-width: 0; flex: 1; width: auto; }
+.generation-recovery-apply { padding: 8px 12px; }

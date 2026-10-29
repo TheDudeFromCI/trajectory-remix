@@ -95,6 +95,44 @@ entries captured at its start, so each is attempted at most once per pass.
 - Existing `/api/pause` and `/api/stop` control the pass. Creation, semantic validation
   and tokenizer migration cannot run concurrently with it.
 
+## Choose what to do with a failed or skipped draft
+
+Expand **Needs attention** after the current generation/review stops. Each entry
+has a recovery menu and Apply button. Confirm the selected action:
+
+- **Force resume** uses the saved checkpoint and cached model outputs, overriding
+  edit and tokenizer/tool compatibility warnings. It can replace current replay
+  edits. Checkpoint ownership and compiler checks still apply; structurally
+  incompatible data can still fail. The result is Pending and must be reviewed.
+- **Restart from beginning** regenerates the workspace and subsequent content from
+  the saved original flow, prompts and sampled conditions. It clears cached steps
+  and old approvals, preserves the sample's ID/UUID, and creates a fresh generation
+  job. New model output can differ. The old source/checkpoint is archived before
+  replacement. Original review checklists remain authoritative.
+- **Delete sample** removes the entry from the dataset through normal Undo history.
+  Deletion can be undone in the current session. Its recovery archive remains in
+  the SQLite project, along with retained generation journals.
+
+Unavailable actions are omitted. Missing checkpoints cannot be forced. Restart
+can use archived original inputs even without a checkpoint; older samples lacking
+those inputs offer deletion only. Choices target the exact queued UUID and source
+hash, so a renamed or subsequently edited entry cannot silently be overwritten.
+Recovery runs one existing trajectory and never fills an old batch's remaining
+quota. Pause/Cancel and interruption recovery preserve work. **Resume pass results**
+returns to the issue list; resolved/deleted entries no longer count as needing
+attention, while failures retain their latest diagnostic and available choices.
+The processed/completed/failed/skipped totals describe the original resume pass.
+
+- `POST /api/scenarios/recover`: `{run_id, position, action, source_hash}` from the
+  current issue. Actions are `force_resume`, `restart`, or `delete`.
+- `GET /api/scenarios/recovery/{recovery_id}`: read the archived source/checkpoint
+  and recovery outcome, including after deletion.
+- MCP `get_generation_record(sample_id, recovery_id=...)`: inspect an archived
+  version's requirements and raw proposals without local inference.
+
+Archives are retained in SQLite; exporting an individual sample's JSON does not
+include every prior archived source. Back up the project to retain that history.
+
 ## Validate existing trajectories
 
 Select a saved trajectory and choose **Edit → Generation → Validate Trajectory**.

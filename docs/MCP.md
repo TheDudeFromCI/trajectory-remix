@@ -945,10 +945,18 @@ Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins,
 
 ## Content-first generation evidence
 
-`get_generation_record(sample_id, request_index?, include_failures=false)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
+`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
 
 The standard `user_scenario` and `idle_scenario` flows generate without validation.
 `validate_trajectory(semantic=true)` uses the same explicit service as **Edit →
 Generation → Validate Trajectory**, without recording a sign-off. Samples without
 a scenario snapshot use the shared standard checklist; older saved contracts remain
 authoritative. Old noval names are creation aliases, not additional scenario choices.
+
+
+Recovery IDs in generation provenance identify pre-recovery versions. Pass
+`recovery_id` to `get_generation_record` to inspect an archived source/checkpoint,
+including its original context, raw requests and failed proposals. The returned
+`archived_sample` is historical evidence; repair the current saved trajectory and
+review it against its current original checklist. Recovery archives are stored
+with the SQLite project. Force resume and restart never grant Ready approval.

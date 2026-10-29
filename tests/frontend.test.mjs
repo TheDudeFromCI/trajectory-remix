@@ -1268,8 +1268,15 @@ assert.equal($("generation-action-title").textContent, "Resume trajectory");
 w.fetch = beforeResumeFetch;
 // Dataset-wide resume has no selected ID, filter, or scenario in its request.
 const beforeBulkResumeFetch = w.fetch;
-let bulkResumeStarted = false, bulkResumePhase = "running";
+let bulkResumeStarted = false, bulkResumePhase = "running", recoveryChoiceApplied = null, recoveryIssueDeleted = false, allRecoveryIssuesResolved = false;
+const recoveryActionRequests = [];
 w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/recover") {
+    const body = JSON.parse(options.body); recoveryActionRequests.push(body);
+    recoveryChoiceApplied = body.action;
+    if (body.action === "delete") recoveryIssueDeleted = true;
+    return new w.Response(JSON.stringify({recovery_id:"recovery-choice",state:body.action === "delete" ? "deleted" : "running"}), {status:200});
+  }
   if (path === "/api/scenarios/resume-all") {
     assert.deepEqual(JSON.parse(options.body), {});
     bulkResumeStarted = true;
@@ -1285,7 +1292,16 @@ w.fetch = async (path, options) => {
         model_requests:1, active:busy ? ["work.5.decide"] : [], metrics:{"work.5.decide":{model:"local-model",token_source:"estimated",prompt_tokens:4917,completion_tokens:0,total_tokens:4917,generation_seconds:2.5,context_size:8192,context_used_tokens:4917,budget_enforced:false}}};
       data.generation_resume = {running:busy, state:busy ? "running" : "complete", target:3, processed:busy ? 1 : 3,
         current_id:busy ? "unfinished-second" : null,
-        completed:busy ? 0 : 2, failed:0, skipped:1, issues:[{sample_id:"edited-draft", state:"skipped", error:"Trajectory edited since checkpoint"}]};
+        completed:busy ? 0 : 2, failed:0, skipped:1, id:"recovery-pass", issues:[
+          ...(!recoveryIssueDeleted ? [{sample_id:"edited-draft",position:17,source_hash:"original-source-hash",actions:{force_resume:true,restart:true,delete:true},state:"skipped",error:"Trajectory edited since checkpoint"}] : []),
+          {sample_id:"missing-checkpoint",position:18,source_hash:"missing-source-hash",actions:{force_resume:false,restart:false,delete:true},state:"skipped",error:"Generation checkpoint not found",action_note:"Original inputs are unavailable."}
+        ]};
+      if (allRecoveryIssuesResolved) data.generation_resume.issues = [];
+      data.generation_resume.attention_count = data.generation_resume.issues.length;
+      if (recoveryChoiceApplied && recoveryChoiceApplied !== "delete") {
+        data.status = {...data.status,activity:recoveryChoiceApplied === "restart" ? "restart" : "force-resume",running:false,phase:"api_paused",recovery_id:"recovery-choice",draft_id:"edited-draft"};
+        data.can_resume_active_generation = true;
+      }
     }
     return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
   }
@@ -1312,6 +1328,7 @@ assert.equal($("generation-progress").max, 3);
 assert.equal($("generation-progress").value, 1);
 assert.match($("generation-current").textContent, /unfinished-second/);
 assert.equal($("resume-issues-panel").open, false);
+assert.equal($("resume-all-findings").querySelectorAll(".generation-recovery-actions").length, 0);
 assert.match($("generation-metrics").textContent, /Estimated tokens/);
 assert.equal($("generation-metrics").querySelector('[role="meter"]'), null);
 bulkResumePhase = "paused";
@@ -1326,6 +1343,36 @@ assert.equal($("stop-run").hidden, true);
 assert.equal($("resume-all-generations-panel").hidden, false);
 assert.equal($("resume-all-generations-panel").textContent, "Resume unfinished (2)");
 assert.equal($("resume-completed-stat").textContent, "2");
+$("resume-issues-panel").open = true;
+const missingRecoveryChoice = $("resume-all-findings").querySelector('[aria-label="Recovery action for missing-checkpoint"]');
+assert.deepEqual([...missingRecoveryChoice.options].map(o => o.value), ["", "delete"]);
+for (const recoveryAction of ["force_resume", "restart", "delete"]) {
+  const choice = $("resume-all-findings").querySelector('[aria-label="Recovery action for edited-draft"]');
+  assert(choice);
+  const apply = choice.parentElement.querySelector("button");
+  choice.value = recoveryAction; choice.onchange();
+  assert.equal(apply.disabled, false);
+  const beforeCount = recoveryActionRequests.length;
+  confirmResult = false;
+  await apply.onclick();
+  assert.equal(recoveryActionRequests.length, beforeCount);
+  confirmResult = true;
+  await apply.onclick();
+  assert.deepEqual(recoveryActionRequests.at(-1), {run_id:"recovery-pass",position:17,action:recoveryAction,source_hash:"original-source-hash"});
+  if (recoveryAction !== "delete") {
+    assert.equal($("generation-action-title").textContent, recoveryAction === "restart" ? "Restart trajectory" : "Force resume trajectory");
+    assert.equal($("generation-setup").hidden, true);
+    assert.equal($("generation-resume-results").hidden, false);
+    await click("generation-resume-results");
+    assert.equal($("resume-issues-panel").hidden, false);
+  }
+}
+assert.equal($("resume-all-findings").querySelector('[aria-label="Recovery action for edited-draft"]'), null);
+assert.match($("resume-issues-summary").textContent, /1/);
+allRecoveryIssuesResolved = true;
+await waitFor(() => $("resume-issues-panel").hidden, 5000);
+assert.doesNotMatch($("generation-detail").textContent, /need attention/);
+
 await click("generate-one");
 assert.equal($("generation-setup").hidden, false);
 assert.equal($("resume-issues-panel").hidden, true);
