@@ -91,6 +91,13 @@ upgrade; entries absent from every saved copy cannot be reconstructed.
 
 ## Resume unfinished generations across the dataset
 
+Search with **`@generation:unfinished`** to list the entries targeted by the
+resume pass. Add `#user_scenario` or `@batch:<batch-id>` to narrow the results.
+Missing or corrupt checkpoints stay visible for recovery; manually created
+entries and known copies of another generation's checkpoint are excluded.
+Use `@generation:complete @state:pending` to find generated samples awaiting
+review. Generation status is separate from the `@state` validation property.
+
 Choose **Edit → Generation → Resume Unfinished Generations**, or the matching
 button in Generation Control. No trajectory selection is required. This takes a
 snapshot of unfinished generated entries throughout the dataset, ignoring the

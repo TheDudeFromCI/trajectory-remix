@@ -24,7 +24,7 @@ def legacy_store(tmp_path, compiler):
     # A later-restored older checkpoint has less history than another saved job.
     histories = [[a, b, b], [a, b, b, c, d], [a, b, b, c]]
     with store.connect() as db:
-        db.execute('CREATE TABLE generation_jobs (id TEXT PRIMARY KEY,snapshot TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS generation_jobs (id TEXT PRIMARY KEY,snapshot TEXT NOT NULL)')
         for i, entries in enumerate(histories):
             db.execute('INSERT INTO generation_jobs VALUES (?,?)', (str(i), json.dumps({'logs': entries})))
         db.execute("INSERT INTO generation_jobs VALUES ('broken','not JSON')")

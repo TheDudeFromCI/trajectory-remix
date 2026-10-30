@@ -18,6 +18,11 @@
   Frontend checks cover distinct setup/running/paused/completed views, hidden
   creation controls during resumption, relevant actions, separate overall and
   per-draft progress, grouped errors and optional inference details.
+- Generation search tests cover unfinished/complete independently of review state,
+  exact resume-queue selection, missing/corrupt checkpoints and manual-copy
+  exclusion, metadata changes, SQL/authoring-draft parity, negation, grouping,
+  case handling, invalid values, filtering before pagination without loading
+  replay sources, and shared dashboard/MCP results.
 - Recovery-action regressions cover force-resume edit/fingerprint overrides,
   compiler/ownership checks, exact restart prompts and conditions, fresh jobs with
   stable sample identity, missing-checkpoint fallback, source-hash conflicts,

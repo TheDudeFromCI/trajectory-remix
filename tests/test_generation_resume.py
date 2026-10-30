@@ -69,6 +69,7 @@ async def test_resume_all_finishes_only_existing_automated_drafts_and_reuses_wor
     ids = [s['id'] for s in app.state.dataset['samples']]
     ideas = sum(m[0]['content'].startswith('Create a fictional') for m in fake.messages)
     assert runner.resume_queue.count() == 3
+    assert app.state.dataset.store.listing('@generation:unfinished')[0] == runner.resume_queue.count()
     runner.resume_queue.start()
     await runner.job
     status = runner.resume_queue.status
@@ -83,6 +84,8 @@ async def test_resume_all_finishes_only_existing_automated_drafts_and_reuses_wor
     assert app.state.dataset['samples'][3] == manual
     assert app.state.dataset['samples'][4] == duplicate
     assert runner.resume_queue.count() == 0
+    assert app.state.dataset.store.listing('@generation:unfinished')[0] == 0
+    assert app.state.dataset.store.listing('@generation:complete')[0] == 3
     assert all(s['metadata']['validation_level'] == 0 for s in list(app.state.dataset['samples'])[:3])
 
 

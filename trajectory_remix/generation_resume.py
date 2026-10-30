@@ -6,19 +6,15 @@ import copy
 import json
 import uuid
 
+from .generation_state import AUTOMATED_GENERATION_SQL
+
 
 # Read metadata projections, not every trajectory's replay. Checkpoint ownership
 # excludes manual copies that retained an automated source's metadata.
-CANDIDATES = """
+CANDIDATES = f"""
 FROM samples s JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid
-LEFT JOIN generation_jobs j ON j.id=json_extract(m.properties,'$.generation_job')
-WHERE json_extract(m.properties,'$.generation_phase')='planning'
-  AND json_extract(m.properties,'$.origin')='automation'
-  AND json_type(m.properties,'$.generation_job')='text'
-  AND json_extract(m.properties,'$.generation_job')!=''
-  AND (j.id IS NULL OR CASE WHEN json_valid(j.snapshot)
-       THEN coalesce(json_extract(j.snapshot,'$.checkpoint.sample.uuid')=s.uuid,1)
-       ELSE 1 END)
+WHERE {AUTOMATED_GENERATION_SQL}
+  AND json_extract(m.properties,'$.generation_phase') IS 'planning'
 """
 
 

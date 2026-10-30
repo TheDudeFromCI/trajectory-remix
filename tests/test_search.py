@@ -1,4 +1,5 @@
 import copy
+import json
 import sqlite3
 
 import pytest
@@ -307,3 +308,98 @@ async def test_candidate_discovery_through_mcp_and_dashboard(studio):
     })
     assert remaining.json()['total'] == 6
     assert 'candidate-0' not in [s['id'] for s in remaining.json()['trajectories']]
+
+
+@pytest.fixture
+def generation_store(search_store):
+    entries = [
+        ('owned', 'planning', 'automation', 'owned', 0),
+        ('missing-checkpoint', 'planning', 'automation', 'missing', 0),
+        ('corrupt-checkpoint', 'planning', 'automation', 'corrupt', 0),
+        ('unknown-owner', 'planning', 'automation', 'unknown', 0),
+        ('reviewed-unfinished', 'planning', 'automation', 'reviewed', 3),
+        ('complete-pending', 'complete', 'automation', 'done-pending', 0),
+        ('complete-ready', 'complete', 'automation', 'done-ready', 3),
+        ('copied-unfinished', 'planning', 'automation', 'owned', 0),
+        ('copied-complete', 'complete', 'automation', 'done-ready', 0),
+        ('manual', 'planning', 'manual', 'manual', 0),
+        ('no-origin', 'planning', None, 'no-origin', 0),
+        ('no-job', 'planning', 'automation', None, 0),
+        ('empty-job', 'planning', 'automation', '', 0),
+        ('number-job', 'planning', 'automation', 42, 0),
+        ('legacy-rejected', 'rejected', 'automation', 'old', -2),
+    ]
+    samples = [{'id': name, 'replay': {}, 'metadata': {
+        'origin': origin, 'generation_phase': phase, 'generation_job': job,
+        'validation_level': level, 'generation_batch': 'Generation-Test', 'tags': ['user_scenario'],
+    }} for name, phase, origin, job, level in entries]
+    samples.append({'id': 'no-metadata', 'replay': {}})
+    search_store.replace(samples, search_store.info()[0])
+    saved = {s['id']: s for s in search_store.samples}
+    with search_store.connect() as db:
+        for name, job in [('owned','owned'), ('reviewed-unfinished','reviewed'),
+                          ('complete-pending','done-pending'), ('complete-ready','done-ready')]:
+            snapshot = {'checkpoint': {'sample': {'uuid': saved[name]['uuid']}}}
+            db.execute('INSERT INTO generation_jobs VALUES (?,?)', (job, json.dumps(snapshot)))
+        db.execute("INSERT INTO generation_jobs VALUES ('corrupt','not JSON')")
+        db.execute("INSERT INTO generation_jobs VALUES ('unknown','{}')")
+    return search_store
+
+
+@pytest.mark.parametrize('query,expected', [
+    ('@generation:unfinished', ['owned','missing-checkpoint','corrupt-checkpoint','unknown-owner','reviewed-unfinished']),
+    ('@GENERATION:UNFINISHED @state:pending', ['owned','missing-checkpoint','corrupt-checkpoint','unknown-owner']),
+    ('@generation:complete', ['complete-pending','complete-ready']),
+    ('@generation:COMPLETE @state:pending #user_scenario @batch:generation-test', ['complete-pending']),
+    ('-@generation:unfinished', ['complete-pending','complete-ready','copied-unfinished','copied-complete','manual',
+                                'no-origin','no-job','empty-job','number-job','legacy-rejected','no-metadata']),
+    ('(@generation:unfinished | @generation:complete) @state:ready', ['reviewed-unfinished','complete-ready']),
+    ('-@generation:unfinished -@generation:complete', ['copied-unfinished','copied-complete','manual',
+                                                     'no-origin','no-job','empty-job','number-job','legacy-rejected','no-metadata']),
+])
+def test_generation_property_sql_and_authoring_draft_parity(generation_store, query, expected):
+    total, result = generation_store.listing(query)
+    assert total == len(expected)
+    assert [s['id'] for s in result] == expected
+    assert [s['id'] for s in generation_store.samples if SearchQuery(query).matches(s, store=generation_store)] == expected
+
+
+@pytest.mark.parametrize('query', ['@generation:', '@generation:pending', '@generation:ready',
+                                  '@generation:unfinished*', '@generation:true', '@generation:complete|'])
+def test_generation_property_rejects_unsupported_values(query):
+    with pytest.raises(ValueError, match='Invalid search query'):
+        SearchQuery(query)
+
+
+def test_generation_search_filters_before_pagination_without_decoding_samples(generation_store, monkeypatch):
+    def forbidden(*args):
+        raise AssertionError('Generation discovery must not decode trajectory sources')
+
+    monkeypatch.setattr(SQLiteSamples, '__iter__', forbidden)
+    monkeypatch.setattr(SQLiteSamples, '__getitem__', forbidden)
+    total, page = generation_store.listing('@generation:unfinished', offset=3, limit=1, dashboard=True)
+    assert total == 5
+    assert [s['id'] for s in page] == ['unknown-owner']
+
+
+async def test_generation_search_shared_by_dashboard_mcp_and_updated_metadata(studio):
+    app, client = studio
+    for i in range(7):
+        app.state.dataset.store.samples.append({'id': f'unfinished-{i}', 'replay': {}, 'metadata': {
+            'origin': 'automation', 'generation_job': f'missing-{i}', 'generation_phase': 'planning',
+            'validation_level': 0,
+        }})
+    query = '@generation:unfinished'
+    mcp = await client.post('/api/mcp/call', json={
+        'name': 'list_trajectories', 'arguments': {'query': query, 'offset': 1, 'limit': 3},
+    })
+    dashboard = await client.get('/api/state', params={'query': query, 'offset': 1, 'limit': 3})
+    assert mcp.status_code == dashboard.status_code == 200
+    assert mcp.json()['total'] == dashboard.json()['total'] == 7
+    assert [s['id'] for s in mcp.json()['trajectories']] == [f'unfinished-{i}' for i in range(1,4)]
+    assert [s['id'] for s in dashboard.json()['samples']] == [f'unfinished-{i}' for i in range(1,4)]
+    sample = app.state.dataset.store.samples[1]
+    sample['metadata']['generation_phase'] = 'complete'
+    app.state.dataset.store.samples[1] = sample
+    assert app.state.dataset.store.listing('@generation:unfinished')[0] == 6
+    assert app.state.dataset.store.listing('@generation:complete @state:pending')[0] == 1

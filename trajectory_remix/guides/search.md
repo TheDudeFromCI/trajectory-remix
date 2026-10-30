@@ -70,6 +70,7 @@ are supported; arbitrary metadata keys are not query-language properties.
 | `@uuid` | Immutable trajectory UUID. Matches the full UUID. | `@uuid:12345678-*` |
 | `@state` | Validation stage: unfinished (-3), rejected (-2), unsuccessful (-1), pending (0), candidate (1), validated (2), ready (3). Accepts the name or numeric level; missing/null levels count as unfinished, matching the dashboard. | `@state:candidate`, `@state:-2` |
 | `@batch` | Generation batch ID from `metadata.generation_batch`. Missing/null IDs do not match, including `@batch:*`. | `@batch:12345678-*`, `-@batch:*` |
+| `@generation` | Automated generation status, independent of validation: `unfinished` or `complete`. Excludes manual entries and known copies of another sample's generation checkpoint. | `@generation:unfinished`, `@generation:complete @state:pending` |
 | `@windows` | Number of distinct declared windows, including implicit visible tool-call windows. Repeated opens/calls in one window count once; invisible calls add no window. | `@windows:>5`, `@windows:<=3`, `@windows:2` |
 | `@uses_tool` | A tool called by an authored `tool-call` or `invisible-tool-call` event. Merely advertising a tool with `show_tools` does not count. | `@uses_tool:calculator`, `@uses_tool:file_*` |
 | `@errors` | Whether local compilation fails with a compiler error. | `@errors:true`, `@errors:false` |
@@ -79,11 +80,29 @@ Window counts accept `=`, `!=`, `<`, `<=`, `>`, and `>=`, followed immediately
 by a nonnegative integer. Omitting the operator means equality. Values must fit
 a signed 64-bit integer. State names/levels require an exact match; unknown states
 report an error. Errors and warnings accept only `true` or `false`,
-case-insensitively; other values and wildcards report an error. Other properties
-accept literal values and `*` globs.
+case-insensitively; other values and wildcards report an error. Name, UUID, batch
+and tool properties accept literal values and `*` globs.
+Generation accepts exactly `unfinished` or `complete`, case-insensitively; it does
+not accept wildcards or validation-stage names.
 Negation and grouping work with properties: `-@uses_tool:subagent` excludes
 trajectories using that tool; `-(@windows:>5 @uses_tool:calculator)` excludes
 only trajectories satisfying both conditions.
+
+Use `@generation:unfinished` to find the same saved automated drafts targeted by
+**Resume Unfinished Generations**: they have generation phase `planning`, an
+automated origin and a nonempty generation-job ID. Paused, failed, cancelled or
+interrupted drafts remain in this group until generation completes. Missing or
+corrupt checkpoints remain visible for recovery; copies known to belong to
+another trajectory's checkpoint are excluded. A match does not promise that
+resumption will succeed without repair.
+
+`@generation:complete @state:pending` finds generated samples awaiting review.
+`@state:unfinished` is the distinct validation stage (-3); it does not identify
+unfinished generation. Manual entries do not match either generation value.
+Negation still includes other entries: `-@generation:unfinished` also includes
+manual samples and legacy entries, not just completed generations. Combine with
+a scenario tag or batch, for example `@generation:unfinished #user_scenario` or
+`@generation:unfinished @batch:<batch-id>`.
 
 Use `@errors:false @warnings:false` to find trajectories that compile without
 diagnostics, or `@errors:true | @warnings:true` to find trajectories needing
