@@ -253,7 +253,8 @@ async def test_exact_huggingface_template(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('parameter', ['max_tokens', 'max_completion_tokens'])
 @pytest.mark.parametrize('with_tokenizer', [True, False])
-async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypatch, parameter, with_tokenizer):
+@pytest.mark.parametrize('structured_output', ['native', 'prompted'])
+async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypatch, parameter, with_tokenizer, structured_output):
     fake = ContentClient()
     wire = []
 
@@ -262,7 +263,15 @@ async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypa
         wire.append(payload)
         assert payload[parameter] == 1024
         assert ('max_tokens' if parameter == 'max_completion_tokens' else 'max_completion_tokens') not in payload
-        assert 'tools' not in payload and 'response_format' not in payload
+        assert 'tools' not in payload
+        schema_request = not payload['messages'][0]['content'].startswith(('Analyze', 'Independently'))
+        if structured_output == 'native' and schema_request:
+            formatting = payload['response_format']
+            assert formatting['type'] == 'json_schema'
+            assert formatting['json_schema']['strict'] is True
+            assert formatting['json_schema']['schema']['type'] == 'object'
+        else:
+            assert 'response_format' not in payload
         message = await fake.complete({}, payload['messages'])
         base = {'id': 'test', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'local-model'}
         prompt = len(ByteChatTokenizer().apply_chat_template(payload['messages']))
@@ -287,6 +296,10 @@ async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypa
     app, runner = setup(tmp_path, compiler, None)
     config = copy.deepcopy(app.state.dataset['config'])
     config['endpoints'][0]['completion_limit_parameter'] = parameter
+    # Missing settings in saved datasets use native output by default.
+    config['endpoints'][0].pop('structured_output', None)
+    if structured_output == 'prompted':
+        config['endpoints'][0]['structured_output'] = structured_output
     if not with_tokenizer:
         config['endpoints'][0].pop('inference_tokenizer')
         config['content_first']['context_budget'] = 1
@@ -297,6 +310,7 @@ async def test_real_streaming_wire_budget_and_usage(compiler, tmp_path, monkeypa
     requests = sample['metadata']['generation_record']['requests']
     assert len(requests) == len(wire) == 5
     for record in requests:
+        assert record['output_mode'] == ('text' if record['path'] in ('arithmetic', 'uncertainty') else structured_output)
         assert record['budget']['budget_enforced'] is with_tokenizer
         if with_tokenizer:
             assert record['metrics']['prompt_tokens'] == record['budget']['prompt_tokens_preflight']

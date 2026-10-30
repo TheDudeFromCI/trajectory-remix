@@ -44,21 +44,27 @@ class RequestBudget:
             ).hexdigest()
         self.fingerprint = self.tokenizer._remix_fingerprint
 
-    def check(self, messages, max_input_tokens=None):
+    def check(self, messages, max_input_tokens=None, response_format=None):
         tokens = self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=False)
         prompt = len(tokens)
-        if prompt + self.completion + self.reserve > self.context or (
-            max_input_tokens is not None and prompt > max_input_tokens
+        # Some servers inject response_format into their prompt; others use it
+        # only as a decoding grammar. Reserve its full serialized size as an
+        # additional allowance, without claiming these are measured prompt tokens.
+        schema_tokens = self.output_tokens(json.dumps(response_format, ensure_ascii=False, separators=(',', ':'))) if response_format else 0
+        request_input = prompt + schema_tokens
+        if request_input + self.completion + self.reserve > self.context or (
+            max_input_tokens is not None and request_input > max_input_tokens
         ):
             raise ValueError(
-                f'Request context budget exceeded: {prompt} prompt + {self.completion} '
+                f'Request context budget exceeded: {prompt} prompt + {schema_tokens} schema allowance + {self.completion} '
                 f'completion (including reasoning) + {self.reserve} reserve > {self.context}, '
                 f'or input cap {max_input_tokens}; required context was retained'
             )
         return {
             'budget_enforced': True, 'prompt_tokens_preflight': prompt, 'completion_cap': self.completion,
+            'structured_output_tokens_reserved': schema_tokens, 'request_input_tokens_preflight': request_input,
             'reserved_tokens': self.reserve, 'context_budget': self.context,
-            'context_utilization_reserved': (prompt + self.completion + self.reserve) / self.context,
+            'context_utilization_reserved': (request_input + self.completion + self.reserve) / self.context,
             'inference_tokenizer': self.identity, 'inference_tokenizer_sha256': self.fingerprint,
             'prompt_token_ids_sha256': hashlib.sha256(json.dumps(tokens).encode()).hexdigest(),
             'completion_limit_parameter': self.parameter,

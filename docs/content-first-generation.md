@@ -56,6 +56,55 @@ The direct OpenAI-compatible streaming boundary sends the rendered messages unch
 
 ## Author content and decisions
 
+### Server-enforced structured output
+
+Schema-bearing requests default to **native JSON schema output**, including
+existing endpoint configurations that omit the new setting. In Generation
+Settings → Endpoints, choose **Native JSON schema (recommended)**, or configure:
+
+```json
+{"structured_output": "native"}
+```
+
+The request includes `response_format.type: "json_schema"`, the original scenario
+schema, a stable output name and `strict: true`. This is the same server protocol
+as Pydantic AI's `NativeOutput`; the low-level Pydantic AI request path uses native
+output parameters too. Content-first SDK streaming retains its exact budgeted
+messages, both supported completion-limit parameter names and usage accounting.
+Custom/injected clients receive the same `response_format` in their endpoint
+argument. Plain-text steps have no response format.
+
+The server must actually implement schema-constrained decoding. OpenAI-compatible
+URLs alone do not establish that support. Schemas are sent intact: open tool
+argument dictionaries, optional fields, array limits and custom constraints must
+not be silently rewritten. Some hosted providers support only a restricted strict
+schema subset; a scenario with unrestricted argument dictionaries may need a
+server with broader schema support or the compatibility mode below.
+
+For servers that cannot enforce the scenario schema, select **Prompt-only JSON
+(compatibility)**, or set `"structured_output": "prompted"`. No native format is
+sent from the content-first streaming path in this mode. A native HTTP 400/422
+pauses creation with an actionable error and the draft/checkpoint retained;
+it does not reject and replace the sample, retry the same incompatible request,
+or silently weaken enforcement. Change the endpoint setting and resume. Other
+API failures retain the existing retry policy.
+
+Local JSON parsing, schema checks and compiler checks still run, even in native
+mode; semantic validation remains a separate action. Native output improves
+formatting, not the truth of generated reasoning or tool arguments. Raw and
+partial responses remain recoverable. Per-request provenance/metrics record
+`output_mode`, and request records include the transmitted `response_format`.
+
+With an available inference tokenizer, preflight additionally reserves the full
+serialized response-format token count as a **schema overhead allowance**, since
+servers may inject the schema into their own prompt. Metrics distinguish this
+allowance (`structured_output_tokens_reserved`, `request_input_tokens_preflight`)
+from the exact counted messages (`prompt_tokens_preflight`) and actual provider
+usage. Input-budget splitting includes this allowance. Without a tokenizer,
+local checks still skip as configured. Server-specific framing beyond this
+allowance must fit the configured reserve; provider usage is checked after the
+response when budget checks are enabled.
+
 `llm.content` is the content-oriented spelling of `llm.generate`. Both share the same inference boundary inside a content-first flow. Requests can return plain text or objects validated against existing scenario schemas. Dependencies, `when`, `flow.repeat`, roles, randomized tags, retries, and fallback configuration remain available.
 
 ```yaml

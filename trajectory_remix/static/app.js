@@ -369,7 +369,7 @@ function renderGenerationAction(recoveryDisabled) {
     : mode === "restart" ? "Regenerate content using the original prompts and sampled conditions." : mode === "force-resume" ? "Continue from the saved checkpoint with compatibility warnings overridden." : mode === "resume" ? "Continue from the saved checkpoint, reusing completed work."
     : setup ? "Choose a scenario and how many samples to create."
     : `${s.scenario || $("scenario-type").value} · ${s.batch?.target || 1} ${(s.batch?.target || 1) === 1 ? "trajectory" : "trajectories"}`;
-  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", api_paused:"Connection interrupted", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
+  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", api_paused:"API request paused", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
   $("run-status").textContent = setup ? "Ready" : s.running
     ? s.paused ? "Paused" : s.pause_requested ? "Pausing after active requests finish" : bulk ? "Resuming saved drafts" : ["resume","force-resume"].includes(mode) ? "Resuming trajectory" : mode === "restart" ? "Restarting trajectory" : "Generating"
     : bulk ? ({complete:"Resume pass complete", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
@@ -2130,6 +2130,7 @@ function configIssues() {
     range(prefix + "max_tokens", ep.max_tokens, 1, 65536);
     range(prefix + "timeout", ep.timeout, 1, 600);
     range(prefix + "context_size", ep.context_size ?? 0, 0, 1000000000, true);
+    if (!["native", "prompted"].includes(ep.structured_output ?? "native")) errors[prefix + "structured_output"] = "Choose native schema output or prompt-only JSON.";
   });
   const single = configDraft.single_generation;
   range("single_generation.max_parallel", single.max_parallel, 1, 128, true);
@@ -2145,7 +2146,7 @@ function configIssues() {
 function updateSettingsState() {
   if (!configDraft) return false;
   const issues = configIssues();
-  for (const box of $("config-content").querySelectorAll("input")) {
+  for (const box of $("config-content").querySelectorAll("input, select")) {
     if (!box.dataset.configPath) {
       const label = box.closest("label")?.textContent || box.parentElement?.textContent || "";
       const keys = {"Request context budget":"content_first.context_budget", "Reserved tokens":"content_first.reserve_tokens", "Validation input token budget":"validation.max_input_tokens", "Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Tool calls per sample":"max_tool_calls"};
@@ -2233,6 +2234,13 @@ function renderConfig() {
         form.append(field(label, box, name === "base_url" ? "wide" : ""));
       }
       form.append(node("small", "hint", "Token budget checks run only when the inference tokenizer is available. Leave its directory blank to skip checks."));
+      const structuredOutput = select([
+        ["native", "Native JSON schema (recommended)"],
+        ["prompted", "Prompt-only JSON (compatibility)"],
+      ], ep.structured_output ?? "native", v => ep.structured_output = v);
+      structuredOutput.dataset.configPath = `endpoints.${i}.structured_output`;
+      form.append(field("Structured output", structuredOutput, "wide"));
+      form.append(node("small", "hint", "Native mode asks the server to enforce each output schema. Use prompt-only JSON if your server does not support the schema. Unsupported native requests pause generation and retain the draft."));
       form.append(
         field(
           "Clear stored session key",
@@ -2258,6 +2266,7 @@ function renderConfig() {
           temperature: 0.7,
           max_tokens: 1024,
           timeout: 120,
+          structured_output: "native",
         });
         renderConfig();
       }),

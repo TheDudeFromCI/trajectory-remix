@@ -31,6 +31,15 @@ optional local inference tokenizer directory for the generation model under Endp
 Leave it blank to skip local token-budget checks; unavailable tokenizer files or
 optional dependencies also skip checks with a recorded reason.
 
+Endpoints default to native JSON-schema output (`structured_output: "native"`).
+The server receives each output schema with `strict: true`; it must support the
+schema's features. Choose **Prompt-only JSON (compatibility)** under Endpoints
+(`structured_output: "prompted"`) for servers without that support. Native
+HTTP 400/422 responses pause generation and retain its checkpoint, with no
+automatic downgrade or repeated incompatible requests. Change the setting and
+resume. Parsing, schema/compiler checks and separate review remain in place.
+See [structured output and budget accounting](content-first-generation.md#server-enforced-structured-output).
+
 When an inference tokenizer is available, each content request is checked against
 its inference-model budget, including the prompt, total completion capacity and
 reserve. Otherwise those checks are skipped without truncating context. Code supplies trajectory syntax, windows,

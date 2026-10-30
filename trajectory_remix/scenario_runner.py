@@ -576,9 +576,10 @@ class ScenarioRunner(ModelSession):
         except ProviderFailure as error:
             self.status.update(phase="api_paused", last_error=str(error))
             self.log(
-                "Model API unavailable; generation paused without rejecting the attempt",
+                "Model API request failed; generation paused without rejecting the attempt",
                 "warning",
             )
+            self.log(str(error), 'warning')
         except EvaluationFailure as error:
             self.snapshot["validation_passed"] = False
             pending = copy.deepcopy(self.expected_draft)
@@ -702,8 +703,8 @@ class ScenarioRunner(ModelSession):
                     try:
                         result = await self.dispatch(step, inputs, context, path)
                         break
-                    except ProviderFailure:
-                        if step.uses not in ('llm.generate', 'llm.content') or api_failures >= self.state["config"].get(
+                    except ProviderFailure as error:
+                        if not error.retryable or step.uses not in ('llm.generate', 'llm.content') or api_failures >= self.state["config"].get(
                             "single_generation", {}
                         ).get("api_retries", 2):
                             raise

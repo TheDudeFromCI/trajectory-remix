@@ -73,6 +73,7 @@ def default_config():
                 "temperature": 0.8,
                 "max_tokens": 1024,
                 "timeout": 120,
+                "structured_output": "native",
             },
             {
                 "id": "validator",
@@ -82,6 +83,7 @@ def default_config():
                 "temperature": 0.1,
                 "max_tokens": 1024,
                 "timeout": 120,
+                "structured_output": "native",
             },
         ],
         "content_first": {"context_budget": 8192, "reserve_tokens": 256},
@@ -147,6 +149,8 @@ def validate_config(config):
             raise ValueError("inference_tokenizer must be text (blank disables token budget checks)")
         if type(ep.get('stream_usage', True)) is not bool:
             raise ValueError('stream_usage must be boolean')
+        if ep.get('structured_output', 'native') not in ('native', 'prompted'):
+            raise ValueError('structured_output must be native or prompted')
         context_size = ep.get("context_size", 0)
         if type(context_size) is not int or not 0 <= context_size <= 1_000_000_000:
             raise ValueError("Endpoint context_size must be an integer between 0 (unknown) and 1000000000")
@@ -337,6 +341,14 @@ def assemble(windows, task, tags, feedback=""):
     return messages
 
 
+class EndpointHTTPError(ValueError):
+    """An HTTP failure without disclosing a provider response body."""
+
+    def __init__(self, endpoint_id, status_code):
+        super().__init__(f'LLM endpoint {endpoint_id} returned HTTP {status_code}')
+        self.status_code = status_code
+
+
 class LLMClient:
     def __init__(self, transport=None):
         self.transport = transport
@@ -353,6 +365,8 @@ class LLMClient:
         }
         if tools:
             payload.update(tools=tools, tool_choice="auto")
+        if endpoint.get('response_format'):
+            payload['response_format'] = endpoint['response_format']
         async with httpx.AsyncClient(
             timeout=endpoint.get("timeout", 120),
             follow_redirects=False,
@@ -366,9 +380,7 @@ class LLMClient:
             ) as response:
                 if response.status_code >= 400:
                     # Do not echo response bodies: providers may repeat secrets.
-                    raise ValueError(
-                        f"LLM endpoint {endpoint['id']} returned HTTP {response.status_code}"
-                    )
+                    raise EndpointHTTPError(endpoint['id'], response.status_code)
                 raw = bytearray()
                 async for part in response.aiter_bytes():
                     raw.extend(part)

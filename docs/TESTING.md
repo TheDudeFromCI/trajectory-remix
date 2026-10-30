@@ -30,6 +30,15 @@
   review snapshots and custom guidance, provider retry budgets and recovery.
   Imported automatic-validation flags and legacy flow validation steps cannot
   invoke semantic review or repair during creation.
+- Structured-output regressions inspect real SDK and Pydantic AI wire requests:
+  native JSON schema and explicit prompt-only compatibility, unchanged schemas
+  including optional/open tool arguments, plain-text exclusions, both completion
+  limit parameter names, model-tokenizer preflight including schema overhead,
+  provider usage/reasoning metrics, retained invalid responses, and one-shot
+  schema rejection that pauses and resumes without repeating completed work.
+  Injected HTTP clients receive the same format. Frontend checks cover the
+  endpoint selector and saving its compatibility setting. Mock servers establish
+  the request/retention contract, not enforcement by an untested local model.
 - MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,

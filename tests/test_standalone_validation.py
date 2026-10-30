@@ -293,8 +293,9 @@ async def test_shared_validation_counts_model_template_completion_and_reserve(st
     assert (await validator.validate('test'))['valid']
     assert validator.endpoint['inference_tokenizer'] == 'fixture'
     for messages, request in zip(reviewer.messages, validator.snapshot['content_requests'], strict=True):
-        bounded = RequestBudget(validator.endpoint, config['content_first']).check(messages)
-        assert bounded['prompt_tokens_preflight'] + 1024 + 256 <= 8192
+        bounded = RequestBudget(validator.endpoint, config['content_first']).check(
+            messages, response_format=request['response_format'])
+        assert bounded['request_input_tokens_preflight'] + 1024 + 256 <= 8192
         assert request['budget'] == bounded
     # A different model must not inherit the generator tokenizer.
     config['endpoints'][1]['model'] = 'another-model'
