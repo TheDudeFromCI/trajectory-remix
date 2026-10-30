@@ -367,6 +367,7 @@ async def test_bundled_idle_flow_uses_compatible_native_schema(compiler, tmp_pat
         schema = payload['response_format']['json_schema']['schema']
         if 'release_windows' in schema['properties']:
             assert 'uniqueItems' not in schema['properties']['release_windows']
+            assert 'allOf' not in schema  # Conditional-only wrapper is eliminated.
         message = await fake.complete({'id': 'generator'}, payload['messages'])
         jsonschema.validate(json.loads(message['content']), schema)
         return streaming_response(message['content'])
@@ -396,6 +397,7 @@ async def test_shared_review_omits_unique_items_only_on_wire(studio, monkeypatch
         wire.append(payload)
         schema = payload['response_format']['json_schema']['schema']
         assert 'uniqueItems' not in schema['properties']['context_requests']
+        assert 'allOf' not in schema['$defs']['item']
         result = review_output(payload['messages'])
         jsonschema.validate(result, schema)
         return streaming_response(json.dumps(result))
@@ -406,7 +408,124 @@ async def test_shared_review_omits_unique_items_only_on_wire(studio, monkeypatch
     assert result['valid'] and not result['recorded']
     assert len(wire) == 4
     for proposal in validator.snapshot['content_requests']:
-        assert proposal['local_schema_constraints'] == [
-            {'keyword': 'uniqueItems', 'schema_path': '/properties/context_requests/uniqueItems'},
-        ]
-        assert proposal['metrics']['local_schema_keywords'] == ['uniqueItems']
+        constraints = proposal['local_schema_constraints']
+        assert {'keyword': 'uniqueItems', 'schema_path': '/properties/context_requests/uniqueItems'} in constraints
+        assert {c['keyword'] for c in constraints} == {'uniqueItems', 'if', 'then', 'else'}
+        assert proposal['metrics']['local_schema_keywords'] == ['else', 'if', 'then', 'uniqueItems']
+
+
+def test_conditional_projection_preserves_property_names_and_literal_data():
+    literal = {'if': {'then': 1}, 'else': 'data'}
+    schema = {'type': 'object', 'properties': {
+        'if': {'type': 'boolean'}, 'then': {'type': 'string'},
+        'else': {'enum': [literal], 'default': literal, 'examples': [literal]},
+    }, 'required': ['if'], 'additionalProperties': False, 'allOf': [{
+        'if': {'properties': {'if': {'const': True}}},
+        'then': {'required': ['then']}, 'else': {'required': ['else']},
+    }]}
+    before = copy.deepcopy(schema)
+    constraints = []
+    projected = decoding_schema(schema, constraints)
+    assert schema == before
+    assert projected['properties'] == schema['properties']
+    assert 'allOf' not in projected
+    assert constraints == [{'keyword': k, 'schema_path': f'/allOf/0/{k}'} for k in ('if','then','else')]
+    for value in [{'if': True, 'then': 'required'}, {'if': False, 'else': literal}]:
+        jsonschema.validate(value, schema)
+        jsonschema.validate(value, projected)
+    jsonschema.validate({'if': True}, projected)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({'if': True}, schema)
+
+
+@pytest.mark.parametrize('schema,values', [
+    ({'not': {'type': 'array', 'uniqueItems': True}}, [[1,1], 'text', {}, [1,2]]),
+    ({'$defs': {'distinct': {'type': 'array', 'uniqueItems': True}},
+      'not': {'$ref': '#/$defs/distinct'}}, [[1,1], 'text', {}, [1,2]]),
+    ({'$defs': {'a b': {'type': 'array', 'uniqueItems': True}},
+      'not': {'$ref': '#/$defs/a%20b'}}, [[1,1], 'text', {}, [1,2]]),
+    ({'$defs': {'distinct': {'$anchor': 'distinct', 'type': 'array', 'uniqueItems': True}},
+      'not': {'$ref': '#distinct'}}, [[1,1], 'text', {}, [1,2]]),
+    ({'oneOf': [{'type': 'array', 'uniqueItems': True}, {'const': ['x','x']}]}, [['a','b'], ['x','x'], [], 1]),
+    ({'anyOf': [{'type': 'array'}, {'type': 'string'}],
+      'oneOf': [{'type': 'array', 'uniqueItems': True}, {'const': ['x','x']}]}, [['a'], ['x','x'], 'text']),
+    ({'$defs': {'distinct': {'type': 'array', 'uniqueItems': True}},
+      'oneOf': [{'$ref': '#/$defs/distinct'}, {'const': ['x','x']}]}, [['a'], ['x','x'], []]),
+    ({'type': 'array', 'contains': {'type': 'array', 'uniqueItems': True}, 'minContains': 0, 'maxContains': 1},
+     [[[1],[2,2]], [[1],[2]], [[1,1]], []]),
+    ({'type': 'object', 'properties': {'flag': {'type': 'boolean'}}, 'required': ['flag'],
+      'if': {'properties': {'flag': {'const': True}}}, 'then': {'properties': {'extra': {'type': 'string'}}},
+      'unevaluatedProperties': False}, [{'flag': True, 'extra': 'valid'}, {'flag': False}, {'flag': True, 'extra': 1}]),
+    ({'type': 'array', 'if': {'contains': {'const': 1}}, 'then': {'items': {'type': 'integer'}},
+      'unevaluatedItems': False}, [[1,2], [], [1,'invalid']]),
+    ({'type': 'object', 'anyOf': [{}, {'properties': {'annotated': {}}}], 'unevaluatedProperties': False},
+     [{'annotated': 1}, {}, {'other': 1}]),
+])
+def test_projection_never_excludes_original_valid_values_under_semantic_operators(schema, values):
+    original = copy.deepcopy(schema)
+    projected = decoding_schema(schema)
+    assert schema == original
+    jsonschema.Draft202012Validator.check_schema(projected)
+    authoritative = jsonschema.Draft202012Validator(schema)
+    decoder = jsonschema.Draft202012Validator(projected)
+    valid = [v for v in values if authoritative.is_valid(v)]
+    assert valid
+    assert all(decoder.is_valid(value) for value in valid)
+
+
+@pytest.mark.parametrize('mode', ['content-first', 'existing'])
+@pytest.mark.parametrize('finished,calls,valid', [(True, [], True), (False, ['work'], True),
+                                                 (True, ['work'], False), (False, [], False)])
+async def test_native_conditional_constraints_are_checked_against_original_schema(
+    compiler, tmp_path, monkeypatch, mode, finished, calls, valid,
+):
+    schema = {'type': 'object', 'properties': {
+        'finished': {'type': 'boolean'}, 'calls': {'type': 'array', 'items': {'type': 'string'}},
+        'text': {'type': 'string'},
+    }, 'required': ['finished','calls','text'], 'additionalProperties': False,
+        'allOf': [{'if': {'properties': {'finished': {'const': True}}},
+                   'then': {'properties': {'calls': {'maxItems': 0}}},
+                   'else': {'properties': {'calls': {'minItems': 1}}}}]}
+    root = write_scenario(tmp_path, {'generation_mode': mode, 'schemas': {'Action': schema}, 'steps': {
+        'decide': {'uses': 'llm.content', 'prompt': 'prompt.md', 'output_schema': 'Action'},
+        'draft': {'uses': 'remix.draft', 'needs': ['decide'], 'inputs': {'response': '${steps.decide.output.text}'}},
+    }})
+    result = {'finished': finished, 'calls': calls, 'text': 'A generated decision.'}
+    wire = []
+
+    async def respond(request):
+        payload = json.loads(request.content)
+        wire.append(payload)
+        actual = payload['response_format']['json_schema']['schema']
+        if 'allOf' in actual:
+            return httpx.Response(400, json={'error': {'message': 'unsupported JSON Schema keyword: if'}})
+        assert actual['properties'] == schema['properties']
+        assert payload['response_format']['json_schema']['strict'] is True
+        assert '"if"' in payload['messages'][0]['content']
+        jsonschema.validate(result, actual)
+        return streaming_response(json.dumps(result))
+
+    wire_transport(monkeypatch, respond)
+    app = app_for(tmp_path, compiler, None, scenarios=root)
+    runner = app.state.scenario_runner
+    config = copy.deepcopy(app.state.dataset['config'])
+    config['single_generation']['max_attempts'] = 1
+    app.state.dataset.set_config(config, app.state.dataset['revision'])
+    runner.start('custom')
+    await runner.job
+    assert len(wire) == 1
+    assert runner.status['phase'] == ('complete' if valid else 'rejected')
+    assert runner.scenario.flow.schemas['Action'] == schema
+    proposal = runner.snapshot['content_requests'][0]
+    assert proposal['output_mode'] == 'native'
+    assert proposal['local_schema_constraints'] == [
+        {'keyword': k, 'schema_path': f'/allOf/0/{k}'} for k in ('if','then','else')]
+    assert proposal['metrics']['local_schema_keywords'] == ['else','if','then']
+    if not valid:
+        assert runner.snapshot['steps']['decide']['error'] == 'ValidationError'
+        assert json.loads(proposal['raw_output']) == result
+        if mode == 'content-first':
+            sample = app.state.dataset['samples'][0]
+            assert sample['metadata']['validation_level'] == 0
+            assert sample['metadata']['generation_record']['failures']
+            assert not compiler.compile(sample)['tool_calls']

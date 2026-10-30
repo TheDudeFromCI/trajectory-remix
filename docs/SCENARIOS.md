@@ -33,10 +33,12 @@ optional dependencies also skip checks with a recorded reason.
 
 Endpoints default to native JSON-schema output (`structured_output: "native"`).
 The server receives a decoding schema with `strict: true`; it must support the
-schema's features. `uniqueItems` is omitted from that decoding schema and checked
-locally against the unchanged original schema, allowing native grammar backends
-without uniqueness support. Duplicates remain invalid; generated decisions are
-never silently deduplicated. All other constraints are preserved. Choose
+schema's features. Uniqueness (`uniqueItems`) and conditional rules
+(`if`/`then`/`else`) are checked locally against the unchanged original schema,
+allowing native backends without those features. The decoding projection also
+relaxes related operators where necessary to avoid excluding valid outputs.
+Native enforcement retains the remaining structure. Duplicates and invalid
+conditional decisions stay invalid; model output is never silently corrected. Choose
 **Prompt-only JSON (compatibility)** under Endpoints
 (`structured_output: "prompted"`) for servers without that support. Native
 HTTP 400/422 responses pause generation and retain its checkpoint, with no

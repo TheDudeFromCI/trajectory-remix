@@ -281,7 +281,9 @@ class ModelSession:
                     path,
                 )
                 if local_constraints:
-                    self.log('Native schema compatibility: uniqueItems is enforced locally against the original '
+                    keywords = sorted({item['keyword'] for item in local_constraints})
+                    self.log('Native schema compatibility: ' + ', '.join(keywords) +
+                             (' is' if len(keywords) == 1 else ' are') + ' enforced locally against the original '
                              f'schema ({len(local_constraints)} location(s)); omitted from the decoding schema.',
                              'info', path)
                 prompt_text = instructions + "\n" + data

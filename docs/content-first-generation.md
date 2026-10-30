@@ -76,22 +76,33 @@ argument. Plain-text steps have no response format.
 
 The server must actually implement schema-constrained decoding. OpenAI-compatible
 URLs alone do not establish that support. Open tool argument dictionaries,
-optional fields and array limits are preserved. The supported compatibility
-exception is `uniqueItems`: common grammar engines, including the pinned
-llguidance backend, cannot enforce arbitrary array uniqueness during decoding.
-Remix omits this keyword from the **decoding schema only** and validates the
-returned JSON against the **original full schema**, which still requires unique
-values. The prompt and saved requirements retain that original constraint. This
+optional fields and ordinary array limits are preserved. Compatibility handling
+covers `uniqueItems` and conditional `if`/`then`/`else` rules, which are unsupported
+by some grammar backends, including the current PolyStrata integration. Remix
+omits these from the **decoding schema only** and validates the returned JSON
+against the **original full schema**, retaining uniqueness and conditional rules.
+For example, the idle rule that `finished: true` requires `calls: []` still runs
+before assembly or any tool execution. Review rules tying feedback to pass/fail
+status are also retained. Conditional keywords are removed together, and empty
+`allOf` wrappers left by that projection are removed.
+
+When a relaxed constraint occurs under negation, exclusive choices, references,
+containment limits or unevaluated-value checks, related decoding constraints are
+conservatively relaxed too. Otherwise removing a constraint could make the
+decoding schema reject an originally valid output. Such adjustments are also
+recorded for local validation; unrelated structural restrictions remain native.
+The prompt and saved requirements retain the original full contract. This
 also works with saved checkpoints; templates do not need to be regenerated.
 
 This is local deterministic schema validation, not an LLM review or a switch to
 prompt-only output. The remaining constraints are still requested through native
-grammar enforcement. Duplicates are rejected with their raw proposal retained;
-Remix does not silently deduplicate model decisions. Request logs explain the
+grammar enforcement. Duplicate values and invalid conditional decisions are
+rejected with their raw proposal retained; Remix does not silently deduplicate,
+change `finished`, alter tool requests or repair review feedback. Request logs explain the
 projection, `local_schema_constraints` records its original schema paths, and
 metrics include `local_schema_keywords`. `uniqueItems: false` is a redundant
 constraint and is also omitted. Property names and literal default/example/enum
-values named `uniqueItems` remain untouched.
+values named `uniqueItems`, `if`, `then` or `else` remain untouched.
 
 Other unsupported schema keywords still produce a visible API failure rather
 than being discarded. Some hosted providers support only a restricted strict

@@ -57,6 +57,11 @@
   transparent provenance and request logs, original-schema duplicate rejection
   with raw proposals retained, tokenizer budgets and both streaming transports,
   and end-to-end standard idle/review requests against a limited mock backend.
+  Conditional compatibility additionally covers if/then/else as one rule,
+  empty-wrapper cleanup, original-schema rejection of both invalid branches,
+  preservation of keyword-named data, negative/exclusive/reference/containment
+  contexts that must not exclude valid original values, and retention before
+  tool side effects. Idle/review wire tests reject conditional keywords too.
 - MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
