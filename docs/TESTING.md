@@ -51,6 +51,12 @@
   Injected HTTP clients receive the same format. Frontend checks cover the
   endpoint selector and saving its compatibility setting. Mock servers establish
   the request/retention contract, not enforcement by an untested local model.
+- Native-schema compatibility tests cover uniqueness enforced against the
+  authoritative original schema while omitted from the decoding contract,
+  nested/reference/tuple schemas, preservation of literal data/property names,
+  transparent provenance and request logs, original-schema duplicate rejection
+  with raw proposals retained, tokenizer budgets and both streaming transports,
+  and end-to-end standard idle/review requests against a limited mock backend.
 - MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,

@@ -98,9 +98,10 @@ class ModelSession:
                              "Return JSON matching this schema:\n" + compact(schema))
         return instructions, compact(inputs)
 
-    def output_definition(self, step, schema=None):
+    def output_definition(self, step, schema=None, *, local_constraints=None):
         schema = schema or self.scenario.flow.schemas.get(step.output_schema)
-        return native_output(self.endpoints[step.endpoint], schema, step.output_schema or 'trajectory_review')
+        return native_output(self.endpoints[step.endpoint], schema, step.output_schema or 'trajectory_review',
+                             local_constraints=local_constraints)
 
     def request_budget(self, endpoint_id):
         """An unavailable inference tokenizer disables local token-budget checks."""
@@ -156,7 +157,8 @@ class ModelSession:
             inputs = {**inputs, 'visible_windows': visible}
         instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
         endpoint = self.endpoints[step.endpoint]
-        output = self.output_definition(step, schema)
+        local_constraints = []
+        output = self.output_definition(step, schema, local_constraints=local_constraints)
         formatting = response_format(output)
         output_mode = 'native' if output else 'prompted' if schema or step.output_schema else 'text'
         budget = self.request_budget(step.endpoint)
@@ -193,6 +195,7 @@ class ModelSession:
             proposal = {'path': path, 'state': 'running', 'model': endpoint['model'],
                         'endpoint': endpoint['id'], 'budget': budget_metrics,
                         'output_mode': output_mode, 'response_format': formatting,
+                        'local_schema_constraints': local_constraints,
                         'decision_tick': self.builder.next_tick, 'started_at': time.time(),
                         'raw_output': '', 'reasoning': ''}
             self.snapshot.setdefault('content_requests', []).append(proposal)
@@ -245,6 +248,7 @@ class ModelSession:
                     current['context_utilization'] = current['total_tokens'] / budget.context
                 current.update(budget_metrics)
                 current['output_mode'] = output_mode
+                current['local_schema_keywords'] = sorted({item['keyword'] for item in local_constraints})
                 if not budget and current.get('token_source') == 'estimated':
                     current['token_estimator'] = 'training-tokenizer'
                 proposal.update(raw_output=streamed_text, reasoning=streamed_reasoning, metrics=current)
@@ -276,6 +280,10 @@ class ModelSession:
                     "info",
                     path,
                 )
+                if local_constraints:
+                    self.log('Native schema compatibility: uniqueItems is enforced locally against the original '
+                             f'schema ({len(local_constraints)} location(s)); omitted from the decoding schema.',
+                             'info', path)
                 prompt_text = instructions + "\n" + data
                 messages = [
                     {"role": "system", "content": instructions},
@@ -284,6 +292,7 @@ class ModelSession:
                 self.snapshot["steps"].setdefault(path, {}).update(
                     messages=messages, endpoint=endpoint["id"], model=endpoint["model"],
                     output_mode=output_mode, response_format=formatting,
+                    local_schema_constraints=local_constraints,
                 )
                 if self.client is not None:
                     # Injected clients use identical rendered messages and request boundaries.

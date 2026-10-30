@@ -66,8 +66,8 @@ Settings → Endpoints, choose **Native JSON schema (recommended)**, or configur
 {"structured_output": "native"}
 ```
 
-The request includes `response_format.type: "json_schema"`, the original scenario
-schema, a stable output name and `strict: true`. This is the same server protocol
+The request includes `response_format.type: "json_schema"`, a decoding schema
+derived from the scenario, a stable output name and `strict: true`. This is the same server protocol
 as Pydantic AI's `NativeOutput`; the low-level Pydantic AI request path uses native
 output parameters too. Content-first SDK streaming retains its exact budgeted
 messages, both supported completion-limit parameter names and usage accounting.
@@ -75,9 +75,26 @@ Custom/injected clients receive the same `response_format` in their endpoint
 argument. Plain-text steps have no response format.
 
 The server must actually implement schema-constrained decoding. OpenAI-compatible
-URLs alone do not establish that support. Schemas are sent intact: open tool
-argument dictionaries, optional fields, array limits and custom constraints must
-not be silently rewritten. Some hosted providers support only a restricted strict
+URLs alone do not establish that support. Open tool argument dictionaries,
+optional fields and array limits are preserved. The supported compatibility
+exception is `uniqueItems`: common grammar engines, including the pinned
+llguidance backend, cannot enforce arbitrary array uniqueness during decoding.
+Remix omits this keyword from the **decoding schema only** and validates the
+returned JSON against the **original full schema**, which still requires unique
+values. The prompt and saved requirements retain that original constraint. This
+also works with saved checkpoints; templates do not need to be regenerated.
+
+This is local deterministic schema validation, not an LLM review or a switch to
+prompt-only output. The remaining constraints are still requested through native
+grammar enforcement. Duplicates are rejected with their raw proposal retained;
+Remix does not silently deduplicate model decisions. Request logs explain the
+projection, `local_schema_constraints` records its original schema paths, and
+metrics include `local_schema_keywords`. `uniqueItems: false` is a redundant
+constraint and is also omitted. Property names and literal default/example/enum
+values named `uniqueItems` remain untouched.
+
+Other unsupported schema keywords still produce a visible API failure rather
+than being discarded. Some hosted providers support only a restricted strict
 schema subset; a scenario with unrestricted argument dictionaries may need a
 server with broader schema support or the compatibility mode below.
 

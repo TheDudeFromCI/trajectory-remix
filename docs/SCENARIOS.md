@@ -32,8 +32,12 @@ Leave it blank to skip local token-budget checks; unavailable tokenizer files or
 optional dependencies also skip checks with a recorded reason.
 
 Endpoints default to native JSON-schema output (`structured_output: "native"`).
-The server receives each output schema with `strict: true`; it must support the
-schema's features. Choose **Prompt-only JSON (compatibility)** under Endpoints
+The server receives a decoding schema with `strict: true`; it must support the
+schema's features. `uniqueItems` is omitted from that decoding schema and checked
+locally against the unchanged original schema, allowing native grammar backends
+without uniqueness support. Duplicates remain invalid; generated decisions are
+never silently deduplicated. All other constraints are preserved. Choose
+**Prompt-only JSON (compatibility)** under Endpoints
 (`structured_output: "prompted"`) for servers without that support. Native
 HTTP 400/422 responses pause generation and retain its checkpoint, with no
 automatic downgrade or repeated incompatible requests. Change the setting and

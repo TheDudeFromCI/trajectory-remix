@@ -8,7 +8,7 @@ import pytest
 
 from trajectory_remix.content_first import RequestBudget
 from trajectory_remix.llm import LLMClient, default_config, validate_config
-from trajectory_remix.structured_output import native_output, response_format
+from trajectory_remix.structured_output import decoding_schema, native_output, response_format
 from test_content_first import ByteChatTokenizer, ContentClient, setup
 from test_scenarios import app_for, finish, write_scenario
 
@@ -247,3 +247,166 @@ async def test_injected_http_schema_rejection_is_recoverable_not_a_rejection(com
     assert 'Prompt-only JSON' in runner.status['last_error']
     assert 'SECRET' not in runner.status['last_error']
     assert app.state.dataset['samples'][0]['metadata']['generation_phase'] == 'planning'
+
+
+def test_decoding_projection_keeps_original_uniqueness_and_literal_keyword_data():
+    schema = {'type': 'object', 'properties': {
+        'uniqueItems': {'type': 'array', 'items': {'type': 'string'}, 'uniqueItems': True, 'maxItems': 4},
+        'literal': {'const': {'uniqueItems': True}, 'default': {'uniqueItems': True},
+                    'examples': [{'uniqueItems': True}], 'enum': [{'uniqueItems': True}]},
+    }, 'required': ['uniqueItems'], 'additionalProperties': False,
+        '$defs': {'uniqueItems': {'type': 'array', 'uniqueItems': True, 'items': {'type': 'integer'}}},
+        'allOf': [{'properties': {'other': {'$ref': '#/$defs/uniqueItems'}}}]}
+    before = copy.deepcopy(schema)
+    constraints = []
+    projected = decoding_schema(schema, constraints)
+    assert schema == before
+    assert projected['properties']['uniqueItems'] == {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 4}
+    assert projected['properties']['literal'] == schema['properties']['literal']
+    assert projected['$defs']['uniqueItems'] == {'type': 'array', 'items': {'type': 'integer'}}
+    assert projected['allOf'] == schema['allOf']
+    assert constraints == [
+        {'keyword': 'uniqueItems', 'schema_path': '/properties/uniqueItems/uniqueItems'},
+        {'keyword': 'uniqueItems', 'schema_path': '/$defs/uniqueItems/uniqueItems'},
+    ]
+    duplicate = {'uniqueItems': ['same', 'same']}
+    jsonschema.validate(duplicate, projected)
+    with pytest.raises(jsonschema.ValidationError, match='non-unique'):
+        jsonschema.validate(duplicate, schema)
+
+
+@pytest.mark.parametrize('keyword', ['items', 'prefixItems'])
+def test_decoding_projection_handles_nested_array_schemas_and_escaped_paths(keyword):
+    schema = {'type': 'array', keyword: [{'type': 'array', 'uniqueItems': True,
+                                       'items': {'type': 'string'}}], 'uniqueItems': False}
+    constraints = []
+    projected = decoding_schema(schema, constraints)
+    assert 'uniqueItems' not in projected and 'uniqueItems' not in projected[keyword][0]
+    assert constraints == [{'keyword': 'uniqueItems', 'schema_path': f'/{keyword}/0/uniqueItems'}]
+    original = {'properties': {'a~/b': {'type': 'array', 'uniqueItems': True}},
+                'additionalProperties': False}
+    constraints = []
+    decoding_schema(original, constraints)
+    assert constraints[0]['schema_path'] == '/properties/a~0~1b/uniqueItems'
+    assert native_output({'structured_output': 'prompted'}, original, local_constraints=constraints) is None
+    assert len(constraints) == 1  # Prompt-only mode never claims a native projection.
+
+
+@pytest.mark.parametrize('mode,with_tokenizer', [('content-first', True), ('content-first', False), ('existing', False)])
+@pytest.mark.parametrize('duplicates', [False, True])
+async def test_unique_items_compatibility_wire_and_original_schema_checks(
+    compiler, tmp_path, monkeypatch, mode, with_tokenizer, duplicates,
+):
+    schema = {'type': 'object', 'properties': {
+        'values': {'type': 'array', 'items': {'type': 'string'}, 'uniqueItems': True, 'maxItems': 4},
+        'text': {'type': 'string', 'minLength': 1},
+    }, 'required': ['values', 'text'], 'additionalProperties': False}
+    root = write_scenario(tmp_path, {'generation_mode': mode, 'schemas': {'Selection': schema}, 'steps': {
+        'pick': {'uses': 'llm.content', 'prompt': 'prompt.md', 'output_schema': 'Selection'},
+        'draft': {'uses': 'remix.draft', 'needs': ['pick'], 'inputs': {'response': '${steps.pick.output.text}'}},
+    }})
+    wire = []
+    result = {'values': ['first', 'first' if duplicates else 'second'], 'text': 'Selected the stated values.'}
+
+    async def respond(request):
+        payload = json.loads(request.content)
+        wire.append(payload)
+        formatting = payload['response_format']
+        assert formatting['type'] == 'json_schema' and formatting['json_schema']['strict'] is True
+        actual = formatting['json_schema']['schema']
+        if 'uniqueItems' in actual['properties']['values']:
+            return httpx.Response(400, json={'error': {'message': 'unsupported JSON Schema keyword: uniqueItems'}})
+        assert actual['properties']['values']['maxItems'] == 4
+        assert '"uniqueItems":true' in payload['messages'][0]['content']
+        jsonschema.validate(result, actual)  # Even duplicates satisfy the decoding subset.
+        return streaming_response(json.dumps(result))
+
+    wire_transport(monkeypatch, respond)
+    app = app_for(tmp_path, compiler, None, scenarios=root)
+    runner = app.state.scenario_runner
+    config = copy.deepcopy(app.state.dataset['config'])
+    config['single_generation']['max_attempts'] = 1
+    if with_tokenizer:
+        monkeypatch.setattr('trajectory_remix.content_first.inference_tokenizer', lambda _: ByteChatTokenizer())
+        config['endpoints'][0].update(inference_tokenizer='bytes', max_tokens=1024)
+    app.state.dataset.set_config(config, app.state.dataset['revision'])
+    runner.start('custom')
+    await runner.job
+    assert len(wire) == 1  # No rejected probe, grammar downgrade or extra inference.
+    assert runner.status['phase'] == ('rejected' if duplicates else 'complete')
+    assert runner.scenario.flow.schemas['Selection'] == schema
+    proposal = runner.snapshot['content_requests'][0]
+    assert proposal['output_mode'] == 'native'
+    assert proposal['local_schema_constraints'] == [{'keyword': 'uniqueItems', 'schema_path': '/properties/values/uniqueItems'}]
+    assert proposal['metrics']['local_schema_keywords'] == ['uniqueItems']
+    assert proposal['metrics']['budget_enforced'] is with_tokenizer
+    assert any('uniqueItems is enforced locally' in e['message'] for e in runner.logs)
+    if duplicates:
+        assert runner.snapshot['steps']['pick']['error'] == 'ValidationError'
+        assert json.loads(proposal['raw_output']) == result  # Never silently deduplicate model output.
+        if mode == 'content-first':
+            sample = app.state.dataset['samples'][0]
+            assert sample['metadata']['validation_level'] == 0
+            assert sample['metadata']['generation_phase'] == 'planning'
+            assert sample['metadata']['generation_record']['failures']
+    else:
+        assert runner.snapshot['steps']['pick']['output'] == result
+        assert app.state.dataset['samples'][0]['metadata']['validation_level'] == 0
+
+
+async def test_bundled_idle_flow_uses_compatible_native_schema(compiler, tmp_path, monkeypatch):
+    import asyncio
+    from test_idle_scenario import IdleClient
+
+    fake = IdleClient('parallel')
+    wire = []
+
+    async def respond(request):
+        payload = json.loads(request.content)
+        wire.append(payload)
+        schema = payload['response_format']['json_schema']['schema']
+        if 'release_windows' in schema['properties']:
+            assert 'uniqueItems' not in schema['properties']['release_windows']
+        message = await fake.complete({'id': 'generator'}, payload['messages'])
+        jsonschema.validate(json.loads(message['content']), schema)
+        return streaming_response(message['content'])
+
+    wire_transport(monkeypatch, respond)
+    app = app_for(tmp_path, compiler, None, scenarios=None, legacy_reviews=False)
+    runner = app.state.scenario_runner
+    runner.start('idle_scenario')
+    await asyncio.wait_for(runner.job, 15)
+    assert runner.status['phase'] == 'complete', list(runner.logs)
+    sample = app.state.dataset['samples'][0]
+    assert sample['metadata']['validation_level'] == 0
+    assert len(wire) == len(fake.messages) == 5
+    assert all(p['output_mode'] == 'native' for p in sample['metadata']['generation_record']['requests'])
+    assert runner.scenario.flow.schemas['Action']['properties']['release_windows']['uniqueItems'] is True
+
+
+async def test_shared_review_omits_unique_items_only_on_wire(studio, monkeypatch):
+    from test_standalone_validation import attach
+    from test_scenarios import review_output
+
+    app, _ = studio
+    wire = []
+
+    async def respond(request):
+        payload = json.loads(request.content)
+        wire.append(payload)
+        schema = payload['response_format']['json_schema']['schema']
+        assert 'uniqueItems' not in schema['properties']['context_requests']
+        result = review_output(payload['messages'])
+        jsonschema.validate(result, schema)
+        return streaming_response(json.dumps(result))
+
+    wire_transport(monkeypatch, respond)
+    validator = attach(app, None)
+    result = await validator.validate('test', record=False)
+    assert result['valid'] and not result['recorded']
+    assert len(wire) == 4
+    for proposal in validator.snapshot['content_requests']:
+        assert proposal['local_schema_constraints'] == [
+            {'keyword': 'uniqueItems', 'schema_path': '/properties/context_requests/uniqueItems'},
+        ]
+        assert proposal['metrics']['local_schema_keywords'] == ['uniqueItems']
