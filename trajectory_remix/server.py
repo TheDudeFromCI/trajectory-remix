@@ -653,14 +653,26 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
 
     @app.post("/api/scenarios/log/clear")
     async def clear_generation_log():
-        scenario_runner.logs.clear()
+        scenario_runner.clear_log()
         runner.logs.clear()
-        scenario_runner.persist()
         return {"ok": True}
+
+    @app.get("/api/scenarios/log")
+    async def generation_log():
+        journal = scenario_runner.log_journal
+        through = journal.last_sequence()
+        return StreamingResponse(journal.text(through), media_type='text/plain', headers={
+            'Content-Disposition': 'attachment; filename="generation.log"',
+            'Cache-Control': 'no-store',
+        })
 
     @app.get("/api/scenarios/job")
     async def scenario_job():
-        return json.loads(scenario_runner.clean(scenario_runner.snapshot)) if scenario_runner.snapshot else {}
+        if not scenario_runner.snapshot:
+            return {}
+        snapshot = json.loads(scenario_runner.clean(scenario_runner.snapshot))
+        snapshot['logs'] = list(scenario_runner.logs)
+        return snapshot
 
     @app.post("/api/samples/{index}/approve")
     async def approve(index: int):

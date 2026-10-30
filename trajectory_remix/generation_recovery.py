@@ -6,7 +6,6 @@ import copy
 import json
 import time
 import uuid
-from collections import deque
 
 from .llm import SampleBuilder
 from .scenarios import Flow, Scenario, check_scenario_endpoints
@@ -216,7 +215,7 @@ class GenerationRecovery:
         owner.expected_draft = copy.deepcopy(sample)
         owner.state_override = None
         owner.manual_tags = (saved or {}).get('manual_tags')
-        owner.first_prompts, owner.first_prompt_paths, owner.logs = {}, {}, deque()
+        owner.first_prompts, owner.first_prompt_paths = {}, {}
         owner.limit = asyncio.Semaphore(owner.snapshot['max_parallel'])
         owner.resume_event.set()
 

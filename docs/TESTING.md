@@ -25,6 +25,13 @@
   failed retries, cancellation before/during inference and process restart.
   DOM checks verify action availability, busy states, confirmations, payloads,
   return-to-results navigation and resolved issue counts.
+- Generation-log regressions cover append-only database retention, older-sample
+  restoration, dataset-wide resume, force/restart recovery, pause and process
+  restart, diagnostics written before checkpoint persistence, one-time union of
+  overlapping legacy logs, repeated identical entries, corrupt checkpoints,
+  explicit clear without later resurrection, and complete server-side exports
+  with a fixed upper sequence while generation continues. Frontend copy/export
+  checks include database entries newer than the browser's last refresh.
 - Creation tests verify Pending drafts, canonical defaults and legacy name aliases,
   generator-only configuration, retired task API errors, preservation of original
   review snapshots and custom guidance, provider retry budgets and recovery.

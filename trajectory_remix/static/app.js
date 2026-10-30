@@ -2164,15 +2164,12 @@ function updateSettingsState() {
 }
 $("config-content").addEventListener("input", () => updateSettingsState());
 $("config-content").addEventListener("change", () => updateSettingsState());
-function generationLogText() {
-  return state.logs.map(log => `${log.time} [${log.level || "info"}]${log.step ? " " + log.step : ""}\n${log.message}`).join("\n\n");
-}
-$("copy-generation-log").onclick = action(async () => { await navigator.clipboard.writeText(generationLogText()); toast("Output copied."); });
-$("export-generation-log").onclick = () => {
-  const url = URL.createObjectURL(new Blob([generationLogText()], {type: "text/plain"}));
+$("copy-generation-log").onclick = action(async () => { await navigator.clipboard.writeText(await (await api("scenarios/log")).text()); toast("Output copied."); });
+$("export-generation-log").onclick = action(async () => {
+  const url = URL.createObjectURL(await (await api("scenarios/log")).blob());
   const link = node("a"); link.href = url; link.download = "generation.log"; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-};
+});
 function openSettings() {
   if (!configDraft) {
     configDraft = structuredClone(state.config);

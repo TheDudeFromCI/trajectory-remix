@@ -66,6 +66,29 @@ The scenario defaults to `user_scenario` when omitted. `user_problem` and
 old task-based creation API, returns HTTP 410. Legacy task settings and automatic
 validation flags in imported configurations do not enable a creation pipeline.
 
+## Generation activity log
+
+Activity is an append-only, project-wide SQLite journal. **Clear Log is the only
+action that removes entries.** Failed attempts, Pause/Cancel, resuming an older
+sample, dataset-wide resume, restarting from the beginning, deleting a sample,
+and reopening Remix do not clear or replace the history. There is no automatic
+database retention limit. Model requests and their metrics remain attributable
+to their sample, generation job and batch in new entries.
+
+**Copy Output** and **Export Log** read the full database journal directly,
+including entries newer than the dashboard's last refresh. The download is
+`GET /api/scenarios/log` (authenticated like the other dashboard APIs). It captures
+a complete prefix at download start, so an active generation cannot extend the
+download indefinitely. `POST /api/scenarios/log/clear` explicitly clears the
+journal without deleting trajectories, proposals, requirements or recovery
+archives. Clearing prevents old checkpoints from bringing activity back.
+
+Existing checkpoint logs are imported once, combining overlapping histories from
+all saved generation jobs, rather than trusting the last restored checkpoint.
+New checkpoints refer to the separate journal instead of copying cumulative
+batch history. Entries still present in older checkpoints can be recovered on
+upgrade; entries absent from every saved copy cannot be reconstructed.
+
 ## Resume unfinished generations across the dataset
 
 Choose **Edit → Generation → Resume Unfinished Generations**, or the matching

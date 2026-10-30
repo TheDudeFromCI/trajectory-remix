@@ -63,9 +63,11 @@ class ScenarioRunner(ModelSession):
                 "SELECT snapshot FROM generation_jobs ORDER BY rowid DESC LIMIT 1"
             ).fetchone()
         self.snapshot = json.loads(row[0]) if row else None
+        from .generation_log import GenerationLog
+        self.log_journal = GenerationLog(self.state.store)
+        self.logs.extend(self.log_journal.entries())
         if self.snapshot:
             self.status.update(self.snapshot["status"])
-            self.logs.extend(self.snapshot["logs"])
             if self.status["running"]:
                 self.status.update(
                     running=False,
@@ -110,7 +112,9 @@ class ScenarioRunner(ModelSession):
         if self.snapshot is None:
             return
         self.snapshot['elapsed_seconds'] = self.elapsed_seconds()
-        self.snapshot.update(status=copy.deepcopy(self.status), logs=list(self.logs))
+        # Activity is project-wide, not checkpoint state. Restoring an older job
+        # must never rewind it, and each checkpoint need not copy the whole batch.
+        self.snapshot.update(status=copy.deepcopy(self.status), logs=[], log_storage='journal')
         if hasattr(self, "builder"):
             self.snapshot["checkpoint"] = {
                 "sample": self.builder.sample,
@@ -128,14 +132,23 @@ class ScenarioRunner(ModelSession):
             )
 
     def log(self, message, level="info", step=None):
-        self.logs.append(
-            {
-                "time": datetime.now(UTC).isoformat(),
-                "message": self.clean(message),
-                "level": level,
-                "step": step,
-            }
-        )
+        entry = {
+            "time": datetime.now(UTC).isoformat(),
+            "message": self.clean(message),
+            "level": level,
+            "step": step,
+        }
+        if self.snapshot:
+            entry.update(job_id=self.snapshot['id'],
+                         sample_id=self.status.get('draft_id'),
+                         batch_id=self.status.get('batch', {}).get('id'))
+        self.log_journal.append(entry)
+        self.logs.append(entry)
+        self.persist()
+
+    def clear_log(self):
+        self.log_journal.clear()
+        self.logs.clear()
         self.persist()
 
     def start(
@@ -439,10 +452,9 @@ class ScenarioRunner(ModelSession):
             last_error=None,
             metrics={},
         )
-        self.logs = deque(self.snapshot["logs"])
         self.limit = asyncio.Semaphore(self.snapshot.get("max_parallel", 1))
         self.resume_event.set()
-        self.log("Resuming saved generation checkpoint; completed steps will be reused")
+        self.log(f"Resuming saved generation checkpoint for {sample_id}; completed steps will be reused")
         if _schedule:
             self.job = asyncio.create_task(
                 self.run(self.scenario.name, self.snapshot.get("max_parallel", 1))

@@ -1213,6 +1213,25 @@ $("randomize-tags").checked = true;
 await click("export-generation-log");
 assert.equal(downloadedFilename, "generation.log");
 assert.equal(typeof await downloadedBlob.text(), "string");
+// Copy/export read the durable server log, including events newer than the UI.
+const beforeLogExportFetch = w.fetch;
+const fullLogText = "Entire persisted history, including a newer event absent from state.logs.";
+let logExportRequests = 0, copiedLogText = null;
+w.navigator.clipboard.writeText = async text => copiedLogText = text;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/log") {
+    logExportRequests++;
+    assert(options.headers["X-Remix-Token"]);
+    return new w.Response(fullLogText, {status:200, headers:{"Content-Type":"text/plain"}});
+  }
+  return beforeLogExportFetch(path, options);
+};
+await click("export-generation-log");
+assert.equal(await downloadedBlob.text(), fullLogText);
+await click("copy-generation-log");
+assert.equal(copiedLogText, fullLogText);
+assert.equal(logExportRequests, 2);
+w.fetch = beforeLogExportFetch;
 const actualFetch = w.fetch;
 let logFixture = [{time:"2026-10-25T00:00:00Z", level:"info", message:"Stable log entry"}];
 w.fetch = async (path, options) => {
