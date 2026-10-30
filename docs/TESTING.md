@@ -18,6 +18,12 @@
   Frontend checks cover distinct setup/running/paused/completed views, hidden
   creation controls during resumption, relevant actions, separate overall and
   per-draft progress, grouped errors and optional inference details.
+- Task-switch regressions cover paused creation batches, dataset resume passes,
+  selected recovery jobs, immediate pauses before the worker starts, active-call
+  rejection, durable checkpoints after process restart, original quota retention,
+  completed-request reuse and independent single/batch counts. Frontend checks
+  verify relevant task choices, switching in both directions, explicit Start,
+  continuing the same paused resume pass and count stability across polling.
 - Generation search tests cover unfinished/complete independently of review state,
   exact resume-queue selection, missing/corrupt checkpoints and manual-copy
   exclusion, metadata changes, SQL/authoring-draft parity, negation, grouping,

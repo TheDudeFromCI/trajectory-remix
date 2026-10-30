@@ -72,6 +72,29 @@ The scenario defaults to `user_scenario` when omitted. `user_problem` and
 old task-based creation API, returns HTTP 410. Legacy task settings and automatic
 validation flags in imported configurations do not enable a creation pipeline.
 
+## Switch generation tasks
+
+Choose **Pause** and let active requests finish. The generation panel then offers
+**New task → Create a single trajectory / Create a new batch**. The same choices
+are available under **Edit → Generation**. Choose the scenario and count, then
+press **Start**. Choosing a task saves and releases the paused worker without
+starting inference. A new single starts with a count of 1; a new batch starts
+with 10, independently of the previous batch's target.
+
+You can also switch from a paused creation batch to **Resume Unfinished
+Generations**, or resume the selected trajectory. Existing samples, completed
+requests, checkpoints and logs remain saved. A parked creation batch retains its
+original quota in its checkpoint; resuming one of its drafts can continue that
+batch. A dataset-wide resume pass only processes existing unfinished drafts and
+never fills an old creation quota. A later dataset-wide pass finds the remaining
+unfinished entries. Resuming the currently paused pass continues that same pass.
+
+The API is `POST /api/scenarios/suspend`. It returns HTTP 409 while a running task
+has not fully paused, is a no-op when idle, and waits for the old worker to exit
+before another task can start. `/api/state` exposes `can_suspend_generation`.
+Suspended queue/recovery records remain inspectable after a process restart;
+switching tasks does not cancel or delete their saved content.
+
 ## Generation activity log
 
 Activity is an append-only, project-wide SQLite journal. **Clear Log is the only

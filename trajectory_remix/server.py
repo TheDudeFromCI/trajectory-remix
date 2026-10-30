@@ -227,6 +227,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "selected_index": selected_index,
             "can_resume_generation": scenario_runner.can_resume(selected_id),
             "can_resume_active_generation": scenario_runner.can_resume(scenario_runner.status.get("draft_id")),
+            "can_suspend_generation": scenario_runner.can_suspend(),
             "unfinished_generation_count": scenario_runner.resume_queue.count(),
             "generation_resume": recovery.view(),
             "config": public_config(state["config"]),
@@ -572,6 +573,13 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def resume_all_generations():
         job_id = scenario_runner.resume_queue.start()
         return {'job_id': job_id, 'status': dict(scenario_runner.resume_queue.status)}
+
+    @app.post('/api/scenarios/suspend')
+    async def suspend_generation():
+        if scenario_runner.status['running'] and not scenario_runner.can_suspend():
+            raise HTTPException(409, 'Pause generation and let active LLM calls finish before switching tasks')
+        await scenario_runner.suspend()
+        return {'ok': True, 'draft_id': scenario_runner.status.get('draft_id')}
 
     @app.get('/api/scenarios/resume-all/results')
     async def resume_all_results(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):

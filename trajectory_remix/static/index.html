@@ -318,6 +318,13 @@
             <button id="stop-run" class="danger-text" hidden>Cancel</button>
             <button id="resume-all-generations-panel" class="primary" hidden>Resume remaining</button>
             <button id="generation-create-more" hidden>Create more trajectories</button>
+            <label id="generation-switch-task" class="generation-switch-task" hidden>New task
+              <select id="generation-next-task" aria-label="Choose a new generation task" title="Paused work stays saved and can be resumed later.">
+                <option value="">Choose another task…</option>
+                <option value="single">Create a single trajectory</option>
+                <option value="batch">Create a new batch</option>
+              </select>
+            </label>
           </div>
 
           <details id="resume-issues-panel" class="generation-card generation-issues" hidden>

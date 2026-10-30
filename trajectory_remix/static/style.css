@@ -1367,6 +1367,8 @@ dialog::backdrop {
 #resume-skipped-stat { color: #e6bc7c; }
 .generation-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .generation-actions button { padding: 9px 14px; min-height: 36px; flex: 1; }
+.generation-switch-task { flex-basis: 100%; display: grid; gap: 6px; color: var(--muted); }
+.generation-switch-task select { width: 100%; min-width: 0; }
 .generation-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .generation-links:empty { display: none; }
 .generation-help { font-size: 11px; line-height: 1.5; color: var(--muted); }

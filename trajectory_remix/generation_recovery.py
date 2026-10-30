@@ -227,7 +227,9 @@ class GenerationRecovery:
             owner.status['batch'].update(state='complete' if success else 'exhausted', completed=int(success))
             self.update(recovery_id, 'complete' if success else 'failed', None if success else owner.status.get('last_error') or owner.status['phase'])
         except asyncio.CancelledError:
-            self.update(recovery_id, 'interrupted', 'Recovery cancelled; draft and checkpoint retained')
+            self.update(recovery_id, 'suspended' if owner.interruption_phase == 'suspended' else 'interrupted',
+                'Recovery paused to switch tasks; draft and checkpoint retained'
+                if owner.interruption_phase == 'suspended' else 'Recovery cancelled; draft and checkpoint retained')
             raise
         except Exception as error:
             self.update(recovery_id, 'failed', str(error))

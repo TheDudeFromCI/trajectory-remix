@@ -271,6 +271,7 @@ function renderValidationState() {
 function renderStatus() {
   $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
+  const switchReady = canSwitchGeneration();
   $("migrate-tokenizer-button").disabled = s.running || !!state.validation_status?.running;
   const scenarioSelect = $("scenario-type");
   const scenarioNames = (state.scenarios || []).map((item) => item.name);
@@ -286,7 +287,7 @@ function renderStatus() {
   scenarioSelect.disabled = s.running;
   $("generation-count").disabled = s.running;
   const batch = s.batch;
-  if (batch && (s.running || ["api_paused", "evaluation_failed"].includes(s.phase))) $("generation-count").value = String(batch.target);
+  if (batch && !(generationPanelIntent === "create" && !s.running) && (s.running || ["api_paused", "evaluation_failed"].includes(s.phase))) $("generation-count").value = String(batch.target);
   $("batch-progress").hidden = !batch || batch.target <= 1;
   const batchState = s.running && s.paused ? "paused" : s.pause_requested ? "pausing" : batch?.state;
   $("batch-progress").textContent = batch ? `${batch.completed}/${batch.target} completed · ${batch.attempts}/${batch.attempt_limit} attempts · ${batchState}` : "";
@@ -294,14 +295,14 @@ function renderStatus() {
   $("scenario-hint").textContent = scenarioNames.length
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
     : "No generation scenarios are available.";
-  $("generate-one").disabled = s.running || migrationBusy || !!state.validation_status?.running;
-  $("generate-batch").disabled = s.running || migrationBusy || !!state.validation_status?.running;
+  $("generate-one").disabled = !switchReady || migrationBusy || !!state.validation_status?.running;
+  $("generate-batch").disabled = !switchReady || migrationBusy || !!state.validation_status?.running;
   $("validate-trajectory").disabled = !sample || s.running || migrationBusy;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
-  $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
-  const recoveryDisabled = s.running || migrationBusy || !!state.validation_status?.running || !state.unfinished_generation_count;
+  $("resume-trajectory-generation").disabled = !switchReady || !sample || !state.can_resume_generation;
+  const recoveryDisabled = !switchReady || migrationBusy || !!state.validation_status?.running || !state.unfinished_generation_count;
   $("resume-all-generations").disabled = recoveryDisabled;
   $("resume-all-generations").title = `Resume ${state.unfinished_generation_count || 0} unfinished generated trajectories across the dataset`;
   renderGenerationAction(recoveryDisabled);
@@ -328,6 +329,10 @@ function renderStatus() {
   renderScenarioTags();
   renderGenerationMetrics();
   updateSettingsState();
+}
+function canSwitchGeneration() {
+  const s = state?.status || {};
+  return !s.running || (state.can_suspend_generation ?? (s.paused && !s.active?.length));
 }
 function renderScenarioTags() {
   const scenario = state.scenarios?.find(item => item.name === $("scenario-type").value);
@@ -357,7 +362,7 @@ $("scenario-type").onchange = () => { renderScenarioTags(); };
 function generationAction() {
   const s = state.status, recovery = state.generation_resume;
   if (s.running) return recovery?.running ? "resume-all" : s.activity || generationPanelIntent || "create";
-  return generationPanelIntent || s.activity || (s.phase === "resume_complete" ? "resume-all" : s.draft_id && ["interrupted","cancelled","api_paused","evaluation_failed"].includes(s.phase) ? "resume" : "create");
+  return generationPanelIntent || s.activity || (s.phase === "resume_complete" ? "resume-all" : s.draft_id && ["interrupted","cancelled","suspended","api_paused","evaluation_failed"].includes(s.phase) ? "resume" : "create");
 }
 function renderGenerationAction(recoveryDisabled) {
   const s = state.status, recovery = state.generation_resume || {}, mode = generationAction();
@@ -369,10 +374,10 @@ function renderGenerationAction(recoveryDisabled) {
     : mode === "restart" ? "Regenerate content using the original prompts and sampled conditions." : mode === "force-resume" ? "Continue from the saved checkpoint with compatibility warnings overridden." : mode === "resume" ? "Continue from the saved checkpoint, reusing completed work."
     : setup ? "Choose a scenario and how many samples to create."
     : `${s.scenario || $("scenario-type").value} · ${s.batch?.target || 1} ${(s.batch?.target || 1) === 1 ? "trajectory" : "trajectories"}`;
-  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", api_paused:"API request paused", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
+  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", suspended:"Task saved for later", api_paused:"API request paused", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
   $("run-status").textContent = setup ? "Ready" : s.running
     ? s.paused ? "Paused" : s.pause_requested ? "Pausing after active requests finish" : bulk ? "Resuming saved drafts" : ["resume","force-resume"].includes(mode) ? "Resuming trajectory" : mode === "restart" ? "Restarting trajectory" : "Generating"
-    : bulk ? ({complete:"Resume pass complete", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
+    : bulk ? ({complete:"Resume pass complete", suspended:"Resume pass saved for later", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("generation-setup").hidden = !setup;
   $("generation-work").hidden = setup;
@@ -402,7 +407,7 @@ function renderGenerationAction(recoveryDisabled) {
   $("generation-step-progress").max = Math.max(1, s.total || 1);
   $("generation-step-progress").value = s.completed || 0;
   $("generation-step-count").textContent = `${s.completed || 0}/${s.total || 0} steps`;
-  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : bulk ? (recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))) ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
+  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : s.phase === "suspended" ? "This task is saved. Start another task or resume it later." : bulk ? (recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))) ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
   const canContinue = !s.running && s.draft_id && (state.can_resume_active_generation ?? ["api_paused","evaluation_failed","cancelled","interrupted","error","rejected"].includes(s.phase));
   $("pause-run").hidden = !s.running && !setup && !(mode !== "resume-all" && canContinue);
   $("pause-run").textContent = s.running ? s.paused || s.pause_requested ? "Resume" : "Pause" : setup ? "Start" : "Resume";
@@ -413,6 +418,7 @@ function renderGenerationAction(recoveryDisabled) {
   $("resume-all-generations-panel").disabled = recoveryDisabled;
   $("resume-all-generations-panel").textContent = `Resume unfinished (${state.unfinished_generation_count || 0})`;
   $("generation-create-more").hidden = mode !== "create" || setup || s.running;
+  $("generation-switch-task").hidden = setup || !canSwitchGeneration() || migrationBusy || !!state.validation_status?.running || (mode === "create" && !s.running);
   $("generation-actions").hidden = [...$("generation-actions").children].every(child => child.hidden);
   $("generation-metrics-panel").hidden = setup || !(s.model_requests || Object.keys(s.metrics || {}).length);
   $("resume-issues-panel").hidden = !bulk || !recovery.issues?.length;
@@ -2856,9 +2862,16 @@ async function resumeGeneration(id) {
   } else if (!response.ok) throw new Error(result.detail);
   return true;
 }
+async function savePausedGeneration() {
+  if (!state.status.running) return;
+  if (!canSwitchGeneration()) throw new Error("Pause generation and let active LLM calls finish before switching tasks.");
+  await json("scenarios/suspend", "POST");
+  await refresh();
+}
 $("resume-trajectory-generation").onclick = action(async () => {
   closeMenus();
   if (hasPendingChanges()) await compileSample(true);
+  await savePausedGeneration();
   if (!await resumeGeneration(sample.id)) return;
   generationPanelIntent = "resume";
   openGenerationPanel(); await refresh();
@@ -2867,6 +2880,13 @@ $("resume-trajectory-generation").onclick = action(async () => {
 async function resumeAllGenerations() {
   closeMenus();
   if (sample && hasPendingChanges()) await compileSample(true);
+  if (state.status.running && state.generation_resume?.running && state.status.activity === "resume-all") {
+    await json("pause", "POST", {resume:true});
+    generationPanelIntent = "resume-all";
+    openGenerationPanel(); await refresh();
+    return;
+  }
+  await savePausedGeneration();
   await json("scenarios/resume-all", "POST", {});
   generationPanelIntent = "resume-all";
   openGenerationPanel();
@@ -2914,20 +2934,21 @@ for (const b of document.querySelectorAll("[data-config]"))
     configTab = b.dataset.config;
     renderConfig();
   };
-$("generate-one").onclick = action(async () => {
+async function prepareGenerationTask(kind) {
+  closeMenus();
+  if (sample && hasPendingChanges()) await compileSample(true);
+  await savePausedGeneration();
   generationPanelIntent = "create"; renderStatus();
   openGenerationPanel();
-  if (sample && hasPendingChanges()) await compileSample(true);
-  $("generation-count").value = "1";
-  // Starting is explicit so the user can select a scenario and request limit.
-  $("scenario-type").focus();
-});
-$("generate-batch").onclick = action(async () => {
-  generationPanelIntent = "create"; renderStatus();
-  openGenerationPanel();
-  if (sample && hasPendingChanges()) await compileSample(true);
-  $("generation-count").value = "10";
-  $("generation-count").focus();
+  $("generation-count").value = kind === "single" ? "1" : "10";
+  $(kind === "single" ? "scenario-type" : "generation-count").focus();
+}
+$("generate-one").onclick = action(() => prepareGenerationTask("single"));
+$("generate-batch").onclick = action(() => prepareGenerationTask("batch"));
+$("generation-next-task").onchange = action(async () => {
+  const kind = $("generation-next-task").value;
+  $("generation-next-task").value = "";
+  if (kind) await prepareGenerationTask(kind);
 });
 $("generation-create-more").onclick = () => { generationPanelIntent = "create"; renderStatus(); $("scenario-type").focus(); };
 $("view-generation-batch").onclick = action(async () => {
@@ -2955,7 +2976,7 @@ $("stop-run").onclick = action(async () => {
 $("pause-run").onclick = action(async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    if (generationPanelIntent !== "create" && ["api_paused", "evaluation_failed", "cancelled", "interrupted", "error", "rejected"].includes(state.status.phase)) {
+    if (generationPanelIntent !== "create" && ["api_paused", "evaluation_failed", "cancelled", "suspended", "interrupted", "error", "rejected"].includes(state.status.phase)) {
       if (!await resumeGeneration(state.status.draft_id)) return;
       generationPanelIntent = "resume";
     }

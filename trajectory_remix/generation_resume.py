@@ -166,11 +166,14 @@ class GenerationResumeQueue:
             self.status.update(state='complete', current_id=None)
             owner.status.update(phase='resume_complete', last_error=None)
         except asyncio.CancelledError:
-            self.status.update(state='cancelled', current_id=None)
-            owner.status['phase'] = 'cancelled'
+            self.status.update(state=owner.interruption_phase, current_id=None)
+            owner.status['phase'] = owner.interruption_phase
             if current:
                 with self.store.connect() as db:
-                    db.execute("UPDATE generation_resume_items SET state='interrupted',error='Cancelled; checkpoint retained' WHERE run_id=? AND position=?", (self.status['id'], current['position']))
+                    db.execute("UPDATE generation_resume_items SET state=?,error=? WHERE run_id=? AND position=?",
+                        ('suspended' if owner.interruption_phase == 'suspended' else 'interrupted',
+                         'Paused to switch tasks; checkpoint retained' if owner.interruption_phase == 'suspended'
+                         else 'Cancelled; checkpoint retained', self.status['id'], current['position']))
             raise
         except Exception as error:
             self.status.update(state='error', current_id=None)
