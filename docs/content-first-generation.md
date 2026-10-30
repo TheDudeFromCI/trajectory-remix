@@ -1,6 +1,6 @@
 # Content-first generation
 
-Content-first is the default generation workflow. The bundled `user_scenario` and `idle_scenario` flows create Pending drafts without semantic validation. Validation is an explicit operation on existing trajectories under **Edit → Generation → Validate Trajectory**. Replay syntax, saved datasets and Ready export requirements are unchanged.
+Content-first is the default generation workflow. The bundled `user_scenario`, `idle_scenario` and three [Kidra project scenarios](kidra-scenarios.md) create Pending drafts without semantic validation. Validation is an explicit operation on existing trajectories under **Edit → Generation → Validate Trajectory**. Replay syntax, saved datasets and Ready export requirements are unchanged.
 
 In this mode, the local model writes content and decisions. The application supplies replay events, tick schedules, protocol framing, and window lifecycle operations. Legacy `remix.validate` steps are deferred without calling an endpoint or attempting repairs. The current standard flows have no validation step at all. `remix.novelty` passes through the proposed idea and retains it as the concept without running a model judge. Scenario review prompts, semantic rules, original flow, randomized conditions, role profiles, and raw responses remain available for external review. Candidates stay at validation level **0** until reviewed; generation never approves training exports.
 

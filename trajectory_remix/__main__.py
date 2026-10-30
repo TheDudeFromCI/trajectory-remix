@@ -34,7 +34,7 @@ def main(argv=None):
     if not initializing:
         from .mcp_server import browser_origin
 
-        parser.add_argument("--scenarios-dir", type=Path, help="Optional custom scenario root replacing the bundled user and idle flows")
+        parser.add_argument("--scenarios-dir", type=Path, help="Optional custom scenario root replacing the bundled user, idle and Kidra project flows")
         parser.add_argument("--tools-dir", type=Path, help="Folder of custom Python tool modules")
         parser.add_argument("--port", type=int, default=8765)
         parser.add_argument(

@@ -414,9 +414,14 @@ file and requests to 40 MB. Large imports should be split into batches; the SQLi
 
 [Creation and independent validation flow (PDF)](docs/generation-validation-flow.pdf)
 
-The application loads two bundled content-first flows by default:
+The application includes five bundled content-first flows:
 **`user_scenario`** for user conversations, and **`idle_scenario`** for autonomous
-TODO, project, memory and alarm work. Select **Edit → Generation → Single Sample**
+TODO, project, memory and alarm work; **`kidra_small`**, **`kidra_medium`** and
+**`kidra_large`** for project coordination across initiation, active execution,
+recovery, revision and completion. The Kidra flows add specialist delegation,
+resource/investment tradeoffs, verification and durable milestone handoffs.
+See the [Kidra scenario guide](docs/kidra-scenarios.md) for scale limits and sampling.
+The default remains `user_scenario`. Select **Edit → Generation → Single Sample**
 or **Batch**. Configure endpoints and optional token budgets in Generation Settings.
 Local budget checks use the inference model’s tokenizer when available; leave its
 directory blank to skip checks. Missing tokenizer files or optional dependencies

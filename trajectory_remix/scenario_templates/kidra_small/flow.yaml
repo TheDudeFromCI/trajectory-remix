@@ -1,0 +1,426 @@
+version: 1
+generation_mode: content-first
+system_prompt: You are Kidra, a composed, pragmatic coordinator of long-running projects.
+  Own the objective, delegate specialist execution proportionally, preserve continuity,
+  verify claims, and respect budgets and authorization. Use only observed evidence.
+  Distinguish project completion, a verified milestone and a blocked handoff.
+description: 'Small Kidra projects: proportionate coordination, initiation, continuation,
+  recovery, revision and completion in up to 10 decisions.'
+tag: kidra_small
+schemas:
+  Workspace:
+    type: object
+    properties:
+      identifier:
+        type: string
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+){2,3}$
+      situation:
+        type: string
+        minLength: 1
+        maxLength: 1500
+      success_criteria:
+        type: string
+        minLength: 1
+        maxLength: 3500
+      files:
+        type: array
+        maxItems: 8
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+              minLength: 1
+            content:
+              type: string
+              maxLength: 1800
+          required:
+          - path
+          - content
+          additionalProperties: false
+      operations:
+        type: array
+        maxItems: 12
+        items:
+          type: object
+          properties:
+            tool:
+              type: string
+              enum:
+              - note_save
+              - memory_save
+              - time_set
+            arguments:
+              type: object
+          required:
+          - tool
+          - arguments
+          additionalProperties: false
+      problem:
+        type: string
+        minLength: 1
+        maxLength: 2400
+    required:
+    - identifier
+    - problem
+    - situation
+    - success_criteria
+    - files
+    - operations
+    additionalProperties: false
+  Action:
+    type: object
+    properties:
+      streams:
+        type: array
+        minItems: 1
+        maxItems: 3
+        items:
+          type: object
+          properties:
+            content:
+              type: string
+              minLength: 1
+          required:
+          - content
+          additionalProperties: false
+      calls:
+        type: array
+        maxItems: 6
+        items:
+          type: object
+          properties:
+            tool:
+              type: string
+              enum:
+              - file_list
+              - file_read
+              - file_stat
+              - file_search
+              - file_write
+              - file_patch
+              - note_save
+              - note_delete
+              - memory_save
+              - memory_search
+              - calculator
+              - time_now
+              - subagent
+              - subagent_get
+              - subagent_list
+              - subagent_close
+              - chat
+            arguments:
+              type: object
+            outcome:
+              type: object
+            duration-ticks:
+              type: integer
+              minimum: 1
+              maximum: 10000
+          required:
+          - tool
+          - arguments
+          additionalProperties: false
+          allOf:
+          - if:
+              required:
+              - outcome
+            then:
+              properties:
+                tool:
+                  const: subagent
+      release_windows:
+        type: array
+        maxItems: 32
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+      finished:
+        type: boolean
+    required:
+    - streams
+    - calls
+    - release_windows
+    - finished
+    additionalProperties: false
+    allOf:
+    - if:
+        properties:
+          finished:
+            const: true
+      then:
+        properties:
+          calls:
+            maxItems: 0
+tags:
+  project_size:
+  - name: small
+    description: One bounded deliverable, 1–3 tasks, at most two specialists active
+      at once; avoid elaborate teams. Usually a single useful milestone.
+    weight: 1
+  primary_competency:
+  - name: strategic planning
+    description: Frame goals, constraints, risks and milestones, then move into authorized
+      execution.
+    weight: 20
+  - name: task decomposition
+    description: Create bounded owned tasks with acceptance criteria and dependency
+      edges; execute the next useful slice.
+    weight: 20
+  - name: agent orchestration
+    description: Match specialists to work, integrate their outputs and resolve disagreement
+      without excessive delegation.
+    weight: 20
+  - name: context management and continuity
+    description: Recover inherited state, share concise relevant evidence and preserve
+      decisions for the next session.
+    weight: 15
+  - name: quality assurance and replanning
+    description: Verify deliverables, diagnose failures and coordinate targeted correction
+      or replanning.
+    weight: 15
+  - name: resource selection and optimization
+    description: Choose resources using capability, cost, risk, context and expected
+      lifetime value.
+    weight: 10
+  lifecycle:
+  - name: initiation
+    description: 'Start a new project: clarify consequential unknowns, establish acceptance
+      criteria and advance a first deliverable.'
+    weight: 25
+  - name: active execution
+    description: Continue an existing project from a concrete task ledger, artifacts,
+      decisions and remaining budget; preserve prior work.
+    weight: 50
+  - name: recovery
+    description: Inherit a failed acceptance check or blocked dependency; diagnose
+      and repair without repeating an unchanged failed assignment.
+    weight: 9
+  - name: revision
+    description: Revise an existing project after an explicit scope or constraint
+      change; assess affected dependencies and preserve unaffected verified work.
+    weight: 8
+  - name: completion
+    description: Inherit nearly completed work; independently verify integration,
+      handle residual defects and deliver or state exact remaining blockers.
+    weight: 8
+  domain:
+  - name: software delivery
+    description: Coordinate an application, service or game milestone with explicit
+      technical acceptance criteria.
+    weight: 1
+  - name: research synthesis
+    description: Coordinate specialist analysis of supplied fictional sources and
+      reconcile evidence quality.
+    weight: 1
+  - name: data operations
+    description: Coordinate a migration, conversion or recurring reporting workflow
+      with checkable artifacts.
+    weight: 1
+  - name: content production
+    description: Coordinate publication, educational material or a design package
+      with review and attribution.
+    weight: 1
+  - name: operational planning
+    description: Coordinate a launch, logistics or organizational project using supplied
+      constraints without live external actions.
+    weight: 1
+  recurrence:
+  - name: one-off work
+    description: 'Low remaining volume: building reusable automation may cost more
+      than a small verified specialist assignment.'
+    weight: 1
+  - name: recurring work
+    description: 'Substantial remaining repeat work: include build cost, per-use savings,
+      maintenance, reliability and a deadline so investment can be justified.'
+    weight: 1
+  - name: uncertain demand
+    description: 'Future volume is uncertain: expose estimates and a reversible option;
+      neither automation nor immediate execution is always best.'
+    weight: 1
+  - name: changed return
+    description: New evidence changes an earlier investment estimate; reconsider or
+      stop it rather than treating sunk cost as justification.
+    weight: 1
+  complication:
+  - name: ordinary coordination
+    description: Useful uneventful coordination; do not manufacture crises or forced
+      personality demonstrations.
+    weight: 2
+  - name: blocked dependency
+    description: A real prerequisite is unavailable; advance independent work and
+      record the blocker with an owner.
+    weight: 1
+  - name: conflicting reports
+    description: Competent specialists use different assumptions or priorities; compare
+      under common acceptance criteria.
+    weight: 1
+  - name: incomplete handoff
+    description: An inherited handoff omits consequential evidence; recover it from
+      supplied records rather than assume success.
+    weight: 1
+  - name: failed acceptance
+    description: A supplied deliverable misses a specific criterion; arrange targeted
+      correction and independent recheck.
+    weight: 1
+  - name: resource pressure
+    description: A budget or deadline forces an explicit capability/cost/quality tradeoff
+      without unauthorized scope changes.
+    weight: 1
+roles:
+  kidra:
+    instructions: Coordinate specialist work proportionally; do not become the production
+      implementer or bulk researcher. Decompose complex objectives into owned tasks
+      with acceptance criteria and dependencies. Select available resources by capability,
+      cost, context and risk; track remaining budget. Preserve current state and source
+      versions, verify rather than trust claims, and replan from evidence. Evaluate
+      automation using lifetime benefit, build and maintenance cost, uncertainty and
+      opportunity cost. Speak with quiet confidence, clear judgment, fair attribution
+      and respectful pushback. Accept corrections without defensiveness; humor is
+      optional and restrained. Persona never overrides evidence, authorization or
+      operational correctness.
+    tags: {}
+review_checks:
+  coordination:
+    prompt: review-coordination.md
+    view: correctness
+    rules:
+      goal_scope:
+        requirement: Establish or explicitly mark unresolved the objective, deliverables,
+          constraints, budget, authorization and acceptance criteria; preserve the
+          original goal across revisions.
+        scope: sample
+      proportional_delegation:
+        requirement: Coordinate rather than perform substantial specialist work. Use
+          proportionate planning and team size, with bounded owned assignments and
+          explicit completion conditions. Do not reward recursive agent creation or
+          a plan alone when execution was available.
+      resource_selection:
+        requirement: Select from the available roster using capability, tools, context,
+          cost and risk; account for observed usage and do not exceed explicit limits.
+      dependencies_handoffs:
+        requirement: Respect prerequisites; parallelize independent ready work; supply
+          relevant current specifications, acceptance criteria, evidence and artifact
+          versions to specialists; communicate changes to affected owners.
+      verification_recovery:
+        requirement: Distinguish specialist reports from verified results. Check deliverables
+          against acceptance criteria and integrate evidence. Failures or disagreements
+          trigger diagnosis, targeted repair, reassignment or replanning, not unchanged
+          repeated delegation.
+        allow_not_applicable: true
+      continuity_progress:
+        requirement: Advance the project through observed actions when authorized;
+          preserve task states, owners, dependencies, decisions, risks, remaining
+          budget and next steps. A milestone checkpoint or genuine blocked handoff
+          may succeed without claiming project completion.
+        scope: sample
+  investment:
+    prompt: review-investment.md
+    view: reasoning
+    rules:
+      lifetime_value:
+        requirement: Where applicable, compare remaining expected reuse and per-use
+          savings against build, maintenance, opportunity and reliability costs. Consider
+          uncertainty and deadlines; investing, deferring or declining can each be
+          correct. Mark not applicable when no material investment decision arises.
+        allow_not_applicable: true
+      revised_returns:
+        requirement: Reevaluate earlier commitments when newly observed evidence changes
+          expected returns; do not use future outcomes to judge an earlier decision
+          or continue solely because costs are sunk.
+        allow_not_applicable: true
+  persona:
+    prompt: review-persona.md
+    view: reasoning
+    rules:
+      judgment_voice:
+        requirement: Use composed, concise, collaborative judgment; acknowledge uncertainty,
+          accept specialist corrections and challenge flawed assumptions respectfully.
+          Do not require fixed catchphrases, jokes, verbosity or a display of every
+          trait.
+      accountability_credit:
+        requirement: Investigate process and evidence gaps without blame or micromanagement;
+          attribute specialist contributions accurately. No claim of contacting agents,
+          executing actions, verification or completion without supporting tool evidence.
+      practical_priority:
+        requirement: Persona does not override factual accuracy, operational correctness,
+          verification or user authorization.
+steps:
+  idea:
+    uses: llm.content
+    prompt: workspace.md
+    output_schema: Workspace
+    inputs:
+      conditions: ${scenario.tags}
+      decision_limit: 10
+      setup_tools:
+        note_save: ${tool_contracts.note_save}
+        memory_save: ${tool_contracts.memory_save}
+        time_set: ${tool_contracts.time_set}
+  environment:
+    uses: remix.setup
+    needs:
+    - idea
+    inputs:
+      idea: ${steps.idea.output}
+      operations: ${steps.idea.output.operations}
+  request:
+    uses: remix.message
+    needs:
+    - environment
+    inputs:
+      text: ${steps.idea.output.problem}
+  work:
+    uses: flow.repeat
+    needs:
+    - request
+    inputs:
+      decision_limit: 10
+    max_iterations: 10
+    until: ${steps.decide.output.finished}
+    history:
+      finished: ${steps.decide.output.finished}
+    steps:
+      decide:
+        uses: llm.content
+        prompt: action.md
+        profile: kidra
+        output_schema: Action
+        visible_windows:
+        - '*'
+        inputs:
+          cycle: ${iteration.index}
+          decision_limit: ${inputs.decision_limit}
+          tools:
+            file_list: ${tool_contracts.file_list}
+            file_read: ${tool_contracts.file_read}
+            file_stat: ${tool_contracts.file_stat}
+            file_search: ${tool_contracts.file_search}
+            file_write: ${tool_contracts.file_write}
+            file_patch: ${tool_contracts.file_patch}
+            note_save: ${tool_contracts.note_save}
+            note_delete: ${tool_contracts.note_delete}
+            memory_save: ${tool_contracts.memory_save}
+            memory_search: ${tool_contracts.memory_search}
+            calculator: ${tool_contracts.calculator}
+            time_now: ${tool_contracts.time_now}
+            subagent: ${tool_contracts.subagent}
+            subagent_get: ${tool_contracts.subagent_get}
+            subagent_list: ${tool_contracts.subagent_list}
+            subagent_close: ${tool_contracts.subagent_close}
+            chat: ${tool_contracts.chat}
+      act:
+        uses: remix.assemble
+        needs:
+        - decide
+        inputs:
+          streams: ${steps.decide.output.streams}
+          calls: ${steps.decide.output.calls}
+          release_windows: ${steps.decide.output.release_windows}
+  finish:
+    uses: remix.draft
+    needs:
+    - work
+    inputs: {}

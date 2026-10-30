@@ -34,9 +34,10 @@ def attach(app, reviewer):
     return validator
 
 
-def test_bundled_choices_are_only_streamlined_user_and_idle():
+def test_bundled_choices_use_content_first_creation_without_inline_review():
     registry = ScenarioRegistry()
-    assert [s['name'] for s in registry.listing()] == ['user_scenario', 'idle_scenario']
+    assert [s['name'] for s in registry.listing()] == [
+        'user_scenario', 'idle_scenario', 'kidra_large', 'kidra_medium', 'kidra_small']
     for scenario in registry.scenarios.values():
         assert scenario.flow.generation_mode == 'content-first'
         assert 'validate' not in scenario.flow.steps
@@ -177,7 +178,8 @@ async def test_config_accepts_generator_only_and_ui_has_no_inline_validation(stu
     html = (await client.get('/')).text
     assert 'Validate Trajectory' in html and 'id="validate-trajectory"' in html
     assert 'Automatic mode' not in html
-    assert [s['name'] for s in (await client.get('/api/state')).json()['scenarios']] == ['user_scenario', 'idle_scenario']
+    assert [s['name'] for s in (await client.get('/api/state')).json()['scenarios']] == [
+        'user_scenario', 'idle_scenario', 'kidra_large', 'kidra_medium', 'kidra_small']
     # A missing optional validator is reported only when explicitly requested.
     response = await client.post('/api/validation/run', json={'sample_id': 'test'})
     assert response.status_code == 422 and 'not configured' in response.json()['detail']
