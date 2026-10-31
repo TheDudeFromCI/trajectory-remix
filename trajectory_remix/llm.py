@@ -89,7 +89,7 @@ def default_config():
         "content_first": {"context_budget": 8192, "reserve_tokens": 256},
         "single_generation": {"max_parallel": 1, "max_attempts": 3, "api_retries": 2},
         "tasks": [],
-        "validation": {"endpoint": "validator", "max_input_tokens": 6000},
+        "validation": {"endpoint": "validator", "max_input_tokens": 6000, "max_repair_attempts": 3},
         "tags": ["competent", "software", "tool-use"],
         "clock": {"seed": "2030-01-01T09:00:00+00:00", "tick_rate": 10},
         "max_tool_calls": 64,
@@ -110,6 +110,8 @@ def validate_config(config):
         raise ValueError('validation.endpoint must be a nonempty endpoint ID')
     if type(validation.get('max_input_tokens', 6000)) is not int or not 512 <= validation.get('max_input_tokens', 6000) <= 100000:
         raise ValueError('validation.max_input_tokens must be between 512 and 100000')
+    if type(validation.get('max_repair_attempts', 3)) is not int or not 1 <= validation.get('max_repair_attempts', 3) <= 100:
+        raise ValueError('validation.max_repair_attempts must be an integer between 1 and 100')
     from .guidance import validate_guidance
     validate_guidance(config.get("review_guidance", {}))
     single = config.get("single_generation", {})

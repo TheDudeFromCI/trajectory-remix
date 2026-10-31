@@ -2202,6 +2202,7 @@ function configIssues() {
   range("content_first.context_budget", configDraft.content_first?.context_budget ?? 8192, 1, 1000000, true);
   range("content_first.reserve_tokens", configDraft.content_first?.reserve_tokens ?? 256, 0, 1000000, true);
   range("validation.max_input_tokens", configDraft.validation?.max_input_tokens ?? 6000, 512, 100000, true);
+  range("validation.max_repair_attempts", configDraft.validation?.max_repair_attempts ?? 3, 1, 100, true);
   range("max_tool_calls", configDraft.max_tool_calls, 1, 256, true);
 
   return errors;
@@ -2212,7 +2213,7 @@ function updateSettingsState() {
   for (const box of $("config-content").querySelectorAll("input, select")) {
     if (!box.dataset.configPath) {
       const label = box.closest("label")?.textContent || box.parentElement?.textContent || "";
-      const keys = {"Request context budget":"content_first.context_budget", "Reserved tokens":"content_first.reserve_tokens", "Validation input token budget":"validation.max_input_tokens", "Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Tool calls per sample":"max_tool_calls"};
+      const keys = {"Maximum automatic repair attempts":"validation.max_repair_attempts", "Request context budget":"content_first.context_budget", "Reserved tokens":"content_first.reserve_tokens", "Validation input token budget":"validation.max_input_tokens", "Maximum simultaneous LLM calls":"single_generation.max_parallel", "Maximum attempts per single sample":"single_generation.max_attempts", "Tool calls per sample":"max_tool_calls"};
       for (const [name, path] of Object.entries(keys)) if (label.includes(name)) box.dataset.configPath = path;
     }
     const message = issues[box.dataset.configPath] || "";
@@ -2344,6 +2345,7 @@ function renderConfig() {
       field("Reserved tokens", input(configDraft.content_first.reserve_tokens, v => configDraft.content_first.reserve_tokens = v, "number")),
       field("Default validation endpoint", select(eps, configDraft.validation.endpoint, v => configDraft.validation.endpoint = v)),
       field("Validation input token budget", input(configDraft.validation.max_input_tokens, v => configDraft.validation.max_input_tokens = v, "number")),
+      field("Maximum automatic repair attempts", input(configDraft.validation.max_repair_attempts ?? 3, v => configDraft.validation.max_repair_attempts = v, "number")),
       field("Tool calls per sample", input(configDraft.max_tool_calls, v => configDraft.max_tool_calls = v, "number")),
     );
     configDraft.clock ??= {
@@ -2959,13 +2961,14 @@ function renderTrajectoryValidation(status = {}) {
   const busy = !!status.running;
   $("validation-progress").max = Math.max(1, status.total || 1);
   $("validation-progress").value = status.completed || 0;
-  $("validation-status").textContent = status.last_error || (busy ? `Validating ${status.sample_id}: ${status.active?.join(" · ") || "preparing"}` : status.result ? (status.result.valid ? "Validation passed." : "Validation found issues.") : status.phase === "idle" ? "Ready to validate." : status.phase || "Ready to validate.");
+  $("validation-status").textContent = status.last_error || (busy ? `${status.phase === "repairing" ? "Repairing" : "Validating"} ${status.sample_id} (repair attempts ${status.repair_attempts || 0}/${status.max_repair_attempts || 3}): ${status.active?.join(" · ") || "preparing"}` : status.result ? (status.result.valid ? "Validation passed." : `Validation found issues.${status.result.repair_limit_reached ? " Repair attempt limit reached." : ""}`) : status.phase === "idle" ? "Ready to validate." : status.phase || "Ready to validate.");
   $("validation-findings").textContent = status.result ? JSON.stringify(status.result, null, 2) : "";
   $("start-validation").disabled = busy || !sample || !!state?.status.running;
   $("cancel-validation").disabled = !busy;
   $("resume-validation").hidden = !["cancelled", "interrupted", "incomplete"].includes(status.phase) || status.sample_id !== sample?.id;
   $("validation-endpoint").disabled = busy;
   $("validation-record").disabled = busy;
+  $("validation-auto-repair").disabled = busy;
 }
 $("validate-trajectory").onclick = action(async () => {
   closeMenus();
@@ -2974,13 +2977,18 @@ $("validate-trajectory").onclick = action(async () => {
   const previous = $("validation-endpoint").value;
   $("validation-endpoint").replaceChildren(...choices.map(id => { const option = node("option", "", id); option.value = id; return option; }));
   $("validation-endpoint").value = choices.includes(previous) ? previous : choices.includes(state.config.validation?.endpoint || "validator") ? (state.config.validation?.endpoint || "validator") : (choices[0] || "");
+  if (state.validation_status?.sample_id === sample.id) {
+    $("validation-auto-repair").checked = !!state.validation_status.auto_repair;
+    if (typeof state.validation_status.record === "boolean") $("validation-record").checked = state.validation_status.record;
+    if (choices.includes(state.validation_status.endpoint)) $("validation-endpoint").value = state.validation_status.endpoint;
+  }
   renderTrajectoryValidation(state.validation_status);
   $("validation-dialog").showModal();
 });
 $("close-validation").onclick = () => $("validation-dialog").close();
 async function startTrajectoryValidation(resume = false) {
   if (hasPendingChanges()) await compileSample(true);
-  await json("validation/run", "POST", {sample_id: sample.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, resume});
+  await json("validation/run", "POST", {sample_id: sample.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, auto_repair: $("validation-auto-repair").checked, resume});
   await refresh();
 }
 $("start-validation").onclick = busyAction("start-validation", () => startTrajectoryValidation());

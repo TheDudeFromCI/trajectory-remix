@@ -485,6 +485,8 @@
         <p>Review the saved trajectory against its original requirements and current guidelines. Validation is separate from content creation and never grants Ready approval.</p>
         <label for="validation-endpoint">Validation endpoint</label>
         <select id="validation-endpoint"></select>
+        <label class="check"><input id="validation-auto-repair" type="checkbox" /> Automatically repair issues and validate again</label>
+        <p class="hint">Automatic repair saves content changes when finished. Set the repair attempt limit in Generation Settings → Defaults. Cancelling leaves saved content unchanged.</p>
         <label class="check"><input id="validation-record" type="checkbox" checked /> Record the result as Validated or Rejected</label>
         <progress id="validation-progress" max="1" value="0" aria-label="Trajectory validation progress"></progress>
         <p id="validation-status" role="status">Ready to validate.</p>
