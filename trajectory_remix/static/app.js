@@ -22,6 +22,8 @@ let frameRequest = null,
   frameCache = new Map(),
   frameFailure = null,
   previewMessage = null;
+const previewSources = new WeakMap();
+let toastVersion = 0;
 let configDraft,
   configTab = "endpoints",
   eventDraft = [],
@@ -54,15 +56,17 @@ function button(text, action, cls = "") {
   n.onclick = action;
   return n;
 }
-function toast(text, error = false) {
+function toast(text, error = false, duration = error ? 11000 : 4500) {
+  const version = ++toastVersion;
   clearTimeout(toastTimer);
   $("toast").textContent = text;
   $("toast").className = error ? "error" : "";
   $("toast").hidden = false;
-  toastTimer = setTimeout(
-    () => ($("toast").hidden = true),
-    error ? 11000 : 4500,
-  );
+  const dismiss = () => {
+    if (version === toastVersion) $("toast").hidden = true;
+  };
+  if (duration) toastTimer = setTimeout(dismiss, duration);
+  return dismiss;
 }
 async function api(path, method = "GET", body) {
   const res = await fetch("/api/" + path, {
@@ -100,6 +104,24 @@ function action(fn) {
       if (e.diagnostics) diagnostics(e.diagnostics);
     }
   };
+}
+function busyAction(control, fn) {
+  return action(async (...args) => {
+    const target = typeof control === "string" ? $(control) : control;
+    if (target.getAttribute("aria-busy") === "true") return;
+    const wasDisabled = target.getAttribute("aria-disabled");
+    target.setAttribute("aria-busy", "true");
+    target.setAttribute("aria-disabled", "true");
+    try {
+      await fn(...args);
+    } finally {
+      target.removeAttribute("aria-busy");
+      // Native disabled state belongs to the status renderers, which may have
+      // updated it while this request was pending.
+      if (wasDisabled === null) target.removeAttribute("aria-disabled");
+      else target.setAttribute("aria-disabled", wasDisabled);
+    }
+  });
 }
 function loadAutoCompileDelay() {
   try {
@@ -252,6 +274,7 @@ async function refresh(initial = false) {
     } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges() && !migrationBusy)
       await selectSample(state.samples[state.samples.length - 1].index, true);
     if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
+    if (changed && !$("metrics-panel").hidden && !metricsCalculating) await loadMetrics();
   } finally {
     pollBusy = false;
     renderValidationState();
@@ -271,6 +294,7 @@ function renderValidationState() {
 function renderStatus() {
   $("sample-count").textContent = state.sample_count ?? state.samples.length;
   const s = state.status;
+  const switchReady = canSwitchGeneration();
   $("migrate-tokenizer-button").disabled = s.running || !!state.validation_status?.running;
   const scenarioSelect = $("scenario-type");
   const scenarioNames = (state.scenarios || []).map((item) => item.name);
@@ -286,7 +310,7 @@ function renderStatus() {
   scenarioSelect.disabled = s.running;
   $("generation-count").disabled = s.running;
   const batch = s.batch;
-  if (batch && (s.running || ["api_paused", "evaluation_failed"].includes(s.phase))) $("generation-count").value = String(batch.target);
+  if (batch && !(generationPanelIntent === "create" && !s.running) && (s.running || ["api_paused", "evaluation_failed"].includes(s.phase))) $("generation-count").value = String(batch.target);
   $("batch-progress").hidden = !batch || batch.target <= 1;
   const batchState = s.running && s.paused ? "paused" : s.pause_requested ? "pausing" : batch?.state;
   $("batch-progress").textContent = batch ? `${batch.completed}/${batch.target} completed · ${batch.attempts}/${batch.attempt_limit} attempts · ${batchState}` : "";
@@ -294,14 +318,14 @@ function renderStatus() {
   $("scenario-hint").textContent = scenarioNames.length
     ? (state.scenarios.find((item) => item.name === scenarioSelect.value)?.description || "")
     : "No generation scenarios are available.";
-  $("generate-one").disabled = s.running || migrationBusy || !!state.validation_status?.running;
-  $("generate-batch").disabled = s.running || migrationBusy || !!state.validation_status?.running;
+  $("generate-one").disabled = !switchReady || migrationBusy || !!state.validation_status?.running;
+  $("generate-batch").disabled = !switchReady || migrationBusy || !!state.validation_status?.running;
   $("validate-trajectory").disabled = !sample || s.running || migrationBusy;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
-  $("resume-trajectory-generation").disabled = (s.running && !s.paused) || !sample || !state.can_resume_generation;
-  const recoveryDisabled = s.running || migrationBusy || !!state.validation_status?.running || !state.unfinished_generation_count;
+  $("resume-trajectory-generation").disabled = !switchReady || !sample || !state.can_resume_generation;
+  const recoveryDisabled = !switchReady || migrationBusy || !!state.validation_status?.running || !state.unfinished_generation_count;
   $("resume-all-generations").disabled = recoveryDisabled;
   $("resume-all-generations").title = `Resume ${state.unfinished_generation_count || 0} unfinished generated trajectories across the dataset`;
   renderGenerationAction(recoveryDisabled);
@@ -328,6 +352,10 @@ function renderStatus() {
   renderScenarioTags();
   renderGenerationMetrics();
   updateSettingsState();
+}
+function canSwitchGeneration() {
+  const s = state?.status || {};
+  return !s.running || (state.can_suspend_generation ?? (s.paused && !s.active?.length));
 }
 function renderScenarioTags() {
   const scenario = state.scenarios?.find(item => item.name === $("scenario-type").value);
@@ -357,7 +385,7 @@ $("scenario-type").onchange = () => { renderScenarioTags(); };
 function generationAction() {
   const s = state.status, recovery = state.generation_resume;
   if (s.running) return recovery?.running ? "resume-all" : s.activity || generationPanelIntent || "create";
-  return generationPanelIntent || s.activity || (s.phase === "resume_complete" ? "resume-all" : s.draft_id && ["interrupted","cancelled","api_paused","evaluation_failed"].includes(s.phase) ? "resume" : "create");
+  return generationPanelIntent || s.activity || (s.phase === "resume_complete" ? "resume-all" : s.draft_id && ["interrupted","cancelled","suspended","api_paused","evaluation_failed"].includes(s.phase) ? "resume" : "create");
 }
 function renderGenerationAction(recoveryDisabled) {
   const s = state.status, recovery = state.generation_resume || {}, mode = generationAction();
@@ -369,10 +397,10 @@ function renderGenerationAction(recoveryDisabled) {
     : mode === "restart" ? "Regenerate content using the original prompts and sampled conditions." : mode === "force-resume" ? "Continue from the saved checkpoint with compatibility warnings overridden." : mode === "resume" ? "Continue from the saved checkpoint, reusing completed work."
     : setup ? "Choose a scenario and how many samples to create."
     : `${s.scenario || $("scenario-type").value} · ${s.batch?.target || 1} ${(s.batch?.target || 1) === 1 ? "trajectory" : "trajectories"}`;
-  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", api_paused:"API request paused", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
+  const phaseLabels = {idle:"Ready", generating:"Generating", complete:"Generation complete", resume_complete:"Resume pass complete", suspended:"Task saved for later", api_paused:"API request paused", evaluation_failed:"Review interrupted", rejected:"Needs attention", error:"Needs attention", cancelled:"Stopped", interrupted:"Interrupted"};
   $("run-status").textContent = setup ? "Ready" : s.running
     ? s.paused ? "Paused" : s.pause_requested ? "Pausing after active requests finish" : bulk ? "Resuming saved drafts" : ["resume","force-resume"].includes(mode) ? "Resuming trajectory" : mode === "restart" ? "Restarting trajectory" : "Generating"
-    : bulk ? ({complete:"Resume pass complete", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
+    : bulk ? ({complete:"Resume pass complete", suspended:"Resume pass saved for later", cancelled:"Resume pass stopped", interrupted:"Resume pass interrupted", error:"Resume pass needs attention"}[recovery.state] || "Ready to resume") : (phaseLabels[s.phase] || "Ready");
   $("run-dot").style.background = s.running ? "#7be0c3" : "#667a95";
   $("generation-setup").hidden = !setup;
   $("generation-work").hidden = setup;
@@ -402,7 +430,7 @@ function renderGenerationAction(recoveryDisabled) {
   $("generation-step-progress").max = Math.max(1, s.total || 1);
   $("generation-step-progress").value = s.completed || 0;
   $("generation-step-count").textContent = `${s.completed || 0}/${s.total || 0} steps`;
-  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : bulk ? (recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))) ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
+  $("generation-detail").textContent = s.running ? s.paused ? "Work is saved. Resume when you’re ready." : s.pause_requested ? "Active requests will finish before pausing." : s.active?.length ? `${s.active.length === 1 ? "Generating content" : `${s.active.length} content requests running`}.` : "Preparing the next step…" : s.phase === "suspended" ? "This task is saved. Start another task or resume it later." : bulk ? (recovery.attention_count ?? ((recovery.failed || 0) + (recovery.skipped || 0))) ? "Some drafts need attention. Their content and checkpoints are retained." : "All entries in this pass have been processed." : (s.last_error || (s.phase === "complete" ? "Drafts are saved and ready for review." : ""));
   const canContinue = !s.running && s.draft_id && (state.can_resume_active_generation ?? ["api_paused","evaluation_failed","cancelled","interrupted","error","rejected"].includes(s.phase));
   $("pause-run").hidden = !s.running && !setup && !(mode !== "resume-all" && canContinue);
   $("pause-run").textContent = s.running ? s.paused || s.pause_requested ? "Resume" : "Pause" : setup ? "Start" : "Resume";
@@ -413,6 +441,7 @@ function renderGenerationAction(recoveryDisabled) {
   $("resume-all-generations-panel").disabled = recoveryDisabled;
   $("resume-all-generations-panel").textContent = `Resume unfinished (${state.unfinished_generation_count || 0})`;
   $("generation-create-more").hidden = mode !== "create" || setup || s.running;
+  $("generation-switch-task").hidden = setup || !canSwitchGeneration() || migrationBusy || !!state.validation_status?.running || (mode === "create" && !s.running);
   $("generation-actions").hidden = [...$("generation-actions").children].every(child => child.hidden);
   $("generation-metrics-panel").hidden = setup || !(s.model_requests || Object.keys(s.metrics || {}).length);
   $("resume-issues-panel").hidden = !bulk || !recovery.issues?.length;
@@ -442,7 +471,8 @@ function renderGenerationAction(recoveryDisabled) {
           for (const [value,label] of [["force_resume","Force resume"],["restart","Restart from beginning"],["delete","Delete sample"]]) if (issue.actions[value]) {
             const option = node("option", "", label); option.value = value; choice.append(option);
           }
-          const apply = button("Apply", action(() => recoverGenerationIssue(issue, choice.value)), "generation-recovery-apply");
+          const apply = button("Apply", null, "generation-recovery-apply");
+          apply.onclick = busyAction(apply, () => recoverGenerationIssue(issue, choice.value));
           apply.disabled = true; choice.onchange = () => { apply.disabled = !choice.value; apply.classList.toggle("danger-text", choice.value === "delete"); };
           actions.append(choice, apply); entry.append(actions);
           if (issue.action_note) entry.append(node("small", "generation-help", issue.action_note));
@@ -610,7 +640,9 @@ async function compileSample(persist = true) {
     }
     $("sample-json").value = JSON.stringify(sample, null, 2);
     try {
-      plan = await json("compile", "POST", { sample });
+      const source = structuredClone(sample);
+      plan = await json("compile", "POST", { sample: source });
+      previewSources.set(plan, source);
       currentFrame = null;
       frameCache.clear();
       frameFailure = null;
@@ -703,6 +735,10 @@ function renderReplay() {
       closed = w.close !== null && w.close <= tick;
     if (!unopened && !closed) active++;
     if (closed && !$("show-closed").checked) return;
+    const data = currentFrame?.tick === tick ? currentFrame.windows?.[w.id] : null;
+    const body = (data?.text || "").replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
+    // Wait for frame data before deciding; automatic headers are not content.
+    if (data && !$("show-empty").checked && !body.trim()) return;
     const card = node(
       "article",
       "window-card" + (closed ? " closed" : "") + (unopened ? " future" : ""),
@@ -739,10 +775,7 @@ function renderReplay() {
       `${isExpanded ? "Shrink" : "Expand"} context window ${w.id}`,
     );
     head.append(resize);
-    const data = currentFrame?.tick === tick ? currentFrame.windows?.[w.id] : null;
-    let content = data?.text || "";
-    if (!showWindowHeaders)
-      content = content.replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
+    const content = showWindowHeaders ? data?.text || "" : body;
     card.append(
       head,
       windowContent(
@@ -780,21 +813,45 @@ function renderReplay() {
 function fetchFrame() {
   if (frameRequest || !plan || currentFrame?.tick === tick) return frameRequest;
   if (frameFailure?.id === plan.plan_id && frameFailure.tick === tick) return;
-  const id = plan.plan_id,
-    target = tick;
+  let activePlan = plan, id = plan.plan_id;
+  const target = tick, source = previewSources.get(plan);
   frameRequest = (async () => {
     let failed = false;
     try {
+      const load = async () => {
+        try {
+          // A small range amortizes request overhead during playback. Seeking always
+          // starts at the selected tick; the browser never replays an earlier prefix.
+          return await json(`frames/${id}?start_tick=${target}&end_tick=${Math.min(target + 7, activePlan.max_tick)}`);
+        } catch (e) {
+          if (e.code !== "preview_limit") throw e;
+          return { frames: [await json(`frame/${id}/${target}`)] };
+        }
+      };
       let result;
       try {
-        // A small range amortizes request overhead during playback. Seeking always
-        // starts at the selected tick; the browser never replays an earlier prefix.
-        result = await json(`frames/${id}?start_tick=${target}&end_tick=${Math.min(target + 7, plan.max_tick)}`);
+        result = await load();
       } catch (e) {
-        if (e.code !== "preview_limit") throw e;
-        result = { frames: [await json(`frame/${id}/${target}`)] };
+        if (e.code !== "preview_expired" || !source || plan !== activePlan) throw e;
+        const dismiss = toast("Please wait while the trajectory recompiles…", false, 0);
+        try {
+          // Reuse the compiled source, including unsaved drafts. Never save edits
+          // or substitute a newer dataset sample while restoring a preview.
+          const restored = await json("compile", "POST", { sample: source });
+          if (plan !== activePlan) return;
+          if (!restored.preview.available) throw new Error(restored.preview.message);
+          previewSources.set(restored, source);
+          plan = activePlan = restored;
+          id = restored.plan_id;
+          frameCache.clear();
+          frameFailure = null;
+          diagnostics(restored.diagnostics);
+          result = await load(); // Retry once; another eviction remains an error.
+        } finally {
+          dismiss();
+        }
       }
-      if (plan?.plan_id === id) {
+      if (plan === activePlan) {
         frameCache = new Map(result.frames.map((frame) => [frame.tick, frame]));
         currentFrame = frameCache.get(tick) || null;
         frameFailure = null;
@@ -802,7 +859,7 @@ function fetchFrame() {
       }
     } catch (e) {
       failed = true;
-      if (plan?.plan_id === id && tick === target) {
+      if (plan === activePlan && tick === target) {
         pause();
         frameFailure = { id, tick: target, message: e.message };
         toast(e.message, true);
@@ -810,9 +867,9 @@ function fetchFrame() {
       }
     } finally {
       frameRequest = null;
-      // No retry loop for expired plans or output limits. A new seek/compile can
+      // No retry loop after recovery or output limits. A new seek/compile can
       // try again, and a seek made during an in-flight request must still load.
-      if (plan && currentFrame?.tick !== tick && (!failed || plan.plan_id !== id || tick !== target))
+      if (plan && currentFrame?.tick !== tick && (!failed || plan !== activePlan || tick !== target))
         setTimeout(fetchFrame, 0);
     }
   })();
@@ -1076,6 +1133,7 @@ function showMetadataNames(metadata) {
   $("user-name").value =
     typeof metadata?.user_name === "string" ? metadata.user_name : "";
   $("tick-rate").value = metadata?.synthetic_clock?.tick_rate ?? 10;
+  showCoverageMetadata(metadata || {});
 }
 function loadMetadata(trajectory) {
   $("trajectory-uuid").value = trajectory?.uuid || "";
@@ -1601,9 +1659,14 @@ function buildEventCard(item, i) {
         card.append(options);
       } else if (e.op === "show_tools") {
         const options = node("div", "event-options show-tools-options");
+        const toolOption = (name, control, cls = "") => {
+          const label = node("label", cls);
+          label.append(control, name);
+          return label;
+        };
         for (const schema of (state.tools || []).filter((s) => !s.invisible)) {
           const name = schema.function.name;
-          options.append(field(name, checkbox((e.tools || []).includes(name), (checked) => {
+          options.append(toolOption(name, checkbox((e.tools || []).includes(name), (checked) => {
             const selected = new Set(e.tools || []);
             if (checked) selected.add(name);
             else selected.delete(name);
@@ -1611,10 +1674,10 @@ function buildEventCard(item, i) {
             update();
           })));
         }
-        options.append(field("Randomly add additional tools", checkbox(e["randomly-add-additional-tools"] || false, (checked) => {
+        options.append(toolOption("Randomly add additional tools", checkbox(e["randomly-add-additional-tools"] || false, (checked) => {
           e["randomly-add-additional-tools"] = checked;
           update();
-        })));
+        }), "show-tools-random"));
         card.append(options);
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
@@ -2246,11 +2309,13 @@ function renderConfig() {
         ),
       );
       const result = node("small", "endpoint-test-result");
-      top.append(button("Test endpoint", action(async () => {
+      const testEndpoint = button("Test endpoint");
+      testEndpoint.onclick = busyAction(testEndpoint, async () => {
         result.textContent = "Testing…";
         try { const answer = await json("endpoints/test", "POST", {endpoint: ep}); result.textContent = `Connected: ${answer.model}`; }
         catch (error) { result.textContent = error.message; }
-      })));
+      });
+      top.append(testEndpoint);
       card.append(top, form, result);
       root.append(card);
     });
@@ -2681,6 +2746,7 @@ document.addEventListener("click", (e) => {
 for (const b of document.querySelectorAll(".tab"))
   b.onclick = action(() => changeView(b.dataset.view));
 $("show-closed").onchange = renderReplay;
+$("show-empty").onchange = renderReplay;
 $("tick-number").onchange = (e) => setTick(e.target.value);
 $("tick-scrubber").oninput = (e) => {
   pause();
@@ -2856,9 +2922,16 @@ async function resumeGeneration(id) {
   } else if (!response.ok) throw new Error(result.detail);
   return true;
 }
-$("resume-trajectory-generation").onclick = action(async () => {
+async function savePausedGeneration() {
+  if (!state.status.running) return;
+  if (!canSwitchGeneration()) throw new Error("Pause generation and let active LLM calls finish before switching tasks.");
+  await json("scenarios/suspend", "POST");
+  await refresh();
+}
+$("resume-trajectory-generation").onclick = busyAction("resume-trajectory-generation", async () => {
   closeMenus();
   if (hasPendingChanges()) await compileSample(true);
+  await savePausedGeneration();
   if (!await resumeGeneration(sample.id)) return;
   generationPanelIntent = "resume";
   openGenerationPanel(); await refresh();
@@ -2867,13 +2940,20 @@ $("resume-trajectory-generation").onclick = action(async () => {
 async function resumeAllGenerations() {
   closeMenus();
   if (sample && hasPendingChanges()) await compileSample(true);
+  if (state.status.running && state.generation_resume?.running && state.status.activity === "resume-all") {
+    await json("pause", "POST", {resume:true});
+    generationPanelIntent = "resume-all";
+    openGenerationPanel(); await refresh();
+    return;
+  }
+  await savePausedGeneration();
   await json("scenarios/resume-all", "POST", {});
   generationPanelIntent = "resume-all";
   openGenerationPanel();
   await refresh();
 }
-$("resume-all-generations").onclick = action(resumeAllGenerations);
-$("resume-all-generations-panel").onclick = action(resumeAllGenerations);
+$("resume-all-generations").onclick = busyAction("resume-all-generations", resumeAllGenerations);
+$("resume-all-generations-panel").onclick = busyAction("resume-all-generations-panel", resumeAllGenerations);
 
 function renderTrajectoryValidation(status = {}) {
   const busy = !!status.running;
@@ -2903,31 +2983,32 @@ async function startTrajectoryValidation(resume = false) {
   await json("validation/run", "POST", {sample_id: sample.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, resume});
   await refresh();
 }
-$("start-validation").onclick = action(() => startTrajectoryValidation());
-$("resume-validation").onclick = action(() => startTrajectoryValidation(true));
-$("cancel-validation").onclick = action(async () => { await json("validation/stop", "POST"); await refresh(); });
+$("start-validation").onclick = busyAction("start-validation", () => startTrajectoryValidation());
+$("resume-validation").onclick = busyAction("resume-validation", () => startTrajectoryValidation(true));
+$("cancel-validation").onclick = busyAction("cancel-validation", async () => { await json("validation/stop", "POST"); await refresh(); });
 
 $("close-settings").onclick = () => $("settings-dialog").close();
-$("save-config").onclick = action(saveConfig);
+$("save-config").onclick = busyAction("save-config", saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
   b.onclick = () => {
     configTab = b.dataset.config;
     renderConfig();
   };
-$("generate-one").onclick = action(async () => {
+async function prepareGenerationTask(kind) {
+  closeMenus();
+  if (sample && hasPendingChanges()) await compileSample(true);
+  await savePausedGeneration();
   generationPanelIntent = "create"; renderStatus();
   openGenerationPanel();
-  if (sample && hasPendingChanges()) await compileSample(true);
-  $("generation-count").value = "1";
-  // Starting is explicit so the user can select a scenario and request limit.
-  $("scenario-type").focus();
-});
-$("generate-batch").onclick = action(async () => {
-  generationPanelIntent = "create"; renderStatus();
-  openGenerationPanel();
-  if (sample && hasPendingChanges()) await compileSample(true);
-  $("generation-count").value = "10";
-  $("generation-count").focus();
+  $("generation-count").value = kind === "single" ? "1" : "10";
+  $(kind === "single" ? "scenario-type" : "generation-count").focus();
+}
+$("generate-one").onclick = action(() => prepareGenerationTask("single"));
+$("generate-batch").onclick = action(() => prepareGenerationTask("batch"));
+$("generation-next-task").onchange = action(async () => {
+  const kind = $("generation-next-task").value;
+  $("generation-next-task").value = "";
+  if (kind) await prepareGenerationTask(kind);
 });
 $("generation-create-more").onclick = () => { generationPanelIntent = "create"; renderStatus(); $("scenario-type").focus(); };
 $("view-generation-batch").onclick = action(async () => {
@@ -2947,15 +3028,15 @@ $("view-generation-draft").onclick = action(async () => {
   if (Number.isInteger(listing.selected_index)) { await selectSample(listing.selected_index); $("generation-panel").hidden = true; }
   else toast("This draft is no longer available.");
 });
-$("stop-run").onclick = action(async () => {
+$("stop-run").onclick = busyAction("stop-run", async () => {
   await json("stop", "POST");
   await refresh();
   if (selected >= 0 && !hasPendingChanges()) await selectSample(selected, true);
 });
-$("pause-run").onclick = action(async () => {
+$("pause-run").onclick = busyAction("pause-run", async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
-    if (generationPanelIntent !== "create" && ["api_paused", "evaluation_failed", "cancelled", "interrupted", "error", "rejected"].includes(state.status.phase)) {
+    if (generationPanelIntent !== "create" && ["api_paused", "evaluation_failed", "cancelled", "suspended", "interrupted", "error", "rejected"].includes(state.status.phase)) {
       if (!await resumeGeneration(state.status.draft_id)) return;
       generationPanelIntent = "resume";
     }
@@ -2969,7 +3050,7 @@ $("pause-run").onclick = action(async () => {
   await refresh();
 });
 $("close-export").onclick = () => $("export-dialog").close();
-$("download-export").onclick = action(async () => {
+$("download-export").onclick = busyAction("download-export", async () => {
   if (hasPendingChanges()) await compileSample(true);
   const body = { ticks_per_chunk: Number($("chunk-size").value) };
   if ($("export-scope").value === "current") body.indices = [selected];
@@ -3012,6 +3093,272 @@ window.addEventListener("beforeunload", (e) => {
     e.returnValue = "";
   }
 });
+// Coverage annotations remain ordinary source metadata, so existing revision
+// guards, JSON editing, immediate saves and undo/redo apply to every field.
+const metricDomains = ["software", "scheduling", "organization", "research", "writing", "general_assistance"];
+const metricOutcomes = ["completed", "partial", "blocked", "clarified", "cancelled", "declined"];
+const metricLabels = [
+  ...["focused_task", "cross_window_synthesis", "memory_retrieval", "planning", "algorithmic", "delegation", "multistep_tools", "tool_observation", "skill_use", "conversation"].map(k => "capability." + k),
+  ...["missing", "false", "ambiguous"].map(k => "information." + k),
+  ...["followup", "interruption", "correction", "background_work"].map(k => "interaction." + k),
+  ...["failure", "partial_output"].map(k => "tool_condition." + k),
+  ...["annoyed", "uncertain", "technically_experienced"].map(k => "user." + k),
+];
+const coverageFields = [
+  ["primary_domain", "Primary domain", metricDomains],
+  ["terminal_outcome", "Terminal outcome", metricOutcomes],
+  ["scenario_family_id", "Scenario family ID"],
+  ["template_family_id", "Template family ID"],
+  ["split", "Split", ["train", "development", "test"]],
+  ["is_original", "Original source?", [["true", "Original"], ["false", "Remix / descendant"]]],
+  ["provenance.author", "Author / generator identity"],
+  ["provenance.source", "Source / endpoint / license reference"],
+  ["provenance.version", "Prompt / source version"],
+];
+function metadataValue(metadata, path) {
+  return path.split(".").reduce((value, key) => value?.[key], metadata);
+}
+function setMetadataPath(path, value) {
+  try {
+    const metadata = readMetadata(), parts = path.split(".");
+    let target = metadata;
+    for (const key of parts.slice(0, -1)) {
+      if (!target[key] || typeof target[key] !== "object" || Array.isArray(target[key])) target[key] = {};
+      target = target[key];
+    }
+    if (value === undefined) delete target[parts.at(-1)];
+    else target[parts.at(-1)] = value;
+    $("metadata-json").value = JSON.stringify(metadata, null, 2);
+    updateMetadata();
+  } catch (error) { $("metadata-status").textContent = error.message; }
+}
+for (const [path, title, choices] of coverageFields) {
+  const id = "coverage-" + path.replaceAll(".", "-"), label = node("label", "", title);
+  label.htmlFor = id;
+  const field = choices ? select([["", "Unknown / not recorded"], ...choices], "", () => {}) : node("input");
+  field.id = id;
+  field.oninput = () => setMetadataPath(path, field.value === "" ? undefined : path === "is_original" ? field.value === "true" : field.value);
+  $("coverage-metadata-fields").append(label, field);
+}
+const observedSelector = select(metricLabels, metricLabels[0], () => showObservedLabel(readMetadata()));
+observedSelector.id = "observed-label-selector";
+const observedLabel = node("label", "", "Observed behavior / condition");
+observedLabel.htmlFor = observedSelector.id;
+$("observed-label-fields").append(observedLabel, observedSelector);
+const observedFields = [
+  ["present", "Present", ["unknown", "true", "false"]],
+  ["required", "Required for success", ["unknown", "true", "false"]],
+  ["demonstrated_correctly", "Demonstrated correctly", ["unknown", "true", "false"]],
+  ["value", "Observed condition", ["unknown", "true", "false"]],
+  ["confidence", "Confidence (0–1)"], ["annotator", "Annotator / validator ID"],
+  ["version", "Annotation version"], ["evidence", "Evidence event paths (one per line)"],
+  ["justification", "Justification"], ["review_status", "Review status", ["pending", "reviewed"]],
+];
+for (const [key, title, choices] of observedFields) {
+  const label = node("label", "", title), id = "observed-" + key;
+  label.htmlFor = id;
+  const field = choices ? select(choices, choices[0], () => {}) : node(key === "evidence" || key === "justification" ? "textarea" : "input");
+  field.id = id;
+  if (key === "confidence") { field.type = "number"; field.min = "0"; field.max = "1"; field.step = "0.01"; }
+  field.oninput = () => {
+    try {
+      const metadata = readMetadata(), name = observedSelector.value;
+      const labels = metadata.observed_labels && typeof metadata.observed_labels === "object" && !Array.isArray(metadata.observed_labels) ? metadata.observed_labels : {};
+      const previous = labels[name] && typeof labels[name] === "object" && !Array.isArray(labels[name]) ? labels[name] : {};
+      const value = field.value === "true" ? true : field.value === "false" ? false : key === "confidence" ? (field.value === "" ? "unknown" : Number(field.value)) : key === "evidence" ? field.value.split("\n").map(v => v.trim()).filter(Boolean) : field.value;
+      metadata.observed_labels = {...labels, [name]: {...previous, [key]: value}};
+      $("metadata-json").value = JSON.stringify(metadata, null, 2);
+      updateMetadata();
+    } catch (error) { $("metadata-status").textContent = error.message; }
+  };
+  $("observed-label-fields").append(label, field);
+}
+function showObservedLabel(metadata) {
+  const label = metadata.observed_labels?.[observedSelector.value] || {};
+  const capability = observedSelector.value.startsWith("capability.");
+  for (const [key] of observedFields) {
+    const field = $("observed-" + key), value = label[key];
+    field.hidden = key === "value" ? capability : ["present", "required", "demonstrated_correctly"].includes(key) && !capability;
+    field.previousElementSibling.hidden = field.hidden;
+    field.value = key === "evidence" ? (Array.isArray(value) ? value.join("\n") : "") : value ?? (key === "review_status" ? "pending" : field.tagName === "SELECT" ? "unknown" : "");
+  }
+}
+function showCoverageMetadata(metadata) {
+  const missing = [];
+  for (const [path, title, choices] of coverageFields) {
+    const value = metadataValue(metadata, path), field = $("coverage-" + path.replaceAll(".", "-"));
+    field.value = value === undefined ? "" : String(value);
+    const valid = path === "is_original" ? typeof value === "boolean" : typeof value === "string" && value.trim() && (!choices || choices.includes(value));
+    field.setAttribute("aria-invalid", String(!valid));
+    if (!valid) missing.push(title);
+  }
+  $("coverage-metadata-alerts").textContent = sample && missing.length ? "Coverage needs: " + missing.join(", ") + "." : "";
+  showObservedLabel(metadata);
+}
+
+let metricsData = null, metricsCalculating = false, metricsOffset = 0, metricsRequest = 0;
+let metricsJob = null, metricsJobTimer = null;
+const metricFormat = value => value == null ? "Insufficient support" : Number(value).toLocaleString(undefined, {maximumFractionDigits: 3});
+function metricBars(title, groups) {
+  const card = node("section", "metric-card");
+  card.append(node("h2", "", title));
+  const max = Math.max(1, ...groups.map(g => g.count || 0));
+  for (const group of groups) {
+    const row = node("div", "metric-bar-row"), track = node("div", "metric-bar-track"), fill = node("div", "metric-bar-fill");
+    fill.style.width = (100 * (group.count || 0) / max) + "%";
+    track.append(fill);
+    track.setAttribute("aria-hidden", "true");
+    row.append(node("span", "metric-bar-label", group.value), track, node("span", "metric-bar-value", metricFormat(group.count)));
+    row.title = `${group.value}: ${group.count}`;
+    card.append(row);
+  }
+  if (!groups.length) card.append(node("p", "", "No measured records in this population."));
+  return card;
+}
+function renderMetricDistribution() {
+  const name = $("metrics-distribution").value, data = metricsData?.distributions[name];
+  if (!data) return;
+  $("metrics-distribution-description").textContent = metricsData.registry[name] || ({window_lengths: "Pooled durable token lengths per window, including boundary/header tokens and empty windows. Idle predictions are excluded.", idle_runs: "Pooled consecutive per-window NOOP decision runs, measured in ticks.", tool_latency_ticks: "Pooled invocation completion tick minus dispatch tick."})[name];
+  $("metrics-histogram").replaceChildren(metricBars("Distribution · " + data.unit.replaceAll("_", " "), data.bins.map(b => ({value: b.lower == null ? `< ${b.upper}` : b.upper == null ? `≥ ${b.lower}` : `[${b.lower}, ${b.upper})`, count: b.count}))));
+  $("metrics-distribution-stats").textContent = ["count", "missing", "mean", "stddev", "min", "max", "p50", "p90", "p95", "p99"].map(k => `${k}: ${metricFormat(data[k])}`).join(" · ");
+}
+function renderMetrics(data) {
+  metricsData = data;
+  const s = data.summary;
+  $("metrics-status").textContent = `Saved revision ${data.revision} · ${s.cached}/${s.samples} measured in this population · ${s.pending} pending · ${s.compile_errors} compiler errors.`;
+  if (data.family_split_conflicts.length) $("metrics-status").textContent += ` Alert: ${data.family_split_conflicts.length} scenario/template families span multiple splits (project-wide).`;
+  $("metrics-summary").replaceChildren(...[["Source samples", s.samples], ["Compiled successfully", s.valid_compiled], ["Need metadata", s.samples_missing_metadata], ["Have unknown labels", s.samples_with_unknown_labels], ["Exact replay duplicate candidates", s.exact_replay_duplicate_extras], ["Scenario families", s.scenario_families], ["Template families", s.template_families]].map(([title, value]) => {
+    const card = node("div", "metric-card"); card.append(node("b", "", metricFormat(value)), node("small", "", title)); return card;
+  }));
+  $("metrics-charts").replaceChildren(
+    metricBars(`Primary domain · ${data.unknown_domains} unknown`, data.domains.map(g => ({...g, value: g.value.replaceAll("_", " ")}))),
+    metricBars(`Terminal outcome · ${data.unknown_outcomes} unknown`, data.outcomes.map(g => ({...g, value: g.value.replaceAll("_", " ")}))),
+    metricBars("Model content concurrency · pooled ticks", data.concurrency.model.map(g => ({value: g.generators + " generators", count: g.ticks}))),
+    metricBars("External content activity · pooled ticks", data.concurrency.external.map(g => ({value: g.generators + " windows", count: g.ticks}))),
+    metricBars("Raw loss allocation · before trainer normalization", data.raw_loss_allocation.map(g => ({value: g.target, count: g.weight}))),
+    metricBars("Tool presence · sources, not invocation share", data.tools.map(g => ({value: `${g.tool} (${g.invocations} calls)`, count: g.samples}))),
+    metricBars("Window categories · instances", data.window_categories.map(g => ({value: g.category, count: g.instances}))),
+  );
+  const choice = $("metrics-distribution").value;
+  $("metrics-distribution").replaceChildren(...Object.keys(data.distributions).map(key => { const option = node("option", "", key.replaceAll("_", " ")); option.value = key; return option; }));
+  $("metrics-distribution").value = choice && data.distributions[choice] ? choice : "generated_content_tokens";
+  renderMetricDistribution();
+  $("metrics-coverage-table").replaceChildren();
+  if (!data.coverage.length) $("metrics-coverage-table").append(node("p", "", "Select Accepted train originals to inspect launch coverage gaps."));
+  else {
+    const wrap = node("div", "metrics-table-wrap"), table = node("table", "metrics-table"), head = node("tr");
+    for (const title of ["Rule", "Observed / eligible", "Unknown", "Families", "Lower-bound shortfall", "Status"]) head.append(node("th", "", title));
+    const thead = node("thead"); thead.append(head); table.append(thead);
+    const body = node("tbody");
+    for (const rule of data.coverage) {
+      const row = node("tr");
+      for (const value of [rule.id, rule.numerator == null ? "Unavailable" : `${rule.numerator} / ${rule.denominator} (${rule.fraction == null ? "n/a" : (100 * rule.fraction).toFixed(1) + "%"})`, rule.unknown ?? "—", rule.distinct_families ?? "—", rule.shortfall ?? "—", rule.status.replaceAll("_", " ")]) row.append(node("td", "", value));
+      row.title = rule.reason || (rule.target_range ? `Provisional range: ${rule.target_range.map(v => 100 * v + "%").join("–")}` : `Minimum ${rule.minimum} distinct families`);
+      body.append(row);
+    }
+    table.append(body); wrap.append(table); $("metrics-coverage-table").append(wrap);
+  }
+  $("metrics-unavailable").replaceChildren(...data.unavailable.map(item => node("p", "", `${item.metric.replaceAll("_", " ")}: ${item.reason}.`)));
+}
+async function loadMetricIssues() {
+  const population = $("metrics-population").value, issue = $("metrics-issue").value, offset = metricsOffset;
+  const result = await json("metrics/query", "POST", {population, issue, offset, limit: 10});
+  if (population !== $("metrics-population").value || issue !== $("metrics-issue").value || offset !== metricsOffset) return;
+  $("metrics-issues").replaceChildren(...result.samples.map(item => {
+    const row = node("div", "metric-issue"), text = node("div");
+    text.append(node("b", "", item.id || item.uuid), node("small", "", item.error?.message || (issue === "unknown_labels" ? `${item.unknown_labels.length} unknown labels` : item.missing_metadata.join(", ")) || "Not calculated yet"));
+    row.append(text, button("Open metadata", action(async () => {
+      await selectSample(item.index);
+      if (selected !== item.index || sample?.uuid !== item.uuid) return;
+      setMetricsVisible(false);
+      setDatasetPanelVisible(true);
+      $("coverage-metadata-details").open = true;
+      $("observed-label-details").open = issue === "unknown_labels";
+      if (issue === "unknown_labels") { observedSelector.value = item.unknown_labels[0] || metricLabels[0]; showObservedLabel(readMetadata()); observedSelector.focus(); }
+      else $("coverage-primary_domain").focus();
+    })));
+    return row;
+  }));
+  if (!result.total) $("metrics-issues").append(node("p", "", "No matching issues in this population."));
+  $("metrics-issues-page").textContent = result.total ? `${offset + 1}–${Math.min(offset + 10, result.total)} of ${result.total}` : "0 issues";
+  $("metrics-issues-prev").disabled = offset === 0;
+  $("metrics-issues-next").disabled = offset + 10 >= result.total;
+}
+async function loadMetrics() {
+  const request = ++metricsRequest, population = $("metrics-population").value;
+  try {
+    const data = await json("metrics", "POST", {population});
+    if (request !== metricsRequest) return;
+    renderMetrics(data);
+    await loadMetricIssues();
+    const job = await json("metrics/status");
+    renderMetricsJob(job);
+    if (metricsCalculating) scheduleMetricsJobPoll();
+  } catch (error) {
+    if (request === metricsRequest) $("metrics-status").textContent = error.message;
+    throw error;
+  }
+}
+function setMetricsVisible(visible) {
+  $("metrics-panel").hidden = !visible;
+  $("toggle-metrics-panel").setAttribute("aria-checked", String(visible));
+  if (!visible) clearTimeout(metricsJobTimer);
+}
+$("toggle-metrics-panel").onclick = action(async () => {
+  closeMenus();
+  const visible = $("metrics-panel").hidden;
+  setMetricsVisible(visible);
+  if (visible) { pause(); await loadMetrics(); }
+});
+$("close-metrics-panel").onclick = () => setMetricsVisible(false);
+$("metrics-refresh").onclick = busyAction("metrics-refresh", loadMetrics);
+$("metrics-population").onchange = action(async () => { metricsOffset = 0; await loadMetrics(); });
+$("metrics-distribution").onchange = renderMetricDistribution;
+$("metrics-issue").onchange = action(async () => { metricsOffset = 0; await loadMetricIssues(); });
+$("metrics-issues-prev").onclick = action(async () => { metricsOffset = Math.max(0, metricsOffset - 10); await loadMetricIssues(); });
+$("metrics-issues-next").onclick = action(async () => { metricsOffset += 10; await loadMetricIssues(); });
+function renderMetricsJob(job) {
+  metricsJob = job;
+  metricsCalculating = ["running", "stopping"].includes(job.status);
+  $("metrics-analyze").disabled = metricsCalculating;
+  $("metrics-stop").hidden = !metricsCalculating;
+  $("metrics-stop").disabled = job.status === "stopping";
+  $("metrics-progress").hidden = !metricsCalculating;
+  $("metrics-progress").max = Math.max(1, job.total || 0);
+  $("metrics-progress").value = job.processed || 0;
+  if (metricsCalculating) {
+    $("metrics-status").textContent = `${job.status === "stopping" ? "Stopping after current sample" : "Calculating numeric cache"}: ${job.processed}/${job.total} · ${job.elapsed_seconds}s${job.current_sample_id ? " · " + job.current_sample_id : ""}. Work continues if this panel closes.`;
+  } else if (job.status === "failed") {
+    $("metrics-status").textContent = "Numeric cache job failed: " + job.error + ". Completed samples remain cached; retry resumes remaining work.";
+  } else if (job.status === "cancelled") {
+    $("metrics-status").textContent += ` Calculation stopped after ${job.processed} samples; resume to finish the remaining sources.`;
+  }
+}
+function scheduleMetricsJobPoll() {
+  clearTimeout(metricsJobTimer);
+  if ($("metrics-panel").hidden || !metricsCalculating) return;
+  metricsJobTimer = setTimeout(action(async () => {
+    try {
+      const job = await json("metrics/status");
+      renderMetricsJob(job);
+      if (!metricsCalculating) await loadMetrics();
+    } catch (error) {
+      $("metrics-status").textContent = "Could not read cache progress; reconnecting to the existing job…";
+    }
+    scheduleMetricsJobPoll();
+  }), 1000);
+}
+$("metrics-stop").onclick = busyAction("metrics-stop", async () => {
+  renderMetricsJob(await json("metrics/cancel", "POST", {job_id: metricsJob?.job_id}));
+  scheduleMetricsJobPoll();
+});
+$("metrics-analyze").onclick = busyAction("metrics-analyze", async () => {
+  if (metricsCalculating) return;
+  renderMetricsJob(await json("metrics/refresh", "POST", {}));
+  if (metricsCalculating) scheduleMetricsJobPoll();
+  else await loadMetrics();
+});
+
 await action(() => refresh(true))();
 setInterval(
   () =>

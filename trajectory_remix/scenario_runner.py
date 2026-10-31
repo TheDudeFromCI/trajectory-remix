@@ -476,6 +476,32 @@ class ScenarioRunner(ModelSession):
         self.resume_event.set()
         self.log("Resumed")
 
+    @property
+    def interruption_phase(self):
+        return 'suspended' if getattr(self, '_suspending', False) else 'cancelled'
+
+    def can_suspend(self):
+        return (self.status['running'] and not self.resume_event.is_set()
+                and not self.status['active'])
+
+    async def suspend(self):
+        """Release a paused worker, retaining its draft and original batch quota."""
+        if not self.status['running']:
+            return
+        if not self.can_suspend():
+            raise ValueError('Pause generation and let active LLM calls finish before switching tasks')
+        self._suspending = True
+        try:
+            await self.stop()
+            self.status.update(running=False, phase='suspended', paused=False,
+                               pause_requested=False, active=[])
+            batch = self.status.get('batch')
+            if batch and batch.get('state') not in ('complete', 'exhausted'):
+                batch['state'] = 'paused'
+            self.log('Task saved for later; worker released for another generation task', 'info')
+        finally:
+            self._suspending = False
+
     async def stop(self):
         if self.job and not self.job.done():
             self.job.cancel()
@@ -486,16 +512,19 @@ class ScenarioRunner(ModelSession):
         # Cancellation before a newly scheduled queue first runs has no async
         # finally block; still make its status durable and release the UI locks.
         if self.resume_queue.status['running'] and self.job and self.job.done():
-            self.resume_queue.status.update(running=False, state='cancelled', current_id=None)
+            self.resume_queue.status.update(running=False, state=self.interruption_phase, current_id=None)
             self.resume_queue.persist()
-            self.status.update(running=False, phase='cancelled', paused=False, pause_requested=False, active=[])
+            self.status.update(running=False, phase=self.interruption_phase, paused=False, pause_requested=False, active=[])
             self.persist()
 
         recovery_id = getattr(self, 'active_recovery_id', None)
         if recovery_id and self.job and self.job.done():
-            self.legacy.generation_recovery.update(recovery_id, 'interrupted', 'Recovery cancelled before inference; checkpoint retained')
+            self.legacy.generation_recovery.update(recovery_id,
+                'suspended' if self.interruption_phase == 'suspended' else 'interrupted',
+                'Recovery paused to switch tasks; checkpoint retained' if self.interruption_phase == 'suspended'
+                else 'Recovery cancelled before inference; checkpoint retained')
             self.active_recovery_id = None
-            self.status.update(running=False, phase='cancelled', paused=False, pause_requested=False, active=[])
+            self.status.update(running=False, phase=self.interruption_phase, paused=False, pause_requested=False, active=[])
             self.persist()
 
     async def run(self, name, max_parallel):
@@ -550,11 +579,12 @@ class ScenarioRunner(ModelSession):
                 await self.gate()
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
-            batch["state"] = "cancelled"
+            batch["state"] = 'paused' if self.interruption_phase == 'suspended' else 'cancelled'
             self.status.update(
-                running=False, phase="cancelled", paused=False, pause_requested=False
+                running=False, phase=self.interruption_phase, paused=False, pause_requested=False
             )
-            self.log("Generation stopped; log retained", "warning")
+            self.log('Generation paused for another task; checkpoint and log retained'
+                     if self.interruption_phase == 'suspended' else "Generation stopped; log retained", "warning")
             raise
         except Exception as error:  # noqa: BLE001 — retain a visible stopped batch on setup failure
             batch["state"] = "error"
@@ -580,9 +610,10 @@ class ScenarioRunner(ModelSession):
                 self.snapshot['creation_counted'] = True
             self.log("Scenario complete", "success")
         except asyncio.CancelledError:
-            self.status.update(phase="cancelled")
+            self.status.update(phase=self.interruption_phase)
             self.log(
-                "Stopped; checkpoint and trajectory retained for resume", "warning"
+                'Paused for another task; checkpoint and trajectory retained for resume'
+                if self.interruption_phase == 'suspended' else "Stopped; checkpoint and trajectory retained for resume", "warning"
             )
             raise
         except ProviderFailure as error:

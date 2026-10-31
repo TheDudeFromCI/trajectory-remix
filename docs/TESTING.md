@@ -1,5 +1,27 @@
 # Verification
 
+- Dataset metric regressions cover compiler token/control accounting, actual
+  concurrent generation versus open windows, streaming versus instant input,
+  canonical same-tick/replacement/closure visibility, tool invocation and latency
+  counts, nullable denominators, fixed/rebinned distributions, pooled units,
+  accepted/train/original population isolation, evidence-backed labels and unknown
+  denominators, family counts, split conflicts and exact replay candidates.
+  A SQLite authorizer rejects replay source reads during cached queries. Cache
+  checks cover reopen reuse, pre-feature v5 files, source/tool/tokenizer/definition
+  invalidation, concurrent edits during a blocked compilation, nonblocking API
+  reads, deletion cascades and metadata undo. MCP protocol discovery/calls use the
+  official SDK. DOM checks exercise View access, calculation, graphs, population
+  changes, repair links, structured provenance/label editing and nested metadata
+  preservation; the metrics panel and replay sidebar were also inspected in
+  headless Chromium.
+  Follow-up checks exercise immediate MCP job replies during blocked compilation,
+  polling after the initiating client disconnects, duplicate-start coalescing,
+  cancellation/resume without recomputing completed sources, metadata-only cache
+  reuse versus changed speaker inputs, and bounded annotation-context packets
+  with definitions, custom guidance, actual event paths and explicit continuation
+  for large evidence. Legacy provenance and family/split policies are reported as
+  unresolved rather than invented.
+
 - Python tests run with `python -m pytest -q`. Install `.[mcp,test]` to also
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic
@@ -18,6 +40,12 @@
   Frontend checks cover distinct setup/running/paused/completed views, hidden
   creation controls during resumption, relevant actions, separate overall and
   per-draft progress, grouped errors and optional inference details.
+- Task-switch regressions cover paused creation batches, dataset resume passes,
+  selected recovery jobs, immediate pauses before the worker starts, active-call
+  rejection, durable checkpoints after process restart, original quota retention,
+  completed-request reuse and independent single/batch counts. Frontend checks
+  verify relevant task choices, switching in both directions, explicit Start,
+  continuing the same paused resume pass and count stability across polling.
 - Generation search tests cover unfinished/complete independently of review state,
   exact resume-queue selection, missing/corrupt checkpoints and manual-copy
   exclusion, metadata changes, SQL/authoring-draft parity, negation, grouping,
@@ -81,8 +109,7 @@
   analyses/tools, observation-dependent writes and TODO completion, generated
   window release, persistent automatic notes, budget rejection, iteration limits,
   cancellation/restart, failed-proposal retention, API-free external repair and
-  Ready-gated export. `python scripts/demo_idle_scenario.py` runs the real flow
-  with scripted offline content; it does not benchmark or approve a real model.
+  Ready-gated export.
 - DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
@@ -193,9 +220,8 @@ result, then emits EOS to release it.
   visibility and loss masks, BOS/EOS/NOOP, trajectories beyond individual request
   limits, invalid output/construction retention, cancellation/resume, archived
   generation evidence, original-checklist MCP repair, export approval, and
-  legacy checkpoint/scenario parsing compatibility. Historical performance reports
-  remain in `docs/content-first-benchmark.*` and `experiments/`; the retired
-  comparison generator is not shipped with the current workflow.
+  legacy checkpoint/scenario parsing compatibility. The retired comparison
+  generator is not shipped with the current workflow.
 
 - User-scenario regressions verify preserved domains/difficulty/roles and weights,
   manual inputs and shared tags, portable original checklists, four calls for a

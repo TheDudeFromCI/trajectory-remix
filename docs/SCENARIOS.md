@@ -1,7 +1,5 @@
 # Scenario generation and separate validation
 
-[Creation and independent validation flow (PDF)](generation-validation-flow.pdf).
-
 Start Remix normally; no scenario-directory argument is required:
 
 ```sh
@@ -48,7 +46,6 @@ conditional decisions stay invalid; model output is never silently corrected. Ch
 HTTP 400/422 responses pause generation and retain its checkpoint, with no
 automatic downgrade or repeated incompatible requests. Change the setting and
 resume. Parsing, schema/compiler checks and separate review remain in place.
-See [structured output and budget accounting](content-first-generation.md#server-enforced-structured-output).
 
 When an inference tokenizer is available, each content request is checked against
 its inference-model budget, including the prompt, total completion capacity and
@@ -75,6 +72,29 @@ The scenario defaults to `user_scenario` when omitted. `user_problem` and
 `idle_scenario`. They do not expose alternate generator versions. `/api/run`, the
 old task-based creation API, returns HTTP 410. Legacy task settings and automatic
 validation flags in imported configurations do not enable a creation pipeline.
+
+## Switch generation tasks
+
+Choose **Pause** and let active requests finish. The generation panel then offers
+**New task → Create a single trajectory / Create a new batch**. The same choices
+are available under **Edit → Generation**. Choose the scenario and count, then
+press **Start**. Choosing a task saves and releases the paused worker without
+starting inference. A new single starts with a count of 1; a new batch starts
+with 10, independently of the previous batch's target.
+
+You can also switch from a paused creation batch to **Resume Unfinished
+Generations**, or resume the selected trajectory. Existing samples, completed
+requests, checkpoints and logs remain saved. A parked creation batch retains its
+original quota in its checkpoint; resuming one of its drafts can continue that
+batch. A dataset-wide resume pass only processes existing unfinished drafts and
+never fills an old creation quota. A later dataset-wide pass finds the remaining
+unfinished entries. Resuming the currently paused pass continues that same pass.
+
+The API is `POST /api/scenarios/suspend`. It returns HTTP 409 while a running task
+has not fully paused, is a no-op when idle, and waits for the old worker to exit
+before another task can start. `/api/state` exposes `can_suspend_generation`.
+Suspended queue/recovery records remain inspectable after a process restart;
+switching tasks does not cancel or delete their saved content.
 
 ## Generation activity log
 
@@ -184,6 +204,14 @@ include every prior archived source. Back up the project to retain that history.
 
 ## Validate existing trajectories
 
+Use **Edit → Set State → Ready** after human review to approve training export.
+Content or metadata edits clear previous evaluations and preserve the trajectory's
+current state, including Ready (3). Human samples begin unfinished at level -3,
+including historical samples without an explicit level. Human review promotes
+them to 3; subsequent edits preserve that approval. Both CLI and dashboard token
+export exclude levels other than 3, including explicitly selected pending samples.
+Project backups retain all samples.
+
 Select a saved trajectory and choose **Edit → Generation → Validate Trajectory**.
 Choose a validation endpoint and run the review. The default records **Validated
 (2)** or **Rejected (-2)**; turn off recording for a report only. Validation never
@@ -280,5 +308,4 @@ Legacy `remix.validate` tail steps in
 archived flows remain readable as review definitions but are deferred during
 creation; their endpoints are never required or called by the generator.
 
-See [content requests and recovery](content-first-generation.md),
-[idle-work behavior and demo](idle-scenario-generation.md), and [MCP](MCP.md).
+See [MCP](MCP.md).

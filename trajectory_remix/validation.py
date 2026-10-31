@@ -360,4 +360,3 @@ class ValidationRunner(ModelSession):
                 ]} if definition.rules else {}
             ),
         }, failures
-

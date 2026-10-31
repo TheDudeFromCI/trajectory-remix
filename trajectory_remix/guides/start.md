@@ -52,6 +52,7 @@ Read just one guide using `get_authoring_guide` with the indicated `topic`:
 | Put virtual files into a trajectory | `sandbox` | [Sandbox setup](sandbox.md) |
 | Choose which tools a beginner agent should see | `tools` | [Starter tool selection](tools.md) |
 | Find trajectories by text, tags or properties | `search` | [Search syntax](search.md) |
+| Analyze coverage | `metrics` | [Metrics](metrics.md) |
 | Inspect a complete replay with parallel tools | `example` | [Build-graph trajectory JSON](../../examples/build-graph-analysis.json) |
 
 For new authors, finish `first`, then `parallel`.

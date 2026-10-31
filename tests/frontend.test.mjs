@@ -147,6 +147,34 @@ assert.match(
   /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
 );
 assert.match($("window-grid").textContent, /slot \d+/);
+// Empty windows stay hidden even when their automatic context headers are shown.
+const visibleWindowIds = () => [...$("window-grid").querySelectorAll(".window-card strong")]
+  .map((heading) => heading.textContent);
+assert.equal($("show-empty").checked, true);
+const emptyScan = [...$("window-grid").querySelectorAll(".window-card")]
+  .find((card) => card.querySelector("strong").textContent === "scan");
+emptyScan.querySelector(".window-size-toggle").onclick();
+assert.equal($("expanded-window-dialog").open, true);
+$("show-empty").checked = false;
+$("show-empty").onchange();
+assert.equal($("expanded-window-dialog").open, false);
+assert.deepEqual(visibleWindowIds(), ["system", "user"]);
+assert.equal($("open-count").textContent, "5");
+$("show-closed").checked = false;
+$("show-closed").onchange();
+assert.deepEqual(visibleWindowIds(), ["system", "user"]);
+$("tick-number").value = "1";
+$("tick-number").onchange({ target: $("tick-number") });
+await waitFor(() => visibleWindowIds().includes("scan"));
+assert.deepEqual(visibleWindowIds(), ["system", "user", "scan"]);
+$("tick-number").value = "0";
+$("tick-number").onchange({ target: $("tick-number") });
+await waitFor(() => visibleWindowIds().length === 2);
+$("show-empty").checked = true;
+$("show-empty").onchange();
+$("show-closed").checked = true;
+$("show-closed").onchange();
+assert.equal(visibleWindowIds().length, 5);
 // Each context window can be opened in a viewport-sized modal and restored.
 const expandedDialog = $("expanded-window-dialog");
 const initialWindowCount = w.document.querySelectorAll(".window-card").length;
@@ -425,6 +453,53 @@ await click("edit-menu-button");
 assert.equal($("view-menu").hidden, true);
 assert.equal($("edit-menu").hidden, false);
 await click("edit-menu-button"); // Leave the existing menu tests in their initial closed state.
+// Dataset metrics are reachable through View; graph refreshes preserve the
+// replay/editor, and repair links open the structured metadata controls.
+await click("view-menu-button");
+await click("toggle-metrics-panel");
+assert.equal($("metrics-panel").hidden, false);
+assert.equal($("toggle-metrics-panel").getAttribute("aria-checked"), "true");
+assert($("metrics-charts").querySelectorAll(".metric-card").length >= 6);
+assert.match($("metrics-status").textContent, /pending/);
+await click("metrics-analyze");
+await waitFor(() => $("metrics-status").textContent.includes("0 pending") && !$("metrics-analyze").disabled, 5000);
+assert.match($("metrics-status").textContent, /0 pending/);
+assert.match($("metrics-distribution-stats").textContent, /p99/);
+assert($("metrics-histogram").querySelectorAll(".metric-bar-row").length > 1);
+assert.equal($("metrics-issues").querySelector("button").textContent, "Open metadata");
+await $("metrics-issues").querySelector("button").onclick();
+assert.equal($("metrics-panel").hidden, true);
+assert.equal($("coverage-metadata-details").open, true);
+const previousCoverageMetadata = JSON.parse($("metadata-json").value);
+$("coverage-primary_domain").value = "research";
+$("coverage-primary_domain").oninput();
+$("coverage-is_original").value = "false";
+$("coverage-is_original").oninput();
+$("coverage-provenance-author").value = "reviewer";
+$("coverage-provenance-author").oninput();
+$("observed-label-selector").value = "capability.delegation";
+$("observed-label-selector").onchange();
+$("observed-required").value = "true";
+$("observed-required").oninput();
+$("observed-evidence").value = "replay[0][0]\nreplay[0][1]";
+$("observed-evidence").oninput();
+const coverageDraft = JSON.parse($("metadata-json").value);
+assert.equal(coverageDraft.primary_domain, "research");
+assert.equal(coverageDraft.is_original, false);
+assert.equal(coverageDraft.provenance.author, "reviewer");
+assert.equal(coverageDraft.observed_labels["capability.delegation"].required, true);
+assert.deepEqual(coverageDraft.observed_labels["capability.delegation"].evidence, ["replay[0][0]", "replay[0][1]"]);
+for (const [key, value] of Object.entries(previousCoverageMetadata))
+  if (!["primary_domain", "is_original", "provenance", "observed_labels"].includes(key)) assert.deepEqual(coverageDraft[key], value);
+await waitFor(() => !w.document.title.startsWith("*"), 5000);
+await click("view-menu-button");
+await click("toggle-metrics-panel");
+$("metrics-population").value = "accepted_train_originals";
+await $("metrics-population").onchange();
+assert.match($("metrics-coverage-table").textContent, /insufficient support/);
+assert.match($("metrics-unavailable").textContent, /trainer/);
+await click("close-metrics-panel");
+assert.equal($("toggle-metrics-panel").getAttribute("aria-checked"), "false");
 assert.equal($("file-menu").contains($("import-button")), true);
 assert.equal($("generation-menu").contains($("settings-button")), true);
 assert.equal($("generation-menu").contains($("generate-one")), true);
@@ -1102,8 +1177,12 @@ assert($("validation-dialog").hasAttribute("open"));
 assert.equal($("validation-record").checked, true);
 const beforeValidationFetch = w.fetch;
 let validationBody, validationStatus = {running:false, phase:"idle", completed:0, total:4, active:[]};
+let holdValidation = true, releaseValidation, failValidation = false, validationRequests = 0;
 w.fetch = async (path, options) => {
   if (path === "/api/validation/run") {
+    validationRequests++;
+    if (holdValidation) await new Promise(resolve => { releaseValidation = resolve; });
+    if (failValidation) return new w.Response(JSON.stringify({detail:"Validation unavailable"}), {status:503});
     validationBody = JSON.parse(options.body);
     validationStatus = {running:true, phase:"validating", completed:1, total:4, active:["layout"], sample_id:validationBody.sample_id};
     return new w.Response(JSON.stringify({job_id:"review",status:validationStatus}), {status:202,headers:{"content-type":"application/json"}});
@@ -1119,7 +1198,20 @@ w.fetch = async (path, options) => {
   }
   return response;
 };
+const startingValidation = click("start-validation");
+assert.equal($("start-validation").getAttribute("aria-busy"), "true");
+assert.equal($("start-validation").getAttribute("aria-disabled"), "true");
+assert.equal($("start-validation").textContent, "Validate");
+await waitFor(() => !!releaseValidation);
 await click("start-validation");
+assert.equal(validationRequests, 1); // Pending buttons ignore repeated activation.
+const pendingValidationReads = completedStateReads;
+await waitFor(() => completedStateReads > pendingValidationReads, 5000);
+assert.equal($("start-validation").getAttribute("aria-busy"), "true");
+releaseValidation();
+await startingValidation;
+assert.equal($("start-validation").hasAttribute("aria-busy"), false);
+assert.equal($("start-validation").hasAttribute("aria-disabled"), false);
 assert.equal(validationBody.record, true);
 assert.equal(validationBody.endpoint, "validator");
 assert.equal($("validation-progress").value, 1);
@@ -1127,6 +1219,14 @@ assert.equal($("start-validation").disabled, true);
 assert.equal($("generate-one").disabled, true);
 await click("cancel-validation");
 assert.equal($("resume-validation").hidden, false);
+holdValidation = false;
+failValidation = true;
+await click("resume-validation");
+assert.equal($("resume-validation").hasAttribute("aria-busy"), false);
+assert.equal($("resume-validation").hasAttribute("aria-disabled"), false);
+assert.equal($("resume-validation").disabled, false);
+assert.match($("toast").textContent, /Validation unavailable/);
+failValidation = false;
 await click("resume-validation");
 assert.equal(validationBody.resume, true);
 await click("cancel-validation");
@@ -1301,7 +1401,29 @@ w.fetch = beforeResumeFetch;
 const beforeBulkResumeFetch = w.fetch;
 let bulkResumeStarted = false, bulkResumePhase = "running", recoveryChoiceApplied = null, recoveryIssueDeleted = false, allRecoveryIssuesResolved = false;
 const recoveryActionRequests = [];
+let suspendedTasks = 0;
+const switchedCreationRequests = [];
+let mockGenerationActivity = "resume-all", resumedExistingPass = 0, resumePassStarts = 0;
+let holdGenerationResume = false, releaseGenerationResume;
 w.fetch = async (path, options) => {
+  if (path === "/api/pause") {
+    assert.deepEqual(JSON.parse(options.body), {resume:true});
+    resumedExistingPass++;
+    if (holdGenerationResume) await new Promise(resolve => { releaseGenerationResume = resolve; });
+    bulkResumePhase = "running";
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
+  if (path === "/api/scenarios/suspend") {
+    assert.equal(bulkResumePhase, "paused");
+    suspendedTasks++;
+    bulkResumePhase = "suspended";
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
+  if (path === "/api/scenarios/run") {
+    switchedCreationRequests.push(JSON.parse(options.body));
+    bulkResumeStarted = false;
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
   if (path === "/api/scenarios/recover") {
     const body = JSON.parse(options.body); recoveryActionRequests.push(body);
     recoveryChoiceApplied = body.action;
@@ -1311,6 +1433,9 @@ w.fetch = async (path, options) => {
   if (path === "/api/scenarios/resume-all") {
     assert.deepEqual(JSON.parse(options.body), {});
     bulkResumeStarted = true;
+    resumePassStarts++;
+    bulkResumePhase = "running";
+    mockGenerationActivity = "resume-all";
     return new w.Response(JSON.stringify({job_id: "recovery-pass"}), {status: 202});
   }
   const response = await beforeBulkResumeFetch(path, options);
@@ -1318,12 +1443,15 @@ w.fetch = async (path, options) => {
     const data = await response.json();
     data.unfinished_generation_count = 2;
     if (bulkResumeStarted) {
-      const busy = bulkResumePhase !== "complete";
-      data.status = {...data.status, activity:"resume-all", running:busy, paused:bulkResumePhase === "paused", phase:busy ? "resuming_all" : "resume_complete",
-        model_requests:1, active:busy ? ["work.5.decide"] : [], metrics:{"work.5.decide":{model:"local-model",token_source:"estimated",prompt_tokens:4917,completion_tokens:0,total_tokens:4917,generation_seconds:2.5,context_size:8192,context_used_tokens:4917,budget_enforced:false}}};
-      data.generation_resume = {running:busy, state:busy ? "running" : "complete", target:3, processed:busy ? 1 : 3,
+      const busy = ["running", "pausing", "paused"].includes(bulkResumePhase);
+      data.can_suspend_generation = busy && bulkResumePhase === "paused";
+      data.status = {...data.status, activity:mockGenerationActivity, running:busy, paused:bulkResumePhase === "paused", pause_requested:bulkResumePhase === "pausing",
+        phase:busy ? "resuming_all" : bulkResumePhase === "suspended" ? "suspended" : "resume_complete",
+        batch:{id:"old-batch",target:200,completed:12,attempts:150,attempt_limit:600,state:"paused"},
+        model_requests:1, active:busy && bulkResumePhase !== "paused" ? ["work.5.decide"] : [], metrics:{"work.5.decide":{model:"local-model",token_source:"estimated",prompt_tokens:4917,completion_tokens:0,total_tokens:4917,generation_seconds:2.5,context_size:8192,context_used_tokens:4917,budget_enforced:false}}};
+      data.generation_resume = {running:busy && mockGenerationActivity === "resume-all", state:busy ? "running" : bulkResumePhase === "suspended" ? "suspended" : "complete", target:3, processed:bulkResumePhase === "complete" ? 3 : 1,
         current_id:busy ? "unfinished-second" : null,
-        completed:busy ? 0 : 2, failed:0, skipped:1, id:"recovery-pass", issues:[
+        completed:bulkResumePhase === "complete" ? 2 : 0, failed:0, skipped:1, id:"recovery-pass", issues:[
           ...(!recoveryIssueDeleted ? [{sample_id:"edited-draft",position:17,source_hash:"original-source-hash",actions:{force_resume:true,restart:true,delete:true},state:"skipped",error:"Trajectory edited since checkpoint"}] : []),
           {sample_id:"missing-checkpoint",position:18,source_hash:"missing-source-hash",actions:{force_resume:false,restart:false,delete:true},state:"skipped",error:"Generation checkpoint not found",action_note:"Original inputs are unavailable."}
         ]};
@@ -1347,6 +1475,9 @@ assert.match($("resume-all-progress").textContent, /1\/3 processed/);
 assert.match($("resume-all-findings").textContent, /edited-draft/);
 assert.match($("resume-all-findings").textContent, /Its edits were preserved/);
 assert.equal($("resume-all-generations").disabled, true);
+assert.equal($("generate-one").disabled, true);
+assert.equal($("generate-batch").disabled, true);
+assert.equal($("generation-switch-task").hidden, true);
 assert.equal($("resume-all-generations-panel").disabled, true);
 assert.equal($("stop-run").disabled, false);
 assert.equal($("generation-setup").hidden, true);
@@ -1362,11 +1493,70 @@ assert.equal($("resume-issues-panel").open, false);
 assert.equal($("resume-all-findings").querySelectorAll(".generation-recovery-actions").length, 0);
 assert.match($("generation-metrics").textContent, /Estimated tokens/);
 assert.equal($("generation-metrics").querySelector('[role="meter"]'), null);
+bulkResumePhase = "pausing";
+await waitFor(() => $("run-status").textContent === "Pausing after active requests finish", 5000);
+assert.equal($("generate-one").disabled, true);
+assert.equal($("generation-switch-task").hidden, true);
 bulkResumePhase = "paused";
 await waitFor(() => $("run-status").textContent === "Paused", 5000);
 assert.equal($("pause-run").textContent, "Resume");
 assert.equal($("generation-setup").hidden, true);
+assert.equal($("generate-one").disabled, false);
+assert.equal($("generate-batch").disabled, false);
+assert.equal($("generation-switch-task").hidden, false);
+holdGenerationResume = true;
+const resumingGeneration = click("pause-run");
+assert.equal($("pause-run").getAttribute("aria-busy"), "true");
+assert.equal($("pause-run").textContent, "Resume");
+await waitFor(() => !!releaseGenerationResume);
+await click("pause-run");
+assert.equal(resumedExistingPass, 1);
+releaseGenerationResume();
+await resumingGeneration;
+assert.equal($("pause-run").hasAttribute("aria-busy"), false);
+assert.equal($("pause-run").hasAttribute("aria-disabled"), false);
+holdGenerationResume = false;
+assert.equal(resumedExistingPass, 1);
+assert.equal(resumePassStarts, 1);
+assert.equal(suspendedTasks, 0);
+bulkResumePhase = "paused";
+await waitFor(() => $("run-status").textContent === "Paused", 5000);
+$("generation-next-task").value = "single";
+await $("generation-next-task").onchange();
+assert.equal(suspendedTasks, 1);
+assert.equal($("generation-setup").hidden, false);
+assert.equal($("generation-work").hidden, true);
+assert.equal($("generation-count").value, "1");
+assert.equal($("pause-run").textContent, "Start");
+assert.equal($("resume-issues-panel").hidden, true);
+assert.equal(switchedCreationRequests.length, 0); // Choosing a task does not start inference.
+const switchedReads = completedStateReads;
+await waitFor(() => completedStateReads > switchedReads, 5000);
+assert.equal($("generation-count").value, "1"); // An old 200-sample target cannot leak into the new setup.
+await click("pause-run");
+assert.equal(switchedCreationRequests.at(-1).batch_size, 1);
+bulkResumeStarted = true; bulkResumePhase = "paused";
+await click("status-button");
+await waitFor(() => $("generation-switch-task").hidden === false, 5000);
+await click("generate-batch");
+assert.equal(suspendedTasks, 2);
+assert.equal($("generation-count").value, "10");
+$("generation-count").value = "7";
+await click("pause-run");
+assert.equal(switchedCreationRequests.at(-1).batch_size, 7);
+bulkResumeStarted = true;
+mockGenerationActivity = "create";
+bulkResumePhase = "paused";
+const creationPauseReads = completedStateReads;
+await click("status-button");
+await waitFor(() => completedStateReads > creationPauseReads, 5000);
+await waitFor(() => $("generation-action-title").textContent === "Create trajectories", 5000);
+await click("resume-all-generations"); // Leave a paused creation batch for existing unfinished drafts.
+assert.equal(suspendedTasks, 3);
+assert.equal(resumePassStarts, 2);
+assert.equal($("generation-action-title").textContent, "Resume unfinished drafts");
 bulkResumePhase = "complete";
+await click("status-button");
 await waitFor(() => $("run-status").textContent === "Resume pass complete", 5000);
 assert.equal($("generation-setup").hidden, true);
 assert.equal($("pause-run").hidden, true);
@@ -1508,18 +1698,47 @@ for (const request of rangeRequests) {
   const query = new URL(request.path, base).searchParams;
   assert(Number(query.get("end_tick")) - Number(query.get("start_tick")) < 8);
 }
-// An oversized range falls back to one frame; expiry does not cause a retry loop.
+// An oversized range falls back to one frame; expiry recompiles the original
+// source once, keeps the selected tick, and displays a toast while waiting.
 nextFramesError = { code: "preview_limit", detail: "Preview range exceeds 4 MB; request fewer frames" };
 jump(1000);
 await waitFor(() => requests.some((r) => r.path === `/api/frame/${lastPlan.plan_id}/1000`) &&
   !$("window-grid").textContent.includes("Loading preview"));
-nextFramesError = { detail: "Preview expired; compile the sample again" };
+const expiredError = { code: "preview_expired", detail: "Preview expired; compile the sample again" };
+const sourceBeforeExpiry = JSON.parse(requests.filter((r) => r.path === "/api/compile").at(-1).options.body);
+const beforeRecoveryCompiles = compileCount();
+const beforeRecoveryWrites = requests.filter((r) => r.options?.method === "PUT").length;
+nextFramesError = expiredError;
+holdNextCompile = true;
+releaseCompile = null;
 jump(500);
+await waitFor(() => releaseCompile !== null);
+assert.equal($("toast").hidden, false);
+assert.match($("toast").textContent, /Please wait.*trajectory recompiles/);
+assert.equal(compileCount(), beforeRecoveryCompiles + 1);
+assert.deepEqual(JSON.parse(requests.filter((r) => r.path === "/api/compile").at(-1).options.body), sourceBeforeExpiry);
+jump(501); // A seek during recompilation must keep the user's latest tick.
+releaseCompile();
+await waitFor(() => !$("window-grid").textContent.includes("Loading preview"));
+assert.doesNotMatch($("window-grid").textContent, /Preview unavailable/);
+assert.equal($("tick-number").value, "501");
+assert.equal($("toast").hidden, true);
+assert.equal(requests.filter((r) => r.options?.method === "PUT").length, beforeRecoveryWrites);
+
+// If the replacement preview also expires, stop instead of recompiling forever.
+nextFramesError = expiredError;
+holdNextCompile = true;
+releaseCompile = null;
+jump(600);
+await waitFor(() => releaseCompile !== null);
+nextFramesError = expiredError;
+releaseCompile();
 await waitFor(() => /Preview unavailable: Preview expired/.test($("window-grid").textContent));
 const frameRequestCount = () => requests.filter((r) => /^\/api\/frames?\//.test(r.path)).length;
 const expiredRequestCount = frameRequestCount();
 await new Promise((resolve) => setTimeout(resolve, 100));
 assert.equal(frameRequestCount(), expiredRequestCount);
+assert.equal(compileCount(), beforeRecoveryCompiles + 2);
 
 const emptyStateResponse = await w.fetch("/api/state", {headers: {
   "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,

@@ -888,7 +888,7 @@ shared open-window attention, redundant file operations, evidence lifetimes
 throughout generation, and independent correctness checks. Zero compiler
 warnings do not establish these properties.
 
-After repairing a candidate, edits reset its previous review state. To sign off
+After repairing a candidate, edits clear previous evaluations while preserving its state. To sign off
 your own review, reread the repaired source, inspect compiler diagnostics and
 semantic correctness, then call:
 
@@ -904,7 +904,8 @@ responsibility. The tool records a self-reported reviewer label, summary,
 timestamp, reviewed revision, source hash and tokenizer/tool fingerprints in
 `metadata.evaluations`. It does not independently verify the agent's assessment
 or identity and does not invoke configured model endpoints. Subsequent content
-edits invalidate the sign-off; undo/redo includes it. It never marks Ready (3).
+edits invalidate the sign-off record while preserving the trajectory's state;
+undo/redo includes it. It never marks Ready (3).
 
 `query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
 (`all`/`any`), `offset`, and `limit`. Scalar filter operators are
@@ -948,9 +949,24 @@ compilation, and include the source event path for targeted repairs.
 
 Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.
 
+## Dataset metrics
+
+Use `get_authoring_guide(topic="metrics")` for coverage analysis, numeric
+distributions, annotation repairs and the limitations of source measurements.
+The shared commands are `get_dataset_metrics`, `refresh_dataset_metrics`,
+`get_dataset_metric_distribution` and `query_dataset_metrics`; they work over both
+stdio and Streamable HTTP without starting generation. Prefer
+`population="accepted_train_originals"` for observer gap analysis.
+Use `population="all"` when finding legacy examples missing split/original metadata.
+`get_metric_annotation_context` bundles sample evidence, field/label definitions
+and dataset/scenario guidance for backfilling annotations. Cache rebuilds return
+immediately with a job ID: poll `get_dataset_metrics_status` and use
+`cancel_dataset_metrics_refresh` to stop after the current sample. Retrying joins
+the running job, including after the initiating MCP client disconnects.
+
 ## Content-first generation evidence
 
-`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
+`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist.
 
 The standard `user_scenario` and `idle_scenario` flows generate without validation.
 `validate_trajectory(semantic=true)` uses the same explicit service as **Edit →

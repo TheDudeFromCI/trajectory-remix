@@ -118,7 +118,13 @@ async def test_large_api_seek_and_bounded_playback_share_compilation(studio, lar
     app.state.commands.previews.entries[plan_id].last_used -= 901
     expired = await client.get(f"/api/frame/{plan_id}/0")
     assert expired.status_code == 404 and "compile the sample again" in expired.text
+    assert expired.json()["code"] == "preview_expired"
+    expired_range = await client.get(f"/api/frames/{plan_id}?start_tick=0&end_tick=1")
+    assert expired_range.status_code == 404
+    assert expired_range.json()["code"] == "preview_expired"
     assert (await client.post("/api/compile", json={"sample": source})).status_code == 200
+    restored = await client.get(f"/api/frame/{plan_id}/20011")
+    assert restored.json() == app.state.compiler.frame(reference, 20011)
     assert compilations == ["large", "large"]
 
 

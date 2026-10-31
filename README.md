@@ -158,6 +158,13 @@ hash, so changed requirements require a fresh review.
 
 ## Dashboard workflow
 
+**View → Dataset Metrics** opens source coverage graphs, compiler-derived token,
+window, concurrency and timing statistics, and actionable annotation alerts.
+Calculate pending values in a background job; use **Open metadata** to repair
+coverage/provenance and evidence-bearing labels in replay. Both MCP transports
+expose the same metrics queries. See [dataset metrics](docs/METRICS.md) for
+populations, compatible caching, metadata fields and measurements requiring logs.
+
 1. **Import samples** accepts multiple `.json`, `.jsonl`, and `.kidra-dataset`
    files in one batch. JSON may contain one trajectory, an array, or a `samples`
    array. JSONL contains one trajectory per nonempty line. Import appends to
@@ -402,7 +409,8 @@ The dashboard explains the preview limit; MCP `preview_snapshots` can inspect
 selected windows/ranges, and `get_window_history` paginates token records.
 NOOPs, losses and training exports are unchanged. Dashboard and MCP share an LRU
 plan cache (six entries, at most 500,000 retained rows in total, 15-minute idle
-expiry); an evicted/expired preview asks you to compile again. Active playback
+expiry); the dashboard automatically recompiles an evicted/expired preview from
+its original source and shows a waiting toast before resuming. Active playback
 reuses the cached plan. Cache limits bound retained expansion, not process RSS
 or temporary compilation memory.
 
@@ -411,8 +419,6 @@ file and requests to 40 MB. Large imports should be split into batches; the SQLi
 100,000-trajectory limit.
 
 ## Generation and explicit validation
-
-[Creation and independent validation flow (PDF)](docs/generation-validation-flow.pdf)
 
 The application includes five bundled content-first flows:
 **`user_scenario`** for user conversations, and **`idle_scenario`** for autonomous
@@ -447,8 +453,7 @@ not required. Old datasets and saved review contracts remain readable. The old
 `user_problem` flow, `content_first` demo and task-based `/api/run` API are retired;
 old noval scenario names are aliases for the standard user/idle choices.
 
-See [scenario configuration and API](docs/SCENARIOS.md) and
-[bounded requests, recovery and analytics](docs/content-first-generation.md).
+See [scenario configuration and API](docs/SCENARIOS.md).
 
 ## Tools and sandbox state
 
@@ -579,5 +584,4 @@ Primary API/security references: [Hugging Face Tokenizers](https://huggingface.c
 The bundled standard flows load automatically. Custom `--scenarios-dir` roots can
 replace them with additional YAML flows. Creation and semantic validation are
 separate operations; no creation flow invokes a semantic validator. See
-[Scenario workflows](docs/SCENARIOS.md), [idle work](docs/idle-scenario-generation.md)
-and the [idle-flow PDF](docs/idle-scenario-flow.pdf).
+[Scenario workflows](docs/SCENARIOS.md).

@@ -18,7 +18,7 @@ from starlette.routing import Route
 
 from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, chunks
-from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewCache, PreviewLimit, bounded_json
+from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewCache, PreviewExpired, PreviewLimit, bounded_json
 from .migration import TokenizerMigration
 from .dataset import (
     new_sample,
@@ -67,6 +67,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             finally:
                 expiry.cancel()
                 await asyncio.gather(expiry, return_exceptions=True)
+                await commands.metrics_refresh.close()
                 if migration.task is not None:
                     await asyncio.shield(migration.task)
                 try:
@@ -162,6 +163,12 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             {"detail": str(error), "code": "preview_limit"}, status_code=413
         )
 
+    @app.exception_handler(PreviewExpired)
+    async def preview_expired(request, error):
+        return JSONResponse(
+            {"detail": str(error), "code": "preview_expired"}, status_code=404
+        )
+
     @app.exception_handler(CommandError)
     async def command_error(request, error):
         status = {"not_found": 404, "conflict": 409, "busy": 409}.get(error.code, 422)
@@ -227,6 +234,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "selected_index": selected_index,
             "can_resume_generation": scenario_runner.can_resume(selected_id),
             "can_resume_active_generation": scenario_runner.can_resume(scenario_runner.status.get("draft_id")),
+            "can_suspend_generation": scenario_runner.can_suspend(),
             "unfinished_generation_count": scenario_runner.resume_queue.count(),
             "generation_resume": recovery.view(),
             "config": public_config(state["config"]),
@@ -276,6 +284,34 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/metadata/counts")
     async def metadata_counts(request: Request):
         return await commands.call("get_metadata_counts", await body(request))
+
+    @app.post("/api/metrics")
+    async def metrics_overview(request: Request):
+        return await commands.call("get_dataset_metrics", await body(request))
+
+    @app.post("/api/metrics/refresh")
+    async def metrics_refresh(request: Request):
+        return await commands.call("refresh_dataset_metrics", await body(request))
+
+    @app.get("/api/metrics/status")
+    async def metrics_status(job_id: str | None = None):
+        return await commands.call("get_dataset_metrics_status", {"job_id": job_id})
+
+    @app.post("/api/metrics/cancel")
+    async def metrics_cancel(request: Request):
+        return await commands.call("cancel_dataset_metrics_refresh", await body(request))
+
+    @app.post("/api/metrics/distribution")
+    async def metrics_distribution(request: Request):
+        return await commands.call("get_dataset_metric_distribution", await body(request))
+
+    @app.post("/api/metrics/query")
+    async def metrics_query(request: Request):
+        return await commands.call("query_dataset_metrics", await body(request))
+
+    @app.post("/api/metrics/annotation-context")
+    async def metrics_annotation_context(request: Request):
+        return await commands.call("get_metric_annotation_context", await body(request))
 
     @app.get("/api/mcp/tools")
     async def mcp_tools():
@@ -438,7 +474,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     def get_preview(plan_id):
         preview = commands.previews.get(plan_id)
         if preview is None:
-            raise HTTPException(404, "Preview expired or evicted from the bounded cache; compile the sample again")
+            raise PreviewExpired("Preview expired or evicted from the bounded cache; compile the sample again")
         return preview
 
     @app.get("/api/frame/{plan_id}/{tick}")
@@ -572,6 +608,13 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def resume_all_generations():
         job_id = scenario_runner.resume_queue.start()
         return {'job_id': job_id, 'status': dict(scenario_runner.resume_queue.status)}
+
+    @app.post('/api/scenarios/suspend')
+    async def suspend_generation():
+        if scenario_runner.status['running'] and not scenario_runner.can_suspend():
+            raise HTTPException(409, 'Pause generation and let active LLM calls finish before switching tasks')
+        await scenario_runner.suspend()
+        return {'ok': True, 'draft_id': scenario_runner.status.get('draft_id')}
 
     @app.get('/api/scenarios/resume-all/results')
     async def resume_all_results(offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
