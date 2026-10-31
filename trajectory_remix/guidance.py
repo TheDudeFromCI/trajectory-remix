@@ -1,7 +1,7 @@
 """Dataset-owned Markdown guidance shared by the editor and MCP commands."""
 
-GUIDE_TOPICS = ("start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "reference", "example")
-GUIDE_TITLES = ("Getting Started", "First Trajectory", "Parallel Work", "Editing", "Sandbox", "Tools", "Search", "Review", "Authoring Reference", "Example Trajectory")
+GUIDE_TOPICS = ("start", "first", "parallel", "edit", "sandbox", "tools", "search", "review", "metrics", "reference", "example")
+GUIDE_TITLES = ("Getting Started", "First Trajectory", "Parallel Work", "Editing", "Sandbox", "Tools", "Search", "Review", "Dataset Metrics", "Authoring Reference", "Example Trajectory")
 MAX_GUIDE_LENGTH = 200_000
 
 

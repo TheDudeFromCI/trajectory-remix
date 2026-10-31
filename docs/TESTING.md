@@ -1,5 +1,27 @@
 # Verification
 
+- Dataset metric regressions cover compiler token/control accounting, actual
+  concurrent generation versus open windows, streaming versus instant input,
+  canonical same-tick/replacement/closure visibility, tool invocation and latency
+  counts, nullable denominators, fixed/rebinned distributions, pooled units,
+  accepted/train/original population isolation, evidence-backed labels and unknown
+  denominators, family counts, split conflicts and exact replay candidates.
+  A SQLite authorizer rejects replay source reads during cached queries. Cache
+  checks cover reopen reuse, pre-feature v5 files, source/tool/tokenizer/definition
+  invalidation, concurrent edits during a blocked compilation, nonblocking API
+  reads, deletion cascades and metadata undo. MCP protocol discovery/calls use the
+  official SDK. DOM checks exercise View access, calculation, graphs, population
+  changes, repair links, structured provenance/label editing and nested metadata
+  preservation; the metrics panel and replay sidebar were also inspected in
+  headless Chromium.
+  Follow-up checks exercise immediate MCP job replies during blocked compilation,
+  polling after the initiating client disconnects, duplicate-start coalescing,
+  cancellation/resume without recomputing completed sources, metadata-only cache
+  reuse versus changed speaker inputs, and bounded annotation-context packets
+  with definitions, custom guidance, actual event paths and explicit continuation
+  for large evidence. Legacy provenance and family/split policies are reported as
+  unresolved rather than invented.
+
 - Python tests run with `python -m pytest -q`. Install `.[mcp,test]` to also
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic

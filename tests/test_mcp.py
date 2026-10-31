@@ -57,7 +57,23 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                     "review_trajectory",
                     "repair_trajectory",
                     "record_trajectory_review",
+                    "get_dataset_metrics",
+                    "refresh_dataset_metrics",
+                    "get_dataset_metric_distribution",
+                    "query_dataset_metrics",
+                    "get_dataset_metrics_status",
+                    "cancel_dataset_metrics_refresh",
+                    "get_metric_annotation_context",
                 } <= set(tools)
+                assert tools["get_dataset_metrics"].annotations.readOnlyHint
+                metric_guide = await session.call_tool("get_authoring_guide", {"topic": "metrics"})
+                assert not metric_guide.isError and "Coverage annotations" in metric_guide.structuredContent["content"]
+                metric_snapshot = await session.call_tool("get_dataset_metrics", {"population": "accepted_train_originals"})
+                assert not metric_snapshot.isError and metric_snapshot.structuredContent["summary"]["samples"] == 0
+                metric_refresh = await session.call_tool("refresh_dataset_metrics", {"limit": 1})
+                assert not metric_refresh.isError and metric_refresh.structuredContent["processed"] == 0
+                metric_distribution = await session.call_tool("get_dataset_metric_distribution", {"metric": "duration_ticks"})
+                assert not metric_distribution.isError and metric_distribution.structuredContent["mean"] is None
                 assert tools["get_guidance"].annotations.readOnlyHint
                 assert "get_guidance" in initialized.instructions
                 guidance = await session.call_tool("get_guidance", {})
@@ -117,6 +133,9 @@ async def test_mcp_protocol_discovery_structured_results_and_errors(compiler, tm
                 assert not created.isError
                 assert created.structuredContent["sample_id"] == "from-mcp"
                 assert json.loads(created.content[0].text) == created.structuredContent
+                annotation = await session.call_tool("get_metric_annotation_context", {"sample_id": "from-mcp"})
+                assert not annotation.isError and annotation.structuredContent["events"]
+                assert "provenance" in annotation.structuredContent["unrecoverable_without_history_or_policy"]
                 result = await session.call_tool(
                     "get_trajectory", {"sample_id": "from-mcp"}
                 )

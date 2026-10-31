@@ -158,6 +158,13 @@ hash, so changed requirements require a fresh review.
 
 ## Dashboard workflow
 
+**View → Dataset Metrics** opens source coverage graphs, compiler-derived token,
+window, concurrency and timing statistics, and actionable annotation alerts.
+Calculate pending values in a background job; use **Open metadata** to repair
+coverage/provenance and evidence-bearing labels in replay. Both MCP transports
+expose the same metrics queries. See [dataset metrics](docs/METRICS.md) for
+populations, compatible caching, metadata fields and measurements requiring logs.
+
 1. **Import samples** accepts multiple `.json`, `.jsonl`, and `.kidra-dataset`
    files in one batch. JSON may contain one trajectory, an array, or a `samples`
    array. JSONL contains one trajectory per nonempty line. Import appends to

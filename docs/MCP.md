@@ -949,6 +949,21 @@ compilation, and include the source event path for targeted repairs.
 
 Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.
 
+## Dataset metrics
+
+Use `get_authoring_guide(topic="metrics")` for coverage analysis, numeric
+distributions, annotation repairs and the limitations of source measurements.
+The shared commands are `get_dataset_metrics`, `refresh_dataset_metrics`,
+`get_dataset_metric_distribution` and `query_dataset_metrics`; they work over both
+stdio and Streamable HTTP without starting generation. Prefer
+`population="accepted_train_originals"` for observer gap analysis.
+Use `population="all"` when finding legacy examples missing split/original metadata.
+`get_metric_annotation_context` bundles sample evidence, field/label definitions
+and dataset/scenario guidance for backfilling annotations. Cache rebuilds return
+immediately with a job ID: poll `get_dataset_metrics_status` and use
+`cancel_dataset_metrics_refresh` to stop after the current sample. Retrying joins
+the running job, including after the initiating MCP client disconnects.
+
 ## Content-first generation evidence
 
 `get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
