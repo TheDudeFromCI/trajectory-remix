@@ -142,12 +142,16 @@ class Flow(Definition):
     schemas: dict[str, dict] = Field(default_factory=dict)
     tags: dict[str, list[Tag]] = Field(default_factory=dict)
     roles: dict[str, Profile] = Field(default_factory=dict)
+    review_checks: dict[str, ReviewCheck] = Field(default_factory=dict)
     steps: dict[str, Step]
 
     @model_validator(mode="after")
     def validate_flow(self):
         if not self.steps:
             raise ValueError("A scenario must contain steps")
+        for name in self.review_checks:
+            if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", name):
+                raise ValueError(f"Invalid scenario review check ID: {name}")
         for schema in self.schemas.values():
             jsonschema.Draft202012Validator.check_schema(schema)
             if schema.get("type") != "object":
@@ -323,6 +327,17 @@ class Scenario:
             raise ValueError(f"Invalid scenario {self.name}: {error}") from error
         self.prompts = copy.deepcopy(parent.prompts) if parent else {}
 
+        def load_prompt(filename):
+            target = (self.path / filename).resolve()
+            if not target.is_relative_to(self.path) or target.suffix != ".md":
+                raise ValueError("Prompts must be Markdown files inside their scenario")
+            if not target.exists() and parent and filename in parent.prompts:
+                return
+            text = target.read_text()
+            if len(text) > 200_000:
+                raise ValueError("Prompt exceeds 200 KB")
+            self.prompts[filename] = text
+
         def collect(steps):
             for step in steps.values():
                 for filename in (
@@ -335,23 +350,12 @@ class Scenario:
                     *step.repair_guides,
                 ):
                     if filename:
-                        target = (self.path / filename).resolve()
-                        if (
-                            not target.is_relative_to(self.path)
-                            or target.suffix != ".md"
-                        ):
-                            raise ValueError(
-                                "Prompts must be Markdown files inside their scenario"
-                            )
-                        if not target.exists() and parent and filename in parent.prompts:
-                            continue
-                        text = target.read_text()
-                        if len(text) > 200_000:
-                            raise ValueError("Prompt exceeds 200 KB")
-                        self.prompts[filename] = text
+                        load_prompt(filename)
                 collect(step.steps)
 
         collect(self.flow.steps)
+        for check in self.flow.review_checks.values():
+            load_prompt(check.prompt)
 
 
 class ScenarioRegistry:

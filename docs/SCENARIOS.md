@@ -6,15 +6,19 @@ Start Remix normally; no scenario-directory argument is required:
 trajectory-remix --dataset project.sqlite
 ```
 
-The installed package includes two standard choices:
+The installed package includes these choices:
 
 - **`user_scenario`** (`#user_scenario`): the former streamlined user variation,
   with all original domain/difficulty pools, user traits and manual selections.
   One workspace request plus three requests per exchange; up to four exchanges.
 - **`idle_scenario`** (`#idle_scenario`): autonomous TODO, project, memory and alarm
   work without a user. One workspace request plus a bounded observe–decide–act loop.
+- **`kidra_small`**, **`kidra_medium`**, **`kidra_large`** (matching scenario tags):
+  project coordination at three scales, with weighted lifecycle, competency,
+  recurrence and complication conditions. One workspace request plus up to
+  10/16/20 observation-dependent decisions. See [Kidra scenarios](kidra-scenarios.md).
 
-Both use content-first generation. The validated `user_problem` scaffold, legacy
+All use content-first generation. The validated `user_problem` scaffold, legacy
 task-based generator and `content_first` demo are retired. Old scenario IDs remain
 aliases for the surviving standard flows when starting a new run. Saved original
 checklists, raw proposals, datasets and completed trajectories remain readable.
@@ -273,7 +277,34 @@ Automatic TODO notes remain compiler-managed and persistent.
 
 Put review requirements in the original scenario concept and saved checklist,
 not in an executable validation tail. The standard shared review contract lives
-under `trajectory_remix/review_templates`. Legacy `remix.validate` tail steps in
+under `trajectory_remix/review_templates`. Optional top-level `review_checks`
+add scenario-specific checks outside the creation graph, for example:
+
+```yaml
+review_checks:
+  coordination:
+    prompt: review-coordination.md
+    view: correctness
+    rules:
+      continuity:
+        requirement: Preserve task ownership, evidence and actionable next steps.
+        scope: sample
+        allow_not_applicable: false
+```
+
+These use the `ReviewCheck` definition (the four views are layout, tools,
+reasoning and correctness). Prompts follow the same Markdown path restrictions
+and inheritance as creation prompts. Check names must be identifiers. The saved
+checklist includes these under `scenario.<name>`, alongside the standard checks
+(or an archived flow's existing review definitions). They never schedule model
+requests during creation; explicit validation uses the shared bounded review
+service. The flow, prompts, sampled conditions and complete checklist are retained
+with the sample for later review even if scenario files change.
+Explicit validation also receives saved `metadata.context_tags` as
+`sampled_conditions`, so reviewers can assess scale and lifecycle requirements
+without inferring them from the generated prose.
+
+Legacy `remix.validate` tail steps in
 archived flows remain readable as review definitions but are deferred during
 creation; their endpoints are never required or called by the generator.
 

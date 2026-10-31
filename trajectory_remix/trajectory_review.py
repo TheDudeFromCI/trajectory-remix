@@ -49,7 +49,12 @@ def build_checklist(scenario):
 
     collect(scenario.flow.steps)
     if not checks:
-        return standard_checklist(scenario.name, scenario.flow.tag or scenario.name)
+        checks = standard_checklist(scenario.name, scenario.flow.tag or scenario.name).checks
+    for name, definition in scenario.flow.review_checks.items():
+        checks[f'scenario.{name}'] = ChecklistCheck(
+            prompt=scenario.prompts[definition.prompt], rules=definition.rules,
+            view=definition.view,
+        )
     return ScenarioChecklist(
         scenario=scenario.name, tag=scenario.flow.tag or scenario.name, checks=checks
     )

@@ -144,7 +144,8 @@ class ValidationRunner(ModelSession):
             self.builder.next_tick = plan['max_tick'] + 1
             context = {'roles': {}, 'steps': {}}
             inputs = {'original_requirements': sample.get('metadata', {}).get('concept', {}),
-                      'roles': sample.get('metadata', {}).get('roles', {})}
+                      'roles': sample.get('metadata', {}).get('roles', {}),
+                      'sampled_conditions': sample.get('metadata', {}).get('context_tags', {})}
             reports = {}
             input_limit = self.config.get('validation', {}).get('max_input_tokens', 6000)
             for index, (name, check) in enumerate(checklist.checks.items()):
@@ -154,14 +155,14 @@ class ValidationRunner(ModelSession):
                 step = Step(uses='remix.validate', endpoint=endpoint, prompt=prompt, review_retries=2)
                 if check.view:
                     definition = ReviewCheck(prompt=prompt, view=check.view, rules=check.rules,
-                        inputs=['original_requirements', 'roles'],
+                        inputs=['original_requirements', 'roles', 'sampled_conditions'],
                         max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
                     result, _ = await self.review_groups(step, definition, inputs, context, path,
                                                         sample, plan, self.snapshot['source_hash'])
                 else:
                     # Legacy and custom prose checklists use the same bounded
                     # evidence protocol without inventing per-rule requirements.
-                    definition = ReviewCheck(prompt=prompt, view='layout', inputs=['original_requirements', 'roles'],
+                    definition = ReviewCheck(prompt=prompt, view='layout', inputs=['original_requirements', 'roles', 'sampled_conditions'],
                         max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
                     result, _ = await self.review_groups(step, definition, inputs, context, path,
                                                         sample, plan, self.snapshot['source_hash'])

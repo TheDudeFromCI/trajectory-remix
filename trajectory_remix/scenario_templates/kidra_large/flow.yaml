@@ -1,0 +1,203 @@
+extends: kidra_small
+tag: kidra_large
+description: 'Large Kidra projects: linked milestones and durable coordination across
+  all lifecycle phases, in up to 20 decisions.'
+schemas:
+  Workspace:
+    type: object
+    properties:
+      identifier:
+        type: string
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+){2,3}$
+      situation:
+        type: string
+        minLength: 1
+        maxLength: 1500
+      success_criteria:
+        type: string
+        minLength: 1
+        maxLength: 3500
+      files:
+        type: array
+        maxItems: 16
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+              minLength: 1
+            content:
+              type: string
+              maxLength: 1800
+          required:
+          - path
+          - content
+          additionalProperties: false
+      operations:
+        type: array
+        maxItems: 20
+        items:
+          type: object
+          properties:
+            tool:
+              type: string
+              enum:
+              - note_save
+              - memory_save
+              - time_set
+            arguments:
+              type: object
+          required:
+          - tool
+          - arguments
+          additionalProperties: false
+      problem:
+        type: string
+        minLength: 1
+        maxLength: 2400
+    required:
+    - identifier
+    - problem
+    - situation
+    - success_criteria
+    - files
+    - operations
+    additionalProperties: false
+tags:
+  project_size:
+  - name: large
+    description: A multi-team project spanning weeks or months, with 9+ tasks, cross-team
+      dependencies and at least three milestones; at most six specialists active at
+      once. Represent a bounded critical milestone, not the entire project in twenty
+      decisions.
+    weight: 1
+  primary_competency:
+  - name: strategic planning
+    description: Frame goals, constraints, risks and milestones, then move into authorized
+      execution.
+    weight: 20
+  - name: task decomposition
+    description: Create bounded owned tasks with acceptance criteria and dependency
+      edges; execute the next useful slice.
+    weight: 20
+  - name: agent orchestration
+    description: Match specialists to work, integrate their outputs and resolve disagreement
+      without excessive delegation.
+    weight: 20
+  - name: context management and continuity
+    description: Recover inherited state, share concise relevant evidence and preserve
+      decisions for the next session.
+    weight: 15
+  - name: quality assurance and replanning
+    description: Verify deliverables, diagnose failures and coordinate targeted correction
+      or replanning.
+    weight: 15
+  - name: resource selection and optimization
+    description: Choose resources using capability, cost, risk, context and expected
+      lifetime value.
+    weight: 10
+  lifecycle:
+  - name: initiation
+    description: 'Start a new project: clarify consequential unknowns, establish acceptance
+      criteria and advance a first deliverable.'
+    weight: 25
+  - name: active execution
+    description: Continue an existing project from a concrete task ledger, artifacts,
+      decisions and remaining budget; preserve prior work.
+    weight: 50
+  - name: recovery
+    description: Inherit a failed acceptance check or blocked dependency; diagnose
+      and repair without repeating an unchanged failed assignment.
+    weight: 9
+  - name: revision
+    description: Revise an existing project after an explicit scope or constraint
+      change; assess affected dependencies and preserve unaffected verified work.
+    weight: 8
+  - name: completion
+    description: Inherit nearly completed work; independently verify integration,
+      handle residual defects and deliver or state exact remaining blockers.
+    weight: 8
+  domain:
+  - name: software delivery
+    description: Coordinate an application, service or game milestone with explicit
+      technical acceptance criteria.
+    weight: 1
+  - name: research synthesis
+    description: Coordinate specialist analysis of supplied fictional sources and
+      reconcile evidence quality.
+    weight: 1
+  - name: data operations
+    description: Coordinate a migration, conversion or recurring reporting workflow
+      with checkable artifacts.
+    weight: 1
+  - name: content production
+    description: Coordinate publication, educational material or a design package
+      with review and attribution.
+    weight: 1
+  - name: operational planning
+    description: Coordinate a launch, logistics or organizational project using supplied
+      constraints without live external actions.
+    weight: 1
+  recurrence:
+  - name: one-off work
+    description: 'Low remaining volume: building reusable automation may cost more
+      than a small verified specialist assignment.'
+    weight: 1
+  - name: recurring work
+    description: 'Substantial remaining repeat work: include build cost, per-use savings,
+      maintenance, reliability and a deadline so investment can be justified.'
+    weight: 1
+  - name: uncertain demand
+    description: 'Future volume is uncertain: expose estimates and a reversible option;
+      neither automation nor immediate execution is always best.'
+    weight: 1
+  - name: changed return
+    description: New evidence changes an earlier investment estimate; reconsider or
+      stop it rather than treating sunk cost as justification.
+    weight: 1
+  complication:
+  - name: ordinary coordination
+    description: Useful uneventful coordination; do not manufacture crises or forced
+      personality demonstrations.
+    weight: 2
+  - name: blocked dependency
+    description: A real prerequisite is unavailable; advance independent work and
+      record the blocker with an owner.
+    weight: 1
+  - name: conflicting reports
+    description: Competent specialists use different assumptions or priorities; compare
+      under common acceptance criteria.
+    weight: 1
+  - name: incomplete handoff
+    description: An inherited handoff omits consequential evidence; recover it from
+      supplied records rather than assume success.
+    weight: 1
+  - name: failed acceptance
+    description: A supplied deliverable misses a specific criterion; arrange targeted
+      correction and independent recheck.
+    weight: 1
+  - name: resource pressure
+    description: A budget or deadline forces an explicit capability/cost/quality tradeoff
+      without unauthorized scope changes.
+    weight: 1
+steps:
+  idea:
+    inherit: true
+    inputs:
+      conditions: ${scenario.tags}
+      decision_limit: 20
+      setup_tools:
+        note_save: ${tool_contracts.note_save}
+        memory_save: ${tool_contracts.memory_save}
+        time_set: ${tool_contracts.time_set}
+  environment:
+    inherit: true
+  request:
+    inherit: true
+  work:
+    inherit: true
+    inputs:
+      decision_limit: 20
+    max_iterations: 20
+  finish:
+    inherit: true
