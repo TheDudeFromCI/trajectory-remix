@@ -97,6 +97,38 @@ button.primary {
 button.primary:hover {
   background: #a1f0d9;
 }
+button[aria-busy="true"] {
+  position: relative;
+  cursor: progress;
+  pointer-events: none;
+  opacity: 1;
+}
+button[aria-busy="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+}
+button[aria-busy="true"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -8px 0 0 -8px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: button-spin 0.7s linear infinite;
+}
+@keyframes button-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  button[aria-busy="true"]::after { animation: none; }
+}
 .square {
   padding: 1.5px 4.5px;
   font-size: 19px;
