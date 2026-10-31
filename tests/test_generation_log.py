@@ -1,6 +1,7 @@
 """Activity history must never be rewound by sample checkpoint restoration."""
 import copy
 import json
+from contextlib import contextmanager
 
 import httpx
 import pytest
@@ -125,6 +126,74 @@ async def test_log_write_survives_failure_before_checkpoint_persistence(compiler
     restored = create_app(app.state.dataset.store.path)
     assert restored.state.scenario_runner.snapshot is None
     assert list(restored.state.scenario_runner.logs) == list(runner.logs)
+
+
+async def test_log_and_checkpoint_share_one_transaction(compiler, tmp_path, monkeypatch):
+    app = app_for(tmp_path, compiler, ScenarioClient(), scenarios=None)
+    runner = app.state.scenario_runner
+    runner.start('user_scenario', _schedule=False)
+    store = app.state.dataset.store
+    connect = store.connect
+    transactions = []
+    @contextmanager
+    def counted_connect():
+        with connect() as db:
+            db.set_trace_callback(lambda statement: transactions.append(1)
+                                  if statement.strip().upper() == 'COMMIT' else None)
+            yield db
+    monkeypatch.setattr(store, 'connect', counted_connect)
+    runner.status['completed'] = 73
+    runner.log('Atomic journal and checkpoint')
+    assert len(transactions) == 1
+    with connect() as db:
+        saved = json.loads(db.execute('SELECT snapshot FROM generation_jobs WHERE id=?',
+                                     (runner.snapshot['id'],)).fetchone()[0])
+        entry = json.loads(db.execute('SELECT event FROM generation_log_events ORDER BY sequence DESC LIMIT 1').fetchone()[0])
+    assert saved['status']['completed'] == 73
+    assert entry == runner.logs[-1]
+    assert entry['message'] == 'Atomic journal and checkpoint'
+
+
+async def test_checkpoint_failure_preserves_log_and_prior_checkpoint(compiler, tmp_path, monkeypatch):
+    app = app_for(tmp_path, compiler, ScenarioClient(), scenarios=None)
+    runner = app.state.scenario_runner
+    runner.start('user_scenario', _schedule=False)
+    store = app.state.dataset.store
+    job = runner.snapshot['id']
+    with store.connect() as db:
+        previous = db.execute('SELECT snapshot FROM generation_jobs WHERE id=?', (job,)).fetchone()[0]
+    def failed_persist(*, db=None):
+        assert db is not None
+        db.execute("UPDATE generation_jobs SET snapshot='partial' WHERE id=?", (job,))
+        raise RuntimeError('Checkpoint failed after writing')
+    monkeypatch.setattr(runner, 'persist', failed_persist)
+    with pytest.raises(RuntimeError, match='Checkpoint failed'):
+        runner.log('Diagnostic survives checkpoint rollback', 'error')
+    with store.connect() as db:
+        assert db.execute('SELECT snapshot FROM generation_jobs WHERE id=?', (job,)).fetchone()[0] == previous
+    assert list(runner.log_journal.entries()) == list(runner.logs)
+    assert runner.logs[-1]['message'] == 'Diagnostic survives checkpoint rollback'
+
+
+async def test_failed_commit_does_not_publish_in_memory_log(compiler, tmp_path, monkeypatch):
+    app = app_for(tmp_path, compiler, ScenarioClient(), scenarios=None)
+    runner = app.state.scenario_runner
+    runner.start('user_scenario', _schedule=False)
+    store = app.state.dataset.store
+    before = list(runner.logs)
+    connect = store.connect
+    @contextmanager
+    def failed_commit():
+        with connect() as db:
+            yield db
+            if db.in_transaction:
+                raise RuntimeError('Commit failed')
+    with monkeypatch.context() as patch:
+        patch.setattr(store, 'connect', failed_commit)
+        with pytest.raises(RuntimeError, match='Commit failed'):
+            runner.log('Not committed')
+    assert list(runner.logs) == before
+    assert list(runner.log_journal.entries()) == before
 
 
 async def test_log_export_reads_complete_journal_and_clear_survives_old_checkpoint_resume(compiler, tmp_path):

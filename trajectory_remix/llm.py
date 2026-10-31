@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import uuid
 from urllib.parse import urlparse
+from contextlib import contextmanager
 
 import httpx
 
@@ -60,6 +62,15 @@ TAGS = [
     "formal",
     "casual",
 ]
+
+
+def _json_source(value):
+    """Reject Python-only values that JSON encoding would silently coerce."""
+    if type(value) is dict:
+        return all(type(key) is str and _json_source(child) for key, child in value.items())
+    if type(value) is list:
+        return all(_json_source(child) for child in value)
+    return type(value) in (str, int, float, bool, type(None))
 
 
 def default_config():
@@ -424,6 +435,124 @@ class SampleBuilder:
         self.sample["uuid"] = self.sample["id"]
         self.next_tick = 0
         self.serial = 0
+        self._compiled_summary = None
+        self._defer_depth = 0
+        self._pending_summary = None
+
+    def _summary_key(self):
+        # Plugins may observe external state. Keep their normal execution and
+        # full dependency-plan recording, even when source text is unchanged.
+        tools = self.compiler.tools.tools.values()
+        if any(t.external or not isinstance(getattr(t.run, '__module__', None), str)
+               or not t.run.__module__.startswith('trajectory_remix.tools.') for t in tools):
+            return None
+        try:
+            if not _json_source(self.sample):
+                return None
+            return json.dumps([self.sample, self.compiler.fingerprint,
+                self.compiler.tools.fingerprint, [id(t.run) for t in self.compiler.tools.tools.values()],
+                self.compiler.special, self.compiler.ids, self.compiler.max_window_slots,
+                self.compiler.slot_policy], sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError, RecursionError):
+            return None
+
+    def remember_plan(self, plan):
+        """Retain only the small fields used by generation scheduling."""
+        key = self._summary_key()
+        summary = copy.deepcopy({name: plan[name] for name in ('max_tick', 'windows', 'tool_calls')})
+        self._compiled_summary = (key, copy.deepcopy(summary)) if key is not None else None
+        self._pending_summary = None
+        return summary
+
+    def compile_summary(self, *, force=False):
+        """Reuse an exact current-source summary; mutations always invalidate it."""
+        key = self._summary_key()
+        if not force and key is not None and self._pending_summary is not None and self._pending_summary[0] == key:
+            return copy.deepcopy(self._pending_summary[1])
+        if key is not None and self._compiled_summary is not None and self._compiled_summary[0] == key:
+            summary = self._compiled_summary[1]
+            store = self.compiler.tool_store
+            if store is not None:
+                store.verify_tool_dependencies(self.sample, self.compiler.tools)
+                store.record_tool_compilation(self.sample, self.compiler.tools, summary)
+            return copy.deepcopy(summary)
+        plan = self.compiler.compile(self.sample)
+        return self.remember_plan(plan)
+
+    @contextmanager
+    def defer_compilation(self, *, enabled=True):
+        """Group scheduling edits; flush before leaving the scenario step.
+
+        Tools explicitly force a flush before consuming observations. The owning
+        scenario step retains responsibility for rolling back failed proposals.
+        """
+        if not enabled or self._summary_key() is None:
+            yield
+            return
+        self._defer_depth += 1
+        try:
+            yield
+            if self._defer_depth == 1 and self._pending_summary is not None:
+                self.compile_summary(force=True)
+        finally:
+            self._defer_depth -= 1
+            if not self._defer_depth:
+                self._pending_summary = None
+
+    def defer_events(self, plan, events):
+        """Forecast ordinary text/EOS edits without expanding a training plan.
+
+        These events have known token lengths and introduce no tool observations.
+        Slot-dependent text and plugins use the normal compiler instead. The
+        forecast is private scheduling state; a real compile validates the batch.
+        """
+        if not self._defer_depth:
+            return None
+        key = self._summary_key()
+        if key is None or '{WINDOW' in key:
+            return None
+        forecast = copy.deepcopy(plan)
+        windows = {w['id']: w for w in forecast['windows']}
+        end = plan['max_tick']
+        for tick, event in events:
+            source_tick = str(tick)
+            if not str(tick).isdigit() or int(tick) <= plan['max_tick']:
+                return None
+            tick = int(tick)
+            name = event.get('window')
+            if not isinstance(name, str) or not name or len(name) > 128:
+                return None
+            if event['op'] == 'open':
+                if name in windows:
+                    return None
+                windows[name] = {'id': name, 'type': event.get('window-type', 'document'),
+                                 'open': tick, 'close': None}
+                end = max(end, tick)
+                continue
+            if event['op'] not in ('generate', 'append') or name not in windows or windows[name]['close'] is not None:
+                return None
+            index = next(i for i, candidate in enumerate(self.sample['replay'][source_tick]) if candidate is event)
+            encoded = self.compiler.encode(event, f'replay[{source_tick}][{index}]',
+                self.sample.get('defaults', {}).get('implicit-noop-loss-weight', .1))
+            if encoded.anchors:
+                return None
+            instant = event['op'] == 'append' and event.get('delivery', 'instant') == 'instant'
+            rate = event.get('tokens-per-tick', 1)
+            if type(rate) is not int or rate < 1 or (event['op'] == 'generate' and rate != 1):
+                return None
+            finish = tick if instant else tick + max(0, len(encoded.ids) - 1) // rate
+            end = max(end, finish)
+            if self.compiler.ids['eos'] in encoded.ids:
+                windows[name]['close'] = finish
+        slots = self.compiler.slots_for(self.sample)
+        for window in windows.values():
+            window['slot'] = slots[window['id']]
+            window['header'] = (self.compiler.window_header(window['slot'], window['type'])
+                                if self.sample.get('defaults', {}).get('window-headers', True) else '')
+        forecast.update(max_tick=end, windows=list(windows.values()))
+        self._pending_summary = (key, forecast)
+        self.next_tick = end + 1
+        return copy.deepcopy(forecast)
 
     def add_stream(
         self,
@@ -436,8 +565,10 @@ class SampleBuilder:
         loss=None,
         request_id=None,
     ):
+        prior = self.compile_summary() if self._defer_depth else None
         key = str(self.next_tick) if start == "auto" else str(start)
         events = self.sample["replay"].setdefault(key, [])
+        first_event = len(events)
         all_events = [e for group in self.sample["replay"].values() for e in group]
         if not any(
             e["op"] in ("open", "tool-call") and e["window"] == window
@@ -471,7 +602,10 @@ class SampleBuilder:
         if op == "append":
             event.update(source=source, delivery="instant")
         events.append(event)
-        plan = self.compiler.compile(self.sample)
+        plan = self.defer_events(prior, [(key, e) for e in events[first_event:]]) if prior is not None else None
+        if plan is None:
+            plan = self.compiler.compile(self.sample)
+            self.remember_plan(plan)
         self.next_tick = plan["max_tick"] + 1
         if op == "append" and close:
             self.add_stream(window, self.compiler.special["eos"], start="auto")

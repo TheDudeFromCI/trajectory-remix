@@ -6,13 +6,15 @@ one encoding of the entire visible content, never separately tokenized fragments
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
 import random
 import re
+import threading
 from bisect import bisect_right
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 
 from tokenizers import Tokenizer
@@ -204,6 +206,13 @@ class Compiler:
         if len(set(self.ids.values())) != 3:
             raise ValueError("BOS, EOS and NOOP must have distinct IDs")
         self.fingerprint = hashlib.sha256(tokenizer.to_str().encode()).hexdigest()
+        self._encodings = OrderedDict()
+        self._encoding_tokens = 0
+        self._row_cache = None
+        self.last_compile_reused_rows = 0
+        self._compile_lock = threading.RLock()
+        self._sandbox_invocations = ()
+        self.last_compile_reused_tool_ticks = 0
 
     def slots_for(self, sample):
         names = window_names(sample)
@@ -238,6 +247,41 @@ class Compiler:
         return f"<|cxt|>Window: {slot}\nPurpose: {field(purpose)}<|/cxt|>"
 
     def encode(self, event, path, noop_weight, literal=False, window_slots=None):
+        with self._compile_lock:
+            return self._cached_encode(event, path, noop_weight, literal, window_slots)
+
+    def _cached_encode(self, event, path, noop_weight, literal, window_slots):
+        if not getattr(self, '_incremental', True):
+            return self._encode(event, path, noop_weight, literal, window_slots)
+        # JSON serializes tuples like lists; preserve the full encoder's array
+        # validation rather than letting malformed segments hit a valid entry.
+        if 'segments' in event and not isinstance(event['segments'], list):
+            return self._encode(event, path, noop_weight, literal, window_slots)
+        # Cache only successful encodings, whose values are path-independent.
+        # Callers must never receive the cached lists.
+        try:
+            source = json.dumps(event, sort_keys=True)
+            slots = window_slots if not literal and '{WINDOW' in source else None
+            key = json.dumps([source, noop_weight, literal, slots, self.special, self.ids], sort_keys=True)
+        except (TypeError, ValueError):
+            return self._encode(event, path, noop_weight, literal, window_slots)
+        cached = self._encodings.get(key)
+        if cached is not None:
+            self._encodings.move_to_end(key)
+            return Encoded(cached.text, cached.ids.copy(), cached.offsets.copy(),
+                           cached.anchors.copy(), cached.weights.copy())
+        encoded = self._encode(event, path, noop_weight, literal, window_slots)
+        cost = len(encoded.ids) + len(key)
+        if cost <= MAX_ROWS:
+            self._encodings[key] = Encoded(encoded.text, encoded.ids.copy(), encoded.offsets.copy(),
+                                           encoded.anchors.copy(), encoded.weights.copy())
+            self._encoding_tokens += cost
+            while self._encoding_tokens > MAX_ROWS or len(self._encodings) > 1024:
+                old_key, old = self._encodings.popitem(last=False)
+                self._encoding_tokens -= len(old.ids) + len(old_key)
+        return encoded
+
+    def _encode(self, event, path, noop_weight, literal=False, window_slots=None):
         if ("content" in event) == ("segments" in event):
             raise CompileError("Supply exactly one of content or segments", path)
         segments = event.get(
@@ -366,8 +410,21 @@ class Compiler:
             "loss": {"mask": "exclude"},
         }
 
-    def compile(self, sample: dict, *, record_dependencies=True) -> dict:
-        """Compile locally; discovery can opt out of recording tool dependencies."""
+    def compile(self, sample: dict, *, record_dependencies=True, incremental=True) -> dict:
+        """Reuse unchanged timeline prefixes; incremental=False forces a full compile.
+
+        Tool scheduling and dependency checks always run. Only successful plans
+        seed the bounded, single-trajectory prefix cache. Serialize shared worker
+        access so one compilation cannot change another's cache settings.
+        """
+        with self._compile_lock:
+            return self._compile(sample, record_dependencies=record_dependencies,
+                                 incremental=incremental)
+
+    def _compile(self, sample, *, record_dependencies, incremental):
+        self._incremental = incremental
+        self.last_compile_reused_tool_ticks = 0
+        self._sandbox_pending = ()
         from .sandbox_replay import compile_sandbox, validate_call
 
         if not isinstance(sample, dict):
@@ -883,6 +940,38 @@ class Compiler:
         visible_end = max(scheduled, default=0)
         max_tick = max([visible_end, *(c["end"] for c in tool_calls)])
         rows, windows, live, positions = [], {}, set(), defaultdict(int)
+        self.last_compile_reused_rows = 0
+        start_tick = 0
+        # Compare resolved events, including tool outputs and window writes,
+        # rather than assuming that append-only source means append-only output.
+        # Replacements can invalidate historical rows, so use the full path.
+        reusable = incremental and not any(item.get('replace_content') for item in prepared)
+        cache_key = (trajectory_uuid(sample), tuple(window_slots.items()), noop_weight,
+                     tuple(self.ids.items()))
+        signatures = None
+        if reusable:
+            signatures = {
+                item['path']: (item['tick'], json.dumps(item, sort_keys=True,
+                    default=lambda value: value.__dict__))
+                for item in prepared
+            }
+            previous = self._row_cache
+            if previous is not None and previous['key'] == cache_key:
+                start_tick = min(visible_end + 1, previous['end'] + 1)
+                old = previous['signatures']
+                for path in old.keys() | signatures.keys():
+                    if old.get(path) != signatures.get(path):
+                        start_tick = min(start_tick, *(entry[0] for entry in
+                            (old.get(path), signatures.get(path)) if entry is not None))
+                rows = [r.copy() for r in previous['rows'] if r['tick'] < start_tick]
+                windows = {w['id']: {**w, 'close': w['close'] if w['close'] is not None
+                            and w['close'] < start_tick else None}
+                           for w in previous['windows'] if w['open'] < start_tick}
+                live = {wid for wid, w in windows.items() if w['close'] is None}
+                for r in rows:
+                    if r['durable']:
+                        positions[r['window']] += 1
+                self.last_compile_reused_rows = len(rows)
 
         def row(tick, phase, window, tid, w, durable, op, path, rank=0):
             idx = len(rows)
@@ -915,7 +1004,7 @@ class Compiler:
             p["event"]["window"]: p for p in prepared if p["event"]["op"] == "open"
         }
         reset_items = set()
-        for tick in range(visible_end + 1):
+        for tick in range(start_tick, visible_end + 1):
             items = sorted(
                 scheduled[tick],
                 key=lambda x: (
@@ -1132,6 +1221,11 @@ class Compiler:
         }
         if self.tool_store is not None and record_dependencies:
             self.tool_store.record_tool_compilation(sample, self.tools, plan)
+        self._row_cache = ({'key': cache_key, 'end': visible_end, 'signatures': signatures,
+                            'rows': [r.copy() for r in rows],
+                            'windows': copy.deepcopy(plan['windows'])}
+                           if reusable else None)
+        self._sandbox_invocations = self._sandbox_pending if incremental else ()
         return plan
 
     def frame(self, plan, tick, *, index=None, windows=None):

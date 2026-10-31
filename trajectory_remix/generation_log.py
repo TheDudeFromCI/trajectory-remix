@@ -44,10 +44,14 @@ class GenerationLog:
                 db.execute('INSERT OR IGNORE INTO generation_log_events(event_key,event) VALUES (?,?)', (key, raw))
             db.execute('INSERT INTO generation_log_state VALUES (1,1)')
 
-    def append(self, event):
+    def append(self, event, *, db=None):
+        statement = 'INSERT INTO generation_log_events(event_key,event) VALUES (?,?)'
+        values = (uuid.uuid4().hex, json.dumps(event, ensure_ascii=False))
+        if db is not None:
+            db.execute(statement, values)
+            return
         with self.store.connect() as db:
-            db.execute('INSERT INTO generation_log_events(event_key,event) VALUES (?,?)',
-                       (uuid.uuid4().hex, json.dumps(event, ensure_ascii=False)))
+            db.execute(statement, values)
 
     def entries(self, through=None):
         with self.store.connect() as db:

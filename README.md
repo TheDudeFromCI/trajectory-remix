@@ -59,6 +59,30 @@ Restart any other server processes sharing this project to load the new tokenize
 Padding and truncation are disabled when compiling trajectories. Required special tokens must each already map to
 one dedicated ID. They are never silently added or renumbered.
 
+Compilation automatically reuses successful token encodings and the unchanged
+prefix of the previous timeline on the same compiler. This applies to generation,
+resume, previews and exports. Tool scheduling and anchors are still resolved on
+every compile. Deterministic bundled tools reuse saved post-call sandbox state
+and window writes when their arguments, state, execution context and any windows
+they read are unchanged. Changed inputs re-execute the affected calls; external
+tools and cancellation cleanup always execute normally. Sandbox checkpoints have
+a 16 MB/1,024-invocation limit and are published only after a successful compile.
+The resolved outputs determine which timeline rows can be reused. Changes to
+earlier events rebuild the affected suffix. Content replacement, another trajectory,
+or incompatible window allocation uses full timeline expansion. Caches are held
+only in memory and bounded; they do not change the dataset format. Python callers
+can request the reference path with `compiler.compile(sample, incremental=False)`.
+Generation also reuses a small scheduling summary for unchanged source, metadata
+and compiler/tool configuration, avoiding repeated compile calls for window and
+tool-budget checks. Plugin tools disable this summary cache. Publication still
+compiles and validates the final draft before saving it.
+Content-first assembly and draft steps batch ordinary text, window openings and
+EOS closures. Token lengths provide provisional scheduling until tool observations
+are needed or the step ends; those boundaries compile and validate the staged
+changes. Plugins, slot-dependent text and unsupported scheduling use the normal
+compiler. Dependent tool groups retain their observation boundaries. A failed
+step still uses the existing proposal archive and rollback path.
+
 ```bash
 python -m trajectory_remix init --dataset custom.sqlite --tokenizer tokenizer.json \
   --bos '<s>' --eos '</s>' --noop '<|noop|>'
@@ -231,8 +255,11 @@ trajectories that compile without diagnostics; both flags accept `true` and `fal
 MCP agents can read the complete guide with
 `get_authoring_guide(topic="search")`; the dashboard links it beside the search box.
 
-Writes use WAL mode, a 30-second busy timeout and transactions. Multiple server
-processes can share a local database: revisions detect competing edits, and
+Writes use WAL mode, a 30-second busy timeout and transactions.
+Generation log entries and their associated checkpoints share a commit, without
+changing checkpoint frequency or SQLite durability settings. A checkpoint
+preparation or SQL-write failure retains the diagnostic log and prior checkpoint.
+Multiple server processes can share a local database: revisions detect competing edits, and
 unique constraints prevent duplicate IDs. SQLite serializes writers while
 readers use consistent snapshots. Keep the database on a local filesystem;
 WAL databases can have companion `-wal` and `-shm` files. Use SQLite's backup API
