@@ -211,6 +211,9 @@ def window_view(items, calls, writes, tick, order, compiler):
 
 
 def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
+    from .sandbox_cache import SandboxReplayCache, window_inputs
+
+    replay_cache = SandboxReplayCache(compiler)
     state, snapshots, calls, writes = {}, {}, [], []
     notes_enabled = any(
         item["event"].get("op") == "open"
@@ -417,8 +420,10 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
             ):
                 output, done, modified = "", False, False
             else:
-                output, done, modified = compiler.tools.run_tick(
-                    call["tool"], call["arguments"], state, windows, call_context
+                output, done, modified = replay_cache.run(
+                    call["tool"], call["arguments"], state, windows, call_context, writes,
+                    lambda: window_inputs(items, calls, writes, tick),
+                    cache_allowed=not cancelled,
                 )
                 last_runs[call["path"]] = tick
             if cancelled and not done:
@@ -507,6 +512,7 @@ def compile_sandbox(items, sample, compiler, resolve_items, finish_result):
             if close is not None:
                 trim_results(call, close)
         call.pop("order")
+    compiler._sandbox_pending = replay_cache.entries
     return {"initial": initial, "snapshots": snapshots}, calls, writes
 
 

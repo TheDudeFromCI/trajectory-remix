@@ -551,6 +551,12 @@ class DatasetStore:
             db.execute("INSERT OR REPLACE INTO trajectory_search_diagnostics VALUES(?,?,?,?,?)",
                        (ident, digest, cache_key, errors, warnings))
 
+    def dataset_tags(self):
+        """Return distinct stored tags across the full dataset."""
+        with self.connect() as db:
+            return sorted((row[0] for row in db.execute("SELECT DISTINCT tag FROM metadata_tags")),
+                          key=lambda tag: (tag.casefold(), tag))
+
     def listing(self, query="", offset=0, limit=100, dashboard=False):
         search = SearchQuery(query)
         predicate, args = search.sql()

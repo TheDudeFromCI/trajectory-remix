@@ -225,6 +225,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         return {
             "samples": samples,
             "sample_count": len(store.samples),
+            "dataset_tags": store.dataset_tags(),
             "max_window_slots": compiler.max_window_slots,
             "slot_policy": compiler.slot_policy,
             "total": total,

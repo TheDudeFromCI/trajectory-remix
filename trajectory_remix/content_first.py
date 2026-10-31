@@ -90,9 +90,10 @@ def assemble_streams(builder, inputs):
     if not isinstance(streams, list) or not 1 <= len(streams) <= 128:
         raise ValueError('streams must contain 1 to 128 content streams')
     frontier = builder.next_tick
-    plan = builder.compiler.compile(builder.sample)
+    plan = builder.compile_summary()
     windows = {w['id']: w for w in plan['windows']}
     occupied = set()
+    staged = []
     for stream in streams:
         if not isinstance(stream, dict) or set(stream) - {'window', 'type', 'content', 'op', 'source', 'offset', 'close', 'loss'}:
             raise ValueError('Unknown content stream field')
@@ -126,6 +127,7 @@ def assemble_streams(builder, inputs):
             raise ValueError('Assistant content must be generated, not appended')
         tick = str(frontier + offset)
         events = builder.sample['replay'].setdefault(tick, [])
+        first_event = len(events)
         if window not in windows:
             events.append({'op': 'open', 'window': window, 'window-type': stream.get('type', 'reasoning' if op == 'generate' else 'document')})
         elif windows[window]['close'] is not None:
@@ -138,7 +140,13 @@ def assemble_streams(builder, inputs):
         if op == 'append':
             event.update(source=stream.get('source', 'user'), delivery='instant')
         events.append(event)
-    plan = builder.compiler.compile(builder.sample)
+        staged.extend((tick, event) for event in events[first_event:])
+    deferred = builder.defer_events(plan, staged)
+    if deferred is not None:
+        plan = deferred
+    else:
+        plan = builder.compiler.compile(builder.sample)
+        builder.remember_plan(plan)
     builder.next_tick = plan['max_tick'] + 1
     return {'windows': sorted(occupied), 'start_tick': frontier, 'end_tick': plan['max_tick']}
 

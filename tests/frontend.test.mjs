@@ -934,7 +934,7 @@ const pagedSamples = Array.from({ length: 205 }, (_, index) => ({
   replay: { 0: [{ op: "open", window: "a" }, {
     op: "append", window: "a", source: "user", content: index === 204 ? "Python humans math" : "complex",
   }] },
-  metadata: { tags: index === 204 ? ["sqlite-last"] : [] },
+  metadata: { tags: index === 204 ? ["sqlite-last", "apple", "apple pie", "apricot", "banana", "#berry"] : [] },
 }));
 const imported = await fetch(base + "/api/import", {
   method: "POST",
@@ -952,21 +952,105 @@ $("sample-search").value = "sqlite-page-";
 $("sample-search").oninput();
 await waitFor(() => $("sample-page-label").textContent === "1–100 of 205");
 assert.equal($("sample-list").children.length, 100);
+// Tags cover the full dataset, including entries beyond the current page.
+assert.equal($("dataset-tags").open, false);
+$("dataset-tags").open = true;
+assert([...$("dataset-tag-list").children].some(tag => tag.textContent === "sqlite-last"));
+assert.equal(new Set([...$("dataset-tag-list").children].map(tag => tag.textContent)).size,
+  $("dataset-tag-list").children.length);
 await click("sample-page-next");
 await waitFor(() => $("sample-page-label").textContent === "101–200 of 205");
 assert.equal($("sample-list").children.length, 100);
 assert.equal($("sample-page-prev").disabled, false);
+const searchInput = $("sample-search");
+const tagList = $("dataset-tag-list");
+const allDatasetTags = [...tagList.children].map(tag => tag.textContent);
+function typeSearch(value, caret = value.length) {
+  searchInput.focus();
+  searchInput.value = value;
+  searchInput.setSelectionRange(caret, caret);
+  searchInput.oninput();
+}
+function pressSearchTab(options = {}) {
+  const event = new w.KeyboardEvent("keydown", { key: "Tab", cancelable: true, ...options });
+  searchInput.dispatchEvent(event);
+  return event;
+}
+$("dataset-tags").open = false;
+typeSearch("#a");
+assert.equal($("dataset-tags").open, true);
+assert.deepEqual([...tagList.children].map(tag => tag.textContent),
+  allDatasetTags.filter(tag => tag.replace(/^#/, "").toLowerCase().startsWith("a")));
+assert.equal($("dataset-tag-count").textContent, String(tagList.children.length));
+assert.equal(pressSearchTab().defaultPrevented, true);
+assert.equal(searchInput.value, "#" + tagList.firstElementChild.textContent);
+assert.equal(w.document.activeElement, searchInput);
+typeSearch("#APR");
+assert.deepEqual([...tagList.children].map(tag => tag.textContent), ["apricot"]);
+pressSearchTab();
+assert.equal(searchInput.value, "#apricot");
+typeSearch("python (#ap | #banana)", 11);
+pressSearchTab();
+assert.equal(searchInput.value, "python (#apple | #banana)");
+assert.equal(searchInput.selectionStart, 14);
+typeSearch('#"apple p');
+pressSearchTab();
+assert.equal(searchInput.value, '#"apple pie"');
+typeSearch("-#ber");
+pressSearchTab();
+assert.equal(searchInput.value, "-#berry");
+typeSearch("#no-such-tag");
+assert.equal(tagList.textContent, "No matching tags.");
+assert.equal($("dataset-tag-count").textContent, "0");
+assert.equal(pressSearchTab().defaultPrevented, false);
+typeSearch("#a");
+assert.equal(pressSearchTab({ shiftKey: true }).defaultPrevented, false);
+for (const plain of ['text#a', '"text #a', '@name:#a', '#apple ']) {
+  typeSearch(plain);
+  assert.deepEqual([...tagList.children].map(tag => tag.textContent), allDatasetTags);
+  assert.equal(pressSearchTab().defaultPrevented, false);
+}
+typeSearch("#");
+assert.deepEqual([...tagList.children].map(tag => tag.textContent), allDatasetTags);
 $("sample-search").value = "python -(math complex) human* #sqlite-last @name:sqlite-page-* @windows:1";
 $("sample-search").oninput();
 await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
 assert.equal($("sample-list").children.length, 1);
+assert.equal($("dataset-tags").open, true);
+assert([...$("dataset-tag-list").children].some(tag => tag.textContent === "sqlite-last"));
 const searchGuide = await fetch(base + "/search-guide");
 assert.equal(searchGuide.status, 200);
 assert((await searchGuide.text()).includes("@uses_tool"));
 const generationSearchGuide = await fetch(base + "/search-guide");
 assert((await generationSearchGuide.text()).includes("@generation:unfinished"));
 assert($("search-help").textContent.includes("@generation:unfinished"));
-assert($("search-help").querySelector('a[href="/search-guide"]'));
+const guideLocation = w.location.href;
+let finishGuideFetch;
+const originalFetch = w.fetch;
+w.fetch = (path, options) => path === "/search-guide"
+  ? new Promise(resolve => { finishGuideFetch = resolve; })
+  : originalFetch(path, options);
+const openingGuide = click("search-guide-button");
+assert($("search-guide-dialog").open);
+assert.match($("search-guide-content").textContent, /Loading search guide/);
+finishGuideFetch(await fetch(base + "/search-guide"));
+await openingGuide;
+assert.equal(w.location.href, guideLocation);
+assert.match($("search-guide-content").querySelector("h1").textContent, /Search trajectories/);
+assert($("search-guide-content").querySelector("pre code"));
+const orRow = [...$("search-guide-content").querySelectorAll("tr")]
+  .find(row => row.firstElementChild.textContent === "apple | banana");
+assert.equal(orRow.children.length, 2);
+await click("close-search-guide");
+assert.equal($("search-guide-dialog").open, false);
+w.fetch = async () => new Response("Unavailable", { status: 503 });
+await click("search-guide-button");
+assert.match($("search-guide-content").textContent, /Unable to load search guide: HTTP 503/);
+await click("close-search-guide");
+w.fetch = originalFetch;
+await click("search-guide-button");
+assert($("search-guide-content").querySelector("table"));
+await click("close-search-guide");
 $("sample-search").value = "python |";
 $("sample-search").oninput();
 await waitFor(() => !$("search-error").hidden);
