@@ -195,6 +195,23 @@ async def test_dashboard_and_mcp_share_search_and_guide(studio):
     assert app.state.dataset["revision"] == before
 
 
+async def test_dataset_tags_cover_all_pages_and_refresh_after_changes(studio):
+    app, client = studio
+    store = app.state.dataset.store
+    store.replace([
+        {"id": "first", "metadata": {"tags": ["shared", "Zulu", "shared"]}, "replay": {}},
+        {"id": "second", "metadata": {"tags": ["shared", "alpha", "<tag>"]}, "replay": {}},
+    ], app.state.dataset["revision"])
+    result = await client.get("/api/state", params={"query": "@name:first", "limit": 1})
+    assert result.status_code == 200
+    assert result.json()["total"] == 1
+    assert result.json()["dataset_tags"] == ["<tag>", "alpha", "shared", "Zulu"]
+    store.samples.pop()
+    assert (await client.get("/api/state")).json()["dataset_tags"] == ["shared", "Zulu"]
+    store.samples.pop()
+    assert (await client.get("/api/state")).json()["dataset_tags"] == []
+
+
 async def test_edits_undo_redo_deletion_and_failed_import_update_search_atomically(studio):
     app, client = studio
 

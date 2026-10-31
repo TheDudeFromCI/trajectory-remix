@@ -952,6 +952,12 @@ $("sample-search").value = "sqlite-page-";
 $("sample-search").oninput();
 await waitFor(() => $("sample-page-label").textContent === "1–100 of 205");
 assert.equal($("sample-list").children.length, 100);
+// Tags cover the full dataset, including entries beyond the current page.
+assert.equal($("dataset-tags").open, false);
+$("dataset-tags").open = true;
+assert([...$("dataset-tag-list").children].some(tag => tag.textContent === "sqlite-last"));
+assert.equal(new Set([...$("dataset-tag-list").children].map(tag => tag.textContent)).size,
+  $("dataset-tag-list").children.length);
 await click("sample-page-next");
 await waitFor(() => $("sample-page-label").textContent === "101–200 of 205");
 assert.equal($("sample-list").children.length, 100);
@@ -960,13 +966,41 @@ $("sample-search").value = "python -(math complex) human* #sqlite-last @name:sql
 $("sample-search").oninput();
 await waitFor(() => $("sample-page-label").textContent === "1–1 of 1");
 assert.equal($("sample-list").children.length, 1);
+assert.equal($("dataset-tags").open, true);
+assert([...$("dataset-tag-list").children].some(tag => tag.textContent === "sqlite-last"));
 const searchGuide = await fetch(base + "/search-guide");
 assert.equal(searchGuide.status, 200);
 assert((await searchGuide.text()).includes("@uses_tool"));
 const generationSearchGuide = await fetch(base + "/search-guide");
 assert((await generationSearchGuide.text()).includes("@generation:unfinished"));
 assert($("search-help").textContent.includes("@generation:unfinished"));
-assert($("search-help").querySelector('a[href="/search-guide"]'));
+const guideLocation = w.location.href;
+let finishGuideFetch;
+const originalFetch = w.fetch;
+w.fetch = (path, options) => path === "/search-guide"
+  ? new Promise(resolve => { finishGuideFetch = resolve; })
+  : originalFetch(path, options);
+const openingGuide = click("search-guide-button");
+assert($("search-guide-dialog").open);
+assert.match($("search-guide-content").textContent, /Loading search guide/);
+finishGuideFetch(await fetch(base + "/search-guide"));
+await openingGuide;
+assert.equal(w.location.href, guideLocation);
+assert.match($("search-guide-content").querySelector("h1").textContent, /Search trajectories/);
+assert($("search-guide-content").querySelector("pre code"));
+const orRow = [...$("search-guide-content").querySelectorAll("tr")]
+  .find(row => row.firstElementChild.textContent === "apple | banana");
+assert.equal(orRow.children.length, 2);
+await click("close-search-guide");
+assert.equal($("search-guide-dialog").open, false);
+w.fetch = async () => new Response("Unavailable", { status: 503 });
+await click("search-guide-button");
+assert.match($("search-guide-content").textContent, /Unable to load search guide: HTTP 503/);
+await click("close-search-guide");
+w.fetch = originalFetch;
+await click("search-guide-button");
+assert($("search-guide-content").querySelector("table"));
+await click("close-search-guide");
 $("sample-search").value = "python |";
 $("sample-search").oninput();
 await waitFor(() => !$("search-error").hidden);
