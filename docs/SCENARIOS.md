@@ -1,7 +1,5 @@
 # Scenario generation and separate validation
 
-[Creation and independent validation flow (PDF)](generation-validation-flow.pdf).
-
 Start Remix normally; no scenario-directory argument is required:
 
 ```sh
@@ -279,4 +277,4 @@ under `trajectory_remix/review_templates`. Legacy `remix.validate` tail steps in
 archived flows remain readable as review definitions but are deferred during
 creation; their endpoints are never required or called by the generator.
 
-See [idle-work behavior and demo](idle-scenario-generation.md) and [MCP](MCP.md).
+See [MCP](MCP.md).
