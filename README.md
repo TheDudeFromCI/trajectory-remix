@@ -450,8 +450,7 @@ not required. Old datasets and saved review contracts remain readable. The old
 `user_problem` flow, `content_first` demo and task-based `/api/run` API are retired;
 old noval scenario names are aliases for the standard user/idle choices.
 
-See [scenario configuration and API](docs/SCENARIOS.md) and
-[bounded requests, recovery and analytics](docs/content-first-generation.md).
+See [scenario configuration and API](docs/SCENARIOS.md).
 
 ## Tools and sandbox state
 

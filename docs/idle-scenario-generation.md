@@ -4,8 +4,8 @@ Select the bundled **`idle_scenario`**; no scenario-directory option is needed. 
 standalone content-first scenario with tag **`#idle_scenario`**. Only a Kidra role
 exists: there is no fictional user, user-message generator, reference solution,
 novelty judge, required chat reply, local semantic validator or local repair model.
-Use the same inference-model tokenizer and context-budget settings described in
-[Content-first generation](content-first-generation.md).
+Configure the inference-model tokenizer and context budgets as described in
+[Scenario configuration](SCENARIOS.md).
 
 [PDF flow chart](idle-scenario-flow.pdf) · [Editable Graphviz source](idle-scenario-flow.dot)
 

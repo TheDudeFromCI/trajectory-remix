@@ -44,7 +44,6 @@ conditional decisions stay invalid; model output is never silently corrected. Ch
 HTTP 400/422 responses pause generation and retain its checkpoint, with no
 automatic downgrade or repeated incompatible requests. Change the setting and
 resume. Parsing, schema/compiler checks and separate review remain in place.
-See [structured output and budget accounting](content-first-generation.md#server-enforced-structured-output).
 
 When an inference tokenizer is available, each content request is checked against
 its inference-model budget, including the prompt, total completion capacity and
@@ -280,5 +279,4 @@ under `trajectory_remix/review_templates`. Legacy `remix.validate` tail steps in
 archived flows remain readable as review definitions but are deferred during
 creation; their endpoints are never required or called by the generator.
 
-See [content requests and recovery](content-first-generation.md),
-[idle-work behavior and demo](idle-scenario-generation.md), and [MCP](MCP.md).
+See [idle-work behavior and demo](idle-scenario-generation.md) and [MCP](MCP.md).
