@@ -215,7 +215,15 @@ Project backups retain all samples.
 Select a saved trajectory and choose **Edit → Generation → Validate Trajectory**.
 Choose a validation endpoint and run the review. The default records **Validated
 (2)** or **Rejected (-2)**; turn off recording for a report only. Validation never
-rewrites source and never grants Ready. Human **Ready (3)** approval remains
+rewrites source unless **Automatically repair issues and validate again** is enabled,
+and never grants Ready. Automatic repair uses the selected validation endpoint to
+apply targeted edits, then reviews the full checklist again after each attempt.
+**Generation Settings → Defaults → Maximum automatic repair attempts** sets the
+limit (default 3, range 1–100); the initial review does not count as a repair attempt.
+Invalid or empty repairs consume an attempt. The loop stops on a pass or when
+the limit is reached. Compilable repairs are saved when the loop finishes, even
+if issues remain; recording controls the final verdict, not saving repairs.
+Cancellation and provider errors leave saved content unchanged. Human **Ready (3)** approval remains
 required for training export.
 
 One service handles the menu, explicit validation API and MCP semantic validation.
@@ -233,11 +241,11 @@ checklist, tokenizer, tools and endpoint configuration still match. Changes duri
 review prevent stale results from being recorded. Start generation and validation
 as separate operations; neither starts the other.
 
-- `POST /api/validation/run`: `{sample_id, endpoint?, record?, resume?}`; returns 202.
+- `POST /api/validation/run`: `{sample_id, endpoint?, record?, resume?, auto_repair?}`; returns 202.
 - `GET /api/validation/status`: progress and final findings.
 - `POST /api/validation/stop`: cancel without changing source or approval state.
 - `POST /api/validate`: synchronous review of a saved sample by index, with optional
-  endpoint/record fields.
+  endpoint/record/auto_repair fields.
 - MCP `validate_trajectory(semantic=false)` performs compiler checks only.
   `semantic=true` calls this same service without recording a sign-off.
 

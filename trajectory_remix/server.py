@@ -757,7 +757,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         if data.get('sample') and commands._find(sample.get('id'))[1] != sample:
             raise ValueError('Save the submitted trajectory before validation')
         editable(sample.get("id"))
-        return await validator.validate(sample['id'], record=data.get('record', True), endpoint=data.get('endpoint'))
+        return await validator.validate(sample['id'], record=data.get('record', True), endpoint=data.get('endpoint'), auto_repair=data.get('auto_repair', False))
 
     @app.post('/api/validation/run', status_code=202)
     async def start_validation(request: Request):
@@ -765,7 +765,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         sample_id = data.get('sample_id')
         editable(sample_id)
         job_id = validator.start(sample_id, record=data.get('record', True),
-                                 endpoint=data.get('endpoint'), resume=data.get('resume', False))
+                                 endpoint=data.get('endpoint'), resume=data.get('resume', False),
+                                 auto_repair=data.get('auto_repair', False))
         return {'job_id': job_id, 'status': dict(validator.status)}
 
     @app.get('/api/validation/status')

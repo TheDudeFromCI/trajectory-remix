@@ -349,3 +349,182 @@ async def test_validation_rejects_ambiguous_selection_flags(studio, field, value
     with pytest.raises(ValueError):
         validator.start(**options)
     assert not validator.status['running']
+
+
+class RepairReviewer(Reviewer):
+    def __init__(self, *, passes=True, edits=True, hold_recheck=False):
+        super().__init__()
+        self.passes, self.edits, self.hold_recheck = passes, edits, hold_recheck
+        self.repairs = 0
+        self.rechecked = asyncio.Event()
+
+    async def complete(self, endpoint, messages, tools=None):
+        self.messages.append(copy.deepcopy(messages))
+        if 'Actions: replace/delete' in messages[0]['content']:
+            self.repairs += 1
+            return {'content': json.dumps({'edits': [{'action': 'append', 'tick': '1',
+                'event': {'op': 'append', 'window': 'a', 'source': 'user', 'content': 'repaired'}}] if self.edits else []})}
+        if self.repairs and self.hold_recheck:
+            self.rechecked.set()
+            await self.release.wait()
+        valid = self.passes and bool(self.repairs)
+        return {'content': json.dumps(review_output(messages, valid, 'Append the missing context to window a.'))}
+
+
+@pytest.mark.parametrize('record', [True, False])
+async def test_auto_repair_rechecks_changed_source_and_saves_only_final_verdict(studio, record):
+    app, _ = studio
+    reviewer = RepairReviewer()
+    validator = attach(app, reviewer)
+    before = copy.deepcopy(app.state.dataset['samples'][0])
+    result = await validator.validate('test', record=record, auto_repair=True)
+    assert result['valid'] and result['repaired'] and result['repair_attempts'] == 1
+    assert result['recorded'] is record
+    assert not result['repair_limit_reached']
+    after = app.state.dataset['samples'][0]
+    assert after['replay'] != before['replay']
+    assert any('repaired' in m[-1]['content'] and 'Actions: replace/delete' not in m[0]['content'] for m in reviewer.messages)
+    assert len(after['replay']['1']) == 1  # Identical edits from several checks are deduplicated.
+    assert len(after.get('metadata', {}).get('evaluations', [])) == int(record)
+    assert not training_eligible(after)
+
+
+@pytest.mark.parametrize('edits', [True, False])
+async def test_auto_repair_stops_at_configured_limit_with_final_rejection(studio, edits):
+    app, _ = studio
+    app.state.dataset['config'].setdefault('validation', {})['max_repair_attempts'] = 2
+    reviewer = RepairReviewer(passes=False, edits=edits)
+    validator = attach(app, reviewer)
+    result = await validator.validate('test', record=True, auto_repair=True)
+    assert not result['valid'] and result['recorded'] and result['repair_limit_reached']
+    assert result['repair_attempts'] == 2
+    assert app.state.dataset['samples'][0]['metadata']['validation_level'] == -2
+    assert len(app.state.dataset['samples'][0]['metadata']['evaluations']) == 1
+
+
+async def test_auto_repair_pass_requires_no_repairs(studio):
+    app, _ = studio
+    reviewer = Reviewer()
+    validator = attach(app, reviewer)
+    result = await validator.validate('test', auto_repair=True)
+    assert result['valid'] and result['repair_attempts'] == 0 and not result['repaired']
+
+
+async def test_auto_repair_cancel_and_resume_preserve_staged_source(studio):
+    app, _ = studio
+    reviewer = RepairReviewer(hold_recheck=True)
+    validator = attach(app, reviewer)
+    before = copy.deepcopy(app.state.dataset['samples'][0])
+    validator.start('test', auto_repair=True)
+    await asyncio.wait_for(reviewer.rechecked.wait(), 5)
+    await validator.stop()
+    assert app.state.dataset['samples'][0] == before
+    assert validator.snapshot['repair_attempts'] == 1
+    staged = copy.deepcopy(validator.snapshot['candidate'])
+    reviewer.hold_recheck = False
+    validator = attach(app, reviewer)  # Reopen the persisted job after a server restart.
+    validator.start('test', auto_repair=True, resume=True)
+    result = await validator.job
+    assert result['valid'] and result['repair_attempts'] == 1
+    assert app.state.dataset['samples'][0]['replay'] == staged['replay']
+
+
+async def test_auto_repair_does_not_overwrite_concurrent_edit(studio):
+    app, _ = studio
+    reviewer = RepairReviewer(hold_recheck=True)
+    validator = attach(app, reviewer)
+    validator.start('test', auto_repair=True)
+    await asyncio.wait_for(reviewer.rechecked.wait(), 5)
+    app.state.commands.update_trajectory_metadata('test', {'metadata': {'title': 'Concurrent edit'}}, expected_revision=app.state.dataset['revision'])
+    changed = copy.deepcopy(app.state.dataset['samples'][0])
+    reviewer.release.set()
+    with pytest.raises(ValueError, match='changed during validation'):
+        await validator.job
+    assert app.state.dataset['samples'][0] == changed
+
+
+@pytest.mark.parametrize('value', [0, -1, 101, 1.5, True, '3'])
+def test_repair_attempt_setting_rejects_invalid_values(value):
+    from trajectory_remix.llm import default_config, validate_config
+    config = default_config()
+    config['validation']['max_repair_attempts'] = value
+    with pytest.raises(ValueError, match='max_repair_attempts'):
+        validate_config(config)
+
+
+async def test_validation_api_accepts_auto_repair_and_checks_type(studio):
+    app, client = studio
+    reviewer = RepairReviewer()
+    app.state.validation_runner.client = reviewer
+    response = await client.post('/api/validation/run', json={'sample_id': 'test', 'auto_repair': True})
+    assert response.status_code == 202
+    result = await app.state.validation_runner.job
+    assert result['valid'] and result['repair_attempts'] == 1
+    response = await client.post('/api/validation/run', json={'sample_id': 'test', 'auto_repair': 'yes'})
+    assert response.status_code == 422
+
+
+async def test_invalid_auto_repairs_consume_limit_without_changing_source(studio):
+    app, _ = studio
+
+    class InvalidRepair(RepairReviewer):
+        async def complete(self, endpoint, messages, tools=None):
+            if 'Actions: replace/delete' in messages[0]['content']:
+                return {'content': json.dumps({'edits': [{'action': 'append', 'tick': '1',
+                    'event': {'op': 'append', 'window': 'missing', 'source': 'user', 'content': 'invalid'}}]})}
+            return await super().complete(endpoint, messages, tools)
+
+    validator = attach(app, InvalidRepair(passes=False))
+    before = copy.deepcopy(app.state.dataset['samples'][0])
+    result = await validator.validate('test', auto_repair=True)
+    assert not result['valid'] and result['repair_limit_reached']
+    assert result['repair_attempts'] == 3 and not result['repaired']
+    assert validator.snapshot['repair_error']
+    assert app.state.dataset['samples'][0] == before
+
+
+async def test_provider_failure_after_staged_repair_never_saves_or_signs_off(studio):
+    app, _ = studio
+
+    class BrokenProvider(RepairReviewer):
+        async def complete(self, endpoint, messages, tools=None):
+            if self.repairs and 'Actions: replace/delete' not in messages[0]['content']:
+                raise RuntimeError('Provider unavailable')
+            return await super().complete(endpoint, messages, tools)
+
+    validator = attach(app, BrokenProvider())
+    before = copy.deepcopy(app.state.dataset['samples'][0])
+    with pytest.raises(RuntimeError, match='Provider unavailable'):
+        await validator.validate('test', record=True, auto_repair=True)
+    assert validator.status['phase'] == 'incomplete'
+    assert validator.snapshot['candidate']['replay'] != before['replay']
+    assert app.state.dataset['samples'][0] == before
+
+
+async def test_synchronous_validation_api_auto_repair(studio):
+    app, client = studio
+    app.state.validation_runner.client = RepairReviewer()
+    response = await client.post('/api/validate', json={'index': 0, 'record': False, 'auto_repair': True})
+    assert response.status_code == 200
+    assert response.json()['valid'] and response.json()['repaired']
+    assert not response.json()['recorded']
+
+
+async def test_auto_repair_can_fix_initial_compiler_error(studio):
+    app, _ = studio
+    source = copy.deepcopy(app.state.dataset['samples'][0])
+    source['replay']['1'] = [{'op': 'append', 'window': 'missing', 'source': 'user', 'content': 'broken'}]
+    app.state.commands.replace_trajectory('test', source)
+
+    class CompilerRepair(RepairReviewer):
+        async def complete(self, endpoint, messages, tools=None):
+            if 'Actions: replace/delete' in messages[0]['content']:
+                self.repairs += 1
+                return {'content': json.dumps({'edits': [{'action': 'replace', 'event_id': 'replay[1][0]',
+                    'event': {'op': 'append', 'window': 'a', 'source': 'user', 'content': 'repaired'}}]})}
+            return await super().complete(endpoint, messages, tools)
+
+    validator = attach(app, CompilerRepair())
+    result = await validator.validate('test', record=True, auto_repair=True)
+    assert result['valid'] and result['repair_attempts'] == 1
+    assert app.state.dataset['samples'][0]['replay']['1'][0]['window'] == 'a'

@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 import uuid
+from pathlib import Path
 from collections import deque
 from types import SimpleNamespace
 
@@ -16,7 +17,7 @@ from .compiler import CompileError
 from .dataset import evaluation_source
 from .llm import SampleBuilder
 from .model_session import ModelSession, EvaluationFailure
-from .review import ReviewView, checklist_report, checklist_schema, compact, count
+from .review import ReviewView, checklist_report, checklist_schema, compact, count, EDIT_SCHEMA, apply_edits
 from .scenarios import Step, ReviewCheck
 from .trajectory_review import fingerprint
 
@@ -67,9 +68,11 @@ class ValidationRunner(ModelSession):
         self.logs.append({'time': time.time(), 'message': self.clean(message), 'level': level, 'step': step})
         self.persist()
 
-    def start(self, sample_id, *, record=True, endpoint=None, resume=False):
+    def start(self, sample_id, *, record=True, endpoint=None, resume=False, auto_repair=False):
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise ValueError('Select a saved trajectory to validate')
+        if type(auto_repair) is not bool:
+            raise ValueError('auto_repair must be a boolean')
         if type(record) is not bool or type(resume) is not bool:
             raise ValueError('record and resume must be booleans')
         if endpoint is not None and (not isinstance(endpoint, str) or not endpoint):
@@ -104,13 +107,18 @@ class ValidationRunner(ModelSession):
         inference_fingerprint = counter.fingerprint if counter else None
         source_hash = hashlib.sha256(compact([evaluation_source(sample), self.checklist_hash,
             self.compiler.fingerprint, self.compiler.tools.fingerprint, self.endpoint,
-            inference_fingerprint, self.config.get('validation', {}), self.config.get('content_first', {})]).encode()).hexdigest()
+            inference_fingerprint, auto_repair, record, self.config.get('validation', {}), self.config.get('content_first', {})]).encode()).hexdigest()
         prior = self.snapshot
         if resume and (not prior or prior.get('source_hash') != source_hash or prior['status'].get('sample_id') != sample_id):
             raise ValueError('Trajectory, checklist, tokenizer or endpoint changed; start a fresh validation')
         self.snapshot = copy.deepcopy(prior) if resume else {'id': str(uuid.uuid4()), 'steps': {}, 'source_hash': source_hash,
             'checklist': checklist.model_dump(), 'origin': origin, 'sample': copy.deepcopy(sample)}
+        self.snapshot.setdefault('repair_attempts', 0)
+        self.snapshot['auto_repair'] = auto_repair
         self.status = {'running': True, 'phase': 'validating', 'sample_id': sample_id,
+            'auto_repair': auto_repair, 'record': record, 'endpoint': endpoint,
+            'repair_attempts': self.snapshot['repair_attempts'],
+            'max_repair_attempts': self.config.get('validation', {}).get('max_repair_attempts', 3),
             'active': [], 'completed': 0, 'total': len(checklist.checks), 'pause_requested': False,
             'model_requests': 0, 'completed_model_seconds': 0, 'last_error': None, 'result': None}
         if not resume:
@@ -133,54 +141,29 @@ class ValidationRunner(ModelSession):
             self.job.cancel()
             await asyncio.gather(self.job, return_exceptions=True)
 
-    async def validate(self, sample_id, *, record=False, endpoint=None):
-        self.start(sample_id, record=record, endpoint=endpoint)
+    async def validate(self, sample_id, *, record=False, endpoint=None, auto_repair=False):
+        self.start(sample_id, record=record, endpoint=endpoint, auto_repair=auto_repair)
         return await self.job
 
     async def run(self, sample, checklist, endpoint, record):
         report = None
         try:
-            plan = self.compiler.compile(sample)
-            self.builder.next_tick = plan['max_tick'] + 1
-            context = {'roles': {}, 'steps': {}}
-            inputs = {'original_requirements': sample.get('metadata', {}).get('concept', {}),
-                      'roles': sample.get('metadata', {}).get('roles', {}),
-                      'sampled_conditions': sample.get('metadata', {}).get('context_tags', {})}
-            reports = {}
-            input_limit = self.config.get('validation', {}).get('max_input_tokens', 6000)
-            for index, (name, check) in enumerate(checklist.checks.items()):
-                prompt = f'check-{index}.md'
-                self.scenario.prompts[prompt] = check.prompt
-                path = 'validate.checks.' + name
-                step = Step(uses='remix.validate', endpoint=endpoint, prompt=prompt, review_retries=2)
-                if check.view:
-                    definition = ReviewCheck(prompt=prompt, view=check.view, rules=check.rules,
-                        inputs=['original_requirements', 'roles', 'sampled_conditions'],
-                        max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
-                    result, _ = await self.review_groups(step, definition, inputs, context, path,
-                                                        sample, plan, self.snapshot['source_hash'])
-                else:
-                    # Legacy and custom prose checklists use the same bounded
-                    # evidence protocol without inventing per-rule requirements.
-                    definition = ReviewCheck(prompt=prompt, view='layout', inputs=['original_requirements', 'roles', 'sampled_conditions'],
-                        max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
-                    result, _ = await self.review_groups(step, definition, inputs, context, path,
-                                                        sample, plan, self.snapshot['source_hash'])
-                reports[name] = result
-                self.status['completed'] = index + 1
-                self.persist()
-            structural = [f"{d['path']}: {d['message']}" for d in plan['diagnostics']
-                          if d.get('code') in ('tool_not_shown', 'tools_in_system', 'direct_chat_generation')]
-            delivery = self.chat_delivery_report(sample, plan)
-            structural = list(dict.fromkeys([*structural, *delivery['feedback']]))
-            report = {'valid': all(r['valid'] for r in reports.values()) and not structural,
-                      'checks': reports, 'feedback': structural + [f'[{name}] {f}' for name, r in reports.items() for f in r['feedback']],
-                      'diagnostics': plan['diagnostics'], 'delivery': delivery, 'recorded': False}
+            sample = copy.deepcopy(self.snapshot.get('candidate', sample))
+            while True:
+                self.status.update(phase='validating', completed=0)
+                self.builder.sample = copy.deepcopy(sample)
+                report, failures = await self.evaluate(sample, checklist, endpoint)
+                if report['valid'] or not self.snapshot['auto_repair'] or self.snapshot['repair_attempts'] >= self.status['max_repair_attempts']:
+                    break
+                sample = await self.repair(sample, checklist, endpoint, failures)
+            report.update(repair_attempts=self.snapshot['repair_attempts'], repaired=sample != self.original,
+                          repair_limit_reached=bool(self.snapshot['auto_repair'] and not report['valid'] and
+                              self.snapshot['repair_attempts'] >= self.status['max_repair_attempts']))
+            current_index, current = self.assert_current()
+            if sample != self.original:
+                self.commands._commit(copy.deepcopy(sample), current_index, validate=True)
+                current = self.commands._find(sample['id'])[1]
             if record:
-                current_index, current = self.commands._find(sample['id'])
-                current_checklist, _ = self.commands._review_checklist(current)
-                if current != self.original or fingerprint(current_checklist) != self.checklist_hash or self.commands.compiler.fingerprint != self.compiler.fingerprint or self.commands.compiler.tools.fingerprint != self.compiler.tools.fingerprint:
-                    raise ValueError('Trajectory or review requirements changed during validation; result was not recorded')
                 saved = self.commands._save_review(current_index, copy.deepcopy(current),
                     'validated' if report['valid'] else 'rejected', self.endpoint['model'],
                     'Explicit trajectory validation against the saved original checklist and current custom guidance.',
@@ -202,6 +185,114 @@ class ValidationRunner(ModelSession):
             self.status.update(running=False, active=[])
             self.snapshot['elapsed_seconds'] = self.elapsed_seconds()
             self.persist()
+
+    def assert_current(self):
+        index, current = self.commands._find(self.original['id'])
+        checklist, _ = self.commands._review_checklist(current)
+        if (current != self.original or fingerprint(checklist) != self.checklist_hash
+                or self.commands.compiler.fingerprint != self.compiler.fingerprint
+                or self.commands.compiler.tools.fingerprint != self.compiler.tools.fingerprint):
+            raise ValueError('Trajectory or review requirements changed during validation; result was not recorded')
+        return index, current
+
+    async def evaluate(self, sample, checklist, endpoint):
+        try:
+            plan = self.compiler.compile(sample)
+        except CompileError as error:
+            if not self.snapshot['auto_repair']:
+                raise
+            diagnostic = error.diagnostic()
+            report = {'valid': False, 'diagnostics': [diagnostic], 'feedback': [str(error)],
+                      'checks': {}, 'recorded': False}
+            events = [{'id': f'replay[{tick}][{index}]', 'data': event}
+                      for tick, group in sample.get('replay', {}).items() for index, event in enumerate(group)]
+            matching = [event for event in events if str(diagnostic.get('path', '')).startswith(event['id'])]
+            # Malformed sources have no compiled review view. Supply raw source
+            # identities; the normal request budget still bounds each proposal.
+            failures = [{'check_name': None, 'findings': report['feedback'],
+                         'review': {'events': matching or events,
+                                    'original_requirements': sample.get('metadata', {}).get('concept', {})}}]
+            return report, failures
+        self.builder.next_tick = plan['max_tick'] + 1
+        context = {'roles': {}, 'steps': {}}
+        inputs = {'original_requirements': sample.get('metadata', {}).get('concept', {}),
+                  'roles': sample.get('metadata', {}).get('roles', {}),
+                  'sampled_conditions': sample.get('metadata', {}).get('context_tags', {})}
+        reports, failures = {}, []
+        input_limit = self.config.get('validation', {}).get('max_input_tokens', 6000)
+        for index, (name, check) in enumerate(checklist.checks.items()):
+            prompt = f'check-{index}.md'
+            self.scenario.prompts[prompt] = check.prompt
+            path = f"validate.round.{self.snapshot['repair_attempts']}.checks." + name
+            step = Step(uses='remix.validate', endpoint=endpoint, prompt=prompt, review_retries=2)
+            if check.view:
+                definition = ReviewCheck(prompt=prompt, view=check.view, rules=check.rules,
+                    inputs=['original_requirements', 'roles', 'sampled_conditions'],
+                    max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
+                result, failed = await self.review_groups(step, definition, inputs, context, path,
+                                                    sample, plan, self.snapshot['source_hash'])
+            else:
+                # Legacy and custom prose checklists use the same bounded
+                # evidence protocol without inventing per-rule requirements.
+                definition = ReviewCheck(prompt=prompt, view='layout', inputs=['original_requirements', 'roles', 'sampled_conditions'],
+                    max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1))
+                result, failed = await self.review_groups(step, definition, inputs, context, path,
+                                                    sample, plan, self.snapshot['source_hash'])
+            failures.extend({**f, "check_name": name} for f in failed)
+            reports[name] = result
+            self.status['completed'] = index + 1
+            self.persist()
+        structural = [f"{d['path']}: {d['message']}" for d in plan['diagnostics']
+                      if d.get('code') in ('tool_not_shown', 'tools_in_system', 'direct_chat_generation')]
+        delivery = self.chat_delivery_report(sample, plan)
+        structural = list(dict.fromkeys([*structural, *delivery['feedback']]))
+        report = {'valid': all(r['valid'] for r in reports.values()) and not structural,
+                  'checks': reports, 'feedback': structural + [f'[{name}] {f}' for name, r in reports.items() for f in r['feedback']],
+                  'diagnostics': plan['diagnostics'], 'delivery': delivery, 'recorded': False}
+        if structural and self.snapshot['auto_repair']:
+            view = ReviewView(sample, plan, ReviewCheck(prompt='structural', view='layout',
+                max_input_tokens=input_limit, content_tokens=min(800, input_limit - 1)),
+                self.compiler.tokenizer, self.compiler.tools)
+            failures.extend({'check_name': None, 'review': payload, 'findings': structural}
+                for payload in view.groups(inputs, lambda payload: count(self.compiler.tokenizer, compact(payload)) <= input_limit))
+        return report, failures
+
+    async def repair(self, sample, checklist, endpoint, failures):
+        self.assert_current()
+        attempt = self.snapshot['repair_attempts'] + 1
+        self.status.update(phase='repairing', repair_attempts=attempt)
+        path = f'repair.{attempt}'
+        # Persist completed attempts only. Cancelled requests can be retried on resume.
+        edits = []
+        base = Path(__file__).with_name('review_templates').joinpath('repair-edits.md').read_text()
+        context = {'roles': {}, 'steps': {}}
+        try:
+            for index, failure in enumerate(failures):
+                check = checklist.checks.get(failure['check_name'])
+                prompt = path + '.md'
+                self.scenario.prompts[prompt] = base + ('\nOriginal requirements:\n' + check.prompt +
+                    '\n' + check.repair_prompt + '\n' + '\n'.join(check.repair_guides) if check else '')
+                step = Step(uses='remix.validate', endpoint=endpoint, prompt=prompt)
+                payload = {**failure, 'previous_repair_error': self.snapshot.get('repair_error'),
+                           'eos_token': self.compiler.special['eos']}
+                proposal = await self.llm(step, payload, context, f'{path}.{index}', EDIT_SCHEMA,
+                    max_input_tokens=self.config.get('validation', {}).get('max_input_tokens', 6000))
+                jsonschema.validate(proposal, EDIT_SCHEMA)
+                edits.extend(proposal['edits'])
+            edits = list({compact(edit): edit for edit in edits}.values())
+            jsonschema.validate({'edits': edits}, EDIT_SCHEMA)
+            candidate = apply_edits(sample, edits)
+            self.compiler.compile(candidate)
+            self.snapshot.pop('repair_error', None)
+        except (ValueError, jsonschema.ValidationError, CompileError) as error:
+            candidate = sample
+            self.snapshot['repair_error'] = self.clean(str(error))
+            self.log({'repair_attempt': attempt, 'error': str(error)}, 'warning', path)
+        self.assert_current()
+        self.snapshot.update(candidate=copy.deepcopy(candidate), repair_attempts=attempt)
+        self.status['repair_attempts'] = attempt
+        self.persist()
+        return candidate
 
     @staticmethod
     def chat_delivery_report(draft, plan, *, require_reply=None):
