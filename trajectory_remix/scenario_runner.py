@@ -108,7 +108,7 @@ class ScenarioRunner(ModelSession):
             'metrics': summarize_requests(requests, elapsed, self.status['phase']),
         }
 
-    def persist(self):
+    def persist(self, *, db=None):
         if self.snapshot is None:
             return
         self.snapshot['elapsed_seconds'] = self.elapsed_seconds()
@@ -125,11 +125,13 @@ class ScenarioRunner(ModelSession):
                 "first_prompts": getattr(self, "first_prompts", {}),
                 "first_prompt_paths": getattr(self, "first_prompt_paths", {}),
             }
+        statement = "INSERT OR REPLACE INTO generation_jobs VALUES (?,?)"
+        values = (self.snapshot["id"], self.clean(self.snapshot))
+        if db is not None:
+            db.execute(statement, values)
+            return
         with self.state.store.connect() as db:
-            db.execute(
-                "INSERT OR REPLACE INTO generation_jobs VALUES (?,?)",
-                (self.snapshot["id"], self.clean(self.snapshot)),
-            )
+            db.execute(statement, values)
 
     def log(self, message, level="info", step=None):
         entry = {
@@ -142,9 +144,27 @@ class ScenarioRunner(ModelSession):
             entry.update(job_id=self.snapshot['id'],
                          sample_id=self.status.get('draft_id'),
                          batch_id=self.status.get('batch', {}).get('id'))
-        self.log_journal.append(entry)
+        if self.snapshot is None:
+            self.log_journal.append(entry)
+            self.logs.append(entry)
+            self.persist()
+            return
+        failure = None
+        with self.state.store.connect() as db:
+            self.log_journal.append(entry, db=db)
+            # Keep the diagnostic even if checkpoint serialization or writing
+            # fails, while normally committing both with a single disk sync.
+            db.execute('SAVEPOINT generation_checkpoint')
+            try:
+                self.persist(db=db)
+            except Exception as error:
+                db.execute('ROLLBACK TO generation_checkpoint')
+                failure = error
+            finally:
+                db.execute('RELEASE generation_checkpoint')
         self.logs.append(entry)
-        self.persist()
+        if failure is not None:
+            raise failure
 
     def clear_log(self):
         self.log_journal.clear()
@@ -855,14 +875,15 @@ class ScenarioRunner(ModelSession):
                     "Conversation reached its iteration limit without resolution"
                 )
             case "remix.assemble":
-                result = assemble_streams(self.builder, inputs)
-                if 'calls' in inputs and 'call_groups' in inputs:
-                    raise ValueError('Supply calls or call_groups, not both')
-                groups = inputs['call_groups'] if 'call_groups' in inputs else [inputs['calls']] if inputs.get('calls') else []
-                result.update(self.simulate({'calls': groups}, start_tick=result['start_tick']))
-                # Lifecycle choices belong to the generated decision. Release
-                # only after every consumer in this committed batch finishes.
-                self.release_windows(inputs.get('release_windows', []))
+                with self.builder.defer_compilation(enabled=self.content_first):
+                    result = assemble_streams(self.builder, inputs)
+                    if 'calls' in inputs and 'call_groups' in inputs:
+                        raise ValueError('Supply calls or call_groups, not both')
+                    groups = inputs['call_groups'] if 'call_groups' in inputs else [inputs['calls']] if inputs.get('calls') else []
+                    result.update(self.simulate({'calls': groups}, start_tick=result['start_tick']))
+                    # Lifecycle choices belong to the generated decision. Release
+                    # only after every consumer in this committed batch finishes.
+                    self.release_windows(inputs.get('release_windows', []))
                 self.publish()
                 return result
             case "remix.novelty":
@@ -935,37 +956,38 @@ class ScenarioRunner(ModelSession):
                         }
                     )
                 self.builder.next_tick = (
-                    self.compiler.compile(self.builder.sample)["max_tick"] + 1
+                    self.builder.compile_summary()["max_tick"] + 1
                 )
                 return {"ready": True}
             case "remix.tools":
                 return self.simulate(inputs)
             case "remix.draft":
-                release_tools = inputs.get("release_tool_context", False)
-                if type(release_tools) is not bool or (release_tools and not inputs.get("reasoning")):
-                    raise ValueError("release_tool_context requires a boolean and nonempty reasoning")
-                if inputs.get("reasoning"):
-                    if self.content_first:
-                        validate_content(self.compiler, inputs['reasoning'])
-                    self.builder.add_stream(
-                        "reasoning-" + str(self.builder.serial),
-                        inputs["reasoning"],
-                        close=False,
-                    )
-                    self.builder.serial += 1
-                if release_tools:
-                    # The scenario explicitly promises that these notes retain
-                    # the evidence required by the reply. Semantic review checks
-                    # that promise; never infer it from window age alone.
-                    self.close_temporary_windows(("tool-",))
-                if inputs.get("response"):
-                    await self.dispatch(
-                        type(step)(uses="remix.message"),
-                        {"source": "assistant", "text": inputs["response"]},
-                        context,
-                        path,
-                    )
-                self.close_temporary_windows(("tool-", "reasoning-"))
+                with self.builder.defer_compilation(enabled=self.content_first):
+                    release_tools = inputs.get("release_tool_context", False)
+                    if type(release_tools) is not bool or (release_tools and not inputs.get("reasoning")):
+                        raise ValueError("release_tool_context requires a boolean and nonempty reasoning")
+                    if inputs.get("reasoning"):
+                        if self.content_first:
+                            validate_content(self.compiler, inputs['reasoning'])
+                        self.builder.add_stream(
+                            "reasoning-" + str(self.builder.serial),
+                            inputs["reasoning"],
+                            close=False,
+                        )
+                        self.builder.serial += 1
+                    if release_tools:
+                        # The scenario explicitly promises that these notes retain
+                        # the evidence required by the reply. Semantic review checks
+                        # that promise; never infer it from window age alone.
+                        self.close_temporary_windows(("tool-",))
+                    if inputs.get("response"):
+                        await self.dispatch(
+                            type(step)(uses="remix.message"),
+                            {"source": "assistant", "text": inputs["response"]},
+                            context,
+                            path,
+                        )
+                    self.close_temporary_windows(("tool-", "reasoning-"))
                 result = self.publish()
                 self.log(
                     "Draft ready in the dashboard; validation may still be running",
@@ -986,7 +1008,7 @@ class ScenarioRunner(ModelSession):
             raise ValueError("release_windows must be a list of distinct window IDs")
         if not names:
             return
-        plan = self.compiler.compile(self.builder.sample)
+        plan = self.builder.compile_summary()
         windows = {window['id']: window for window in plan['windows']}
         for name in names:
             window = windows.get(name)
@@ -995,20 +1017,21 @@ class ScenarioRunner(ModelSession):
             if window['type'] in ('system', 'notes', 'tools'):
                 raise ValueError(f"Cannot release persistent {window['type']} window {name}")
         tick = str(plan['max_tick'] + 1)
-        self.builder.sample['replay'].setdefault(tick, []).extend(
-            {'op': 'generate', 'window': name, 'content': self.compiler.special['eos']}
-            for name in names
-        )
-        self.builder.next_tick = self.compiler.compile(self.builder.sample)['max_tick'] + 1
+        events = [{'op': 'generate', 'window': name, 'content': self.compiler.special['eos']} for name in names]
+        self.builder.sample['replay'].setdefault(tick, []).extend(events)
+        self.builder.defer_events(plan, [(tick, event) for event in events])
+        self.builder.next_tick = self.builder.compile_summary()['max_tick'] + 1
 
     def close_temporary_windows(self, prefixes):
-        plan = self.compiler.compile(self.builder.sample)
-        for window in plan["windows"]:
-            if window["id"].startswith(prefixes) and window["close"] is None:
-                self.builder.sample["replay"].setdefault(str(plan["max_tick"] + 1), []).append(
-                    {"op": "generate", "window": window["id"], "content": self.compiler.special["eos"]}
-                )
-        self.builder.next_tick = self.compiler.compile(self.builder.sample)["max_tick"] + 1
+        plan = self.builder.compile_summary()
+        tick = str(plan["max_tick"] + 1)
+        events = [{"op": "generate", "window": window["id"], "content": self.compiler.special["eos"]}
+                  for window in plan['windows']
+                  if window['id'].startswith(prefixes) and window['close'] is None]
+        if events:
+            self.builder.sample['replay'].setdefault(tick, []).extend(events)
+            self.builder.defer_events(plan, [(tick, event) for event in events])
+        self.builder.next_tick = self.builder.compile_summary()["max_tick"] + 1
 
     def simulate(self, inputs, start_tick=None):
         calls = inputs.get("calls", [])
@@ -1021,7 +1044,7 @@ class ScenarioRunner(ModelSession):
                 raise ValueError(
                     "Tool calls must be grouped into nonempty parallel batches"
                 )
-            existing = self.compiler.compile(self.builder.sample)['tool_calls']
+            existing = self.builder.compile_summary()['tool_calls']
             if sum(not call.get('invisible') for call in existing) + len(group) > self.config.get('max_tool_calls', 64):
                 raise ValueError('Trajectory exceeds the configured tool-call budget')
             tick = str(self.builder.next_tick if start_tick is None else start_tick)
@@ -1076,7 +1099,7 @@ class ScenarioRunner(ModelSession):
                     event["outcome"] = call["outcome"]
                 self.builder.sample["replay"].setdefault(tick, []).append(event)
                 windows.append(window)
-            plan = self.compiler.compile(self.builder.sample)
+            plan = self.builder.compile_summary(force=True)
             self.builder.next_tick = plan["max_tick"] + 1
             results.extend(
                 {"tool": c["tool"], "outcome": c["outcome"]}
@@ -1085,9 +1108,9 @@ class ScenarioRunner(ModelSession):
             )
         return {"results": results}
 
-    def closed_draft(self):
+    def closed_draft(self, *, validate=True):
         draft = copy.deepcopy(self.builder.sample)
-        plan = self.compiler.compile(draft)
+        plan = self.builder.compile_summary()
         for window in plan["windows"]:
             if window["close"] is None and window["type"] != "notes":
                 draft["replay"].setdefault(str(plan["max_tick"] + 1), []).append(
@@ -1097,11 +1120,12 @@ class ScenarioRunner(ModelSession):
                         "content": self.compiler.special["eos"],
                     }
                 )
-        self.compiler.compile(draft)
+        if validate:
+            self.compiler.compile(draft)
         return draft
 
     def publish(self, draft=None):
-        draft = draft or self.closed_draft()
+        draft = draft or self.closed_draft(validate=False)
         if self.content_first:
             draft['metadata']['generation_record'] = self.generation_record()
         elif self.snapshot.get('request_metrics'):
