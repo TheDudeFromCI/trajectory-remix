@@ -420,8 +420,6 @@ file and requests to 40 MB. Large imports should be split into batches; the SQLi
 
 ## Generation and explicit validation
 
-[Creation and independent validation flow (PDF)](docs/generation-validation-flow.pdf)
-
 The application loads two bundled content-first flows by default:
 **`user_scenario`** for user conversations, and **`idle_scenario`** for autonomous
 TODO, project, memory and alarm work. Select **Edit → Generation → Single Sample**
@@ -450,8 +448,7 @@ not required. Old datasets and saved review contracts remain readable. The old
 `user_problem` flow, `content_first` demo and task-based `/api/run` API are retired;
 old noval scenario names are aliases for the standard user/idle choices.
 
-See [scenario configuration and API](docs/SCENARIOS.md) and
-[bounded requests, recovery and analytics](docs/content-first-generation.md).
+See [scenario configuration and API](docs/SCENARIOS.md).
 
 ## Tools and sandbox state
 
@@ -582,5 +579,4 @@ Primary API/security references: [Hugging Face Tokenizers](https://huggingface.c
 The bundled standard flows load automatically. Custom `--scenarios-dir` roots can
 replace them with additional YAML flows. Creation and semantic validation are
 separate operations; no creation flow invokes a semantic validator. See
-[Scenario workflows](docs/SCENARIOS.md), [idle work](docs/idle-scenario-generation.md)
-and the [idle-flow PDF](docs/idle-scenario-flow.pdf).
+[Scenario workflows](docs/SCENARIOS.md).

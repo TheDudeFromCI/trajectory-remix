@@ -966,7 +966,7 @@ the running job, including after the initiating MCP client disconnects.
 
 ## Content-first generation evidence
 
-`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
+`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist.
 
 The standard `user_scenario` and `idle_scenario` flows generate without validation.
 `validate_trajectory(semantic=true)` uses the same explicit service as **Edit →

@@ -109,8 +109,7 @@
   analyses/tools, observation-dependent writes and TODO completion, generated
   window release, persistent automatic notes, budget rejection, iteration limits,
   cancellation/restart, failed-proposal retention, API-free external repair and
-  Ready-gated export. `python scripts/demo_idle_scenario.py` runs the real flow
-  with scripted offline content; it does not benchmark or approve a real model.
+  Ready-gated export.
 - DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
@@ -221,9 +220,8 @@ result, then emits EOS to release it.
   visibility and loss masks, BOS/EOS/NOOP, trajectories beyond individual request
   limits, invalid output/construction retention, cancellation/resume, archived
   generation evidence, original-checklist MCP repair, export approval, and
-  legacy checkpoint/scenario parsing compatibility. Historical performance reports
-  remain in `docs/content-first-benchmark.*` and `experiments/`; the retired
-  comparison generator is not shipped with the current workflow.
+  legacy checkpoint/scenario parsing compatibility. The retired comparison
+  generator is not shipped with the current workflow.
 
 - User-scenario regressions verify preserved domains/difficulty/roles and weights,
   manual inputs and shared tags, portable original checklists, four calls for a
