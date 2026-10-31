@@ -1,0 +1,1 @@
+Integrate actual observations with the visible reasoning and request. React explicitly to any failed or contradictory result. Produce Kidra's reasoning and a user-facing response, acknowledging unresolved facts. Do not claim unsupported verification. Do not include trajectory syntax.

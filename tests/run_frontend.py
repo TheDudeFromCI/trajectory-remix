@@ -33,8 +33,6 @@ with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
             "trajectory_remix",
             "--dataset",
             str(dataset),
-            "--scenarios-dir",
-            str(root / "examples/scenarios"),
             "--port",
             str(port),
         ],

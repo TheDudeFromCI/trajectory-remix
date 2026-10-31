@@ -1,0 +1,239 @@
+uses: remix.validate
+needs: []
+inputs: {}
+endpoint: validator
+visible_windows: []
+retries: 0
+on_failure:
+  action: reject
+when: true
+steps: {}
+max_iterations: 1
+history: {}
+repair_prompt: repair-edits.md
+checks:
+  layout:
+    prompt: validate-layout.md
+    view: layout
+    inputs:
+    - idea.problem
+    events_per_chunk: 10
+    overlap: 2
+    max_input_tokens: 6000
+    content_tokens: 800
+    context_rounds: 2
+    rules:
+      actor_separation:
+        requirement: 'Preserve actor ownership, visibility and supervision: user inputs,
+          specialist replies and external observations are not Kidra decisions. Keep
+          author instructions, raw logs, secrets and irrelevant scaffolding out of
+          Kidra output.'
+        scope: group
+        allow_not_applicable: false
+      attachment_separation:
+        requirement: Supply each attachment as separate document context with the
+          user request, not whole-file chat prose. Invisible file setup does not expose
+          an attachment to Kidra.
+        scope: group
+        allow_not_applicable: true
+      coherent_windows:
+        requirement: Give each window one coherent purpose. Keep system instructions,
+          documents, reasoning, conversation and tool interactions distinct; avoid
+          unrelated full observations in reasoning/chat.
+        scope: group
+        allow_not_applicable: false
+      context_retention:
+        requirement: Evidence must remain active throughout dependent generation,
+          including every chat-request token. Closed/replaced context is lost unless
+          sufficient facts were retained elsewhere; a reference or promise to remember
+          is insufficient. Use resolved timing.
+        scope: group
+        allow_not_applicable: false
+      prompt_context_release:
+        requirement: Close documents, results and temporary reasoning after their
+          last actual consumer. Do not retain all windows until the final reply by
+          default. Compact large documents into exact needed facts/caveats and source
+          versions when this enables useful earlier closure.
+        scope: group
+        allow_not_applicable: false
+      managed_notes:
+        requirement: The automatic TODO notes window is persistent and tool-managed.
+          Never manually open/close it or train externally refreshed task state as
+          Kidra output.
+        scope: group
+        allow_not_applicable: true
+  tools:
+    prompt: validate-tools.md
+    view: tools
+    inputs:
+    - idea.problem
+    events_per_chunk: 10
+    overlap: 2
+    max_input_tokens: 6000
+    content_tokens: 800
+    context_rounds: 2
+    rules:
+      observation_grounding:
+        requirement: Claims agree with canonical tool outcomes and availability. Do
+          not invent observations, duplicate results or treat failure/cancellation
+          as success. A partial read/search cannot prove unseen content; follow continuations
+          when needed.
+        scope: group
+        allow_not_applicable: true
+      causal_knowledge:
+        requirement: Use facts only after they become available to Kidra. All active
+          Kidra windows share attention; invisible mutations and author inspections
+          are not observations. Future results/revisions and lost context cannot inform
+          earlier tokens.
+        scope: group
+        allow_not_applicable: false
+      useful_calls:
+        requirement: Each call adds needed information/action. Rereading an unchanged
+          visible attachment, relisting known paths or fetching automatically visible
+          TODOs needs an additional purpose. Preserve reads of unseen files, changed
+          versions or needed metadata.
+        scope: group
+        allow_not_applicable: true
+      parallel_calls:
+        requirement: Overlap useful independent calls once inputs are ready. Wait
+          only for relevant dependencies, not unrelated work or an entire reasoning
+          stream. Judge resolved dispatch/result intervals; do not force artificial
+          concurrency.
+        scope: group
+        allow_not_applicable: true
+      specialist_context:
+        requirement: Specialist replies follow from their tasks, retained conversations
+          and explicitly shared artifact versions, not all Kidra windows. Follow-ups
+          build on prior replies; reviews cannot certify unseen newer versions.
+        scope: group
+        allow_not_applicable: true
+      artifact_consistency:
+        requirement: Edit/review/test/completion claims match authored files, versions
+          and external mutations. A claimed file write does not publish it. Synthetic
+          tests must be plausible for supplied artifacts; do not claim Remix ran authored
+          code/tests.
+        scope: group
+        allow_not_applicable: true
+      status_and_recovery:
+        requirement: Progress, TODO meanings/statuses, reviews, clarifications and
+          handoff agree with observed work. Respond coherently to failures, rejections,
+          changes and blockers. Do not invent host processes or wall-clock runtimes.
+        scope: group
+        allow_not_applicable: true
+      idle_tasks:
+        requirement: For idle work, follow visible standing policy, TODO priority,
+          actual blockers and observed completion evidence. An alarm firing is not
+          successful follow-up work. Never invent a user or permission. A quiet or
+          blocked ending is valid when no useful authorized immediate action remains.
+        scope: group
+        allow_not_applicable: true
+  reasoning:
+    prompt: validate-reasoning.md
+    view: reasoning
+    inputs:
+    - roles.user.tags
+    - roles.kidra.instructions
+    events_per_chunk: 10
+    overlap: 2
+    max_input_tokens: 6000
+    content_tokens: 800
+    context_rounds: 2
+    rules:
+      private_working_notes:
+        requirement: Reasoning is private task-directed notes on evidence, uncertainty
+          and decisions. User-addressed reassurance/advice, greetings, closing offers
+          or a duplicated answer draft fail even on simple tasks. Concise private
+          calculations are fine.
+        scope: group
+        allow_not_applicable: false
+      parallel_analysis:
+        requirement: Overlap useful independent analyses in separate reasoning windows
+          when inputs are ready. Flag concrete unnecessary serialization; preserve
+          real dependencies and avoid redundant parallel work.
+        scope: group
+        allow_not_applicable: false
+      evidence_transfer:
+        requirement: Retained summaries preserve needed constraints, values, quotes,
+          caveats and source/version references. They must support later claims without
+          closed/replaced originals. Whole-document duplication without useful earlier
+          closure is not effective extraction.
+        scope: group
+        allow_not_applicable: false
+      role_behavior:
+        requirement: User traits shape the user naturally without changing Kidra's
+          configured personality. Expertise is not infallibility; frustration does
+          not require abuse. Kidra stays consistent with its role profile.
+        scope: group
+        allow_not_applicable: false
+      dialogue_continuity:
+        requirement: When dialogue exists, preserve established facts and each actor’s
+          knowledge. For idle work, retain working state across decisions without
+          inventing dialogue. Never leak author-only requirements into Kidra decisions.
+        scope: group
+        allow_not_applicable: false
+      coordination:
+        requirement: For coordination tasks, Kidra delegates appropriately, integrates
+          specialist evidence and follows actual blockers rather than doing all specialist
+          implementation. Do not demand delegation for simple tasks.
+        scope: group
+        allow_not_applicable: true
+  correctness:
+    prompt: validate-correctness.md
+    view: correctness
+    inputs:
+    - idea.problem
+    - idea.success_criteria
+    events_per_chunk: 10
+    overlap: 2
+    max_input_tokens: 6000
+    content_tokens: 800
+    context_rounds: 2
+    rules:
+      independent_verification:
+        requirement: Verify facts, calculations, logic, graph edges/cycles, schedules,
+          units, quotations and causal claims against the original task and evidence.
+          Reference/success-criteria agreement is insufficient; identify reference
+          defects.
+        scope: group
+        allow_not_applicable: false
+      literal_constraints:
+        requirement: 'Satisfy every explicit constraint literally. Runtime workarounds
+          do not prove static/build compliance: function-local imports may still be
+          tracked edges. Do not relax requirements or substitute a task without evidence.'
+        scope: group
+        allow_not_applicable: false
+      extremal_claims:
+        requirement: Try counterexamples to minimality, uniqueness, necessity and
+          optimality. Spare schedule capacity does not force an unrelated module into
+          that batch. Claims must follow from actual constraints.
+        scope: group
+        allow_not_applicable: true
+      usable_changes:
+        requirement: Proposed code/plans/edits implement the described fix and work
+          together. Removing an import while leaving an unresolved reference is incomplete.
+          Check artifacts and interactions, not prose alone.
+        scope: group
+        allow_not_applicable: true
+      calibrated_uncertainty:
+        requirement: Distinguish facts from assumptions/uncertainty. Resolve consequential
+          ambiguity through evidence or clarification. Do not invent requirements
+          or claim unsupported verification.
+        scope: group
+        allow_not_applicable: false
+      task_fulfillment:
+        requirement: 'The actual request or visible idle responsibilities are resolved with a correct,
+          usable result meeting their constraints. Honest blocked or quiet termination
+          is valid when no useful authorized immediate action remains. Establish sufficient conversation history: an earlier
+          delivered reply may solve the task and the final answer may merely acknowledge
+          it.'
+        scope: sample
+        allow_not_applicable: false
+repair_mode: edits
+repair_max_input_tokens: 10000
+repair_guides:
+- repair-notes.md
+max_repairs: 0
+review_retries: 2
+level: 2
+attempts: 3
+fallback: true

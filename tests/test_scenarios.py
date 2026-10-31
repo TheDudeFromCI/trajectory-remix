@@ -14,7 +14,7 @@ from trajectory_remix.scenarios import ScenarioRegistry, resolve
 from trajectory_remix.server import create_app
 from trajectory_remix.storage import DatasetStore
 
-EXAMPLES = Path(__file__).parents[1] / "examples/scenarios"
+EXAMPLES = Path(__file__).parent / "fixtures/retired-scenarios"
 
 
 def review_output(messages, valid=True, feedback="Incorrect answer", context_requests=None):
@@ -126,7 +126,7 @@ async def test_example_single_and_multiple_turns_are_compilable_and_pending_huma
     samples = list(app.state.dataset["samples"])
     assert len(samples) == 1
     sample = samples[0]
-    assert sample["metadata"]["validation_level"] == 1
+    assert sample["metadata"]["validation_level"] == 0
     assert not training_eligible(sample)
     assert sample["metadata"]["context_tags"]
     assert sample["metadata"]["roles"]["kidra"]["tags"] == {}
@@ -206,7 +206,7 @@ async def test_stopped_draft_resumes_after_restart_without_regenerating_complete
     compiler, tmp_path
 ):
     fake = ScenarioClient()
-    fake.hold = "Validate ONLY message framing"
+    fake.hold = "Write Kidra's next response"
     app = app_for(tmp_path, compiler, fake)
     runner = app.state.scenario_runner
     async with httpx.AsyncClient(
@@ -296,6 +296,7 @@ async def test_human_edit_preserves_approval_and_export(compiler, tmp_path):
 def write_scenario(tmp_path, flow, prompts=None):
     root = tmp_path / "scenarios" / "nested" / "custom"
     root.mkdir(parents=True)
+    flow.setdefault("generation_mode", "existing")
     (root / "flow.yaml").write_text(yaml.safe_dump(flow))
     for name, text in (prompts or {"prompt.md": "Say something"}).items():
         (root / name).write_text(text)
@@ -370,24 +371,6 @@ async def test_parallel_calls_are_bounded_and_failure_fallback_is_explicit(
     assert runner.snapshot["steps"]["a"]["state"] == "fallback"
 
 
-async def test_rejected_validation_keeps_negative_level(compiler, tmp_path):
-    # Disable repairs to exercise rejection independently of a repair model.
-    root = tmp_path / "scenarios"
-    import shutil
-
-    shutil.copytree(EXAMPLES, root)
-    path = root / "user_problem/flow.yaml"
-    flow = yaml.safe_load(path.read_text())
-    flow["steps"]["validate"]["max_repairs"] = 0
-    flow["steps"]["validate"]["level"] = 2
-    path.write_text(yaml.safe_dump(flow))
-    app = app_for(tmp_path, compiler, ScenarioClient(valid=False), root)
-    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == "rejected"
-    assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == -2
 
 
 def test_references_do_not_evaluate_code():
@@ -402,7 +385,7 @@ async def test_pydantic_ai_streaming_uses_prompted_json_without_tool_permissions
 ):
     from pydantic_ai.providers.openai import OpenAIProvider
 
-    import trajectory_remix.scenario_runner as runtime
+    import trajectory_remix.model_session as runtime
 
     requests = []
 
@@ -496,47 +479,12 @@ async def test_pydantic_ai_streaming_uses_prompted_json_without_tool_permissions
     )
 
 
-async def test_validation_repairs_are_visible_and_revalidated(compiler, tmp_path):
-    class RepairClient(ScenarioClient):
-        repaired = False
-
-        async def complete(self, endpoint, messages, tools=None):
-            prompt = messages[0]["content"]
-            if prompt.startswith("Repair ONLY"):
-                self.repaired = True
-                data = json.loads(
-                    messages[1]["content"].split("\nOutput JSON schema:")[0]
-                )
-                assert data["findings"] == [
-                    f"[{name}] Incorrect answer"
-                    for name in ("layout", "tools", "reasoning", "correctness")
-                ]
-                return {"content": json.dumps({"replay": data["trajectory"]["replay"]})}
-            self.valid = self.repaired
-            return await super().complete(endpoint, messages, tools)
-
-    app = app_for(tmp_path, compiler, RepairClient())
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await finish(runner)
-    metadata = app.state.dataset["samples"][0]["metadata"]
-    assert metadata["validation_level"] == 1
-    assert [item["report"]["valid"] for item in metadata["evaluations"]] == [
-        False,
-        True,
-    ]
-    assert "validate.repair" in runner.snapshot["steps"]
-    # Even an unchanged repair is reviewed afresh by every focused check.
-    reviews = [
-        m for m in runner.client.messages if m[0]["content"].startswith("Validate")
-    ]
-    assert len(reviews) == 8
 
 
 async def test_transport_failure_does_not_reject_pending_draft(compiler, tmp_path):
     class Unavailable(ScenarioClient):
         async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Validate"):
+            if messages[0]["content"].startswith("Write Kidra's next response"):
                 raise httpx.ConnectError("unavailable")
             return await super().complete(endpoint, messages, tools)
 
@@ -589,29 +537,6 @@ def test_duplicate_yaml_keys_are_rejected(tmp_path):
         ScenarioRegistry(root)
 
 
-async def test_validation_failure_can_take_yaml_fallback_without_promoting_sample(
-    compiler, tmp_path
-):
-    import shutil
-
-    root = tmp_path / "scenarios"
-    shutil.copytree(EXAMPLES, root)
-    path = root / "user_problem/flow.yaml"
-    flow = yaml.safe_load(path.read_text())
-    flow["steps"]["validate"].update(
-        max_repairs=0,
-        on_failure={
-            "action": "fallback",
-            "value": {"valid": False, "feedback": ["Retain for human review"]},
-        },
-    )
-    path.write_text(yaml.safe_dump(flow))
-    app = app_for(tmp_path, compiler, ScenarioClient(valid=False), root)
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await finish(runner)
-    assert runner.snapshot["steps"]["validate"]["state"] == "fallback"
-    assert app.state.dataset["samples"][0]["metadata"]["validation_level"] == -1
 
 
 async def test_failed_attempt_retries_and_manual_starts_preserve_log_and_counter(
@@ -796,7 +721,7 @@ async def test_unrelated_samples_edit_validate_and_state_changes_during_generati
 
 
 @pytest.mark.parametrize("failure", ["connection", "model_api", "model_http"])
-@pytest.mark.parametrize("stage", ["idea", "validate"])
+@pytest.mark.parametrize("stage", ["idea", "answer"])
 async def test_api_retry_budget_pauses_same_attempt_and_can_resume(
     compiler, tmp_path, failure, stage
 ):
@@ -808,8 +733,8 @@ async def test_api_retry_budget_pauses_same_attempt_and_can_resume(
 
         async def complete(self, endpoint, messages, tools=None):
             fails_here = (
-                messages[0]["content"].startswith("Validate")
-                if stage == "validate"
+                messages[0]["content"].startswith("Write Kidra's next response")
+                if stage == "answer"
                 else messages[0]["content"].startswith("Invent")
             )
             if self.broken and fails_here:
@@ -961,117 +886,15 @@ async def test_settings_missing_endpoint_names_scenario_and_step(compiler, tmp_p
         headers={"X-Remix-Token": app.state.csrf},
     ) as client:
         response = await client.put("/api/config", json={"config": config})
-    assert response.status_code == 422
-    assert (
-        "Scenario 'user_problem' requires endpoint 'validator'"
-        in response.json()["detail"]
-    )
-    assert "step 'validate'" in response.json()["detail"]
-    assert len(app.state.dataset["config"]["endpoints"]) == 2
+    assert response.status_code == 200
+    assert len(app.state.dataset["config"]["endpoints"]) == 1
 
 
-async def test_validation_connection_failure_identifies_endpoint_url_and_model(
-    compiler, tmp_path
-):
-    class Offline(ScenarioClient):
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Validate"):
-                raise httpx.ConnectError("offline")
-            return await super().complete(endpoint, messages, tools)
-
-    app = app_for(tmp_path, compiler, Offline())
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 5)
-    message = runner.status["last_error"]
-    assert "Endpoint 'validator'" in message
-    assert "http://127.0.0.1:8080/v1" in message
-    assert "local-model" in message
-    assert any("Endpoint 'validator'" in log["message"] for log in runner.logs)
 
 
-async def test_one_failed_focused_check_blocks_promotion(compiler, tmp_path):
-    import shutil
-
-    class FocusedClient(ScenarioClient):
-        def __init__(self):
-            super().__init__()
-            self.reviewed = []
-
-        async def complete(self, endpoint, messages, tools=None):
-            prompt = messages[0]["content"]
-            if prompt.startswith("Validate"):
-                data = json.loads(
-                    messages[1]["content"].split("\nOutput JSON schema:")[0]
-                )
-                assert {
-                    "events",
-                    "windows",
-                    "anchors",
-                    "tool_calls",
-                    "diagnostics",
-                } <= data["compiled"].keys()
-                assert "evaluations" not in data["trajectory"]["metadata"]
-                assert "validation_level" not in data["trajectory"]["metadata"]
-                assert "files" in data["idea"]
-                self.reviewed.append(prompt)
-                valid = not prompt.startswith("Validate ONLY factual correctness")
-                return {
-                    "content": json.dumps(
-                        {
-                            "valid": valid,
-                            "feedback": [] if valid else ["Schedule is not unique"],
-                        }
-                    )
-                }
-            return await super().complete(endpoint, messages, tools)
-
-    root = tmp_path / "scenarios"
-    shutil.copytree(EXAMPLES, root)
-    path = root / "user_problem/flow.yaml"
-    flow = yaml.safe_load(path.read_text())
-    flow["steps"]["validate"]["max_repairs"] = 0
-    path.write_text(yaml.safe_dump(flow, sort_keys=False))
-    fake = FocusedClient()
-    app = app_for(tmp_path, compiler, fake, root)
-    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 5)
-    assert len(fake.reviewed) == 4
-    sample = app.state.dataset["samples"][0]
-    assert sample["metadata"]["validation_level"] == -1
-    report = sample["metadata"]["evaluations"][-1]["report"]
-    assert not report["valid"]
-    assert report["feedback"] == ["[correctness] Schedule is not unique"]
-    assert report["checks"]["layout"]["valid"]
-    assert not report["checks"]["correctness"]["valid"]
 
 
-async def test_focused_reviews_resume_without_repeating_completed_checks(
-    compiler, tmp_path
-):
-    fake = ScenarioClient()
-    fake.hold = "Validate ONLY reasoning quality"
-    app = app_for(tmp_path, compiler, fake)
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(fake.entered.wait(), 5)
-    draft_id = runner.status["draft_id"]
-    assert "report" in runner.snapshot["steps"]["validate.checks.layout"]
-    await runner.stop()
-    restored = create_app(tmp_path / "project.sqlite", client=fake)
-    fake.hold = None
-    restored_runner = restored.state.scenario_runner
-    restored_runner.resume_saved(draft_id)
-    await finish(restored_runner)
-    reviews = [
-        m[0]["content"] for m in fake.messages if m[0]["content"].startswith("Validate")
-    ]
-    assert sum(p.startswith("Validate ONLY message framing") for p in reviews) == 1
-    assert sum(p.startswith("Validate ONLY tool use") for p in reviews) == 1
-    assert sum(p.startswith("Validate ONLY reasoning quality") for p in reviews) == 2
-    assert sum(p.startswith("Validate ONLY factual correctness") for p in reviews) == 1
+
 
 
 @pytest.mark.parametrize(
@@ -1091,27 +914,6 @@ def test_focused_check_definitions_are_validated(tmp_path, checks):
         ScenarioRegistry(root)
 
 
-async def test_single_prompt_validation_remains_supported(compiler, tmp_path):
-    root = write_scenario(
-        tmp_path,
-        {
-            "steps": {
-                "review": {
-                    "uses": "remix.validate",
-                    "prompt": "review.md",
-                    "endpoint": "validator",
-                }
-            }
-        },
-        {"review.md": "Validate this trajectory."},
-    )
-    fake = ScenarioClient()
-    app = app_for(tmp_path, compiler, fake, root)
-    runner = app.state.scenario_runner
-    runner.start("custom")
-    await finish(runner)
-    report = app.state.dataset["samples"][0]["metadata"]["evaluations"][0]["report"]
-    assert report == {"valid": True, "feedback": []}
 
 
 @pytest.mark.parametrize(
@@ -1183,110 +985,22 @@ def test_chat_delivery_requires_a_successful_visible_reply(
         ]
         plan = compiler.compile(sample)
     runner = app_for(tmp_path, compiler, ScenarioClient()).state.scenario_runner
-    report = runner.chat_delivery_report(sample, plan)
+    from trajectory_remix.validation import ValidationRunner
+    report = ValidationRunner.chat_delivery_report(sample, plan)
     assert report["valid"] == (kind == "success")
     if kind == "direct":
         assert any("directly into chat" in finding for finding in report["feedback"])
 
 
-async def test_missing_chat_delivery_overrides_a_positive_model_verdict(
-    compiler, tmp_path
-):
-    root = write_scenario(
-        tmp_path,
-        {
-            "steps": {
-                "user": {"uses": "remix.message", "inputs": {"text": "Hello"}},
-                "draft": {
-                    "uses": "remix.draft",
-                    "needs": ["user"],
-                    "inputs": {"reasoning": "I should greet the user."},
-                },
-                "review": {
-                    "uses": "remix.validate",
-                    "needs": ["draft"],
-                    "prompt": "review.md",
-                    "endpoint": "validator",
-                    "inputs": {"require_chat_delivery": True},
-                },
-            }
-        },
-        {"review.md": "Validate the trajectory."},
-    )
-    app = app_for(tmp_path, compiler, ScenarioClient(), root)
-    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner = app.state.scenario_runner
-    runner.start("custom")
-    await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == "rejected"
-    sample = app.state.dataset["samples"][0]
-    assert sample["metadata"]["validation_level"] == -1
-    report = sample["metadata"]["evaluations"][-1]["report"]
-    assert not report["valid"]
-    assert not report["delivery"]["valid"]
-    assert any("[delivery]" in finding for finding in report["feedback"])
 
 
-async def test_repair_cannot_replace_chat_delivery_with_direct_generation(
-    compiler, tmp_path
-):
-    import shutil
-
-    class BadRepairClient(ScenarioClient):
-        repaired = False
-
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Repair ONLY"):
-                data = json.loads(
-                    messages[1]["content"].split("\nOutput JSON schema:")[0]
-                )
-                replay = copy.deepcopy(data["trajectory"]["replay"])
-                for events in list(replay.values()):
-                    for index, event in enumerate(events):
-                        if event["op"] == "tool-call" and event["tool"] == "chat":
-                            replay["0"].append(
-                                {
-                                    "op": "open",
-                                    "window": event["window"],
-                                    "window-type": "tool",
-                                }
-                            )
-                            events[index] = {
-                                "op": "generate",
-                                "window": "chat",
-                                "content": "Kidra: Hello!",
-                            }
-                self.repaired = True
-                return {"content": json.dumps({"replay": replay})}
-            self.valid = self.repaired
-            return await super().complete(endpoint, messages, tools)
-
-    root = tmp_path / "scenarios"
-    shutil.copytree(EXAMPLES, root)
-    path = root / "user_problem/flow.yaml"
-    flow = yaml.safe_load(path.read_text())
-    flow["steps"]["validate"]["max_repairs"] = 1
-    path.write_text(yaml.safe_dump(flow, sort_keys=False))
-    app = app_for(tmp_path, compiler, BadRepairClient(), root)
-    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == "rejected"
-    sample = app.state.dataset["samples"][0]
-    evaluations = sample["metadata"]["evaluations"]
-    assert evaluations[0]["report"]["delivery"]["valid"]
-    report = evaluations[-1]["report"]
-    assert all(check["valid"] for check in report["checks"].values())
-    assert not report["valid"] and not report["delivery"]["valid"]
-    assert any("directly into chat" in finding for finding in report["feedback"])
 
 
 async def test_resuming_older_attempt_keeps_cumulative_counts_and_its_own_metrics(
     compiler, tmp_path
 ):
     fake = ScenarioClient()
-    fake.hold = "Validate ONLY reasoning quality"
+    fake.hold = "Write Kidra's next response"
     app = app_for(tmp_path, compiler, fake)
     runner = app.state.scenario_runner
     runner.start("user_problem")
@@ -1313,322 +1027,18 @@ async def test_resuming_older_attempt_keeps_cumulative_counts_and_its_own_metric
     assert resumed.status["model_requests"] > old_requests
 
 
-@pytest.mark.parametrize("frontier_passes", [True, False])
-async def test_accepted_counts_completed_samples_once_not_validation_stages(
-    compiler, tmp_path, frontier_passes
-):
-    import shutil
-
-    class FrontierClient(ScenarioClient):
-        async def complete(self, endpoint, messages, tools=None):
-            if (
-                messages[0]["content"].startswith("Validate")
-                and json.loads(messages[1]["content"]).get("frontier") is True
-            ):
-                self.entered.set()
-                await self.release.wait()
-                return {
-                    "content": json.dumps(
-                        {
-                            "valid": frontier_passes,
-                            "feedback": [] if frontier_passes else ["Incorrect"],
-                        }
-                    )
-                }
-            return await super().complete(endpoint, messages, tools)
-
-    root = tmp_path / "scenarios"
-    shutil.copytree(EXAMPLES, root)
-    path = root / "user_problem/flow.yaml"
-    flow = yaml.safe_load(path.read_text())
-    frontier = copy.deepcopy(flow["steps"]["validate"])
-    frontier.update(needs=["validate"], level=2, max_repairs=0)
-    frontier["inputs"]["frontier"] = True
-    flow["steps"]["frontier"] = frontier
-    path.write_text(yaml.safe_dump(flow, sort_keys=False))
-    fake = FrontierClient()
-    app = app_for(tmp_path, compiler, fake, root)
-    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(fake.entered.wait(), 5)
-    assert runner.status["accepted"] == 0
-    fake.release.set()
-    await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == ("complete" if frontier_passes else "rejected")
-    assert runner.status["accepted"] == int(frontier_passes)
 
 
-async def test_bundled_bounded_reviews_use_small_projected_prompts(compiler, tmp_path):
-    class BoundedClient(ScenarioClient):
-        reviews = 0
-
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Validate"):
-                self.reviews += 1
-                data = json.loads(messages[1]["content"])
-                assert "trajectory" not in data and "compiled" not in data
-                assert "events" in data and "boundary" in data
-                assert (
-                    sum(
-                        len(compiler.tokenizer.encode(m["content"]).ids)
-                        for m in messages
-                    )
-                    + 128
-                    <= 6000
-                )
-                assert "evaluations" not in data
-            return await super().complete(endpoint, messages, tools)
-
-    fake = BoundedClient()
-    runner = app_for(
-        tmp_path, compiler, fake, legacy_reviews=False
-    ).state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 15)
-    assert runner.status["phase"] == "complete", list(runner.logs)
-    assert fake.reviews >= 4
-    report = runner.builder.sample["metadata"]["evaluations"][-1]["report"]
-    assert all(item["groups"] > 0 for item in report["checks"].values())
-    assert fake.reviews == sum(item["groups"] for item in report["checks"].values())
-    definitions = runner.scenario.flow.steps["validate"].checks
-    for name, category in report["checks"].items():
-        for group in category["rule_results"]:
-            assert set(group["checks"]) == set(definitions[name].rules)
-            assert all(item["status"] == "pass" for item in group["checks"].values())
 
 
-async def test_bounded_review_repairs_only_the_identified_text(compiler, tmp_path):
-    class EditClient(ScenarioClient):
-        repaired = False
-
-        async def complete(self, endpoint, messages, tools=None):
-            prompt = messages[0]["content"]
-            if prompt.startswith("Repair ONLY"):
-                data = json.loads(messages[1]["content"])
-                assert "trajectory" not in data and "authoring_guide" not in data
-                assert len(data["authoring_notes"]) < 1500
-                unit = next(
-                    u
-                    for u in data["review"]["events"]
-                    if u.get("data", {}).get("content")
-                    == "Adding two pairs yields four."
-                )
-                self.repaired = True
-                return {
-                    "content": json.dumps(
-                        {
-                            "edits": [
-                                {
-                                    "action": "replace_text",
-                                    "event_id": unit["event_id"],
-                                    "field": "/content",
-                                    "old": "Adding two pairs yields four.",
-                                    "new": "I should add the pairs and verify the total.",
-                                }
-                            ]
-                        }
-                    )
-                }
-            if prompt.startswith("Validate"):
-                data = json.loads(messages[1]["content"])
-                fail = (
-                    data["view"] == "reasoning"
-                    and not self.repaired
-                    and any(
-                        u.get("data", {}).get("content")
-                        == "Adding two pairs yields four."
-                        for u in data["events"]
-                    )
-                )
-                return {
-                    "content": json.dumps(
-                        review_output(messages, not fail, "Reasoning should be private working notes")
-                    )
-                }
-            return await super().complete(endpoint, messages, tools)
-
-    runner = app_for(
-        tmp_path, compiler, EditClient(), legacy_reviews=False
-    ).state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 15)
-    assert runner.status["phase"] == "complete", list(runner.logs)
-    assert "I should add the pairs" in json.dumps(runner.builder.sample["replay"])
-    assert [
-        call["tool"] for call in compiler.compile(runner.builder.sample)["tool_calls"]
-    ] == ["chat"]
 
 
-@pytest.mark.parametrize("stale_group", [None, "missing", "different"])
-async def test_bounded_scan_reuses_only_matching_completed_groups(
-    compiler, tmp_path, stale_group
-):
-    class ScanClient(ScenarioClient):
-        scans = 0
-
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Validate"):
-                self.scans += 1
-                if self.scans == 2:
-                    self.entered.set()
-                    await self.release.wait()
-            return await super().complete(endpoint, messages, tools)
-
-    fake = ScanClient()
-    app = app_for(tmp_path, compiler, fake, legacy_reviews=False)
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(fake.entered.wait(), 10)
-    ident = runner.status["draft_id"]
-    first = copy.deepcopy(runner.snapshot["steps"]["validate.checks.layout.groups.0"])
-    assert first["report"]["valid"]
-    await runner.stop()
-    if stale_group:
-        cached = runner.snapshot["steps"]["validate.checks.layout.groups.0"]
-        if stale_group == "missing":
-            cached.pop("review_group_hash")
-        else:
-            cached["review_group_hash"] = "earlier group boundaries"
-        runner.persist()
-    restored = create_app(tmp_path / "project.sqlite", client=fake)
-    resumed = restored.state.scenario_runner
-    resumed.resume_saved(ident)
-    await asyncio.wait_for(resumed.job, 15)
-    assert resumed.status["phase"] == "complete", list(resumed.logs)
-    current = resumed.snapshot["steps"]["validate.checks.layout.groups.0"]
-    if not stale_group:
-        assert current["metrics"] == first["metrics"]
-    assert current["messages"] == first["messages"]
-    groups = sum(c["groups"] for c in resumed.builder.sample["metadata"]["evaluations"][-1]["report"]["checks"].values())
-    assert fake.scans == groups + 1 + bool(stale_group)  # Includes the cancelled call.
 
 
-async def test_review_context_request_retries_with_evidence(compiler, tmp_path):
-    class ContextClient(ScenarioClient):
-        requested = False
-        received = False
-
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Validate"):
-                data = json.loads(messages[1]["content"])
-                ids = {u["id"] for u in data["events"]}
-                older = [
-                    uid
-                    for values in data["boundary"]["history"].values()
-                    for uid in values
-                    if uid not in ids
-                ]
-                if older and not self.requested:
-                    self.requested = True
-                    self.requested_id = older[0]
-                    return {
-                        "content": json.dumps(
-                            review_output(messages, context_requests=[self.requested_id])
-                        )
-                    }
-                if self.requested and self.requested_id in ids:
-                    self.received = True
-            return await super().complete(endpoint, messages, tools)
-
-    fake = ContextClient()
-    runner = app_for(
-        tmp_path, compiler, fake, legacy_reviews=False
-    ).state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 15)
-    assert runner.status["phase"] == "complete", list(runner.logs)
-    assert fake.requested and fake.received
 
 
-async def test_oversized_review_pauses_before_contacting_model(compiler, tmp_path):
-    class Forbidden:
-        async def complete(self, *args, **kwargs):
-            pytest.fail("An over-budget review must not contact the provider")
-
-    root = write_scenario(
-        tmp_path,
-        {
-            "steps": {
-                "user": {"uses": "remix.message", "inputs": {"text": "Hi"}},
-                "draft": {
-                    "uses": "remix.draft",
-                    "needs": ["user"],
-                    "inputs": {"response": "Hello"},
-                },
-                "review": {
-                    "uses": "remix.validate",
-                    "endpoint": "validator",
-                    "needs": ["draft"],
-                    "checks": {
-                        "layout": {
-                            "prompt": "review.md",
-                            "view": "layout",
-                            "max_input_tokens": 512,
-                            "content_tokens": 64,
-                        },
-                    },
-                },
-            }
-        },
-        {"review.md": "Validate " + "very detailed instructions " * 100},
-    )
-    runner = app_for(
-        tmp_path, compiler, Forbidden(), root, legacy_reviews=False
-    ).state.scenario_runner
-    runner.state["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner.start("custom")
-    await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == "evaluation_failed"
-    assert runner.status["model_requests"] == 0
-    assert any("budget exceeded" in log["message"] for log in runner.logs)
 
 
-async def test_invalid_targeted_repair_is_not_published(compiler, tmp_path):
-    class InvalidRepair(ScenarioClient):
-        async def complete(self, endpoint, messages, tools=None):
-            prompt = messages[0]["content"]
-            if prompt.startswith("Repair ONLY"):
-                return {
-                    "content": json.dumps(
-                        {
-                            "edits": [
-                                {
-                                    "action": "append",
-                                    "tick": "0",
-                                    "event": {
-                                        "op": "generate",
-                                        "window": "missing",
-                                        "content": "x",
-                                    },
-                                }
-                            ]
-                        }
-                    )
-                }
-            if prompt.startswith("Validate"):
-                data = json.loads(messages[1]["content"])
-                valid = data["view"] != "reasoning"
-                return {
-                    "content": json.dumps(
-                        review_output(messages, valid, "Fix private notes")
-                    )
-                }
-            return await super().complete(endpoint, messages, tools)
-
-    app = app_for(tmp_path, compiler, InvalidRepair(), legacy_reviews=False)
-    app.state.dataset["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner = app.state.scenario_runner
-    runner.start("user_problem")
-    await asyncio.wait_for(runner.job, 15)
-    assert runner.status["phase"] == "rejected"
-    saved = app.state.dataset["samples"][0]
-    assert all(
-        event.get("window") != "missing"
-        for events in saved["replay"].values()
-        for event in events
-    )
-    compiler.compile(saved)
 
 
 def checklist_scenario(tmp_path, *, repairs=0):
@@ -1645,63 +1055,3 @@ def checklist_scenario(tmp_path, *, repairs=0):
         },
         "max_repairs": repairs, "repair_mode": "edits", "repair_prompt": "repair.md",
     }}}, {"review.md": "Validate this checklist.", "repair.md": "Repair ONLY the findings."})
-
-
-async def test_rule_failure_collects_all_categories_then_rechecks_every_rule(compiler, tmp_path):
-    class ChecklistClient:
-        reviews = 0
-        repaired = False
-
-        async def complete(self, endpoint, messages, tools=None):
-            if messages[0]["content"].startswith("Repair"):
-                assert self.reviews == 2  # No short circuit after the first failure.
-                data = json.loads(messages[1]["content"])
-                assert len(data["findings"]) == 1
-                assert "[grounding]" in data["findings"][0]
-                assert "specialists" not in data["findings"][0]
-                self.repaired = True
-                return {"content": '{"edits":[]}'}
-            self.reviews += 1
-            result = review_output(messages)
-            if "grounding" in result["checks"]:
-                result["checks"]["specialists"].update(
-                    status="not_applicable", evidence="No specialist calls in this group"
-                )
-                if not self.repaired:
-                    result["checks"]["grounding"].update(status="fail", feedback="Correct the unsupported claim.")
-            return {"content": json.dumps(result)}
-
-    client = ChecklistClient()
-    runner = app_for(tmp_path, compiler, client, checklist_scenario(tmp_path, repairs=1), legacy_reviews=False).state.scenario_runner
-    runner.start("custom")
-    await finish(runner)
-    assert client.reviews == 4  # Same candidate still requires a complete new review.
-    reports = [e["report"] for e in runner.builder.sample["metadata"]["evaluations"]]
-    assert [r["valid"] for r in reports] == [False, True]
-    assert len(reports[0]["feedback"]) == 1
-    assert reports[0]["checks"]["secondary"]["valid"]
-    assert runner.snapshot["flow"]["steps"]["review"]["checks"]["primary"]["rules"]["grounding"]["requirement"] == "Claims match observations."
-
-
-@pytest.mark.parametrize("failure", ["missing_item", "extra_item", "invalid_applicability", "missing_context_request"])
-async def test_malformed_rule_results_never_promote_a_sample(compiler, tmp_path, failure):
-    class MalformedClient:
-        async def complete(self, endpoint, messages, tools=None):
-            result = review_output(messages)
-            if failure == "missing_item":
-                result["checks"].pop("grounding")
-            elif failure == "extra_item":
-                result["checks"]["invented"] = result["checks"]["grounding"]
-            else:
-                result["checks"]["grounding"]["status"] = (
-                    "not_applicable" if failure == "invalid_applicability" else "needs_context"
-                )
-            return {"content": json.dumps(result)}
-
-    runner = app_for(tmp_path, compiler, MalformedClient(), checklist_scenario(tmp_path), legacy_reviews=False).state.scenario_runner
-    runner.state["config"].setdefault("single_generation", {})["max_attempts"] = 1
-    runner.start("custom")
-    await asyncio.wait_for(runner.job, 5)
-    assert runner.status["phase"] == "evaluation_failed"
-    assert not runner.builder.sample["metadata"].get("evaluations")
-    assert runner.status["accepted"] == 0

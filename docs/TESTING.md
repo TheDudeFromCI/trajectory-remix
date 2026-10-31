@@ -4,18 +4,70 @@
   exercise official-client MCP protocol tests and the stdio bridge; MCP tests
   are skipped when the optional SDK is absent. Authoring tests cover atomic
   edits, revision conflicts, patches, metadata, diagnostics and timeline inspection.
-- Scenario checklist tests cover exact rule coverage, typed statuses, evidence,
-  applicability, code-derived acceptance/findings, missing-context handling,
-  bounded cross-view evidence requests, saved group reuse, and complete reviews
-  after targeted repair. Legacy single-prompt/string/object checks remain covered.
-- Repair recovery regressions cover malformed JSON/schema, review-wrapper edits,
-  invalid source pointers, edit conflicts, compilation failures, atomic retention,
-  bounded retry exhaustion, full-replay repairs, and repair budgets across provider
-  interruption/resume. Review regressions cover malformed/unknown/repeated context
-  requests, exhausted rounds, narrowing over-budget evidence requests, and batch
-  pause/resume with Pending rather than rejected drafts. Lifecycle checks verify
-  tool evidence survives reasoning and retained reasoning survives chat delivery;
-  the dashboard test resumes evaluation failures without starting a fresh sample.
+- Standalone validation tests cover the shared user/idle/manual checklist, typed
+  statuses and evidence, complete rule coverage, malformed responses, bounded
+  missing-context requests, input budgets, cancellation/restart, completed-group
+  reuse, stale-source/requirements rejection and immutable creation metrics.
+  UI and MCP semantic validation use the same service; read-only reviews never
+  alter samples, and recorded reviews never grant Ready approval.
+- Dataset-wide resume tests cover generated-only selection, manual copies and
+  checkpoint ownership, bounded per-entry attempts, reuse of completed requests,
+  no replacement samples or original batch-quota filling, independent failures,
+  edit conflicts, missing/corrupt checkpoints, queue changes, pause/cancel/restart,
+  unfiltered API selection, paginated results and toolbar progress/locking.
+  Frontend checks cover distinct setup/running/paused/completed views, hidden
+  creation controls during resumption, relevant actions, separate overall and
+  per-draft progress, grouped errors and optional inference details.
+- Task-switch regressions cover paused creation batches, dataset resume passes,
+  selected recovery jobs, immediate pauses before the worker starts, active-call
+  rejection, durable checkpoints after process restart, original quota retention,
+  completed-request reuse and independent single/batch counts. Frontend checks
+  verify relevant task choices, switching in both directions, explicit Start,
+  continuing the same paused resume pass and count stability across polling.
+- Generation search tests cover unfinished/complete independently of review state,
+  exact resume-queue selection, missing/corrupt checkpoints and manual-copy
+  exclusion, metadata changes, SQL/authoring-draft parity, negation, grouping,
+  case handling, invalid values, filtering before pagination without loading
+  replay sources, and shared dashboard/MCP results.
+- Recovery-action regressions cover force-resume edit/fingerprint overrides,
+  compiler/ownership checks, exact restart prompts and conditions, fresh jobs with
+  stable sample identity, missing-checkpoint fallback, source-hash conflicts,
+  archive inspection through HTTP/MCP, approval invalidation, deletion/Undo,
+  failed retries, cancellation before/during inference and process restart.
+  DOM checks verify action availability, busy states, confirmations, payloads,
+  return-to-results navigation and resolved issue counts.
+- Generation-log regressions cover append-only database retention, older-sample
+  restoration, dataset-wide resume, force/restart recovery, pause and process
+  restart, diagnostics written before checkpoint persistence, one-time union of
+  overlapping legacy logs, repeated identical entries, corrupt checkpoints,
+  explicit clear without later resurrection, and complete server-side exports
+  with a fixed upper sequence while generation continues. Frontend copy/export
+  checks include database entries newer than the browser's last refresh.
+- Creation tests verify Pending drafts, canonical defaults and legacy name aliases,
+  generator-only configuration, retired task API errors, preservation of original
+  review snapshots and custom guidance, provider retry budgets and recovery.
+  Imported automatic-validation flags and legacy flow validation steps cannot
+  invoke semantic review or repair during creation.
+- Structured-output regressions inspect real SDK and Pydantic AI wire requests:
+  native JSON schema and explicit prompt-only compatibility, unchanged schemas
+  including optional/open tool arguments, plain-text exclusions, both completion
+  limit parameter names, model-tokenizer preflight including schema overhead,
+  provider usage/reasoning metrics, retained invalid responses, and one-shot
+  schema rejection that pauses and resumes without repeating completed work.
+  Injected HTTP clients receive the same format. Frontend checks cover the
+  endpoint selector and saving its compatibility setting. Mock servers establish
+  the request/retention contract, not enforcement by an untested local model.
+- Native-schema compatibility tests cover uniqueness enforced against the
+  authoritative original schema while omitted from the decoding contract,
+  nested/reference/tuple schemas, preservation of literal data/property names,
+  transparent provenance and request logs, original-schema duplicate rejection
+  with raw proposals retained, tokenizer budgets and both streaming transports,
+  and end-to-end standard idle/review requests against a limited mock backend.
+  Conditional compatibility additionally covers if/then/else as one rule,
+  empty-wrapper cleanup, original-schema rejection of both invalid branches,
+  preservation of keyword-named data, negative/exclusive/reference/containment
+  contexts that must not exclude valid original values, and retention before
+  tool side effects. Idle/review wire tests reject conditional keywords too.
 - MCP scenario reviews cover scenario-tag and legacy-metadata resolution,
   preservation of randomized tags, portable checklist snapshots, exact results
   schemas, incomplete/stale review rejection, atomic dry-run/undoable repairs,
@@ -30,11 +82,19 @@
   restrictions without weakening dashboard token checks. A real network test uses
   the official SDK, verifies HTTP and stdio share edits, and holds GET/SSE open
   while POST remains operational. The dashboard also works without the MCP extra.
+- Idle-scenario regressions exercise autonomous project work without a user or
+  chat window, quiet and blocked endings, real alarm results, concurrent private
+  analyses/tools, observation-dependent writes and TODO completion, generated
+  window release, persistent automatic notes, budget rejection, iteration limits,
+  cancellation/restart, failed-proposal retention, API-free external repair and
+  Ready-gated export. `python scripts/demo_idle_scenario.py` runs the real flow
+  with scripted offline content; it does not benchmark or approve a real model.
 - DOM integration checks run with `python tests/run_frontend.py` after
   installing the optional `tests/package.json` dependencies. They execute the
   dashboard JavaScript against a temporary local backend and exercise sample
   loading, playback controls, event and JSON editing, marker diagnostics and
-  task/endpoint/condition/automatic configuration surfaces, external MCP edits,
+  scenario/endpoint/condition/default configuration surfaces and the independent
+  Validate Trajectory dialog, external MCP edits,
   and protection of pending browser edits during conflicts.
   Large-preview checks compile over 50,000 rows from little source text, seek
   forward/backward without fetching a row prefix, cross streamed-output and
@@ -114,7 +174,8 @@
   SQL/draft parity, invalid boolean values, grouping/negation, filtering before
   pagination, lazy cache reuse, source/tool invalidation, reopening, and dashboard/MCP
   agreement through edits and undo/redo without changing pinned dependencies.
-- A Python wheel builds successfully and contains all dashboard assets.
+- Package checks build a Python wheel and verify dashboard assets, bundled standard
+  flows and shared review templates load outside the source checkout.
 
 LLM integrations are tested against deterministic fake completions and an
 HTTPX mocked OpenAI-compatible transport. No live provider credentials were
@@ -126,3 +187,25 @@ Re-run the tests when changing compiler visibility, stream timing, tokenization,
 window closure, tool capabilities or generation task assembly. The reactive
 fixture keeps the tool window open until the final response has consumed its
 result, then emits EOS to release it.
+
+- Optional-tokenizer regressions verify omitted/blank settings, missing files,
+  dependencies and chat templates; unbudgeted creation and validation; provider
+  usage/reasoning accounting; native streaming and cancellation; labeled estimates;
+  and preserved enforcement when a matching tokenizer is available.
+- Content-first regressions cover exact inference chat-template budgets (install
+  `.[inference,test,mcp]` for the real tokenizer integration), both OpenAI completion
+  limit parameters on the streaming wire, reasoning usage, concurrent content
+  requests and windows, tool requests/results and delayed observations, causal
+  visibility and loss masks, BOS/EOS/NOOP, trajectories beyond individual request
+  limits, invalid output/construction retention, cancellation/resume, archived
+  generation evidence, original-checklist MCP repair, export approval, and
+  legacy checkpoint/scenario parsing compatibility. Historical performance reports
+  remain in `docs/content-first-benchmark.*` and `experiments/`; the retired
+  comparison generator is not shipped with the current workflow.
+
+- User-scenario regressions verify preserved domains/difficulty/roles and weights,
+  manual inputs and shared tags, portable original checklists, four calls for a
+  one-exchange sample, multi-turn continuation, parallel planning/tool requests,
+  no validator endpoint or semantic calls, archived review provenance, safe
+  family-tag resolution and tool-schema constraints. Retired flow definitions
+  live only under test fixtures to exercise old saved datasets/checkpoints.

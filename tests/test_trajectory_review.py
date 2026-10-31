@@ -28,7 +28,7 @@ def results_for(checklist):
         rid: {'evidence': 'replay[0][0]: inspected source and relevant dependencies',
               'status': 'pass', 'feedback': ''}
         for rid in check['rules']
-    }} for name, check in checklist['checks'].items()}
+    }} if check['rules'] else {'valid': True, 'feedback': []} for name, check in checklist['checks'].items()}
 
 
 async def submit(studio, prepared, results=None, **overrides):
@@ -183,7 +183,8 @@ async def test_legacy_metadata_fallback_unknown_and_conflicting_scenarios(studio
         'scenario': None, 'tags': ['unknown'],
     }})
     response = await studio[1].post('/api/mcp/call', json={'name': 'review_trajectory', 'arguments': {'sample_id': 'test'}})
-    assert response.json()['code'] == 'scenario_not_found'
+    assert response.status_code == 200
+    assert response.json()['checklist']['scenario'] == 'manual'
 
 
 async def test_generated_tags_keep_all_randomized_dimensions_and_snapshot(compiler, tmp_path):

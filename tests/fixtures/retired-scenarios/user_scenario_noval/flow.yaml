@@ -1,0 +1,141 @@
+extends: user_problem
+generation_mode: content-first
+description: The user_scenario inputs and review contract, with streamlined content
+  creation and no local validation.
+steps:
+  idea:
+    inherit: true
+    uses: llm.content
+    retries: 0
+  environment:
+    uses: remix.setup
+    needs:
+    - idea
+    inputs:
+      idea: ${steps.idea.output}
+  conversation:
+    uses: flow.repeat
+    needs:
+    - environment
+    max_iterations: 4
+    until: ${steps.reply.output.resolved}
+    history:
+      user: ${steps.user.output.text}
+      response: ${steps.reply.output.response}
+      assessment:
+        resolved: ${steps.reply.output.resolved}
+        next_exchange: ${steps.reply.output.next_exchange}
+    inputs:
+      idea: ${steps.idea.output}
+    steps:
+      user:
+        uses: llm.content
+        prompt: user.md
+        profile: user
+        output_schema: Message
+        inputs:
+          situation: ${inputs.idea.situation}
+          problem: ${inputs.idea.problem}
+          history: ${iteration.history}
+          round: ${iteration.index}
+          files: ${inputs.idea.files}
+      message:
+        uses: remix.message
+        needs:
+        - user
+        inputs:
+          text: ${steps.user.output.text}
+      decisions:
+        uses: llm.content
+        needs:
+        - message
+        prompt: decisions.md
+        profile: kidra
+        output_schema: ContentPlan
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          tools: ${tool_contracts}
+      planning:
+        uses: remix.assemble
+        needs:
+        - decisions
+        inputs:
+          streams:
+          - type: reasoning
+            content: ${steps.decisions.output.reasoning}
+          call_groups: ${steps.decisions.output.calls}
+      reply:
+        uses: llm.content
+        needs:
+        - planning
+        prompt: reply.md
+        profile: kidra
+        output_schema: ContentReply
+        inputs:
+          request: ${steps.user.output.text}
+          history: ${iteration.history}
+          planning: ${steps.decisions.output.reasoning}
+          observations: ${steps.planning.output.results}
+      draft:
+        uses: remix.draft
+        needs:
+        - reply
+        inputs:
+          reasoning: ${steps.reply.output.reasoning}
+          response: ${steps.reply.output.response}
+          release_tool_context: true
+  validate:
+    inherit: true
+    inputs:
+      require_chat_delivery: true
+      idea: ${steps.idea.output}
+      tags: ${scenario.tags}
+      roles: ${roles}
+schemas:
+  ContentPlan:
+    type: object
+    properties:
+      calls:
+        type: array
+        maxItems: 8
+        items:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: object
+            properties:
+              tool:
+                type: string
+                minLength: 1
+              arguments:
+                type: object
+              outcome:
+                type: object
+            required:
+            - tool
+            - arguments
+            additionalProperties: false
+      reasoning: &id001
+        type: string
+        minLength: 1
+    required:
+    - calls
+    - reasoning
+    additionalProperties: false
+  ContentReply:
+    type: object
+    properties:
+      reasoning: *id001
+      response: *id001
+      resolved:
+        type: boolean
+      next_exchange:
+        type: string
+    required:
+    - reasoning
+    - response
+    - resolved
+    - next_exchange
+    additionalProperties: false

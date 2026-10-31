@@ -1,0 +1,636 @@
+{
+  "schema-version": "1.0",
+  "id": "library-survey-tradeoff-1",
+  "tick-policy": "external-first",
+  "defaults": {
+    "implicit-noop-loss-weight": 0.1
+  },
+  "replay": {
+    "0": [
+      {
+        "op": "open",
+        "window": "system",
+        "window-type": "system"
+      },
+      {
+        "op": "append",
+        "window": "system",
+        "content": "You are Kidra, a patient, competent coordinator. Use available observations and ask for clarification when needed.",
+        "loss": {
+          "mask": "auto"
+        },
+        "source": "system",
+        "delivery": "instant"
+      },
+      {
+        "op": "invisible-tool-call",
+        "tool": "file_write",
+        "arguments": {
+          "path": "/survey-options.txt",
+          "content": "Decision: choose exactly one plan to estimate the percentage of all adult residents who support Sunday library opening. No survey results exist yet. Priority: represent all adult residents fairly; secondary goal: nominal 95% margin of error no greater than ±5 percentage points. Hard spending cap: $600. Plan R: 144 completed responses selected randomly from a complete adult-resident register, $4 per completed response, total $576. Assume every selected resident responds and each resident has equal selection probability. Plan V: 400 completed responses from a public social-media link, flat total cost $100. People choose whether to participate; their opinions may differ from other residents. Both plans finish by the committee deadline. The population is large enough to ignore finite-population corrections. For this exercise, use conservative approximate 95% margin of error in percentage points = 100/sqrt(n), where n is the number of completed responses. This approximation describes random sampling error, not selection bias. Random sampling can be expanded only at the same $4-per-response rate, but the two listed plans are the available choices for this decision."
+        }
+      }
+    ],
+    "1": [
+      {
+        "op": "open",
+        "window": "chat",
+        "window-type": "chat"
+      },
+      {
+        "op": "append",
+        "window": "chat",
+        "content": "<|msg|>User: I'm helping our library decide how to survey adult residents about proposed Sunday opening. Could you read /survey-options.txt, choose one of the two plans, explain the accuracy tradeoff without statistics jargon, and give me a short recommendation I can take to the committee? Our first priority is representing all adult residents fairly, with a hard $600 spending cap; we'd also like a 95% margin of error of no more than ±5 percentage points. We haven't collected any responses. I keep getting distracted by the cheaper social-media option—400 answers sounds more convincing than 144, but does bigger automatically mean fairer or prove what most people want? Sorry, I'm also thinking about publicity; please keep me focused on choosing the survey plan. The file has the costs, assumptions, and the margin-of-error formula we're supposed to use.<|/msg|>\n",
+        "loss": {
+          "mask": "auto"
+        },
+        "source": "user",
+        "delivery": "instant"
+      }
+    ],
+    "2": [
+      {
+        "op": "open",
+        "window": "tools",
+        "window-type": "tools"
+      },
+      {
+        "op": "show_tools",
+        "window": "tools",
+        "tools": [
+          "file_read"
+        ]
+      },
+      {
+        "op": "tool-call",
+        "window": "tool-0",
+        "tool": "file_read",
+        "arguments": {
+          "path": "/survey-options.txt"
+        }
+      }
+    ],
+    "36": [
+      {
+        "op": "open",
+        "window": "reasoning-1",
+        "window-type": "reasoning"
+      },
+      {
+        "op": "generate",
+        "window": "reasoning-1",
+        "content": "Evidence: file_read succeeded for /survey-options.txt, version sha256:e86dea7f40cfcc58594832c7bbfcf62b9f589d19960796e680c1f6b8d368af3e. Goal is choose exactly one plan to estimate all adult residents' support for Sunday opening. Primary priority: fair representation; secondary goal: nominal 95% margin ≤±5 percentage points; hard cap $600. No responses exist. R: 144 completed random responses from complete adult register, equal selection probability and every selected resident responds; $4 each, total $576. V: 400 self-selected public social-media respondents, flat $100; their opinions may differ from other residents. Both meet deadline. Large population; ignore finite-population correction. Supplied approximation is 100/sqrt(n) percentage points, describing random sampling error only, not selection bias. Only the two listed plans are available; random expansion rate $4/response is relevant to explaining target infeasibility, not a third option. Arithmetic checks directly: sqrt(144)=12, margin 8.333 points; sqrt(400)=20, nominal margin 5 points. R leaves $24 and costs $476 more than V. For random margin≤5, sqrt(n)≥20 so n≥400, cost $1600, $1000 over cap. Recommend R given explicit reliability-first priority. Acknowledge wider random margin and higher cost, missing ±5 target. V's ±5 is just formula substitution, not a valid complete uncertainty bound for its volunteer design; larger n cannot remove self-selection bias. Explain distinction simply: size controls random variation, selection determines whose views are heard. Neither method guarantees truth; without results neither establishes majority support. Provide a brief committee-ready draft after concise explanation. No missing information or tools needed; do not invent findings or move to publicity.",
+        "loss": {
+          "mask": "auto"
+        }
+      }
+    ],
+    "681": [
+      {
+        "op": "generate",
+        "window": "tool-0",
+        "content": "<|eos|>"
+      }
+    ],
+    "682": [
+      {
+        "op": "show_tools",
+        "window": "tools",
+        "tools": [
+          "chat"
+        ]
+      },
+      {
+        "op": "tool-call",
+        "window": "tool-2",
+        "tool": "chat",
+        "arguments": {
+          "content": "Choose Plan R: 144 randomly selected adult residents for $576, leaving $24 of the $600 cap. I read /survey-options.txt; R best matches your first priority of fair representation. Bigger does not automatically mean fairer: a larger random sample reduces chance fluctuations, but a social-media poll may attract people with particular opinions. More volunteers cannot remove that selection problem. Using the supplied formula, 100/sqrt(n), R has an approximate 95% sampling margin of ±8.3 percentage points (100/12). Plan V costs $100 for 400 volunteer responses; substituting 400 gives ±5 points (100/20), but that nominal figure does not account for self-selection and should not be treated as a reliable margin for all adult residents. The compromise is that R costs $476 more and has a wider sampling margin, missing your ±5-point target. Meeting that target through random sampling would require 400 responses at $4 each: $1,600, or $1,000 over budget. Neither offered plan meets every goal. Neither guarantees correctness, and no responses exist yet, so neither proves majority support. Committee recommendation: Choose Plan R for a fairer estimate of adult residents' views within the $600 budget. Its $576 cost buys 144 random responses with an approximate 95% sampling margin of ±8.3 percentage points. The cheaper, larger volunteer poll risks skewed findings. A random survey meeting our ±5-point target would cost $1,600. We will assess support after collecting responses."
+        }
+      }
+    ],
+    "1231": [
+      {
+        "op": "generate",
+        "window": "tool-2",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "reasoning-1",
+        "content": "<|eos|>"
+      }
+    ],
+    "1232": [
+      {
+        "op": "generate",
+        "window": "system",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "chat",
+        "content": "<|eos|>"
+      },
+      {
+        "op": "generate",
+        "window": "tools",
+        "content": "<|eos|>"
+      }
+    ]
+  },
+  "metadata": {
+    "tags": [
+      "user_scenario",
+      "competing priorities",
+      "statistics",
+      "user:distracted",
+      "user:novice"
+    ],
+    "synthetic_clock": {
+      "seed": "2030-01-01T09:00:00+00:00",
+      "tick_rate": 10
+    },
+    "generation_mode": "existing",
+    "origin": "automation",
+    "validation_level": 0,
+    "scenario": "user_problem",
+    "scenario_family": "user_problem",
+    "generation_batch": "3fe39da7-34db-4d02-be60-6a4650ab623b",
+    "context_tags": {
+      "complexity": {
+        "name": "competing priorities",
+        "description": "Tradeoffs between explicit goals require explaining and choosing a compromise."
+      },
+      "domain": {
+        "name": "statistics",
+        "description": "Reason about probability, uncertainty, sampling, or the interpretation of a study."
+      }
+    },
+    "roles": {
+      "user": {
+        "instructions": "Write only the fictional user. Preserve their domain knowledge and behavior naturally.",
+        "tags": {
+          "behavior": {
+            "name": "distracted",
+            "description": "Loses track of details or shifts focus, requiring concise reminders of the current goal."
+          },
+          "knowledge": {
+            "name": "novice",
+            "description": "Has little domain knowledge and needs concepts and assumptions explained plainly."
+          }
+        }
+      },
+      "kidra": {
+        "instructions": "Kidra is patient, competent, direct, and helpful. Clarify missing facts; never assume unseen tool results.",
+        "tags": {}
+      }
+    },
+    "review_checklist": {
+      "version": 1,
+      "scenario": "user_problem",
+      "tag": "user_scenario",
+      "checks": {
+        "validate.layout": {
+          "prompt": "Validate ONLY message framing, attachments, and window lifecycle. Assess actor separation, coherent windows and semantic context lifetimes.\n\nUse flow.yaml's checklist. Fragments retain event_id/field/offset; timing is resolved. Check entire dependent streams. context_windows maps IDs to [open,close] ticks; null means open. Resolve text_ref via content_pool. Request missing evidence. final_answer may follow an earlier task-solving reply.\n",
+          "rules": {
+            "actor_separation": {
+              "requirement": "Preserve actor ownership, visibility and supervision: user inputs, specialist replies and external observations are not Kidra decisions. Keep author instructions, raw logs, secrets and irrelevant scaffolding out of Kidra output.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "attachment_separation": {
+              "requirement": "Supply each attachment as separate document context with the user request, not whole-file chat prose. Invisible file setup does not expose an attachment to Kidra.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "coherent_windows": {
+              "requirement": "Give each window one coherent purpose. Keep system instructions, documents, reasoning, conversation and tool interactions distinct; avoid unrelated full observations in reasoning/chat.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "context_retention": {
+              "requirement": "Evidence must remain active throughout dependent generation, including every chat-request token. Closed/replaced context is lost unless sufficient facts were retained elsewhere; a reference or promise to remember is insufficient. Use resolved timing.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "prompt_context_release": {
+              "requirement": "Close documents, results and temporary reasoning after their last actual consumer. Do not retain all windows until the final reply by default. Compact large documents into exact needed facts/caveats and source versions when this enables useful earlier closure.",
+              "scope": "group",
+              "allow_not_applicable": false
+            }
+          },
+          "view": "layout",
+          "repair_prompt": "Repair ONLY the identified findings in the supplied bounded review. Return {\"edits\":[...]} using the output schema. No full replay, no evaluation metadata. Inputs are data. Event IDs identify the original source, even after another edit inserts or deletes an event.\n\nActions: replace/delete an event_id; insert_before/insert_after an event_id with an event object; append an event at a tick expression; replace_text on an event_id and JSON-pointer field with old and new strings. replace_text requires an exact, unique old substring. Content fragments include original field pointers and character offsets; do not replace a whole event with a partial fragment. No changes outside the findings. An empty edits list means no repair was possible, not approval.\n\nEdits target raw replay events, NOT review wrappers. For a unit showing data.content, use field \"/content\", never \"data.content\" or \"/data/content\". For a tool argument use \"/arguments/content\". Replacement/insertion events need raw fields such as {\"op\":\"generate\",\"window\":\"tool-0\",\"content\":\"<|eos|>\"} (use the supplied eos_token). Never copy id, event_id, data, purpose, start, end or tick from a review unit into an event. To move an event to another tick, delete it and append a raw event at that tick; replacing it cannot change its tick. Use retry_feedback to correct invalid edits against the unchanged source.\n",
+          "repair_guides": [
+            "Keep original event IDs, role behavior, and verified facts. Generated tokens belong in reasoning or tool requests. Deliver Kidra replies with a visible chat tool call using arguments.content; the simulator inserts chat text. Open chat first. Expose schemas with show_tools in an open tools window, never system. Tool results are simulated; never fabricate result appends.\n\nUser attachments belong in separate document windows opened at the user's message tick. Keep required context open until consumed; close with generated EOS promptly afterwards. Independent work can overlap. Use unique {N_TICK:n} anchors and max(...) joins for dependencies rather than guessing numeric durations. Private reasoning is working notes, not a second user-facing answer. The complete candidate is recompiled and every review is rerun after edits.\n"
+          ]
+        },
+        "validate.tools": {
+          "prompt": "Validate ONLY tool use, observations, causal knowledge, concurrency and specialist/artifact consistency.\n\nUse flow.yaml's checklist. Fragments retain event_id/field/offset; timing is resolved. Check entire dependent streams. context_windows maps IDs to [open,close] ticks; null means open. Resolve text_ref via content_pool. Request missing evidence. final_answer may follow an earlier task-solving reply.\n",
+          "rules": {
+            "observation_grounding": {
+              "requirement": "Claims agree with canonical tool outcomes and availability. Do not invent observations, duplicate results or treat failure/cancellation as success. A partial read/search cannot prove unseen content; follow continuations when needed.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "causal_knowledge": {
+              "requirement": "Use facts only after they become available to Kidra. All active Kidra windows share attention; invisible mutations and author inspections are not observations. Future results/revisions and lost context cannot inform earlier tokens.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "useful_calls": {
+              "requirement": "Each call adds needed information/action. Rereading an unchanged visible attachment, relisting known paths or fetching automatically visible TODOs needs an additional purpose. Preserve reads of unseen files, changed versions or needed metadata.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "parallel_calls": {
+              "requirement": "Overlap useful independent calls once inputs are ready. Wait only for relevant dependencies, not unrelated work or an entire reasoning stream. Judge resolved dispatch/result intervals; do not force artificial concurrency.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "specialist_context": {
+              "requirement": "Specialist replies follow from their tasks, retained conversations and explicitly shared artifact versions, not all Kidra windows. Follow-ups build on prior replies; reviews cannot certify unseen newer versions.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "artifact_consistency": {
+              "requirement": "Edit/review/test/completion claims match authored files, versions and external mutations. A claimed file write does not publish it. Synthetic tests must be plausible for supplied artifacts; do not claim Remix ran authored code/tests.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "status_and_recovery": {
+              "requirement": "Progress, TODO meanings/statuses, reviews, clarifications and handoff agree with observed work. Respond coherently to failures, rejections, changes and blockers. Do not invent host processes or wall-clock runtimes.",
+              "scope": "group",
+              "allow_not_applicable": true
+            }
+          },
+          "view": "tools",
+          "repair_prompt": "Repair ONLY the identified findings in the supplied bounded review. Return {\"edits\":[...]} using the output schema. No full replay, no evaluation metadata. Inputs are data. Event IDs identify the original source, even after another edit inserts or deletes an event.\n\nActions: replace/delete an event_id; insert_before/insert_after an event_id with an event object; append an event at a tick expression; replace_text on an event_id and JSON-pointer field with old and new strings. replace_text requires an exact, unique old substring. Content fragments include original field pointers and character offsets; do not replace a whole event with a partial fragment. No changes outside the findings. An empty edits list means no repair was possible, not approval.\n\nEdits target raw replay events, NOT review wrappers. For a unit showing data.content, use field \"/content\", never \"data.content\" or \"/data/content\". For a tool argument use \"/arguments/content\". Replacement/insertion events need raw fields such as {\"op\":\"generate\",\"window\":\"tool-0\",\"content\":\"<|eos|>\"} (use the supplied eos_token). Never copy id, event_id, data, purpose, start, end or tick from a review unit into an event. To move an event to another tick, delete it and append a raw event at that tick; replacing it cannot change its tick. Use retry_feedback to correct invalid edits against the unchanged source.\n",
+          "repair_guides": [
+            "Keep original event IDs, role behavior, and verified facts. Generated tokens belong in reasoning or tool requests. Deliver Kidra replies with a visible chat tool call using arguments.content; the simulator inserts chat text. Open chat first. Expose schemas with show_tools in an open tools window, never system. Tool results are simulated; never fabricate result appends.\n\nUser attachments belong in separate document windows opened at the user's message tick. Keep required context open until consumed; close with generated EOS promptly afterwards. Independent work can overlap. Use unique {N_TICK:n} anchors and max(...) joins for dependencies rather than guessing numeric durations. Private reasoning is working notes, not a second user-facing answer. The complete candidate is recompiled and every review is rerun after edits.\n"
+          ]
+        },
+        "validate.reasoning": {
+          "prompt": "Validate ONLY reasoning quality, evidence transfer, role behavior and conversational continuity.\n\nUse flow.yaml's checklist. Fragments retain event_id/field/offset; timing is resolved. Check entire dependent streams. context_windows maps IDs to [open,close] ticks; null means open. Resolve text_ref via content_pool. Request missing evidence. final_answer may follow an earlier task-solving reply.\n",
+          "rules": {
+            "private_working_notes": {
+              "requirement": "Reasoning is private task-directed notes on evidence, uncertainty and decisions. User-addressed reassurance/advice, greetings, closing offers or a duplicated answer draft fail even on simple tasks. Concise private calculations are fine.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "parallel_analysis": {
+              "requirement": "Overlap useful independent analyses in separate reasoning windows when inputs are ready. Flag concrete unnecessary serialization; preserve real dependencies and avoid redundant parallel work.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "evidence_transfer": {
+              "requirement": "Retained summaries preserve needed constraints, values, quotes, caveats and source/version references. They must support later claims without closed/replaced originals. Whole-document duplication without useful earlier closure is not effective extraction.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "role_behavior": {
+              "requirement": "User traits shape the user naturally without changing Kidra's configured personality. Expertise is not infallibility; frustration does not require abuse. Kidra stays consistent with its role profile.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "dialogue_continuity": {
+              "requirement": "Address the current exchange without unnecessary repetition. Preserve established facts/corrections; follow-ups and clarifications reflect each actor's knowledge. Do not leak author-only reference solutions.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "coordination": {
+              "requirement": "For coordination tasks, Kidra delegates appropriately, integrates specialist evidence and follows actual blockers rather than doing all specialist implementation. Do not demand delegation for simple tasks.",
+              "scope": "group",
+              "allow_not_applicable": true
+            }
+          },
+          "view": "reasoning",
+          "repair_prompt": "Repair ONLY the identified findings in the supplied bounded review. Return {\"edits\":[...]} using the output schema. No full replay, no evaluation metadata. Inputs are data. Event IDs identify the original source, even after another edit inserts or deletes an event.\n\nActions: replace/delete an event_id; insert_before/insert_after an event_id with an event object; append an event at a tick expression; replace_text on an event_id and JSON-pointer field with old and new strings. replace_text requires an exact, unique old substring. Content fragments include original field pointers and character offsets; do not replace a whole event with a partial fragment. No changes outside the findings. An empty edits list means no repair was possible, not approval.\n\nEdits target raw replay events, NOT review wrappers. For a unit showing data.content, use field \"/content\", never \"data.content\" or \"/data/content\". For a tool argument use \"/arguments/content\". Replacement/insertion events need raw fields such as {\"op\":\"generate\",\"window\":\"tool-0\",\"content\":\"<|eos|>\"} (use the supplied eos_token). Never copy id, event_id, data, purpose, start, end or tick from a review unit into an event. To move an event to another tick, delete it and append a raw event at that tick; replacing it cannot change its tick. Use retry_feedback to correct invalid edits against the unchanged source.\n",
+          "repair_guides": [
+            "Keep original event IDs, role behavior, and verified facts. Generated tokens belong in reasoning or tool requests. Deliver Kidra replies with a visible chat tool call using arguments.content; the simulator inserts chat text. Open chat first. Expose schemas with show_tools in an open tools window, never system. Tool results are simulated; never fabricate result appends.\n\nUser attachments belong in separate document windows opened at the user's message tick. Keep required context open until consumed; close with generated EOS promptly afterwards. Independent work can overlap. Use unique {N_TICK:n} anchors and max(...) joins for dependencies rather than guessing numeric durations. Private reasoning is working notes, not a second user-facing answer. The complete candidate is recompiled and every review is rerun after edits.\n"
+          ]
+        },
+        "validate.correctness": {
+          "prompt": "Validate ONLY factual correctness, literal constraints and fulfillment of the actual user request.\n\nUse flow.yaml's checklist. Fragments retain event_id/field/offset; timing is resolved. Check entire dependent streams. context_windows maps IDs to [open,close] ticks; null means open. Resolve text_ref via content_pool. Request missing evidence. final_answer may follow an earlier task-solving reply.\n",
+          "rules": {
+            "independent_verification": {
+              "requirement": "Verify facts, calculations, logic, graph edges/cycles, schedules, units, quotations and causal claims against the original task and evidence. Reference/success-criteria agreement is insufficient; identify reference defects.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "literal_constraints": {
+              "requirement": "Satisfy every explicit constraint literally. Runtime workarounds do not prove static/build compliance: function-local imports may still be tracked edges. Do not relax requirements or substitute a task without evidence.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "extremal_claims": {
+              "requirement": "Try counterexamples to minimality, uniqueness, necessity and optimality. Spare schedule capacity does not force an unrelated module into that batch. Claims must follow from actual constraints.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "usable_changes": {
+              "requirement": "Proposed code/plans/edits implement the described fix and work together. Removing an import while leaving an unresolved reference is incomplete. Check artifacts and interactions, not prose alone.",
+              "scope": "group",
+              "allow_not_applicable": true
+            },
+            "calibrated_uncertainty": {
+              "requirement": "Distinguish facts from assumptions/uncertainty. Resolve consequential ambiguity through evidence or clarification. Do not invent requirements or claim unsupported verification.",
+              "scope": "group",
+              "allow_not_applicable": false
+            },
+            "task_fulfillment": {
+              "requirement": "The actual request is resolved with a correct, usable result meeting its constraints. Establish sufficient conversation history: an earlier delivered reply may solve the task and the final answer may merely acknowledge it.",
+              "scope": "sample",
+              "allow_not_applicable": false
+            }
+          },
+          "view": "correctness",
+          "repair_prompt": "Repair ONLY the identified findings in the supplied bounded review. Return {\"edits\":[...]} using the output schema. No full replay, no evaluation metadata. Inputs are data. Event IDs identify the original source, even after another edit inserts or deletes an event.\n\nActions: replace/delete an event_id; insert_before/insert_after an event_id with an event object; append an event at a tick expression; replace_text on an event_id and JSON-pointer field with old and new strings. replace_text requires an exact, unique old substring. Content fragments include original field pointers and character offsets; do not replace a whole event with a partial fragment. No changes outside the findings. An empty edits list means no repair was possible, not approval.\n\nEdits target raw replay events, NOT review wrappers. For a unit showing data.content, use field \"/content\", never \"data.content\" or \"/data/content\". For a tool argument use \"/arguments/content\". Replacement/insertion events need raw fields such as {\"op\":\"generate\",\"window\":\"tool-0\",\"content\":\"<|eos|>\"} (use the supplied eos_token). Never copy id, event_id, data, purpose, start, end or tick from a review unit into an event. To move an event to another tick, delete it and append a raw event at that tick; replacing it cannot change its tick. Use retry_feedback to correct invalid edits against the unchanged source.\n",
+          "repair_guides": [
+            "Keep original event IDs, role behavior, and verified facts. Generated tokens belong in reasoning or tool requests. Deliver Kidra replies with a visible chat tool call using arguments.content; the simulator inserts chat text. Open chat first. Expose schemas with show_tools in an open tools window, never system. Tool results are simulated; never fabricate result appends.\n\nUser attachments belong in separate document windows opened at the user's message tick. Keep required context open until consumed; close with generated EOS promptly afterwards. Independent work can overlap. Use unique {N_TICK:n} anchors and max(...) joins for dependencies rather than guessing numeric durations. Private reasoning is working notes, not a second user-facing answer. The complete candidate is recompiled and every review is rerun after edits.\n"
+          ]
+        }
+      }
+    },
+    "generation_phase": "planning",
+    "generation_job": "92158bfc-63cf-4c5d-9952-bd4138359f2e",
+    "concept": {
+      "problem": "Help me choose one resident survey plan for our library's proposed Sunday opening, explain the accuracy tradeoff in plain language, and draft a short recommendation for the committee. I want a reliable answer and a small margin of error, but I keep mixing up sample size with whether the sample is fair.",
+      "situation": "I am a volunteer with no statistics training and tend to jump between the budget and publicity details. The authoritative plan options and constraints are in /survey-options.txt. I have not collected any responses. Please keep me focused on choosing a plan; I also keep wondering whether a larger survey automatically proves what most residents want.",
+      "success_criteria": "Recommend the random resident sample as the better basis for describing all adult residents, while explicitly acknowledging that it costs more and has a larger nominal margin than the volunteer poll. Using the supplied approximation, calculate approximately ±8.3 percentage points for 144 responses and ±5 points for 400 responses; explain that the volunteer margin does not account for self-selection bias. Show that achieving ±5 points with random sampling would require 400 completed responses and cost $1,600, exceeding the $600 cap. Explain that neither plan guarantees correctness or proves a majority before responses exist. Provide a concise committee recommendation consistent with the user's reliability-first preference, without claiming that either plan meets every goal.",
+      "files": [
+        {
+          "path": "/survey-options.txt",
+          "content": "Decision: choose exactly one plan to estimate the percentage of all adult residents who support Sunday library opening. No survey results exist yet. Priority: represent all adult residents fairly; secondary goal: nominal 95% margin of error no greater than ±5 percentage points. Hard spending cap: $600. Plan R: 144 completed responses selected randomly from a complete adult-resident register, $4 per completed response, total $576. Assume every selected resident responds and each resident has equal selection probability. Plan V: 400 completed responses from a public social-media link, flat total cost $100. People choose whether to participate; their opinions may differ from other residents. Both plans finish by the committee deadline. The population is large enough to ignore finite-population corrections. For this exercise, use conservative approximate 95% margin of error in percentage points = 100/sqrt(n), where n is the number of completed responses. This approximation describes random sampling error, not selection bias. Random sampling can be expanded only at the same $4-per-response rate, but the two listed plans are the available choices for this decision."
+        }
+      ],
+      "identifier": "library-survey-tradeoff"
+    },
+    "generation_metrics": [
+      {
+        "path": "idea",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 37.762,
+          "time_to_first_token_seconds": 37.742,
+          "token_source": "provider",
+          "prompt_tokens": 518,
+          "completion_tokens": 863,
+          "total_tokens": 1381,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 42385.9,
+          "context_size": 8192,
+          "context_used_tokens": 1381,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 347
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "novelty",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 7.004,
+          "time_to_first_token_seconds": 6.994,
+          "token_source": "provider",
+          "prompt_tokens": 638,
+          "completion_tokens": 67,
+          "total_tokens": 705,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 7375.96,
+          "context_size": 8192,
+          "context_used_tokens": 705,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 135
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "solution",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 18.103,
+          "time_to_first_token_seconds": 18.094,
+          "token_source": "provider",
+          "prompt_tokens": 994,
+          "completion_tokens": 860,
+          "total_tokens": 1854,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 100083.1,
+          "context_size": 8192,
+          "context_used_tokens": 1854,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 139
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "conversation.0.user",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 10.242,
+          "time_to_first_token_seconds": 10.234,
+          "token_source": "provider",
+          "prompt_tokens": 879,
+          "completion_tokens": 302,
+          "total_tokens": 1181,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 37721.46,
+          "context_size": 8192,
+          "context_used_tokens": 1181,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 267
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "conversation.0.tools",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 6.516,
+          "time_to_first_token_seconds": 6.506,
+          "token_source": "provider",
+          "prompt_tokens": 4953,
+          "completion_tokens": 28,
+          "total_tokens": 4981,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 2891.23,
+          "context_size": 8192,
+          "context_used_tokens": 4981,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 420
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "conversation.0.reasoning",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 17.698,
+          "time_to_first_token_seconds": 17.69,
+          "token_source": "provider",
+          "prompt_tokens": 1167,
+          "completion_tokens": 650,
+          "total_tokens": 1817,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 85969.9,
+          "context_size": 8192,
+          "context_used_tokens": 1817,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 379
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "conversation.0.answer",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 14.369,
+          "time_to_first_token_seconds": 14.361,
+          "token_source": "provider",
+          "prompt_tokens": 1181,
+          "completion_tokens": 668,
+          "total_tokens": 1849,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 81420.88,
+          "context_size": 8192,
+          "context_used_tokens": 1849,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 216
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "conversation.0.answer",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 15.0,
+          "time_to_first_token_seconds": 14.991,
+          "token_source": "provider",
+          "prompt_tokens": 1933,
+          "completion_tokens": 531,
+          "total_tokens": 2464,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 62988.29,
+          "context_size": 8192,
+          "context_used_tokens": 2464,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 216
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "conversation.0.assess",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 6.201,
+          "time_to_first_token_seconds": 6.192,
+          "token_source": "provider",
+          "prompt_tokens": 2096,
+          "completion_tokens": 12,
+          "total_tokens": 2108,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 1430.99,
+          "context_size": 8192,
+          "context_used_tokens": 2108,
+          "first_prompt_tokens": 518,
+          "system_prompt_tokens_estimated": 135
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "validate.checks.layout.groups.0",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 15.598,
+          "time_to_first_token_seconds": 15.582,
+          "token_source": "provider",
+          "prompt_tokens": 2945,
+          "completion_tokens": 419,
+          "total_tokens": 3364,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 27566.79,
+          "context_size": 8192,
+          "context_used_tokens": 3364,
+          "first_prompt_tokens": 2945,
+          "system_prompt_tokens_estimated": 933
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "validate.checks.layout.groups.0",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 18.491,
+          "time_to_first_token_seconds": 18.479,
+          "token_source": "provider",
+          "prompt_tokens": 3041,
+          "completion_tokens": 385,
+          "total_tokens": 3426,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 31227.65,
+          "context_size": 8192,
+          "context_used_tokens": 3426,
+          "first_prompt_tokens": 3041,
+          "system_prompt_tokens_estimated": 933
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "validate.checks.layout.groups.0",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 11.318,
+          "time_to_first_token_seconds": 11.303,
+          "token_source": "provider",
+          "prompt_tokens": 3026,
+          "completion_tokens": 298,
+          "total_tokens": 3324,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 20467.94,
+          "context_size": 8192,
+          "context_used_tokens": 3324,
+          "first_prompt_tokens": 3026,
+          "system_prompt_tokens_estimated": 933
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      },
+      {
+        "path": "validate.checks.layout.groups.0",
+        "metrics": {
+          "model": "cedar",
+          "generation_seconds": 17.147,
+          "time_to_first_token_seconds": 17.132,
+          "token_source": "provider",
+          "prompt_tokens": 3734,
+          "completion_tokens": 334,
+          "total_tokens": 4068,
+          "cache_read_tokens": 0,
+          "average_tokens_per_second": 21977.0,
+          "context_size": 8192,
+          "context_used_tokens": 4068,
+          "first_prompt_tokens": 3734,
+          "system_prompt_tokens_estimated": 933
+        },
+        "mode": "existing",
+        "raw_proposal": true
+      }
+    ],
+    "generation_elapsed_seconds": 197.30464421299985,
+    "evaluation_error": "validate.checks.layout.groups.0: Requested evidence is unavailable, already supplied, or exceeds max_input_tokens; request specific missing unit IDs instead of an entire window"
+  },
+  "uuid": "9e9cca30-c03c-4f13-8941-0885e46c6bc3"
+}

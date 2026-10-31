@@ -530,12 +530,12 @@ async def test_preview_and_history_limits(studio):
 async def test_semantic_validation_is_opt_in(studio, monkeypatch):
     calls = []
 
-    async def validators(self, sample):
-        calls.append(sample["id"])
+    async def validators(self, sample_id, **kwargs):
+        calls.append(sample_id)
         return {"valid": False, "reports": [{"feedback": ["semantic failure"]}]}
 
     monkeypatch.setattr(
-        "trajectory_remix.authoring.SampleBuilder.validators", validators
+        "trajectory_remix.validation.ValidationRunner.validate", validators
     )
     assert (await call(studio, "validate_trajectory", sample_id="test"))["valid"]
     assert calls == []

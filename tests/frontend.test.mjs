@@ -352,6 +352,22 @@ await click("edit-menu-button");
 await click("generation-menu-button");
 await click("settings-button");
 assert($("settings-dialog").hasAttribute("open"));
+await w.document.querySelector('[data-config="endpoints"]').onclick();
+assert.match($("config-content").textContent, /tokenizer directory \(optional\)/);
+assert.match($("config-content").textContent, /Leave its directory blank to skip checks/);
+const outputMode = w.document.querySelector('[data-config-path="endpoints.0.structured_output"]');
+assert.equal(outputMode.value, "native");
+assert.deepEqual([...outputMode.options].map(o => o.value), ["native", "prompted"]);
+assert.match($("config-content").textContent, /Unsupported native requests pause generation/);
+outputMode.value = "prompted";
+outputMode.dispatchEvent(new w.Event("change", {bubbles: true}));
+assert.equal($("save-config").disabled, false);
+await click("save-config");
+assert.equal(w.document.querySelector('[data-config-path="endpoints.0.structured_output"]').value, "prompted");
+const optionalTokenizer = w.document.querySelector('[data-config-path="endpoints.0.inference_tokenizer"]');
+optionalTokenizer.value = "";
+optionalTokenizer.dispatchEvent(new w.Event("input", {bubbles: true}));
+assert.equal($("save-config").disabled, false);
 await click("close-settings");
 await click("edit-menu-button");
 await click("generation-menu-button");
@@ -362,8 +378,9 @@ assert($("settings-dialog").hasAttribute("open"));
 assert.equal(w.document.querySelector('[data-config="tasks"]'), null);
 assert.equal(w.document.querySelector('[data-config="conditions"]'), null);
 assert.match($("settings-dialog").textContent, /Generation Settings/);
-await w.document.querySelector('[data-config="automatic"]').onclick();
-assert.match($("config-content").textContent, /Consecutive failure limit/);
+await w.document.querySelector('[data-config="defaults"]').onclick();
+assert.match($("config-content").textContent, /Request context budget/);
+assert.doesNotMatch($("config-content").textContent, /Validate with LLM|Regenerations per attempt|Failure behavior/);
 await click("save-config");
 await click("close-settings");
 assert.equal($("file-save"), null);
@@ -871,6 +888,9 @@ assert.equal($("sample-list").children.length, 1);
 const searchGuide = await fetch(base + "/search-guide");
 assert.equal(searchGuide.status, 200);
 assert((await searchGuide.text()).includes("@uses_tool"));
+const generationSearchGuide = await fetch(base + "/search-guide");
+assert((await generationSearchGuide.text()).includes("@generation:unfinished"));
+assert($("search-help").textContent.includes("@generation:unfinished"));
 assert($("search-help").querySelector('a[href="/search-guide"]'));
 $("sample-search").value = "python |";
 $("sample-search").oninput();
@@ -1018,7 +1038,10 @@ assert.equal($("generation-count").value, "10");
 await click("generate-one");
 assert.equal($("generation-count").value, "1");
 assert.equal($("generation-panel").hidden, false);
-assert.equal($("scenario-type").value, "user_problem");
+assert.equal($("scenario-type").value, "user_scenario");
+assert.equal($("generation-setup").hidden, false);
+assert.equal($("generation-work").hidden, true);
+assert.equal($("resume-issues-panel").hidden, true);
 assert.equal($("scenario-start"), null);
 assert.equal($("export-button"), null);
 assert.equal($("pause-run").textContent, "Start");
@@ -1042,6 +1065,7 @@ w.fetch = async (path, options) => {
     }
     const response = await beforeBatchStartFetch(url.pathname + url.search, options);
     const data = await response.json();
+    data.status = {...data.status, activity:"create", phase:"complete", draft_id:"test-batch-last"};
     data.status.batch = {id:"test-batch", target:3, completed:3, attempts:3, attempt_limit:9, state:"complete"};
     return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
   }
@@ -1050,7 +1074,7 @@ w.fetch = async (path, options) => {
 $("generation-count").value = "3";
 await click("pause-run");
 assert.equal(batchStartBody.batch_size, 3);
-assert.equal(batchStartBody.scenario, "user_problem");
+assert.equal(batchStartBody.scenario, "user_scenario");
 assert.match($("batch-progress").textContent, /3\/3 completed/);
 await click("view-generation-batch");
 assert.equal($("sample-search").value, "@batch:test-batch");
@@ -1070,6 +1094,45 @@ assert.equal($("view-generation-draft").hidden, true);
 assert.equal($("stop-run").textContent, "Cancel");
 await click("close-generation-panel");
 assert.equal($("generation-panel").hidden, true);
+// Semantic validation is an explicit operation on the saved current sample.
+assert.equal($("validate-trajectory").parentElement.id, "generation-menu");
+assert.equal($("validate-trajectory").textContent, "Validate Trajectory");
+await click("validate-trajectory");
+assert($("validation-dialog").hasAttribute("open"));
+assert.equal($("validation-record").checked, true);
+const beforeValidationFetch = w.fetch;
+let validationBody, validationStatus = {running:false, phase:"idle", completed:0, total:4, active:[]};
+w.fetch = async (path, options) => {
+  if (path === "/api/validation/run") {
+    validationBody = JSON.parse(options.body);
+    validationStatus = {running:true, phase:"validating", completed:1, total:4, active:["layout"], sample_id:validationBody.sample_id};
+    return new w.Response(JSON.stringify({job_id:"review",status:validationStatus}), {status:202,headers:{"content-type":"application/json"}});
+  }
+  if (path === "/api/validation/stop") {
+    validationStatus = {...validationStatus,running:false,phase:"cancelled",active:[]};
+    return new w.Response(JSON.stringify(validationStatus), {status:200,headers:{"content-type":"application/json"}});
+  }
+  const response = await beforeValidationFetch(path, options);
+  if (String(path).startsWith("/api/state?")) {
+    const data = await response.json(); data.validation_status = validationStatus;
+    return new w.Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+await click("start-validation");
+assert.equal(validationBody.record, true);
+assert.equal(validationBody.endpoint, "validator");
+assert.equal($("validation-progress").value, 1);
+assert.equal($("start-validation").disabled, true);
+assert.equal($("generate-one").disabled, true);
+await click("cancel-validation");
+assert.equal($("resume-validation").hidden, false);
+await click("resume-validation");
+assert.equal(validationBody.resume, true);
+await click("cancel-validation");
+await click("close-validation");
+w.fetch = beforeValidationFetch;
+
 await click("settings-button");
 await w.document.querySelector('[data-config="endpoints"]').onclick();
 assert.equal($("save-config").disabled, true);
@@ -1119,14 +1182,14 @@ assert.equal($("guidelines-content").querySelector('input[type="checkbox"]').dis
 $("guidelines-source").checked = true; $("guidelines-source").onchange();
 assert.equal($("guidelines-content").textContent, customMarkdown);
 $("guidelines-source").checked = false; $("guidelines-source").onchange();
-$("guidelines-scenario").value = "scenario:user_problem";
+$("guidelines-scenario").value = "scenario:user_scenario";
 await $("guidelines-scenario").onchange();
 assert(guideTab("Review Checklist"));
 assert(guideTab("idea.md"));
 guideTab("Review Checklist").onclick();
-assert.match($("guidelines-content").textContent, /user_problem/);
+assert.match($("guidelines-content").textContent, /user_scenario/);
 await click("edit-guidelines");
-assert.equal($("custom-guidance-scenario").value, "user_problem");
+assert.equal($("custom-guidance-scenario").value, "user_scenario");
 $("custom-guide").value = "# Scenario Guide\nMake a pun.";
 $("custom-guide").dispatchEvent(new w.Event("input", {bubbles: true}));
 await click("save-config");
@@ -1134,13 +1197,13 @@ $("custom-guidance-scenario").value = ""; $("custom-guidance-scenario").onchange
 assert.equal($("custom-guide").value, customMarkdown);
 await click("close-settings");
 await click("guidelines-button");
-$("guidelines-scenario").value = "scenario:user_problem"; await $("guidelines-scenario").onchange();
-guideTab("Scenario user_problem Guide").onclick();
+$("guidelines-scenario").value = "scenario:user_scenario"; await $("guidelines-scenario").onchange();
+guideTab("Scenario user_scenario Guide").onclick();
 assert.match($("guidelines-content").textContent, /Make a pun/);
 const sharedGuidance = await (await w.fetch("/api/mcp/call", {method: "POST", headers: {
   "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,
   "Content-Type": "application/json",
-}, body: JSON.stringify({name: "get_guidance", arguments: {scenario: "user_problem"}})})).json();
+}, body: JSON.stringify({name: "get_guidance", arguments: {scenario: "user_scenario"}})})).json();
 assert.equal(sharedGuidance.documents.find(d => d.id === "custom.dataset.guide").content, customMarkdown);
 assert.equal(sharedGuidance.documents.find(d => d.id === "custom.scenario.guide").content, "# Scenario Guide\nMake a pun.");
 await click("close-guidelines");
@@ -1153,6 +1216,25 @@ $("randomize-tags").checked = true;
 await click("export-generation-log");
 assert.equal(downloadedFilename, "generation.log");
 assert.equal(typeof await downloadedBlob.text(), "string");
+// Copy/export read the durable server log, including events newer than the UI.
+const beforeLogExportFetch = w.fetch;
+const fullLogText = "Entire persisted history, including a newer event absent from state.logs.";
+let logExportRequests = 0, copiedLogText = null;
+w.navigator.clipboard.writeText = async text => copiedLogText = text;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/log") {
+    logExportRequests++;
+    assert(options.headers["X-Remix-Token"]);
+    return new w.Response(fullLogText, {status:200, headers:{"Content-Type":"text/plain"}});
+  }
+  return beforeLogExportFetch(path, options);
+};
+await click("export-generation-log");
+assert.equal(await downloadedBlob.text(), fullLogText);
+await click("copy-generation-log");
+assert.equal(copiedLogText, fullLogText);
+assert.equal(logExportRequests, 2);
+w.fetch = beforeLogExportFetch;
 const actualFetch = w.fetch;
 let logFixture = [{time:"2026-10-25T00:00:00Z", level:"info", message:"Stable log entry"}];
 w.fetch = async (path, options) => {
@@ -1212,7 +1294,199 @@ assert.match(confirmationMessage, /replace those edits/);
 confirmResult = true;
 await click("resume-trajectory-generation");
 assert.equal(resumeRequests, 3);
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("generation-action-title").textContent, "Resume trajectory");
 w.fetch = beforeResumeFetch;
+// Dataset-wide resume has no selected ID, filter, or scenario in its request.
+const beforeBulkResumeFetch = w.fetch;
+let bulkResumeStarted = false, bulkResumePhase = "running", recoveryChoiceApplied = null, recoveryIssueDeleted = false, allRecoveryIssuesResolved = false;
+const recoveryActionRequests = [];
+let suspendedTasks = 0;
+const switchedCreationRequests = [];
+let mockGenerationActivity = "resume-all", resumedExistingPass = 0, resumePassStarts = 0;
+w.fetch = async (path, options) => {
+  if (path === "/api/pause") {
+    assert.deepEqual(JSON.parse(options.body), {resume:true});
+    resumedExistingPass++;
+    bulkResumePhase = "running";
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
+  if (path === "/api/scenarios/suspend") {
+    assert.equal(bulkResumePhase, "paused");
+    suspendedTasks++;
+    bulkResumePhase = "suspended";
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
+  if (path === "/api/scenarios/run") {
+    switchedCreationRequests.push(JSON.parse(options.body));
+    bulkResumeStarted = false;
+    return new w.Response(JSON.stringify({ok:true}), {status:200});
+  }
+  if (path === "/api/scenarios/recover") {
+    const body = JSON.parse(options.body); recoveryActionRequests.push(body);
+    recoveryChoiceApplied = body.action;
+    if (body.action === "delete") recoveryIssueDeleted = true;
+    return new w.Response(JSON.stringify({recovery_id:"recovery-choice",state:body.action === "delete" ? "deleted" : "running"}), {status:200});
+  }
+  if (path === "/api/scenarios/resume-all") {
+    assert.deepEqual(JSON.parse(options.body), {});
+    bulkResumeStarted = true;
+    resumePassStarts++;
+    bulkResumePhase = "running";
+    mockGenerationActivity = "resume-all";
+    return new w.Response(JSON.stringify({job_id: "recovery-pass"}), {status: 202});
+  }
+  const response = await beforeBulkResumeFetch(path, options);
+  if (path.startsWith("/api/state?")) {
+    const data = await response.json();
+    data.unfinished_generation_count = 2;
+    if (bulkResumeStarted) {
+      const busy = ["running", "pausing", "paused"].includes(bulkResumePhase);
+      data.can_suspend_generation = busy && bulkResumePhase === "paused";
+      data.status = {...data.status, activity:mockGenerationActivity, running:busy, paused:bulkResumePhase === "paused", pause_requested:bulkResumePhase === "pausing",
+        phase:busy ? "resuming_all" : bulkResumePhase === "suspended" ? "suspended" : "resume_complete",
+        batch:{id:"old-batch",target:200,completed:12,attempts:150,attempt_limit:600,state:"paused"},
+        model_requests:1, active:busy && bulkResumePhase !== "paused" ? ["work.5.decide"] : [], metrics:{"work.5.decide":{model:"local-model",token_source:"estimated",prompt_tokens:4917,completion_tokens:0,total_tokens:4917,generation_seconds:2.5,context_size:8192,context_used_tokens:4917,budget_enforced:false}}};
+      data.generation_resume = {running:busy && mockGenerationActivity === "resume-all", state:busy ? "running" : bulkResumePhase === "suspended" ? "suspended" : "complete", target:3, processed:bulkResumePhase === "complete" ? 3 : 1,
+        current_id:busy ? "unfinished-second" : null,
+        completed:bulkResumePhase === "complete" ? 2 : 0, failed:0, skipped:1, id:"recovery-pass", issues:[
+          ...(!recoveryIssueDeleted ? [{sample_id:"edited-draft",position:17,source_hash:"original-source-hash",actions:{force_resume:true,restart:true,delete:true},state:"skipped",error:"Trajectory edited since checkpoint"}] : []),
+          {sample_id:"missing-checkpoint",position:18,source_hash:"missing-source-hash",actions:{force_resume:false,restart:false,delete:true},state:"skipped",error:"Generation checkpoint not found",action_note:"Original inputs are unavailable."}
+        ]};
+      if (allRecoveryIssuesResolved) data.generation_resume.issues = [];
+      data.generation_resume.attention_count = data.generation_resume.issues.length;
+      if (recoveryChoiceApplied && recoveryChoiceApplied !== "delete") {
+        data.status = {...data.status,activity:recoveryChoiceApplied === "restart" ? "restart" : "force-resume",running:false,phase:"api_paused",recovery_id:"recovery-choice",draft_id:"edited-draft"};
+        data.can_resume_active_generation = true;
+      }
+    }
+    return new w.Response(JSON.stringify(data), {status:200, headers:{"content-type":"application/json"}});
+  }
+  return response;
+};
+assert.equal($("resume-all-generations").parentElement, $("generation-menu"));
+await waitFor(() => !$("resume-all-generations").disabled, 5000);
+await click("resume-all-generations");
+assert(bulkResumeStarted);
+assert.equal($("generation-panel").hidden, false);
+assert.match($("resume-all-progress").textContent, /1\/3 processed/);
+assert.match($("resume-all-findings").textContent, /edited-draft/);
+assert.match($("resume-all-findings").textContent, /Its edits were preserved/);
+assert.equal($("resume-all-generations").disabled, true);
+assert.equal($("generate-one").disabled, true);
+assert.equal($("generate-batch").disabled, true);
+assert.equal($("generation-switch-task").hidden, true);
+assert.equal($("resume-all-generations-panel").disabled, true);
+assert.equal($("stop-run").disabled, false);
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("generation-run-conditions").hidden, true);
+assert.equal($("generation-action-title").textContent, "Resume unfinished drafts");
+assert.equal($("resume-all-generations-panel").hidden, true);
+assert.equal($("generation-create-stats").hidden, true);
+assert.equal($("resume-remaining-stat").textContent, "2");
+assert.equal($("generation-progress").max, 3);
+assert.equal($("generation-progress").value, 1);
+assert.match($("generation-current").textContent, /unfinished-second/);
+assert.equal($("resume-issues-panel").open, false);
+assert.equal($("resume-all-findings").querySelectorAll(".generation-recovery-actions").length, 0);
+assert.match($("generation-metrics").textContent, /Estimated tokens/);
+assert.equal($("generation-metrics").querySelector('[role="meter"]'), null);
+bulkResumePhase = "pausing";
+await waitFor(() => $("run-status").textContent === "Pausing after active requests finish", 5000);
+assert.equal($("generate-one").disabled, true);
+assert.equal($("generation-switch-task").hidden, true);
+bulkResumePhase = "paused";
+await waitFor(() => $("run-status").textContent === "Paused", 5000);
+assert.equal($("pause-run").textContent, "Resume");
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("generate-one").disabled, false);
+assert.equal($("generate-batch").disabled, false);
+assert.equal($("generation-switch-task").hidden, false);
+await click("resume-all-generations"); // Resume the same paused pass rather than capture another queue.
+assert.equal(resumedExistingPass, 1);
+assert.equal(resumePassStarts, 1);
+assert.equal(suspendedTasks, 0);
+bulkResumePhase = "paused";
+await waitFor(() => $("run-status").textContent === "Paused", 5000);
+$("generation-next-task").value = "single";
+await $("generation-next-task").onchange();
+assert.equal(suspendedTasks, 1);
+assert.equal($("generation-setup").hidden, false);
+assert.equal($("generation-work").hidden, true);
+assert.equal($("generation-count").value, "1");
+assert.equal($("pause-run").textContent, "Start");
+assert.equal($("resume-issues-panel").hidden, true);
+assert.equal(switchedCreationRequests.length, 0); // Choosing a task does not start inference.
+const switchedReads = completedStateReads;
+await waitFor(() => completedStateReads > switchedReads, 5000);
+assert.equal($("generation-count").value, "1"); // An old 200-sample target cannot leak into the new setup.
+await click("pause-run");
+assert.equal(switchedCreationRequests.at(-1).batch_size, 1);
+bulkResumeStarted = true; bulkResumePhase = "paused";
+await click("status-button");
+await waitFor(() => $("generation-switch-task").hidden === false, 5000);
+await click("generate-batch");
+assert.equal(suspendedTasks, 2);
+assert.equal($("generation-count").value, "10");
+$("generation-count").value = "7";
+await click("pause-run");
+assert.equal(switchedCreationRequests.at(-1).batch_size, 7);
+bulkResumeStarted = true;
+mockGenerationActivity = "create";
+bulkResumePhase = "paused";
+const creationPauseReads = completedStateReads;
+await click("status-button");
+await waitFor(() => completedStateReads > creationPauseReads, 5000);
+await waitFor(() => $("generation-action-title").textContent === "Create trajectories", 5000);
+await click("resume-all-generations"); // Leave a paused creation batch for existing unfinished drafts.
+assert.equal(suspendedTasks, 3);
+assert.equal(resumePassStarts, 2);
+assert.equal($("generation-action-title").textContent, "Resume unfinished drafts");
+bulkResumePhase = "complete";
+await click("status-button");
+await waitFor(() => $("run-status").textContent === "Resume pass complete", 5000);
+assert.equal($("generation-setup").hidden, true);
+assert.equal($("pause-run").hidden, true);
+assert.equal($("stop-run").hidden, true);
+assert.equal($("resume-all-generations-panel").hidden, false);
+assert.equal($("resume-all-generations-panel").textContent, "Resume unfinished (2)");
+assert.equal($("resume-completed-stat").textContent, "2");
+$("resume-issues-panel").open = true;
+const missingRecoveryChoice = $("resume-all-findings").querySelector('[aria-label="Recovery action for missing-checkpoint"]');
+assert.deepEqual([...missingRecoveryChoice.options].map(o => o.value), ["", "delete"]);
+for (const recoveryAction of ["force_resume", "restart", "delete"]) {
+  const choice = $("resume-all-findings").querySelector('[aria-label="Recovery action for edited-draft"]');
+  assert(choice);
+  const apply = choice.parentElement.querySelector("button");
+  choice.value = recoveryAction; choice.onchange();
+  assert.equal(apply.disabled, false);
+  const beforeCount = recoveryActionRequests.length;
+  confirmResult = false;
+  await apply.onclick();
+  assert.equal(recoveryActionRequests.length, beforeCount);
+  confirmResult = true;
+  await apply.onclick();
+  assert.deepEqual(recoveryActionRequests.at(-1), {run_id:"recovery-pass",position:17,action:recoveryAction,source_hash:"original-source-hash"});
+  if (recoveryAction !== "delete") {
+    assert.equal($("generation-action-title").textContent, recoveryAction === "restart" ? "Restart trajectory" : "Force resume trajectory");
+    assert.equal($("generation-setup").hidden, true);
+    assert.equal($("generation-resume-results").hidden, false);
+    await click("generation-resume-results");
+    assert.equal($("resume-issues-panel").hidden, false);
+  }
+}
+assert.equal($("resume-all-findings").querySelector('[aria-label="Recovery action for edited-draft"]'), null);
+assert.match($("resume-issues-summary").textContent, /1/);
+allRecoveryIssuesResolved = true;
+await waitFor(() => $("resume-issues-panel").hidden, 5000);
+assert.doesNotMatch($("generation-detail").textContent, /need attention/);
+
+await click("generate-one");
+assert.equal($("generation-setup").hidden, false);
+assert.equal($("resume-issues-panel").hidden, true);
+assert.equal($("generation-metrics-panel").hidden, true);
+assert.equal($("pause-run").textContent, "Start");
+w.fetch = beforeBulkResumeFetch;
 // Evaluation failures retain the existing candidate and resume the batch.
 const beforeEvaluationFetch = w.fetch;
 let evaluationResumed = false;
@@ -1233,7 +1507,9 @@ w.fetch = async (path, options) => {
   }
   return response;
 };
-await waitFor(() => $("pause-run").textContent === "Resume", 5000);
+await click("status-button");
+await waitFor(() => /Evaluation failed/.test($("generation-detail").textContent), 5000);
+assert.equal($("pause-run").textContent, "Resume");
 assert.equal($("generation-count").value, "3");
 assert.match($("generation-detail").textContent, /Evaluation failed/);
 await click("pause-run");

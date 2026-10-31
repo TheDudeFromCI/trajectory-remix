@@ -1,3 +1,4 @@
+import json
 import copy
 import uuid
 
@@ -75,26 +76,17 @@ async def test_limits_are_persisted_and_enforced_for_crud_imports_and_mcp(tmp_pa
 
 
 async def test_generation_cannot_accept_a_trajectory_above_the_project_limit(tmp_path, compiler, monkeypatch):
-    from trajectory_remix.llm import default_config
-    from trajectory_remix.runner import Runner
-    from trajectory_remix.storage import DatasetState
-
+    from test_idle_scenario import IdleClient, setup_idle
     compiler = Compiler(compiler.tokenizer, max_window_slots=1)
-    store = DatasetStore.initialize(tmp_path / "project.sqlite", compiler)
-    class Builder:
-        def __init__(self, *args):
-            pass
-        async def generate(self, *args):
-            return source(str(uuid.uuid4()), 2)
-    monkeypatch.setattr("trajectory_remix.runner.SampleBuilder", Builder)
-    runner = Runner(DatasetState(store, default_config()), compiler, store.path)
-    runner.start(single=True, validate=False)
+    app, runner = setup_idle(tmp_path, compiler, monkeypatch, IdleClient())
+    runner.start('idle_scenario')
     await runner.job
-    assert runner.status["accepted"] == 0
-    assert "project limit is 1" in runner.status["last_error"]
-    assert len(store.samples) == 0
-    with store.connect() as db:
-        assert db.execute("SELECT count(*) FROM trajectory_metadata").fetchone()[0] == 0
+    assert runner.status['accepted'] == 0
+    assert len(app.state.dataset['samples']) == 1  # Keep last compilable checkpoint.
+    sample = app.state.dataset['samples'][0]
+    assert sample['metadata']['validation_level'] == 0
+    assert 'project limit is 1' in json.dumps(sample['metadata']['generation_record']['failures'])
+    compiler.compile(sample)
 
 
 def test_init_slot_limit_is_fixed_for_project(tmp_path):

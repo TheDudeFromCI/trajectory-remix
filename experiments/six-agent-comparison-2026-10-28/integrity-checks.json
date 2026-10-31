@@ -1,0 +1,44 @@
+[
+  {
+    "route": "amber",
+    "requests": 4,
+    "request_response_integrity": true,
+    "tokenizer_unchanged": true,
+    "terminal": true
+  },
+  {
+    "route": "cedar",
+    "requests": 13,
+    "request_response_integrity": true,
+    "tokenizer_unchanged": true,
+    "terminal": true
+  },
+  {
+    "route": "cobalt",
+    "requests": 13,
+    "request_response_integrity": true,
+    "tokenizer_unchanged": true,
+    "terminal": true
+  },
+  {
+    "route": "kestrel",
+    "requests": 4,
+    "request_response_integrity": true,
+    "tokenizer_unchanged": true,
+    "terminal": true
+  },
+  {
+    "route": "marble",
+    "requests": 7,
+    "request_response_integrity": true,
+    "tokenizer_unchanged": true,
+    "terminal": true
+  },
+  {
+    "route": "willow",
+    "requests": 13,
+    "request_response_integrity": true,
+    "tokenizer_unchanged": true,
+    "terminal": true
+  }
+]
