@@ -203,6 +203,14 @@ include every prior archived source. Back up the project to retain that history.
 
 ## Validate existing trajectories
 
+Use **Edit → Set State → Ready** after human review to approve training export.
+Content or metadata edits clear previous evaluations and preserve the trajectory's
+current state, including Ready (3). Human samples begin unfinished at level -3,
+including historical samples without an explicit level. Human review promotes
+them to 3; subsequent edits preserve that approval. Both CLI and dashboard token
+export exclude levels other than 3, including explicitly selected pending samples.
+Project backups retain all samples.
+
 Select a saved trajectory and choose **Edit → Generation → Validate Trajectory**.
 Choose a validation endpoint and run the review. The default records **Validated
 (2)** or **Rejected (-2)**; turn off recording for a report only. Validation never

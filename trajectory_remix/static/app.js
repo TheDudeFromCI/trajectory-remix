@@ -1607,9 +1607,14 @@ function buildEventCard(item, i) {
         card.append(options);
       } else if (e.op === "show_tools") {
         const options = node("div", "event-options show-tools-options");
+        const toolOption = (name, control, cls = "") => {
+          const label = node("label", cls);
+          label.append(control, name);
+          return label;
+        };
         for (const schema of (state.tools || []).filter((s) => !s.invisible)) {
           const name = schema.function.name;
-          options.append(field(name, checkbox((e.tools || []).includes(name), (checked) => {
+          options.append(toolOption(name, checkbox((e.tools || []).includes(name), (checked) => {
             const selected = new Set(e.tools || []);
             if (checked) selected.add(name);
             else selected.delete(name);
@@ -1617,10 +1622,10 @@ function buildEventCard(item, i) {
             update();
           })));
         }
-        options.append(field("Randomly add additional tools", checkbox(e["randomly-add-additional-tools"] || false, (checked) => {
+        options.append(toolOption("Randomly add additional tools", checkbox(e["randomly-add-additional-tools"] || false, (checked) => {
           e["randomly-add-additional-tools"] = checked;
           update();
-        })));
+        }), "show-tools-random"));
         card.append(options);
       } else if (e.op === "tool-call" || e.op === "invisible-tool-call") {
         const options = node("div", "event-options");
