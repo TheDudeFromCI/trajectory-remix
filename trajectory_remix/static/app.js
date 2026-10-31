@@ -710,6 +710,10 @@ function renderReplay() {
       closed = w.close !== null && w.close <= tick;
     if (!unopened && !closed) active++;
     if (closed && !$("show-closed").checked) return;
+    const data = currentFrame?.tick === tick ? currentFrame.windows?.[w.id] : null;
+    const body = (data?.text || "").replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
+    // Wait for frame data before deciding; automatic headers are not content.
+    if (data && !$("show-empty").checked && !body.trim()) return;
     const card = node(
       "article",
       "window-card" + (closed ? " closed" : "") + (unopened ? " future" : ""),
@@ -746,10 +750,7 @@ function renderReplay() {
       `${isExpanded ? "Shrink" : "Expand"} context window ${w.id}`,
     );
     head.append(resize);
-    const data = currentFrame?.tick === tick ? currentFrame.windows?.[w.id] : null;
-    let content = data?.text || "";
-    if (!showWindowHeaders)
-      content = content.replace(/<\|cxt\|>[\s\S]*?<\|\/cxt\|>/, "");
+    const content = showWindowHeaders ? data?.text || "" : body;
     card.append(
       head,
       windowContent(
@@ -2694,6 +2695,7 @@ document.addEventListener("click", (e) => {
 for (const b of document.querySelectorAll(".tab"))
   b.onclick = action(() => changeView(b.dataset.view));
 $("show-closed").onchange = renderReplay;
+$("show-empty").onchange = renderReplay;
 $("tick-number").onchange = (e) => setTick(e.target.value);
 $("tick-scrubber").oninput = (e) => {
   pause();

@@ -147,6 +147,34 @@ assert.match(
   /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
 );
 assert.match($("window-grid").textContent, /slot \d+/);
+// Empty windows stay hidden even when their automatic context headers are shown.
+const visibleWindowIds = () => [...$("window-grid").querySelectorAll(".window-card strong")]
+  .map((heading) => heading.textContent);
+assert.equal($("show-empty").checked, true);
+const emptyScan = [...$("window-grid").querySelectorAll(".window-card")]
+  .find((card) => card.querySelector("strong").textContent === "scan");
+emptyScan.querySelector(".window-size-toggle").onclick();
+assert.equal($("expanded-window-dialog").open, true);
+$("show-empty").checked = false;
+$("show-empty").onchange();
+assert.equal($("expanded-window-dialog").open, false);
+assert.deepEqual(visibleWindowIds(), ["system", "user"]);
+assert.equal($("open-count").textContent, "5");
+$("show-closed").checked = false;
+$("show-closed").onchange();
+assert.deepEqual(visibleWindowIds(), ["system", "user"]);
+$("tick-number").value = "1";
+$("tick-number").onchange({ target: $("tick-number") });
+await waitFor(() => visibleWindowIds().includes("scan"));
+assert.deepEqual(visibleWindowIds(), ["system", "user", "scan"]);
+$("tick-number").value = "0";
+$("tick-number").onchange({ target: $("tick-number") });
+await waitFor(() => visibleWindowIds().length === 2);
+$("show-empty").checked = true;
+$("show-empty").onchange();
+$("show-closed").checked = true;
+$("show-closed").onchange();
+assert.equal(visibleWindowIds().length, 5);
 // Each context window can be opened in a viewport-sized modal and restored.
 const expandedDialog = $("expanded-window-dialog");
 const initialWindowCount = w.document.querySelectorAll(".window-card").length;
