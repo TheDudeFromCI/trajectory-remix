@@ -215,7 +215,7 @@ A construction failure can depend on a schema-valid but semantically unusable ca
 Elapsed time includes orchestration and pauses within an attempt but excludes time between stopped attempts and external review. Inference seconds measure occupied request wall time, including provider latency, transport, and request bookkeeping; OpenAI-compatible APIs expose no standard GPU compute-time counter. Inference request durations may overlap, so their sum can exceed elapsed time; `inference_wall_seconds` measures their interval union. Dataset throughput sums recorded candidate elapsed times and is intended for equivalent workload comparisons, not server-wide concurrent-session capacity. Usable throughput requires actual Ready approvals. Legacy datasets without instrumentation are not backfilled with invented counters. Repair counts cover the explicit MCP `repair_trajectory` operation; arbitrary manual edits are not classified as repairs.
 
 The earlier comparison and six-agent experiment are preserved as historical
-results in [the benchmark report](content-first-benchmark.md) and `experiments/`.
+results in [the benchmark report](content-first-benchmark.md).
 They describe pre-consolidation versions; the retired comparison generator is not
 part of the current application. For an executable current-flow demonstration use
 `python scripts/demo_idle_scenario.py --output-dir work/idle-demo` with a fresh

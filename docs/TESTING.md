@@ -222,7 +222,7 @@ result, then emits EOS to release it.
   limits, invalid output/construction retention, cancellation/resume, archived
   generation evidence, original-checklist MCP repair, export approval, and
   legacy checkpoint/scenario parsing compatibility. Historical performance reports
-  remain in `docs/content-first-benchmark.*` and `experiments/`; the retired
+  remain in `docs/content-first-benchmark.*`; the retired
   comparison generator is not shipped with the current workflow.
 
 - User-scenario regressions verify preserved domains/difficulty/roles and weights,
