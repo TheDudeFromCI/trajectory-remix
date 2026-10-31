@@ -1177,8 +1177,12 @@ assert($("validation-dialog").hasAttribute("open"));
 assert.equal($("validation-record").checked, true);
 const beforeValidationFetch = w.fetch;
 let validationBody, validationStatus = {running:false, phase:"idle", completed:0, total:4, active:[]};
+let holdValidation = true, releaseValidation, failValidation = false, validationRequests = 0;
 w.fetch = async (path, options) => {
   if (path === "/api/validation/run") {
+    validationRequests++;
+    if (holdValidation) await new Promise(resolve => { releaseValidation = resolve; });
+    if (failValidation) return new w.Response(JSON.stringify({detail:"Validation unavailable"}), {status:503});
     validationBody = JSON.parse(options.body);
     validationStatus = {running:true, phase:"validating", completed:1, total:4, active:["layout"], sample_id:validationBody.sample_id};
     return new w.Response(JSON.stringify({job_id:"review",status:validationStatus}), {status:202,headers:{"content-type":"application/json"}});
@@ -1194,7 +1198,20 @@ w.fetch = async (path, options) => {
   }
   return response;
 };
+const startingValidation = click("start-validation");
+assert.equal($("start-validation").getAttribute("aria-busy"), "true");
+assert.equal($("start-validation").getAttribute("aria-disabled"), "true");
+assert.equal($("start-validation").textContent, "Validate");
+await waitFor(() => !!releaseValidation);
 await click("start-validation");
+assert.equal(validationRequests, 1); // Pending buttons ignore repeated activation.
+const pendingValidationReads = completedStateReads;
+await waitFor(() => completedStateReads > pendingValidationReads, 5000);
+assert.equal($("start-validation").getAttribute("aria-busy"), "true");
+releaseValidation();
+await startingValidation;
+assert.equal($("start-validation").hasAttribute("aria-busy"), false);
+assert.equal($("start-validation").hasAttribute("aria-disabled"), false);
 assert.equal(validationBody.record, true);
 assert.equal(validationBody.endpoint, "validator");
 assert.equal($("validation-progress").value, 1);
@@ -1202,6 +1219,14 @@ assert.equal($("start-validation").disabled, true);
 assert.equal($("generate-one").disabled, true);
 await click("cancel-validation");
 assert.equal($("resume-validation").hidden, false);
+holdValidation = false;
+failValidation = true;
+await click("resume-validation");
+assert.equal($("resume-validation").hasAttribute("aria-busy"), false);
+assert.equal($("resume-validation").hasAttribute("aria-disabled"), false);
+assert.equal($("resume-validation").disabled, false);
+assert.match($("toast").textContent, /Validation unavailable/);
+failValidation = false;
 await click("resume-validation");
 assert.equal(validationBody.resume, true);
 await click("cancel-validation");
@@ -1379,10 +1404,12 @@ const recoveryActionRequests = [];
 let suspendedTasks = 0;
 const switchedCreationRequests = [];
 let mockGenerationActivity = "resume-all", resumedExistingPass = 0, resumePassStarts = 0;
+let holdGenerationResume = false, releaseGenerationResume;
 w.fetch = async (path, options) => {
   if (path === "/api/pause") {
     assert.deepEqual(JSON.parse(options.body), {resume:true});
     resumedExistingPass++;
+    if (holdGenerationResume) await new Promise(resolve => { releaseGenerationResume = resolve; });
     bulkResumePhase = "running";
     return new w.Response(JSON.stringify({ok:true}), {status:200});
   }
@@ -1477,7 +1504,18 @@ assert.equal($("generation-setup").hidden, true);
 assert.equal($("generate-one").disabled, false);
 assert.equal($("generate-batch").disabled, false);
 assert.equal($("generation-switch-task").hidden, false);
-await click("resume-all-generations"); // Resume the same paused pass rather than capture another queue.
+holdGenerationResume = true;
+const resumingGeneration = click("pause-run");
+assert.equal($("pause-run").getAttribute("aria-busy"), "true");
+assert.equal($("pause-run").textContent, "Resume");
+await waitFor(() => !!releaseGenerationResume);
+await click("pause-run");
+assert.equal(resumedExistingPass, 1);
+releaseGenerationResume();
+await resumingGeneration;
+assert.equal($("pause-run").hasAttribute("aria-busy"), false);
+assert.equal($("pause-run").hasAttribute("aria-disabled"), false);
+holdGenerationResume = false;
 assert.equal(resumedExistingPass, 1);
 assert.equal(resumePassStarts, 1);
 assert.equal(suspendedTasks, 0);

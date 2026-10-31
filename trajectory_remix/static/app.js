@@ -105,6 +105,24 @@ function action(fn) {
     }
   };
 }
+function busyAction(control, fn) {
+  return action(async (...args) => {
+    const target = typeof control === "string" ? $(control) : control;
+    if (target.getAttribute("aria-busy") === "true") return;
+    const wasDisabled = target.getAttribute("aria-disabled");
+    target.setAttribute("aria-busy", "true");
+    target.setAttribute("aria-disabled", "true");
+    try {
+      await fn(...args);
+    } finally {
+      target.removeAttribute("aria-busy");
+      // Native disabled state belongs to the status renderers, which may have
+      // updated it while this request was pending.
+      if (wasDisabled === null) target.removeAttribute("aria-disabled");
+      else target.setAttribute("aria-disabled", wasDisabled);
+    }
+  });
+}
 function loadAutoCompileDelay() {
   try {
     const saved = Number(localStorage.getItem(AUTO_COMPILE_DELAY_KEY));
@@ -453,7 +471,8 @@ function renderGenerationAction(recoveryDisabled) {
           for (const [value,label] of [["force_resume","Force resume"],["restart","Restart from beginning"],["delete","Delete sample"]]) if (issue.actions[value]) {
             const option = node("option", "", label); option.value = value; choice.append(option);
           }
-          const apply = button("Apply", action(() => recoverGenerationIssue(issue, choice.value)), "generation-recovery-apply");
+          const apply = button("Apply", null, "generation-recovery-apply");
+          apply.onclick = busyAction(apply, () => recoverGenerationIssue(issue, choice.value));
           apply.disabled = true; choice.onchange = () => { apply.disabled = !choice.value; apply.classList.toggle("danger-text", choice.value === "delete"); };
           actions.append(choice, apply); entry.append(actions);
           if (issue.action_note) entry.append(node("small", "generation-help", issue.action_note));
@@ -2290,11 +2309,13 @@ function renderConfig() {
         ),
       );
       const result = node("small", "endpoint-test-result");
-      top.append(button("Test endpoint", action(async () => {
+      const testEndpoint = button("Test endpoint");
+      testEndpoint.onclick = busyAction(testEndpoint, async () => {
         result.textContent = "Testing…";
         try { const answer = await json("endpoints/test", "POST", {endpoint: ep}); result.textContent = `Connected: ${answer.model}`; }
         catch (error) { result.textContent = error.message; }
-      })));
+      });
+      top.append(testEndpoint);
       card.append(top, form, result);
       root.append(card);
     });
@@ -2907,7 +2928,7 @@ async function savePausedGeneration() {
   await json("scenarios/suspend", "POST");
   await refresh();
 }
-$("resume-trajectory-generation").onclick = action(async () => {
+$("resume-trajectory-generation").onclick = busyAction("resume-trajectory-generation", async () => {
   closeMenus();
   if (hasPendingChanges()) await compileSample(true);
   await savePausedGeneration();
@@ -2931,8 +2952,8 @@ async function resumeAllGenerations() {
   openGenerationPanel();
   await refresh();
 }
-$("resume-all-generations").onclick = action(resumeAllGenerations);
-$("resume-all-generations-panel").onclick = action(resumeAllGenerations);
+$("resume-all-generations").onclick = busyAction("resume-all-generations", resumeAllGenerations);
+$("resume-all-generations-panel").onclick = busyAction("resume-all-generations-panel", resumeAllGenerations);
 
 function renderTrajectoryValidation(status = {}) {
   const busy = !!status.running;
@@ -2962,12 +2983,12 @@ async function startTrajectoryValidation(resume = false) {
   await json("validation/run", "POST", {sample_id: sample.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, resume});
   await refresh();
 }
-$("start-validation").onclick = action(() => startTrajectoryValidation());
-$("resume-validation").onclick = action(() => startTrajectoryValidation(true));
-$("cancel-validation").onclick = action(async () => { await json("validation/stop", "POST"); await refresh(); });
+$("start-validation").onclick = busyAction("start-validation", () => startTrajectoryValidation());
+$("resume-validation").onclick = busyAction("resume-validation", () => startTrajectoryValidation(true));
+$("cancel-validation").onclick = busyAction("cancel-validation", async () => { await json("validation/stop", "POST"); await refresh(); });
 
 $("close-settings").onclick = () => $("settings-dialog").close();
-$("save-config").onclick = action(saveConfig);
+$("save-config").onclick = busyAction("save-config", saveConfig);
 for (const b of document.querySelectorAll("[data-config]"))
   b.onclick = () => {
     configTab = b.dataset.config;
@@ -3007,12 +3028,12 @@ $("view-generation-draft").onclick = action(async () => {
   if (Number.isInteger(listing.selected_index)) { await selectSample(listing.selected_index); $("generation-panel").hidden = true; }
   else toast("This draft is no longer available.");
 });
-$("stop-run").onclick = action(async () => {
+$("stop-run").onclick = busyAction("stop-run", async () => {
   await json("stop", "POST");
   await refresh();
   if (selected >= 0 && !hasPendingChanges()) await selectSample(selected, true);
 });
-$("pause-run").onclick = action(async () => {
+$("pause-run").onclick = busyAction("pause-run", async () => {
   if (!state.status.running) {
     if (hasPendingChanges()) await compileSample(true);
     if (generationPanelIntent !== "create" && ["api_paused", "evaluation_failed", "cancelled", "suspended", "interrupted", "error", "rejected"].includes(state.status.phase)) {
@@ -3029,7 +3050,7 @@ $("pause-run").onclick = action(async () => {
   await refresh();
 });
 $("close-export").onclick = () => $("export-dialog").close();
-$("download-export").onclick = action(async () => {
+$("download-export").onclick = busyAction("download-export", async () => {
   if (hasPendingChanges()) await compileSample(true);
   const body = { ticks_per_chunk: Number($("chunk-size").value) };
   if ($("export-scope").value === "current") body.indices = [selected];
@@ -3290,7 +3311,7 @@ $("toggle-metrics-panel").onclick = action(async () => {
   if (visible) { pause(); await loadMetrics(); }
 });
 $("close-metrics-panel").onclick = () => setMetricsVisible(false);
-$("metrics-refresh").onclick = action(loadMetrics);
+$("metrics-refresh").onclick = busyAction("metrics-refresh", loadMetrics);
 $("metrics-population").onchange = action(async () => { metricsOffset = 0; await loadMetrics(); });
 $("metrics-distribution").onchange = renderMetricDistribution;
 $("metrics-issue").onchange = action(async () => { metricsOffset = 0; await loadMetricIssues(); });
@@ -3327,11 +3348,11 @@ function scheduleMetricsJobPoll() {
     scheduleMetricsJobPoll();
   }), 1000);
 }
-$("metrics-stop").onclick = action(async () => {
+$("metrics-stop").onclick = busyAction("metrics-stop", async () => {
   renderMetricsJob(await json("metrics/cancel", "POST", {job_id: metricsJob?.job_id}));
   scheduleMetricsJobPoll();
 });
-$("metrics-analyze").onclick = action(async () => {
+$("metrics-analyze").onclick = busyAction("metrics-analyze", async () => {
   if (metricsCalculating) return;
   renderMetricsJob(await json("metrics/refresh", "POST", {}));
   if (metricsCalculating) scheduleMetricsJobPoll();
