@@ -1,0 +1,1 @@
+Create a fictional brief under the selected conditions. Include a concrete arithmetic discrepancy and a request to verify it against a named file. Put any known file contents in files; a missing reference should genuinely be absent. Vary the quantities, context, paths, and user phrasing. Preserve explicit success criteria. This is world setup, not Kidra's answer.

@@ -59,6 +59,9 @@ class DatasetStore:
                 raise ValueError("Unsupported project schema; initialize a new project with its tokenizer and import trajectories")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
+                CREATE TABLE IF NOT EXISTS generation_jobs (
+                    id TEXT PRIMARY KEY, snapshot TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS external_tools (
                     name TEXT PRIMARY KEY, schema_json TEXT NOT NULL, file_hash TEXT NOT NULL,
                     available INTEGER NOT NULL DEFAULT 1

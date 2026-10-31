@@ -30,7 +30,12 @@ def custom_documents(config, scenario=None, *, include_empty=False):
     guidance = config.get("review_guidance", {})
     scopes = [("dataset", "Dataset", guidance)]
     if scenario:
-        scopes.append(("scenario", f"Scenario {scenario}", guidance.get("scenarios", {}).get(scenario, {})))
+        from .scenarios import canonical_scenario
+        pairs = guidance.get('scenarios', {})
+        scopes.append(("scenario", f"Scenario {scenario}", pairs.get(scenario, {})))
+        for alias, pair in pairs.items():
+            if alias != scenario and canonical_scenario(alias) == canonical_scenario(scenario):
+                scopes.append((f'scenario.alias-{alias}', f'Scenario {alias}', pair))
     return [
         {"id": f"custom.{scope}.{kind}", "title": f"{label} {kind.title()}",
          "content": pair.get(kind, ""), "format": "markdown", "source": "dataset_config", "editable": True}

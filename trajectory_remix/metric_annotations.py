@@ -62,7 +62,7 @@ def context(sample, revision, guidance, guide, *, offset=0, limit=50, max_chars=
             "Capabilities use separate present/required/demonstrated_correctly booleans; other labels use value. Unknown is a legitimate result.",
             "Reviewed labels need confidence, annotator identity/version, justification and actual replay[tick][index] evidence paths.",
             "Leave unavailable historical facts unknown and report what the owner must supply. Never fabricate provenance, split, lineage or a positive label to eliminate an alert.",
-            "Use update_trajectory_metadata with the returned expected_revision and a metadata merge patch; preserve unrelated data. Normal review/Ready invalidation still applies.",
+            "Use update_trajectory_metadata with the returned expected_revision and a metadata merge patch; preserve unrelated data. Edits clear prior evaluations while preserving trajectory state; Ready is not proof of annotation correctness.",
         ],
         "guidance": {"scenario": guidance.get("scenario"), "documents": []},
         "events": [], "source_complete": False,

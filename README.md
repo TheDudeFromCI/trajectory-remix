@@ -417,110 +417,40 @@ Imports are limited to 32 MB per
 file and requests to 40 MB. Large imports should be split into batches; the SQLite dataset itself has no
 100,000-trajectory limit.
 
-## LLM tasks and endpoint configuration
+## Generation and explicit validation
 
-**Configuration → Endpoints** defines independent OpenAI-compatible services.
-Set base URL including `/v1`, model ID, temperature, completion-token limit,
-timeout, and optional API-key environment variable or session-only key.
+[Creation and independent validation flow (PDF)](docs/generation-validation-flow.pdf)
 
-```bash
-export REMIX_GENERATOR_KEY='your-key'
-export REMIX_VALIDATOR_KEY='your-key'
-python -m trajectory_remix --dataset project.sqlite
-```
+The application loads two bundled content-first flows by default:
+**`user_scenario`** for user conversations, and **`idle_scenario`** for autonomous
+TODO, project, memory and alarm work. Select **Edit → Generation → Single Sample**
+or **Batch**. Configure endpoints and optional token budgets in Generation Settings.
+Local budget checks use the inference model’s tokenizer when available; leave its
+directory blank to skip checks. Missing tokenizer files or optional dependencies
+also skip checks, with the reason recorded in generation provenance. No task-based or inline-validated generator is
+available. Creation always retains Pending drafts and expensive failed proposals.
 
-Environment variables are read by the backend only. A blank key field preserves
-an existing session key; **Clear stored session key** removes it. Saved datasets
-never include key values. Host environment credentials are not exposed to tools.
-Endpoints are contacted only when generation or validation is started. No
-credentials or provider access were available during development; automated
-integration tests use deterministic OpenAI-compatible mocked responses.
+Use **Edit → Generation → Resume Unfinished Generations** (also in Generation
+Control) to complete existing generated drafts across the whole dataset in one
+pass. Manual entries are ignored. Completed steps are reused; failures and edited
+checkpoints are reported while the pass continues. Pause/Cancel preserve work.
 
-Each **Task** has its own written prompt, endpoint, visibility selection,
-organization, and enabled state. Built-ins cover system prompt, tagged user
-request, reasoning/tool use, assistant response, user followup, followup response,
-and validation. Duplicate/add/reorder tasks to create more content streams or
-multiple validators. Every task produces a separate stream.
+To review a saved trajectory, select **Edit → Generation → Validate Trajectory**.
+It runs the same shared checklist service used by explicit MCP semantic validation,
+against original saved requirements plus current custom guidance. Review has its
+own progress, findings, cancellation, resumption and journal. It records Validated
+or Rejected only after a complete result, never Ready, and does not rewrite source.
+External MCP review/repair remains available without local inference. Human Ready
+approval is still required for training export.
 
-Visibility accepts ordered comma-separated window IDs or `*`. Layouts:
+Provider keys remain in server memory; environment-variable credentials are not
+exported. Creation needs only the generator endpoint; an unused validator alias is
+not required. Old datasets and saved review contracts remain readable. The old
+`user_problem` flow, `content_first` demo and task-based `/api/run` API are retired;
+old noval scenario names are aliases for the standard user/idle choices.
 
-- **Separate labeled messages:** one data message per selected window.
-- **Single labeled transcript:** combine selected windows in one data message.
-- **Structured JSON:** serialize the selected windows into a JSON object.
-
-Task prompts remain privileged instructions. Imported window text is labeled
-as input data, including source system prompts. The API supports a task's
-optional `visible_tick` to prefix-limit conditioning. Without it, all selected
-windows are supplied through the current replay end, including closed-window
-transcripts for offline authoring/validation. The replay attention predicate
-still removes closed-window KV during actual execution.
-
-Generation tasks specify append/generate ownership, source, target window,
-loss mask, optional EOS closure, sandbox tools, and start tick/expression.
-`auto` schedules after the existing replay end. Explicit starts can overlap
-independent windows. For an explicit early start, task conditioning is
-automatically limited to external inputs available by that tick and generated
-outputs committed before that tick. Optional `visible_tick` can constrain it
-further. Generated text still needs semantic validation: prefix limiting
-prevents showing future observations but does not prove model correctness.
-
-**Run this task in current sample** fills a selected existing sample, replacing
-it only after compilation succeeds; the UI skips semantic validation for this
-single-stream edit. A closed window cannot receive new content: choose a fresh
-target ID or remove its prior EOS first. **Generate sample** runs all enabled
-generation tasks into a new sample. Enable followup tasks to include further
-turns.
-
-Tools use standard `tools` / `tool_calls` on `POST /chat/completions`.
-Tool call arguments become supervised `<tool>{"tool":...,"args":...}</tool>`
-text and actual dispatcher results become masked `<tool_result>...</tool_result>`
-text in the same tool window, open from tick 0. Results remain open through downstream
-reasoning and responses, then receive generated EOS. Tool-enabled tasks require
-`start=auto`; explicitly timed tool interactions can be authored in the replay. Non-tool providers work with tools
-disabled. Models must return ordinary textual completion content. Truncated,
-empty and malformed completions count as failures.
-
-Validators must return exactly the useful shape:
-
-```json
-{"valid": false, "feedback": ["The response gives a result the tool did not return."]}
-```
-
-All enabled validators must accept. Compiler validation always runs; LLM
-validation is optional. JSON code fences are tolerated. A malformed report
-fails rather than passing optimistically.
-
-Scenario-based generation additionally supports semantic checklists defined in
-`flow.yaml`. The bundled scenario reviews every rule within its existing four
-categories, requiring per-item evidence and a typed verdict in the same request
-per bounded group. Code derives acceptance, collects failed-item findings for
-repair, and reruns all checks after edits. Compiler checks remain separate.
-See [semantic checklist configuration](docs/SCENARIOS.md#semantic-checklists) for
-rule scopes, context requests, response examples and migration from older flows.
-
-## Automatic mode
-
-- `max_samples`: accepted new samples; zero means unlimited.
-- `max_attempts`: candidate attempts; zero means unlimited. An attempt may run
-  `regenerations + 1` complete task pipelines.
-- `autosave_every`: accepted samples between checkpoint progress reports; every
-  accepted sample commits immediately.
-- `delay_seconds`: delay between candidate attempts (minimum 0.1 seconds).
-- `max_consecutive_failures`: hard stop threshold, even with skip/pause chosen.
-- `failure_action`: stop immediately, pause after a failed attempt, or skip to
-  another candidate. Compilation, HTTP, empty response and validator failures
-  use the same failure mechanism. A new acceptance resets the failure streak.
-- `regenerations`: retries with concrete compiler/validator feedback inserted
-  into each task prompt. Each candidate receives a fresh isolated sandbox.
-- `validate`: run enabled LLM validators before accepting a candidate.
-
-Accepted samples enter the dataset immediately. A stop cancels the in-flight HTTP
-request and discards the incomplete candidate. Accepted changes are already durable. Pause
-finishes the in-flight request and blocks at the next pipeline/attempt boundary;
-it is not a provider-side pause. Generator state/quotas are per candidate, and
-credentials are not included in retained datasets. Generation locks dataset
-editing/configuration to prevent index races. Downloads and checkpoints remain
-available.
+See [scenario configuration and API](docs/SCENARIOS.md) and
+[bounded requests, recovery and analytics](docs/content-first-generation.md).
 
 ## Tools and sandbox state
 
@@ -623,10 +553,12 @@ cancellation and failure limits. `docs/EXPORT.md` describes the training adapter
 | `training.py` | Export reader, reference query/attention batching, optional PyTorch conversion. |
 | `dataset.py` | JSON import normalization, trajectory defaults and key removal. |
 | `storage.py` | SQLite storage, lazy reads, paginated metadata and sparse edits. |
-| `llm.py` | Config/task defaults, prompt organization, bounded HTTP, generation, validators. |
+| `llm.py` | Configuration, provider client and deterministic sample construction. |
 | `tools/` | Tool registry, tick protocol, and one module per built-in tool. |
 | `sandbox_replay.py` | Generic tick scheduling, window writes, and sparse state snapshots. |
-| `runner.py` | Background generation, retry/feedback, pause/stop, autosaves. |
+| `runner.py` | Shared history and checkpoint/session coordination. |
+| `model_session.py` | Shared bounded inference boundary for creation and explicit review. |
+| `validation.py` | Independent checklist review, progress, journals and source-safe recording. |
 | `server.py` | Local API and dashboard serving. |
 | `static/` | Dependency-free dashboard, editor, timeline and configuration UI. |
 
@@ -644,16 +576,10 @@ anchors when authoring reactive trajectories.
 
 Primary API/security references: [Hugging Face Tokenizers](https://huggingface.co/docs/tokenizers/en/api/tokenizer).
 
-## Scenario-based single sample generation
+## Scenario-based generation
 
-Pass `--scenarios-dir examples/scenarios` on startup, then open
-**Edit → Generation → Single Sample**. The external directory contains nested
-scenario folders with `flow.yaml` and Markdown prompts. The included `user_problem`
-scenario samples context tags, develops a solution, uses simulated tools, varies
-conversation length, publishes an immediately selectable draft, and validates or
-repairs it. The progress panel supports pause/resume, immediate cancellation,
-colored streamed output, and a configurable LLM concurrency limit (default 1).
-
-Automated drafts require human approval (Validation 3) before token export.
-See [Scenario workflows](docs/SCENARIOS.md) for YAML syntax, failure paths, role
-profiles, inspection, lifecycle details, and the current implementation limits.
+The bundled standard flows load automatically. Custom `--scenarios-dir` roots can
+replace them with additional YAML flows. Creation and semantic validation are
+separate operations; no creation flow invokes a semantic validator. See
+[Scenario workflows](docs/SCENARIOS.md), [idle work](docs/idle-scenario-generation.md)
+and the [idle-flow PDF](docs/idle-scenario-flow.pdf).

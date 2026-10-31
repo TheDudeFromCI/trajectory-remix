@@ -100,7 +100,8 @@ For repairs, call `update_trajectory_metadata` with a merge patch and the latest
 `expected_revision`. Preserve existing metadata, unknown values and evidence;
 never fabricate an annotation to improve a quota. Requested `metadata.tags` are
 not observed capability labels. Edits use the normal revision guards and undo.
-An edit can invalidate prior review/Ready state under the existing project policy.
+Edits clear prior evaluations while preserving the trajectory's state under the
+existing project policy; a preserved Ready state does not establish annotation correctness.
 
 Launch coverage uses the PDF's bundled provisional domain, capability, condition,
 outcome and distinct-family rules. Every fraction carries numerator, denominator

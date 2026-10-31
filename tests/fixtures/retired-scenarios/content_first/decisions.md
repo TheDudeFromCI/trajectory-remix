@@ -1,0 +1,1 @@
+Choose useful calculator and/or file_read requests for this user. Return tool names and actual arguments only. These are Kidra's decisions, not fabricated tool observations. Independent requests may run together. Do not emit replay events, timestamps, BOS, EOS, or NOOP.

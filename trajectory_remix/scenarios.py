@@ -14,6 +14,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 REFERENCE = re.compile(r"^\$\{([a-zA-Z0-9_.-]+)\}$")
+BUNDLED_SCENARIOS = Path(__file__).with_name('scenario_templates')
+SCENARIO_ALIASES = {'user_problem': 'user_scenario', 'user_scenario_noval': 'user_scenario',
+                    'idle_scenario_noval': 'idle_scenario'}
+
+
+def canonical_scenario(name):
+    return SCENARIO_ALIASES.get(name, name)
 
 
 class Definition(BaseModel):
@@ -57,6 +64,8 @@ class ReviewCheck(Definition):
 class Step(Definition):
     uses: Literal[
         "llm.generate",
+        "llm.content",
+        "remix.assemble",
         "flow.repeat",
         "remix.novelty",
         "remix.message",
@@ -72,6 +81,7 @@ class Step(Definition):
     profile: str | None = None
     endpoint: str = "generator"
     output_schema: str | None = None
+    visible_windows: list[str] = Field(default_factory=list)
     max_input_tokens: int | None = Field(default=None, ge=512, le=100000)
     retries: int = Field(default=0, ge=0, le=5)
     on_failure: Failure = Field(default_factory=Failure)
@@ -92,7 +102,7 @@ class Step(Definition):
     fallback: bool = True
 
 
-def check_scenario_endpoints(name, flow, endpoints):
+def check_scenario_endpoints(name, flow, endpoints, *, content_first=False):
     available = {endpoint["id"] for endpoint in endpoints}
 
     def check(steps, prefix=""):
@@ -101,7 +111,7 @@ def check_scenario_endpoints(name, flow, endpoints):
                 continue
             path = prefix + step_name
             if (
-                step.uses in ("llm.generate", "remix.validate", "remix.novelty")
+                step.uses in (("llm.generate", "llm.content") if content_first else ("llm.generate", "llm.content", "remix.novelty"))
                 and step.endpoint not in available
             ):
                 raise ValueError(
@@ -124,6 +134,7 @@ class Profile(Definition):
 
 
 class Flow(Definition):
+    generation_mode: Literal["existing", "content-first"] = "content-first"
     system_prompt: str = "You are Kidra, a coordinator."
     version: Literal[1] = 1
     description: str = ""
@@ -165,7 +176,7 @@ class Flow(Definition):
             if step.profile and step.profile not in self.roles:
                 raise ValueError(f"Unknown role: {step.profile}")
             if (
-                step.uses in ("llm.generate", "remix.novelty", "remix.validate")
+                step.uses in ("llm.generate", "llm.content", "remix.novelty", "remix.validate")
                 and not step.prompt
                 and not (step.uses == "remix.validate" and step.checks)
             ):
@@ -266,17 +277,51 @@ class UniqueLoader(yaml.SafeLoader):
 
 
 class Scenario:
-    def __init__(self, path):
+    def __init__(self, path, resolve_parent=None):
         self.path = path.resolve()
         self.name = path.name
         raw = (path / "flow.yaml").read_text()
         if len(raw) > 1_000_000:
             raise ValueError("flow.yaml exceeds 1 MB")
         try:
-            self.flow = Flow.model_validate(yaml.load(raw, Loader=UniqueLoader))
+            definition = yaml.load(raw, Loader=UniqueLoader)
+            if not isinstance(definition, dict):
+                raise ValueError('Scenario definition must be an object')
+            parent_name = definition.pop('extends', None)
+            self.parent_name = parent_name
+            self.family = self.name
+            parent = None
+            if parent_name is not None:
+                if not isinstance(parent_name, str) or not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_-]*', parent_name):
+                    raise ValueError('extends must name a registered scenario')
+                if resolve_parent is None:
+                    raise ValueError('Load scenario variations through ScenarioRegistry')
+                parent = resolve_parent(parent_name)
+                self.family = parent.family
+                inherited = parent.flow.model_dump()
+                # Input pools and schemas inherit automatically. An explicit
+                # steps block defines its own scaffold; inherit:true imports an
+                # individual step without pulling in unrelated parent stages.
+                for section in ('steps', 'schemas'):
+                    overrides = definition.get(section, {})
+                    if not isinstance(overrides, dict):
+                        raise ValueError(f'{section} must be an object')
+                    overrides = copy.deepcopy(overrides)
+                    if section == 'steps':
+                        for key, value in overrides.items():
+                            if isinstance(value, dict) and 'inherit' in value:
+                                if value.pop('inherit') is not True or key not in inherited[section]:
+                                    raise ValueError(f'Cannot inherit undefined step: {key}')
+                                overrides[key] = {**inherited[section][key], **value}
+                    definition[section] = (overrides if section == 'steps' and section in definition
+                                           else {**inherited[section], **overrides})
+                    if section == 'steps':
+                        definition[section] = {k: v for k, v in definition[section].items() if v is not None}
+                definition = {**inherited, **definition}
+            self.flow = Flow.model_validate(definition)
         except (yaml.YAMLError, ValueError) as error:
             raise ValueError(f"Invalid scenario {self.name}: {error}") from error
-        self.prompts = {}
+        self.prompts = copy.deepcopy(parent.prompts) if parent else {}
 
         def collect(steps):
             for step in steps.values():
@@ -298,6 +343,8 @@ class Scenario:
                             raise ValueError(
                                 "Prompts must be Markdown files inside their scenario"
                             )
+                        if not target.exists() and parent and filename in parent.prompts:
+                            continue
                         text = target.read_text()
                         if len(text) > 200_000:
                             raise ValueError("Prompt exceeds 200 KB")
@@ -309,29 +356,47 @@ class Scenario:
 
 class ScenarioRegistry:
     def __init__(self, root=None):
-        self.root = Path(root).resolve() if root is not None else None
+        self.root = Path(root if root is not None else BUNDLED_SCENARIOS).resolve()
         self.scenarios = {}
         if self.root is not None:
             if not self.root.is_dir():
                 raise ValueError(f"Scenario directory does not exist: {self.root}")
+            paths = {}
             for filename in sorted(self.root.rglob("flow.yaml")):
                 if not filename.resolve().is_relative_to(self.root):
-                    raise ValueError(
-                        "Scenario files must stay inside the scenario directory"
-                    )
-                scenario = Scenario(filename.parent)
-                if scenario.name in self.scenarios:
-                    raise ValueError(f"Duplicate scenario type: {scenario.name}")
+                    raise ValueError("Scenario files must stay inside the scenario directory")
+                name = filename.parent.name
+                if name in paths:
+                    raise ValueError(f"Duplicate scenario type: {name}")
+                paths[name] = filename.parent
+            loading = set()
+
+            def load(name):
+                if name in self.scenarios:
+                    return self.scenarios[name]
+                if name not in paths:
+                    raise ValueError(f"Unknown parent scenario: {name}")
+                if name in loading:
+                    raise ValueError(f"Scenario inheritance cycle: {name}")
+                loading.add(name)
+                scenario = Scenario(paths[name], resolve_parent=load)
+                loading.remove(name)
                 tag = scenario.flow.tag or scenario.name
-                if any((s.flow.tag or s.name).casefold() == tag.casefold() for s in self.scenarios.values()):
+                if any((s.flow.tag or s.name).casefold() == tag.casefold() and s.family != scenario.family
+                       for s in self.scenarios.values()):
                     raise ValueError(f"Duplicate scenario tag: {tag}")
-                self.scenarios[scenario.name] = scenario
+                self.scenarios[name] = scenario
+                return scenario
+
+            for name in paths:
+                load(name)
 
     def listing(self):
         return [
             {
                 "name": s.name,
                 "tag": s.flow.tag or s.name,
+                "variation_of": s.parent_name,
                 "description": s.flow.description,
                 "tag_pools": {
                     "scenario": {
@@ -346,5 +411,5 @@ class ScenarioRegistry:
                     },
                 },
             }
-            for s in self.scenarios.values()
+            for s in sorted(self.scenarios.values(), key=lambda s: (s.name != 'user_scenario', s.name))
         ]

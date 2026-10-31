@@ -6,6 +6,8 @@ import fnmatch
 import re
 from functools import lru_cache
 
+from .generation_state import AUTOMATED_GENERATION_SQL, GENERATION_PHASES, generation_matches
+
 STATES = {
     "unfinished": -3, "rejected": -2, "unsuccessful": -1,
     "pending": 0, "candidate": 1, "validated": 2, "ready": 3,
@@ -181,8 +183,8 @@ class SearchQuery:
             return ("tag", value[1:])
         if value.startswith("@"):
             name, separator, value = value[1:].partition(":")
-            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch", "errors", "warnings"):
-                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, @batch, @errors, or @warnings")
+            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch", "generation", "errors", "warnings"):
+                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, @batch, @generation, @errors, or @warnings")
             if not separator or not value:
                 raise SearchSyntaxError(f"supply a value after @{name}:")
             if name in ("errors", "warnings"):
@@ -195,6 +197,10 @@ class SearchQuery:
                 if value not in STATES and value not in levels:
                     raise SearchSyntaxError("@state requires unfinished, rejected, unsuccessful, pending, candidate, validated, ready, or a level from -3 to 3")
                 return ("state", STATES[value] if value in STATES else levels[value])
+            if name == 'generation':
+                if value not in GENERATION_PHASES:
+                    raise SearchSyntaxError('@generation requires unfinished or complete')
+                return ('generation', GENERATION_PHASES[value])
             if name == "windows":
                 match = re.fullmatch(r"(>=|<=|!=|=|>|<)?([0-9]+)", value)
                 if not match:
@@ -226,6 +232,8 @@ class SearchQuery:
                 return f"(SELECT d.{kind} FROM trajectory_search_diagnostics d WHERE d.trajectory_uuid=s.uuid) = ?"
             if kind == "state":
                 return "COALESCE(json_extract(m.properties, '$.validation_level'), -3) = ?"
+            if kind == 'generation':
+                return f"({AUTOMATED_GENERATION_SQL} AND json_extract(m.properties,'$.generation_phase') IS ?)"
             if kind == "batch":
                 return "search_glob(?, json_extract(m.properties, '$.generation_batch'))"
             if kind == "text":
@@ -238,7 +246,7 @@ class SearchQuery:
 
         return compile_node(self.root), args
 
-    def matches(self, sample, compiler=None):
+    def matches(self, sample, compiler=None, *, store=None):
         """Match authoring drafts; diagnostic properties need the project compiler."""
         from .compiler import window_names
         from .dataset import trajectory_uuid
@@ -269,6 +277,8 @@ class SearchQuery:
                 return glob_match(node[1], sample.get("id"))
             if kind == "uuid":
                 return glob_match(node[1], trajectory_uuid(sample))
+            if kind == 'generation':
+                return generation_matches(sample, node[1], store or getattr(compiler, 'tool_store', None))
             if kind in ("state", "batch"):
                 metadata = sample.get("metadata")
                 metadata = metadata if isinstance(metadata, dict) else {}

@@ -1,0 +1,31 @@
+digraph idle {
+  graph [rankdir=TB, bgcolor="white", fontname="DejaVu Sans", fontsize=20, labelloc=t, label="idle_scenario — autonomous idle work\nBlue: content LLM | Gray: code / observations | Orange: explicit validation | Purple: external review", pad=0.3, nodesep=0.25, ranksep=0.35];
+  node [shape=box, style="rounded,filled", fillcolor="#F1F5F9", color="#64748B", fontname="DejaVu Sans", fontsize=14, margin="0.16,0.1"];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#475569"];
+  tags [label="Randomize domain, wake trigger and complication\nInitialize Kidra, metadata and saved checklist\nNo user role or conversation"];
+  world [label="Generate a small idle workspace\nStanding policy + scheduler wake context\nVirtual files / TODOs / memory / synthetic time\nAuthor-only situation and success criteria", fillcolor="#DBEAFE", color="#2563EB"];
+  setup [label="Seed sandbox invisibly\nAppend external scheduler/policy document\nCompiler exposes current TODOs in notes window"];
+  decide [label="Choose next action from open visible windows\nPrivate reasoning streams + independent tool batch\nWindow-release choices + finished flag\nOne bounded content request", fillcolor="#DBEAFE", color="#2563EB"];
+  act [label="Construct concurrent reasoning and tool requests\nExecute actual simulator; append masked observations\nRelease selected old windows after consumers finish\nCompile and save; retain live checkpoint"];
+  done [label="Finished?", shape=diamond];
+  limit [label="Fewer than 12 decisions?", shape=diamond];
+  partial [label="Keep incomplete draft, expensive proposals\nand diagnostics for external repair"];
+  pending [label="Stop quietly; no chat reply\nFinalize ordinary window lifecycles\nKeep Pending draft (level 0)\nNo local semantic validation or repair"];
+  original [label="Retain original requirements, tags,\nworld, prompts and semantic checklist"];
+  validate [label="Optional: Edit > Generation > Validate Trajectory\nShared checklist + saved original requirements\nJournaled, cancellable model review; no content rewriting\nRecord Validated / Rejected, never Ready", fillcolor="#FFEDD5", color="#EA580C"];
+  external [label="External MCP review and repair\nLayout / tasks / reasoning / correctness\nEvaluate repaired source against original requirements", fillcolor="#EDE9FE", color="#7C3AED"];
+  ready [label="External sign-off, then human Ready approval\nOnly Ready (level 3) permits training export", fillcolor="#EDE9FE", color="#7C3AED"];
+  tags -> world -> setup -> decide -> act -> done;
+  world -> original [style=dashed, label="Review material; not decision context"];
+  done -> pending [label="Yes; requires no tool calls"];
+  done -> limit [label="No"];
+  limit -> decide [label="Yes: actual observations and retained task state"];
+  limit -> partial [label="No"];
+  pending -> validate [label="Explicit action only"];
+  pending -> external;
+  validate -> external;
+  partial -> external;
+  original -> external [style=dashed];
+  external -> external [label="Findings → targeted edits → recompile / review"];
+  external -> ready [label="Review passes"];
+}

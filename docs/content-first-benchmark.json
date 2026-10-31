@@ -1,0 +1,64 @@
+{
+  "measurement": "offline-fixture-simulated-inference",
+  "seed": 42,
+  "samples_per_mode": 3,
+  "scenario_family": "user-scenario",
+  "context_budget": 8192,
+  "modes": {
+    "existing": {
+      "retained_candidates": 3,
+      "constructed_drafts": 3,
+      "unsuccessful_drafts": 0,
+      "pending_drafts": 0,
+      "repaired_samples": 0,
+      "approved_samples": 0,
+      "request_count": 45,
+      "raw_proposals": 45,
+      "prompt_tokens": 61151,
+      "completion_tokens": 5577,
+      "reasoning_tokens": 0,
+      "inference_seconds": 4.194999999999999,
+      "elapsed_seconds": 9.708266437999555,
+      "candidate_throughput_per_second": 0.30901500480637484,
+      "usable_throughput_per_second": 0.0,
+      "total_tokens": 66728,
+      "scenario": "user_problem",
+      "generation_phase": "complete",
+      "candidate_retention": 1.0
+    },
+    "content-first": {
+      "retained_candidates": 3,
+      "constructed_drafts": 3,
+      "unsuccessful_drafts": 0,
+      "pending_drafts": 0,
+      "repaired_samples": 0,
+      "approved_samples": 0,
+      "request_count": 12,
+      "raw_proposals": 12,
+      "prompt_tokens": 16833,
+      "completion_tokens": 441,
+      "reasoning_tokens": 0,
+      "inference_seconds": 0.9229999999999999,
+      "elapsed_seconds": 4.309941727000478,
+      "candidate_throughput_per_second": 0.696065095545471,
+      "usable_throughput_per_second": 0.0,
+      "total_tokens": 17274,
+      "scenario": "user_scenario_noval",
+      "generation_phase": "complete",
+      "candidate_retention": 1.0
+    }
+  },
+  "comparable_completed_candidates": true,
+  "reductions_fraction": {
+    "request_count": 0.7333333333333334,
+    "total_tokens": 0.7411281620908764,
+    "inference_seconds": 0.7799761620977353,
+    "elapsed_seconds": 0.5560544455052506
+  },
+  "limitations": [
+    "Offline results use scripted text and simulated delays, not real LLM quality or GPU timing.",
+    "Same generation input pools and tag seed; optimized content prompts differ, and live outputs may vary even at temperature zero.",
+    "All candidates remain unapproved. Usable training throughput requires independent review and Ready approval.",
+    "The existing YAML runner already generates content; user-scenario comparison also combines content requests and removes reference/assessment work."
+  ]
+}

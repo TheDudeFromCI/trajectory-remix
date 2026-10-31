@@ -2,12 +2,14 @@
 
 import copy
 import hashlib
+from pathlib import Path
 from typing import Literal
+import yaml
 
 from pydantic import Field
 
 from .review import checklist_schema, compact
-from .scenarios import Definition, SemanticRule
+from .scenarios import Definition, SemanticRule, Step
 
 
 class ChecklistCheck(Definition):
@@ -46,9 +48,25 @@ def build_checklist(scenario):
             collect(step.steps, path + '.')
 
     collect(scenario.flow.steps)
+    if not checks:
+        return standard_checklist(scenario.name, scenario.flow.tag or scenario.name)
     return ScenarioChecklist(
         scenario=scenario.name, tag=scenario.flow.tag or scenario.name, checks=checks
     )
+
+
+def standard_checklist(scenario='manual', tag=None):
+    """One shared review contract, entirely outside the creation graph."""
+    root = Path(__file__).with_name('review_templates')
+    review = Step.model_validate(yaml.safe_load((root / 'review.yaml').read_text()))
+    return ScenarioChecklist(scenario=scenario, tag=tag or scenario, checks={
+        'validate.' + name: ChecklistCheck(
+            prompt=(root / definition.prompt).read_text(), rules=definition.rules,
+            view=definition.view,
+            repair_prompt=(root / review.repair_prompt).read_text() if review.repair_prompt else '',
+            repair_guides=[(root / guide).read_text() for guide in review.repair_guides],
+        ) for name, definition in review.checks.items()
+    })
 
 
 def fingerprint(checklist):

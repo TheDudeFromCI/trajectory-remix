@@ -46,7 +46,9 @@ def evaluation_source(sample):
     source = copy.deepcopy(sample)
     metadata = source.get("metadata", {})
     if isinstance(metadata, dict):
-        for key in ("validation_level", "evaluations", "approval"):
+        # Operational counters are not evidence reviewed by semantic sign-off.
+        # Original content-first requirements/proposals remain part of the source.
+        for key in ("validation_level", "evaluations", "approval", "generation_metrics", "generation_elapsed_seconds"):
             metadata.pop(key, None)
     return source
 
@@ -62,13 +64,10 @@ def invalidate_automation(sample, existing):
             metadata = sample["metadata"] = {}
         if previous.get("origin") == "automation":
             metadata["origin"] = "automation"
+        # Editing source invalidates old assessments, not the chosen state.
+        metadata["validation_level"] = previous.get("validation_level", -3)
         if evaluation_source(sample) != evaluation_source(existing):
-            metadata["validation_level"] = (
-                0 if previous.get("origin") == "automation" else -3
-            )
             metadata.pop("evaluations", None)
-        else:
-            metadata["validation_level"] = previous.get("validation_level", -3)
     return sample
 
 

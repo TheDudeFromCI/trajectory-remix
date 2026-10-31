@@ -1,0 +1,324 @@
+version: 1
+generation_mode: content-first
+tag: idle_scenario
+description: Autonomous idle work on TODOs, project files, memory and alarms, with
+  adaptive tool decisions and external review only.
+system_prompt: You are Kidra, a competent autonomous coordinator. No user is present
+  in this idle session. Follow standing responsibilities and actual scheduler, TODO
+  and tool observations. Choose useful work, preserve needed state, and stop quietly
+  when nothing actionable remains. Do not invent user requests, tool results or permission.
+tags:
+  domain:
+  - name: project maintenance
+    description: Review and reconcile project files or documentation.
+  - name: task management
+    description: Prioritize TODOs and respect blockers and completion evidence.
+  - name: knowledge organization
+    description: Consolidate notes or memory without losing source facts.
+  - name: scheduling
+    description: Handle due alarms or maintain a schedule using the synthetic clock.
+  trigger:
+  - name: idle tick
+    description: Routine idle opportunity with standing responsibilities.
+  - name: TODO backlog
+    description: Existing prioritized tasks need attention.
+  - name: alarm fired
+    description: A scheduler alarm has fired; its payload and standing handling policy
+      are visible.
+  - name: project changed
+    description: A scheduler reports a changed project artifact; inspect its actual
+      contents.
+  complication:
+  - name: straightforward
+    description: A small concrete action with checkable effects.
+  - name: blocked work
+    description: Missing evidence or an unfinished dependency prevents some work.
+  - name: competing priorities
+    description: Choose between useful tasks using urgency and dependencies.
+  - name: contradictory files
+    description: Reconcile inconsistent project facts using explicit source authority.
+  - name: quiet workspace
+    description: Nothing needs changing; recognize this without inventing work.
+roles:
+  kidra:
+    instructions: Work privately from visible state. Prioritize and coordinate rather
+      than narrating to an absent user. Update TODOs only after observed evidence,
+      handle alarms without confusing a wake event with successful follow-up work,
+      and retain exact task state across bounded decisions.
+schemas:
+  Workspace:
+    type: object
+    properties:
+      identifier:
+        type: string
+        pattern: ^[a-z0-9]+(?:-[a-z0-9]+){2,3}$
+      situation:
+        type: string
+        minLength: 1
+        maxLength: 1500
+      success_criteria:
+        type: string
+        minLength: 1
+        maxLength: 1500
+      idle_context:
+        type: string
+        minLength: 1
+        maxLength: 1600
+      files:
+        type: array
+        maxItems: 4
+        items:
+          type: object
+          properties:
+            path:
+              type: string
+              minLength: 1
+            content:
+              type: string
+              maxLength: 1800
+          required:
+          - path
+          - content
+          additionalProperties: false
+      operations:
+        type: array
+        maxItems: 8
+        items:
+          type: object
+          properties:
+            tool:
+              type: string
+              enum:
+              - note_save
+              - memory_save
+              - time_set
+            arguments:
+              type: object
+          required:
+          - tool
+          - arguments
+          additionalProperties: false
+    required:
+    - identifier
+    - situation
+    - success_criteria
+    - idle_context
+    - files
+    - operations
+    additionalProperties: false
+  Action:
+    type: object
+    properties:
+      streams:
+        type: array
+        minItems: 1
+        maxItems: 3
+        items:
+          type: object
+          properties:
+            content:
+              type: string
+              minLength: 1
+          required:
+          - content
+          additionalProperties: false
+      calls:
+        type: array
+        maxItems: 6
+        items:
+          type: object
+          properties:
+            tool:
+              type: string
+              enum:
+              - file_list
+              - file_read
+              - file_stat
+              - file_search
+              - file_write
+              - file_patch
+              - note_save
+              - note_delete
+              - memory_save
+              - memory_search
+              - calculator
+              - time_now
+              - timer
+            arguments:
+              type: object
+          required:
+          - tool
+          - arguments
+          additionalProperties: false
+      release_windows:
+        type: array
+        maxItems: 32
+        uniqueItems: true
+        items:
+          type: string
+          minLength: 1
+      finished:
+        type: boolean
+    required:
+    - streams
+    - calls
+    - release_windows
+    - finished
+    additionalProperties: false
+    allOf:
+    - if:
+        properties:
+          finished:
+            const: true
+      then:
+        properties:
+          calls:
+            maxItems: 0
+steps:
+  idea:
+    uses: llm.content
+    prompt: workspace.md
+    output_schema: Workspace
+    inputs:
+      conditions: ${scenario.tags}
+      setup_tools:
+        note_save: ${tool_contracts.note_save}
+        memory_save: ${tool_contracts.memory_save}
+        time_set: ${tool_contracts.time_set}
+  environment:
+    uses: remix.setup
+    needs:
+    - idea
+    inputs:
+      idea: ${steps.idea.output}
+      operations: ${steps.idea.output.operations}
+  wake:
+    uses: remix.assemble
+    needs:
+    - environment
+    inputs:
+      streams:
+      - window: idle-context
+        type: document
+        op: append
+        source: system
+        content: ${steps.idea.output.idle_context}
+  work:
+    uses: flow.repeat
+    needs:
+    - wake
+    max_iterations: 12
+    until: ${steps.decide.output.finished}
+    steps:
+      decide:
+        uses: llm.content
+        profile: kidra
+        prompt: action.md
+        visible_windows:
+        - '*'
+        output_schema: Action
+        inputs:
+          cycle: ${iteration.index}
+          tools:
+            file_list: ${tool_contracts.file_list}
+            file_read: ${tool_contracts.file_read}
+            file_stat: ${tool_contracts.file_stat}
+            file_search: ${tool_contracts.file_search}
+            file_write: ${tool_contracts.file_write}
+            file_patch: ${tool_contracts.file_patch}
+            note_save: ${tool_contracts.note_save}
+            note_delete: ${tool_contracts.note_delete}
+            memory_save: ${tool_contracts.memory_save}
+            memory_search: ${tool_contracts.memory_search}
+            calculator: ${tool_contracts.calculator}
+            time_now: ${tool_contracts.time_now}
+            timer: ${tool_contracts.timer}
+      act:
+        uses: remix.assemble
+        needs:
+        - decide
+        inputs:
+          streams: ${steps.decide.output.streams}
+          calls: ${steps.decide.output.calls}
+          release_windows: ${steps.decide.output.release_windows}
+  finish:
+    uses: remix.draft
+    needs:
+    - work
+  validate:
+    uses: remix.validate
+    needs:
+    - finish
+    inputs:
+      idea: ${steps.idea.output}
+      tags: ${scenario.tags}
+      roles: ${roles}
+    checks:
+      layout:
+        prompt: review.md
+        view: layout
+        rules:
+          idle_ownership:
+            requirement: No user or chat response is invented. Scheduler context and
+              TODO refreshes are external, masked observations; reasoning and visible
+              tool requests are generated training targets. Invisible setup is not
+              agent knowledge.
+          useful_windows:
+            requirement: Windows have coherent purposes. Independent useful analyses
+              and requests overlap when appropriate; no artificial branches are required
+              for simple or quiet work.
+          retained_state:
+            requirement: Every decision has its required evidence in open windows.
+              Releasing a result requires sufficient retained facts, constraints,
+              caveats and source versions; closed content is unavailable. Persistent
+              automatic notes are not manually closed.
+      tasks:
+        prompt: review.md
+        view: tools
+        rules:
+          priorities_and_blockers:
+            requirement: Work selection follows standing policy, priorities and actual
+              dependencies. Do not mark tasks done before dependent writes or verification
+              succeed, or bypass blockers. Quiet or blocked sessions may end without
+              completing every task.
+          grounded_actions:
+            requirement: File, memory and TODO claims match actual tool outcomes and
+              versions. Follow failures or contradictions with an appropriate new
+              decision; no invented test execution, external communications or synthetic
+              successes.
+          alarm_handling:
+            requirement: Distinguish externally supplied alarm signals, tool timer
+              firings and timeouts from completed follow-up work. Use synthetic time
+              rather than host time. Preserve needed alarm purpose and observe any
+              resulting action before claiming success.
+            allow_not_applicable: true
+      reasoning:
+        prompt: review.md
+        view: reasoning
+        rules:
+          private_decisions:
+            requirement: Private notes explain task-directed decisions, useful calculations
+              and uncertainty without addressing an absent user. Later tool actions
+              depend on earlier results only after they are visible.
+          efficient_idle_work:
+            requirement: Avoid redundant reads of visible unchanged state, pointless
+              status polling, busy loops or work invented to fill cycles. Keep useful
+              compact working state; release obsolete windows after their last consumer.
+          bounded_stop:
+            requirement: Ending is a model decision supported by completed work, legitimate
+              blockers or no useful current action. A stop flag is not approval or
+              proof that all TODOs are done.
+      correctness:
+        prompt: review.md
+        view: correctness
+        rules:
+          original_requirements:
+            requirement: Evaluate final artifacts, task state and decisions against
+              the original workspace success criteria and visible standing responsibilities.
+              Independently check calculations, source authority and effects; do not
+              trust the author's answer key alone.
+            scope: sample
+          permission_and_scope:
+            requirement: Actions stay within the visible standing policy and available
+              tool contracts. Do not invent a user, permission, alarm, observation
+              or requirement; missing authority can legitimately block action.

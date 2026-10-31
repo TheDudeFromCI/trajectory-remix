@@ -24,7 +24,8 @@ class RequestStats:
 
     def count(self, text):
         if self.tokenizer is not None:
-            return len(self.tokenizer.encode(text, add_special_tokens=False).ids)
+            encoded = self.tokenizer.encode(text, add_special_tokens=False)
+            return len(encoded.ids if hasattr(encoded, 'ids') else encoded)
         return len(re.findall(r"\w+|[^\w\s]", text))
 
     def estimate(self, prompt, output, reasoning=""):

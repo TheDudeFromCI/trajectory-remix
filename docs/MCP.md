@@ -459,8 +459,9 @@ Then call `validate_trajectory`, `get_window_history` with `window: "chat"`,
 `validate_trajectory` and `get_diagnostics` use the tokenizer-aware compiler.
 It stops at its first error. Repair that error and run validation again to find
 the next. Open-window warnings are expected for unfinished drafts. Semantic
-validation is opt-in with `semantic: true`; it uses the dashboard's configured
-validators and can contact provider endpoints. Reports do not alter the sample.
+validation is opt-in with `semantic: true`; it uses the same standalone service
+and configured validation endpoint as **Edit → Generation → Validate Trajectory**,
+and can contact provider endpoints. MCP reports do not alter the sample.
 
 `get_window_history` returns cumulative durable text through `end_tick`, even
 when `start_tick` is later than zero. Its events overlap the selected range, and
@@ -512,7 +513,7 @@ returns one bounded snapshot. Preview output limits return HTTP 413 with
 
 `get_guidance()` returns the exact bundle shown in **View → Trajectory Guidelines**.
 Each entry in `documents` has an ID, title, content, format, source and editable
-flag. Standard files are read-only. `get_guidance(scenario="user_problem")` includes
+flag. Standard files are read-only. `get_guidance(scenario="user_scenario")` includes
 that scenario's prompts and rules before creation; `get_guidance(sample_id="id")`
 uses the sample's saved checklist when present. Select only one of these arguments.
 The response lists available scenarios, including custom scopes retained without
@@ -568,11 +569,11 @@ window histories and snapshots instead. `get_review_checklist(sample_id=...)`
 retrieves only the checklist when the source is already known.
 
 A saved snapshot takes precedence over changed scenario files and survives
-export/import and a server without --scenarios-dir. Older/tag-only samples need
-the matching configured scenario, resolved by tag with `metadata.scenario` as a
-legacy fallback. Missing, multiple or conflicting scenarios fail explicitly;
-there is no fallback to another flow's checklist. Older samples are not silently
-retagged or rewritten. A generated snapshot is source provenance, not proof of
+export/import and a server without --scenarios-dir. Older/tag-only samples resolve
+by tag, then `metadata.scenario`, including aliases for retired names. Manual or
+unrecognized samples use the common review contract; custom dataset/scenario
+requirements are included. Ambiguous/conflicting scenario identities still fail
+explicitly. Older samples are not silently retagged or rewritten. A generated snapshot is source provenance, not proof of
 review correctness or authenticity; editing it changes the source/checklist hash.
 
 Evaluate every rule independently, following the returned review guide. Apply
@@ -867,11 +868,16 @@ replay text, arguments and authored outcomes. Spaces mean AND, `|` means OR,
 `-` negates a term/group, parentheses nest, and `*` provides word wildcards.
 `#tag` filters complete metadata tags; properties are `@name`, `@uuid`,
 `@windows` (numeric comparisons), `@uses_tool` (actual visible/invisible calls),
-`@state` (validation stage), `@batch` (generation batch ID), and
+`@state` (validation stage), `@batch` (generation batch ID),
+`@generation:unfinished/complete` (automated generation independently of review), and
 `@errors:true/false` / `@warnings:true/false` (cached local compiler diagnostics).
 Use `@errors:false @warnings:false` for trajectories that compile without diagnostics.
 For example, `list_trajectories(query="@state:candidate", limit=5)` discovers
 five candidates for external review without calling a model API.
+`list_trajectories(query="@generation:unfinished", limit=50)` discovers the same
+unfinished automated drafts as the resume queue, including checkpoint problems
+needing attention and excluding known manual copies. Combine
+`@generation:complete @state:pending` for completed generation awaiting review.
 All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
 Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
 through MCP with `get_authoring_guide(topic="search")`.
@@ -882,7 +888,7 @@ shared open-window attention, redundant file operations, evidence lifetimes
 throughout generation, and independent correctness checks. Zero compiler
 warnings do not establish these properties.
 
-After repairing a candidate, edits reset its previous review state. To sign off
+After repairing a candidate, edits clear previous evaluations while preserving its state. To sign off
 your own review, reread the repaired source, inspect compiler diagnostics and
 semantic correctness, then call:
 
@@ -898,7 +904,8 @@ responsibility. The tool records a self-reported reviewer label, summary,
 timestamp, reviewed revision, source hash and tokenizer/tool fingerprints in
 `metadata.evaluations`. It does not independently verify the agent's assessment
 or identity and does not invoke configured model endpoints. Subsequent content
-edits invalidate the sign-off; undo/redo includes it. It never marks Ready (3).
+edits invalidate the sign-off record while preserving the trajectory's state;
+undo/redo includes it. It never marks Ready (3).
 
 `query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
 (`all`/`any`), `offset`, and `limit`. Scalar filter operators are
@@ -956,3 +963,21 @@ and dataset/scenario guidance for backfilling annotations. Cache rebuilds return
 immediately with a job ID: poll `get_dataset_metrics_status` and use
 `cancel_dataset_metrics_refresh` to stop after the current sample. Retrying joins
 the running job, including after the initiating MCP client disconnects.
+
+## Content-first generation evidence
+
+`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist. See [content-first generation](content-first-generation.md) for configuration, recovery, and limitations.
+
+The standard `user_scenario` and `idle_scenario` flows generate without validation.
+`validate_trajectory(semantic=true)` uses the same explicit service as **Edit →
+Generation → Validate Trajectory**, without recording a sign-off. Samples without
+a scenario snapshot use the shared standard checklist; older saved contracts remain
+authoritative. Old noval names are creation aliases, not additional scenario choices.
+
+
+Recovery IDs in generation provenance identify pre-recovery versions. Pass
+`recovery_id` to `get_generation_record` to inspect an archived source/checkpoint,
+including its original context, raw requests and failed proposals. The returned
+`archived_sample` is historical evidence; repair the current saved trajectory and
+review it against its current original checklist. Recovery archives are stored
+with the SQLite project. Force resume and restart never grant Ready approval.
