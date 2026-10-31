@@ -402,6 +402,7 @@ body.resizing iframe {
 .dataset-tags summary { cursor: pointer; color: var(--muted); }
 #dataset-tag-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow: auto; padding-top: 8px; overflow-wrap: anywhere; }
 #dataset-tag-list .tag { max-width: 100%; }
+#dataset-tag-list .first-match { outline: 1px solid var(--accent); }
 .metadata-panel {
   flex: 0 1 auto;
   max-height: 45%;

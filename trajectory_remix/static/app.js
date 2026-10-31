@@ -281,16 +281,41 @@ async function refresh(initial = false) {
     renderValidationState();
   }
 }
+function activeSearchTag() {
+  const input = $("sample-search");
+  if (input.selectionStart !== input.selectionEnd) return null;
+  const cursor = input.selectionStart, query = input.value;
+  // Match term boundaries in the search grammar, including quoted tag names.
+  for (let start = 0; start < query.length;) {
+    if (/[\s()|\-]/.test(query[start])) { start++; continue; }
+    let end = start, quoted = false;
+    while (end < query.length) {
+      if (query[end] === '"') quoted = !quoted;
+      else if (!quoted && /[\s()|]/.test(query[end])) break;
+      end++;
+    }
+    if (query[start] === "#" && cursor > start && cursor <= end) {
+      return { start, end, prefix: query.slice(start + 1, cursor).replaceAll('"', "").toLowerCase() };
+    }
+    start = end;
+  }
+  return null;
+}
+function matchingDatasetTags(active = activeSearchTag()) {
+  const tags = state?.dataset_tags || [];
+  return active ? tags.filter(tag => tag.replace(/^#/, "").toLowerCase().startsWith(active.prefix)) : tags;
+}
 function renderDatasetTags() {
-  const tags = state.dataset_tags || [];
+  const active = activeSearchTag();
+  const tags = matchingDatasetTags(active);
   const root = $("dataset-tag-list");
-  const signature = JSON.stringify(tags);
+  const signature = JSON.stringify([tags, !!active]);
   if (root.dataset.tags === signature) return;
   root.dataset.tags = signature;
-  $("dataset-tag-count").textContent = tags.length;
+  $("dataset-tag-count").textContent = String(tags.length);
   root.replaceChildren(...(tags.length
-    ? tags.map(tag => node("span", "tag", tag))
-    : [node("span", "hint", "No tags in this dataset.")]));
+    ? tags.map((tag, index) => node("span", "tag" + (active && index === 0 ? " first-match" : ""), tag))
+    : [node("span", "hint", active ? "No matching tags." : "No tags in this dataset.")]));
 }
 function renderValidationState() {
   $("set-state-menu-button").disabled = !sample;
@@ -2411,7 +2436,29 @@ async function saveConfig() {
   updateSettingsState();
   toast("Configuration saved.");
 }
+function updateSearchTagSuggestions() {
+  if (activeSearchTag()) $("dataset-tags").open = true;
+  renderDatasetTags();
+}
+$("sample-search").onclick = updateSearchTagSuggestions;
+$("sample-search").onkeyup = event => {
+  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) updateSearchTagSuggestions();
+};
+$("sample-search").onkeydown = event => {
+  if (event.key !== "Tab" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+  const active = activeSearchTag();
+  if (!active) return;
+  const first = matchingDatasetTags(active)[0];
+  if (first === undefined || first.includes('"')) return;
+  event.preventDefault();
+  const input = $("sample-search"), tag = first.replace(/^#/, "");
+  const replacement = "#" + (/[\s()|]/.test(tag) ? `"${tag}"` : tag);
+  input.value = input.value.slice(0, active.start) + replacement + input.value.slice(active.end);
+  input.setSelectionRange(active.start + replacement.length, active.start + replacement.length);
+  input.oninput();
+};
 $("sample-search").oninput = () => {
+  updateSearchTagSuggestions();
   clearTimeout(searchTimer);
   sampleOffset = 0;
   searchTimer = setTimeout(
