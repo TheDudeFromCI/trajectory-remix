@@ -231,6 +231,7 @@ async function refresh(initial = false) {
       next.query !== state.query;
     const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
     state = next;
+    renderDatasetTags();
     renderTokenizerMigration(next.tokenizer_migration);
     renderTrajectoryValidation(next.validation_status);
     renderStatus();
@@ -279,6 +280,17 @@ async function refresh(initial = false) {
     pollBusy = false;
     renderValidationState();
   }
+}
+function renderDatasetTags() {
+  const tags = state.dataset_tags || [];
+  const root = $("dataset-tag-list");
+  const signature = JSON.stringify(tags);
+  if (root.dataset.tags === signature) return;
+  root.dataset.tags = signature;
+  $("dataset-tag-count").textContent = tags.length;
+  root.replaceChildren(...(tags.length
+    ? tags.map(tag => node("span", "tag", tag))
+    : [node("span", "hint", "No tags in this dataset.")]));
 }
 function renderValidationState() {
   $("set-state-menu-button").disabled = !sample;
@@ -2070,7 +2082,7 @@ function renderMarkdown(root, text) {
     if (!line.trim()) { list = null; continue; }
     if (line.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
       const table = node("table");
-      const cells = value => value.trim().replace(/^\||\|$/g, "").split("|");
+      const cells = value => value.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map(cell => cell.replace(/\\\|/g, "|"));
       const row = (value, tag) => { const tr = node("tr"); for (const valueCell of cells(value)) { const cell = node(tag); markdownInline(cell, valueCell.trim()); tr.append(cell); } table.append(tr); };
       row(line, "th"); i++;
       while (i + 1 < lines.length && lines[i + 1].includes("|") && lines[i + 1].trim()) row(lines[++i], "td");
@@ -2091,6 +2103,23 @@ function renderMarkdown(root, text) {
     }
   }
 }
+$("search-guide-button").onclick = async () => {
+  const root = $("search-guide-content");
+  root.textContent = "Loading search guide…";
+  $("search-guide-dialog").showModal();
+  try {
+    const response = await fetch("/search-guide");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    root.replaceChildren();
+    renderMarkdown(root, text);
+    root.scrollTop = 0;
+  } catch (error) {
+    root.textContent = `Unable to load search guide: ${error.message}. Close and reopen to retry.`;
+  }
+};
+$("close-search-guide").onclick = () => $("search-guide-dialog").close();
+
 let guidanceBundle = null, guidanceTab = "standard.start", guidanceRequest = 0, customGuidanceScope = "";
 function renderGuidelines() {
   const tabs = $("guidelines-tabs"), root = $("guidelines-content");

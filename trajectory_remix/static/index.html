@@ -106,7 +106,11 @@
             <code>@state:candidate @batch:batch-id</code><br />
             <code>@generation:unfinished</code> (unfinished automated drafts)<br />
             <code>@generation:complete @state:pending</code> (generated, awaiting review)</p>
-          <a href="/search-guide" target="_blank" rel="noopener">Full search guide</a>
+          <button id="search-guide-button" type="button" aria-haspopup="dialog" aria-controls="search-guide-dialog">Full search guide</button>
+        </details>
+        <details id="dataset-tags" class="dataset-tags">
+          <summary>Dataset tags <span id="dataset-tag-count" class="badge">0</span></summary>
+          <div id="dataset-tag-list" aria-label="All dataset tags"></div>
         </details>
         <div id="sample-list"></div>
         <div class="sample-pagination" aria-label="Sample pages">
@@ -524,6 +528,13 @@
           persistence.</span
         ><button id="save-config" class="primary" disabled>Save Changes</button>
       </div>
+    </dialog>
+    <dialog id="search-guide-dialog" aria-labelledby="search-guide-title">
+      <div class="dialog-header">
+        <strong id="search-guide-title">Full search guide</strong>
+        <button id="close-search-guide" class="square" aria-label="Close search guide" autofocus>×</button>
+      </div>
+      <article id="search-guide-content" class="markdown-guide" aria-label="Search guide" tabindex="0"></article>
     </dialog>
     <dialog id="guidelines-dialog" aria-labelledby="guidelines-title">
       <div class="dialog-header">
