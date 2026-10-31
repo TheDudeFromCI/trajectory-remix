@@ -1632,18 +1632,47 @@ for (const request of rangeRequests) {
   const query = new URL(request.path, base).searchParams;
   assert(Number(query.get("end_tick")) - Number(query.get("start_tick")) < 8);
 }
-// An oversized range falls back to one frame; expiry does not cause a retry loop.
+// An oversized range falls back to one frame; expiry recompiles the original
+// source once, keeps the selected tick, and displays a toast while waiting.
 nextFramesError = { code: "preview_limit", detail: "Preview range exceeds 4 MB; request fewer frames" };
 jump(1000);
 await waitFor(() => requests.some((r) => r.path === `/api/frame/${lastPlan.plan_id}/1000`) &&
   !$("window-grid").textContent.includes("Loading preview"));
-nextFramesError = { detail: "Preview expired; compile the sample again" };
+const expiredError = { code: "preview_expired", detail: "Preview expired; compile the sample again" };
+const sourceBeforeExpiry = JSON.parse(requests.filter((r) => r.path === "/api/compile").at(-1).options.body);
+const beforeRecoveryCompiles = compileCount();
+const beforeRecoveryWrites = requests.filter((r) => r.options?.method === "PUT").length;
+nextFramesError = expiredError;
+holdNextCompile = true;
+releaseCompile = null;
 jump(500);
+await waitFor(() => releaseCompile !== null);
+assert.equal($("toast").hidden, false);
+assert.match($("toast").textContent, /Please wait.*trajectory recompiles/);
+assert.equal(compileCount(), beforeRecoveryCompiles + 1);
+assert.deepEqual(JSON.parse(requests.filter((r) => r.path === "/api/compile").at(-1).options.body), sourceBeforeExpiry);
+jump(501); // A seek during recompilation must keep the user's latest tick.
+releaseCompile();
+await waitFor(() => !$("window-grid").textContent.includes("Loading preview"));
+assert.doesNotMatch($("window-grid").textContent, /Preview unavailable/);
+assert.equal($("tick-number").value, "501");
+assert.equal($("toast").hidden, true);
+assert.equal(requests.filter((r) => r.options?.method === "PUT").length, beforeRecoveryWrites);
+
+// If the replacement preview also expires, stop instead of recompiling forever.
+nextFramesError = expiredError;
+holdNextCompile = true;
+releaseCompile = null;
+jump(600);
+await waitFor(() => releaseCompile !== null);
+nextFramesError = expiredError;
+releaseCompile();
 await waitFor(() => /Preview unavailable: Preview expired/.test($("window-grid").textContent));
 const frameRequestCount = () => requests.filter((r) => /^\/api\/frames?\//.test(r.path)).length;
 const expiredRequestCount = frameRequestCount();
 await new Promise((resolve) => setTimeout(resolve, 100));
 assert.equal(frameRequestCount(), expiredRequestCount);
+assert.equal(compileCount(), beforeRecoveryCompiles + 2);
 
 const emptyStateResponse = await w.fetch("/api/state", {headers: {
   "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content,

@@ -15,6 +15,10 @@ class PreviewLimit(ValueError):
     pass
 
 
+class PreviewExpired(ValueError):
+    pass
+
+
 def bounded_json(value, message):
     """Serialize once and enforce an output budget, independently of compilation."""
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()

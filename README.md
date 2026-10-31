@@ -409,7 +409,8 @@ The dashboard explains the preview limit; MCP `preview_snapshots` can inspect
 selected windows/ranges, and `get_window_history` paginates token records.
 NOOPs, losses and training exports are unchanged. Dashboard and MCP share an LRU
 plan cache (six entries, at most 500,000 retained rows in total, 15-minute idle
-expiry); an evicted/expired preview asks you to compile again. Active playback
+expiry); the dashboard automatically recompiles an evicted/expired preview from
+its original source and shows a waiting toast before resuming. Active playback
 reuses the cached plan. Cache limits bound retained expansion, not process RSS
 or temporary compilation memory.
 

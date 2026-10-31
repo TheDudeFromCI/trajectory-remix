@@ -22,6 +22,8 @@ let frameRequest = null,
   frameCache = new Map(),
   frameFailure = null,
   previewMessage = null;
+const previewSources = new WeakMap();
+let toastVersion = 0;
 let configDraft,
   configTab = "endpoints",
   eventDraft = [],
@@ -54,15 +56,17 @@ function button(text, action, cls = "") {
   n.onclick = action;
   return n;
 }
-function toast(text, error = false) {
+function toast(text, error = false, duration = error ? 11000 : 4500) {
+  const version = ++toastVersion;
   clearTimeout(toastTimer);
   $("toast").textContent = text;
   $("toast").className = error ? "error" : "";
   $("toast").hidden = false;
-  toastTimer = setTimeout(
-    () => ($("toast").hidden = true),
-    error ? 11000 : 4500,
-  );
+  const dismiss = () => {
+    if (version === toastVersion) $("toast").hidden = true;
+  };
+  if (duration) toastTimer = setTimeout(dismiss, duration);
+  return dismiss;
 }
 async function api(path, method = "GET", body) {
   const res = await fetch("/api/" + path, {
@@ -617,7 +621,9 @@ async function compileSample(persist = true) {
     }
     $("sample-json").value = JSON.stringify(sample, null, 2);
     try {
-      plan = await json("compile", "POST", { sample });
+      const source = structuredClone(sample);
+      plan = await json("compile", "POST", { sample: source });
+      previewSources.set(plan, source);
       currentFrame = null;
       frameCache.clear();
       frameFailure = null;
@@ -787,21 +793,45 @@ function renderReplay() {
 function fetchFrame() {
   if (frameRequest || !plan || currentFrame?.tick === tick) return frameRequest;
   if (frameFailure?.id === plan.plan_id && frameFailure.tick === tick) return;
-  const id = plan.plan_id,
-    target = tick;
+  let activePlan = plan, id = plan.plan_id;
+  const target = tick, source = previewSources.get(plan);
   frameRequest = (async () => {
     let failed = false;
     try {
+      const load = async () => {
+        try {
+          // A small range amortizes request overhead during playback. Seeking always
+          // starts at the selected tick; the browser never replays an earlier prefix.
+          return await json(`frames/${id}?start_tick=${target}&end_tick=${Math.min(target + 7, activePlan.max_tick)}`);
+        } catch (e) {
+          if (e.code !== "preview_limit") throw e;
+          return { frames: [await json(`frame/${id}/${target}`)] };
+        }
+      };
       let result;
       try {
-        // A small range amortizes request overhead during playback. Seeking always
-        // starts at the selected tick; the browser never replays an earlier prefix.
-        result = await json(`frames/${id}?start_tick=${target}&end_tick=${Math.min(target + 7, plan.max_tick)}`);
+        result = await load();
       } catch (e) {
-        if (e.code !== "preview_limit") throw e;
-        result = { frames: [await json(`frame/${id}/${target}`)] };
+        if (e.code !== "preview_expired" || !source || plan !== activePlan) throw e;
+        const dismiss = toast("Please wait while the trajectory recompiles…", false, 0);
+        try {
+          // Reuse the compiled source, including unsaved drafts. Never save edits
+          // or substitute a newer dataset sample while restoring a preview.
+          const restored = await json("compile", "POST", { sample: source });
+          if (plan !== activePlan) return;
+          if (!restored.preview.available) throw new Error(restored.preview.message);
+          previewSources.set(restored, source);
+          plan = activePlan = restored;
+          id = restored.plan_id;
+          frameCache.clear();
+          frameFailure = null;
+          diagnostics(restored.diagnostics);
+          result = await load(); // Retry once; another eviction remains an error.
+        } finally {
+          dismiss();
+        }
       }
-      if (plan?.plan_id === id) {
+      if (plan === activePlan) {
         frameCache = new Map(result.frames.map((frame) => [frame.tick, frame]));
         currentFrame = frameCache.get(tick) || null;
         frameFailure = null;
@@ -809,7 +839,7 @@ function fetchFrame() {
       }
     } catch (e) {
       failed = true;
-      if (plan?.plan_id === id && tick === target) {
+      if (plan === activePlan && tick === target) {
         pause();
         frameFailure = { id, tick: target, message: e.message };
         toast(e.message, true);
@@ -817,9 +847,9 @@ function fetchFrame() {
       }
     } finally {
       frameRequest = null;
-      // No retry loop for expired plans or output limits. A new seek/compile can
+      // No retry loop after recovery or output limits. A new seek/compile can
       // try again, and a seek made during an in-flight request must still load.
-      if (plan && currentFrame?.tick !== tick && (!failed || plan.plan_id !== id || tick !== target))
+      if (plan && currentFrame?.tick !== tick && (!failed || plan !== activePlan || tick !== target))
         setTimeout(fetchFrame, 0);
     }
   })();

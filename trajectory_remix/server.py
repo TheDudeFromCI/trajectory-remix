@@ -18,7 +18,7 @@ from starlette.routing import Route
 
 from .authoring import CommandError, TrajectoryCommands
 from .compiler import CompileError, chunks
-from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewCache, PreviewLimit, bounded_json
+from .preview import MAX_PREVIEW_BYTES, MAX_PREVIEW_FRAMES, PreviewCache, PreviewExpired, PreviewLimit, bounded_json
 from .migration import TokenizerMigration
 from .dataset import (
     new_sample,
@@ -161,6 +161,12 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def preview_limit(request, error):
         return JSONResponse(
             {"detail": str(error), "code": "preview_limit"}, status_code=413
+        )
+
+    @app.exception_handler(PreviewExpired)
+    async def preview_expired(request, error):
+        return JSONResponse(
+            {"detail": str(error), "code": "preview_expired"}, status_code=404
         )
 
     @app.exception_handler(CommandError)
@@ -468,7 +474,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     def get_preview(plan_id):
         preview = commands.previews.get(plan_id)
         if preview is None:
-            raise HTTPException(404, "Preview expired or evicted from the bounded cache; compile the sample again")
+            raise PreviewExpired("Preview expired or evicted from the bounded cache; compile the sample again")
         return preview
 
     @app.get("/api/frame/{plan_id}/{tick}")
