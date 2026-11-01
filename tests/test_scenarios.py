@@ -115,11 +115,15 @@ async def finish(runner):
     assert runner.status["phase"] == "complete", (runner.status, list(runner.logs))
 
 
+@pytest.mark.parametrize("split", ["train", "development", "test"])
 async def test_example_single_and_multiple_turns_are_compilable_and_pending_human_review(
-    compiler, tmp_path
+    compiler, tmp_path, split
 ):
     fake = ScenarioClient(turns=2, tools=True)
     app = app_for(tmp_path, compiler, fake)
+    config = copy.deepcopy(app.state.dataset["config"])
+    config["default_split"] = split
+    app.state.dataset.set_config(config)
     runner = app.state.scenario_runner
     runner.start("user_problem")
     await finish(runner)
@@ -127,6 +131,7 @@ async def test_example_single_and_multiple_turns_are_compilable_and_pending_huma
     assert len(samples) == 1
     sample = samples[0]
     assert sample["metadata"]["validation_level"] == 0
+    assert sample["metadata"]["split"] == split
     assert not training_eligible(sample)
     assert sample["metadata"]["context_tags"]
     assert sample["metadata"]["roles"]["kidra"]["tags"] == {}

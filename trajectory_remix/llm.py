@@ -75,6 +75,7 @@ def _json_source(value):
 
 def default_config():
     return {
+        "default_split": "train",
         "endpoints": [
             {
                 "id": "generator",
@@ -110,6 +111,8 @@ def default_config():
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("Config must be an object")
+    if config.get("default_split", "train") not in ("train", "development", "test"):
+        raise ValueError("Default split must be train, development or test")
     content = config.get("content_first", {})
     if not isinstance(content, dict):
         raise ValueError("content_first must be an object")
@@ -430,6 +433,7 @@ class SampleBuilder:
             "defaults": {"implicit-noop-loss-weight": 0.1},
             "replay": {},
             "metadata": {
+                "split": config.get("default_split", "train"),
                 "tags": config.get("tags", []),
                 "synthetic_clock": config.get("clock", {}),
             },

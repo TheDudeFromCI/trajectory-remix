@@ -20,6 +20,7 @@ async def source(studio, sample_id="test"):
 async def test_trajectory_crud_metadata_and_save(studio, tmp_path):
     created = await call(studio, "create_trajectory", sample_id="empty")
     assert created == {"sample_id": "empty", "revision": 1, "saved": True}
+    assert (await source(studio, "empty"))["metadata"]["split"] == "train"
     report = await call(studio, "validate_trajectory", sample_id="empty")
     assert not report["valid"]
     await call(
@@ -77,6 +78,7 @@ async def test_demo_template_uses_configured_eos(studio):
         studio, "create_trajectory", template="demo", sample_id="demo", validate=True
     )
     assert (await call(studio, "validate_trajectory", sample_id="demo"))["valid"]
+    assert (await source(studio, "demo"))["metadata"]["split"] == "train"
 
 
 async def test_event_editing_moving_offsets_and_deletion(studio):

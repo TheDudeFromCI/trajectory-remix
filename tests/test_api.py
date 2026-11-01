@@ -30,6 +30,7 @@ async def test_crud_compile_frame_export_roundtrip(client, tmp_path):
     frame = (await client.get(f"/api/frame/{p['plan_id']}/2")).json()
     assert frame["tick"] == 2
     assert s["metadata"]["validation_level"] == -3
+    assert s["metadata"]["split"] == "train"
     assert (await client.post("/api/export", json={})).text == ""
     await client.post("/api/samples/0/approve")
     s = (await client.get("/api/samples/0")).json()
@@ -51,6 +52,35 @@ async def test_bad_marker_diagnostic(client):
     r = await client.post("/api/compile", json={"sample": s})
     assert r.status_code == 422
     assert "Invalid marker" in r.json()["diagnostics"][0]["message"]
+
+
+@pytest.mark.parametrize("split", ["train", "development", "test"])
+async def test_default_split_preferences_apply_to_new_trajectories(client, tmp_path, split):
+    response = await client.post("/api/preferences", json={"default_split": split})
+    assert response.status_code == 200, response.text
+    assert json.loads(DatasetStore(tmp_path / "project.kidra-dataset").info()[3])["default_split"] == split
+    await client.post("/api/samples", json={})
+    assert (await client.get("/api/samples/0")).json()["metadata"]["split"] == split
+    for template in ("empty", "demo"):
+        response = await client.post("/api/mcp/call", json={
+            "name": "create_trajectory", "arguments": {"sample_id": template, "template": template}
+        })
+        assert response.status_code == 200, response.text
+    for index in (1, 2):
+        assert (await client.get(f"/api/samples/{index}")).json()["metadata"]["split"] == split
+    imported = new_sample("development")
+    await client.post("/api/samples", json={"sample": imported})
+    await client.post("/api/preferences", json={"default_split": "train"})
+    assert (await client.get("/api/samples/0")).json()["metadata"]["split"] == split
+    assert (await client.get("/api/samples/3")).json()["metadata"]["split"] == "development"
+
+
+@pytest.mark.parametrize("split", [None, "invalid", 1, [], {}])
+async def test_invalid_default_split_does_not_save_other_preferences(client, split):
+    before = (await client.get("/api/state")).json()["config"]
+    response = await client.post("/api/preferences", json={"default_split": split, "api_retries": 7})
+    assert response.status_code == 422
+    assert (await client.get("/api/state")).json()["config"] == before
 
 
 async def test_tool_authoring_history_and_atomic_rejection(client):

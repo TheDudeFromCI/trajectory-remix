@@ -2701,6 +2701,7 @@ $("preferences-button").onclick = () => {
   $("auto-compile-delay").value = (autoCompileDelayMs / 1000).toString();
   $("show-window-headers").checked = showWindowHeaders;
   $("model-api-retries").value = state.config.single_generation?.api_retries ?? 2;
+  $("default-split").value = state.config.default_split ?? "train";
   $("preferences-dialog").showModal();
 };
 function setMigrationBusy(busy) {
@@ -2796,10 +2797,11 @@ $("preferences-form").onsubmit = action(async (event) => {
     throw new Error("Compile delay must be between 0.1 and 60 seconds.");
   const apiRetries = Number($("model-api-retries").value);
   if (!Number.isInteger(apiRetries) || apiRetries < 0 || apiRetries > 20) throw new Error("API retries must be an integer from 0 to 20.");
-  if (apiRetries !== (state.config.single_generation?.api_retries ?? 2)) {
-    await json("preferences", "POST", {api_retries: apiRetries});
-    if (configDraft) { configDraft.single_generation ??= {}; configDraft.single_generation.api_retries = apiRetries; }
-    if (configBaseline) { const baseline = JSON.parse(configBaseline); baseline.single_generation ??= {}; baseline.single_generation.api_retries = apiRetries; configBaseline = JSON.stringify(baseline); }
+  const defaultSplit = $("default-split").value;
+  if (apiRetries !== (state.config.single_generation?.api_retries ?? 2) || defaultSplit !== (state.config.default_split ?? "train")) {
+    await json("preferences", "POST", {api_retries: apiRetries, default_split: defaultSplit});
+    if (configDraft) { configDraft.single_generation ??= {}; configDraft.single_generation.api_retries = apiRetries; configDraft.default_split = defaultSplit; }
+    if (configBaseline) { const baseline = JSON.parse(configBaseline); baseline.single_generation ??= {}; baseline.single_generation.api_retries = apiRetries; baseline.default_split = defaultSplit; configBaseline = JSON.stringify(baseline); }
     await refresh();
   }
   const delayMs = Math.round(delaySeconds * 1000);
