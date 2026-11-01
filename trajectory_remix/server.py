@@ -363,7 +363,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def create_sample(request: Request):
         editable()
         data = await body(request)
-        sample = data.get("sample") or new_sample()
+        sample = data.get("sample") or new_sample(state["config"].get("default_split", "train"))
         if "sample" not in data:
             for group in sample["replay"].values():
                 for event in group:
@@ -658,11 +658,15 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/preferences")
     async def preferences(request: Request):
         data = await body(request)
-        value = data.get("api_retries")
-        if type(value) is not int or not 0 <= value <= 20:
-            raise ValueError("API retries must be an integer from 0 to 20")
         config = copy.deepcopy(state["config"])
-        config.setdefault("single_generation", {})["api_retries"] = value
+        if "api_retries" in data:
+            value = data["api_retries"]
+            if type(value) is not int or not 0 <= value <= 20:
+                raise ValueError("API retries must be an integer from 0 to 20")
+            config.setdefault("single_generation", {})["api_retries"] = value
+        if "default_split" in data:
+            config["default_split"] = data["default_split"]
+        validate_config(config)
         state.set_config(config, state["revision"])
         return {"ok": True}
 

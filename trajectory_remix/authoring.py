@@ -573,12 +573,12 @@ class TrajectoryCommands:
     ):
         """Create a trajectory from full JSON, an empty draft, or the dashboard demo template.
 
-        Empty and demo drafts default to the train split. Empty drafts need events
-        before they compile. IDs default to UUIDs.
+        Empty and demo drafts use the default split from Preferences. Empty drafts
+        need events before they compile. IDs default to UUIDs.
         """
         self._editable(expected_revision)
         if sample is None:
-            sample = new_sample()
+            sample = new_sample(self.state["config"].get("default_split", "train"))
             if template == "empty":
                 sample["replay"] = {"0": []}
             else:

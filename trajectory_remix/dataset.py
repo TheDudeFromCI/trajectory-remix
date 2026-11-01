@@ -83,14 +83,14 @@ def training_eligible(sample):
     )
 
 
-def new_sample():
+def new_sample(default_split="train"):
     ident = str(uuid.uuid4())
     return {
         "schema-version": "1.0",
         "id": ident,
         "uuid": ident,
         "tick-policy": "external-first",
-        "metadata": {"validation_level": -3, "split": "train"},
+        "metadata": {"validation_level": -3, "split": default_split},
         "defaults": {"implicit-noop-loss-weight": 0.1},
         "replay": {
             "0": [

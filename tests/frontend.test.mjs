@@ -515,6 +515,9 @@ assert.equal($("edit-menu").querySelectorAll('[role="separator"]').length, 3);
 await click("preferences-button");
 assert($("preferences-dialog").hasAttribute("open"));
 assert.equal($("auto-compile-delay").value, "1");
+assert.equal($("default-split").value, "train");
+assert.deepEqual(Array.from($("default-split").options, option => option.value), ["train", "development", "test"]);
+$("default-split").value = "development";
 $("auto-compile-delay").value = "0.2";
 await $("preferences-form").onsubmit({ preventDefault() {} });
 assert.equal($("preferences-dialog").hasAttribute("open"), false);
@@ -523,6 +526,8 @@ assert.equal(
   "200",
 );
 await click("preferences-button");
+assert.equal($("default-split").value, "development");
+$("default-split").value = "train";
 await $("preferences-form").onsubmit({ preventDefault() {} });
 await waitFor(() => !w.document.title.startsWith("*") && !$("undo-edit").disabled);
 const compileCountBeforePreference = compileCount();

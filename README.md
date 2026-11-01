@@ -16,6 +16,10 @@ cd trajectory-remix
 Open **http://127.0.0.1:8765** in your browser. Windows activation:
 `.venv\Scripts\activate`. Use `--port 8766` to change the port.
 
+In **Edit → Preferences**, choose the default split (Train, Development, or Test)
+for new manual and generated trajectories. The choice is saved with the project
+and initially defaults to Train. Existing trajectories retain their splits.
+
 A small ASCII character tokenizer and reactive tool sample are included for a
 reproducible first run:
 
