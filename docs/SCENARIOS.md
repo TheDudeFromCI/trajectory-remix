@@ -104,6 +104,8 @@ with the same normal pipeline, concurrency, retries and compiler checks as Start
 The browser automatically downloads `generation-walkthrough.md` when the run
 finishes or stops, including failed, API-paused and cancelled runs. Pause/Resume
 and Cancel remain available in Generation Control while the download is pending.
+Pausing keeps the walkthrough only in the current server's memory. It does not
+survive a server restart, even though the generation checkpoint can be resumed.
 
 The verbose Markdown includes the flow and sampled conditions; exact system/user
 messages and prompt sources; original JSON schemas, provider decoding schemas and

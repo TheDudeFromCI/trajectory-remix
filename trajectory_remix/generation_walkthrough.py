@@ -8,11 +8,22 @@ import os
 import re
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
+
+
+def json_equal(before, after):
+    if type(before) is not type(after):
+        return False
+    if isinstance(before, dict):
+        return before.keys() == after.keys() and all(json_equal(value, after[key]) for key, value in before.items())
+    if isinstance(before, list):
+        return len(before) == len(after) and all(json_equal(a, b) for a, b in zip(before, after))
+    return before == after
 
 
 def changes(before, after, path=''):
     """Lossless JSON-pointer changes, including the previous values."""
-    if before == after:
+    if json_equal(before, after):
         return []
     if isinstance(before, dict) and isinstance(after, dict):
         result = []
@@ -118,7 +129,19 @@ class GenerationWalkthrough:
 
         def redact(value):
             if isinstance(value, str):
-                for key in sorted(self.credentials, key=len, reverse=True):
+                # Inputs and raw outputs can contain JSON inside JSON strings.
+                # Match every escaping depth that can fit in this value, longest
+                # first so replacing a literal cannot damage an encoded match.
+                representations = set(self.credentials)
+                pending = list(self.credentials)
+                while pending:
+                    key = pending.pop()
+                    for ascii_only in (False, True):
+                        encoded = json.dumps(key, ensure_ascii=ascii_only)[1:-1]
+                        if encoded not in representations and len(encoded) <= len(value):
+                            representations.add(encoded)
+                            pending.append(encoded)
+                for key in sorted(representations, key=len, reverse=True):
                     value = value.replace(key, '[redacted]')
                 return value
             if isinstance(value, dict):
@@ -127,31 +150,7 @@ class GenerationWalkthrough:
                 return [redact(item) for item in value]
             return value
 
-        text = [
-            '# Scenario generation walkthrough\n',
-            'This report follows the normal generation pipeline. Drafts, checkpoints and ordinary '
-            'generation records are saved normally; this walkthrough is request-scoped and is '
-            'never stored in the database.\n',
-            'Events are ordered by observation time. Start/finish event IDs identify overlapping '
-            'requests and nested steps. Step definitions include dependencies, conditions, retries '
-            'and fallbacks. Model requests contain the exact rendered messages and original JSON '
-            'schema, plus the provider decoding schema and local constraints. Prompt sources are '
-            'listed separately: a source or saved review checklist is only shown to a model if it '
-            'appears in that request’s messages.\n',
-            'Generation enforces request budgets when an inference tokenizer is available, JSON '
-            'parsing/schema checks and compiler/tool contracts. Semantic review is deferred to '
-            'Validate Trajectory; saved review checklists are not automatically enforced during '
-            'creation. Budget skips, failures and compiler diagnostics appear below.\n',
-            'Model responses do not apply workspace edits themselves. Subsequent remix steps '
-            'construct the trajectory and execute simulated tools. Workspace changes use JSON '
-            'pointers with before/after values. Compiler results include each tool call and the '
-            'sandbox state and changes at every recorded execution tick; simultaneous changes '
-            'share a tick. Compiler results may include earlier calls replayed or cached by the '
-            'normal pipeline. No extra tool execution is performed for this report.\n',
-            'Reasoning is included only when returned by the provider. Missing reasoning is '
-            'marked unavailable. Token metrics retain their reported/estimated source. '
-            'Configured endpoint credentials are redacted.\n',
-        ]
+        text = [Path(__file__).with_name('guides').joinpath('generation-walkthrough.md').read_text()]
         for entry in self.events:
             entry = redact(entry)
             payload = json.dumps(entry, ensure_ascii=False, indent=2)

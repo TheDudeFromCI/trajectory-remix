@@ -229,3 +229,106 @@ def test_lossless_workspace_changes():
         {'op': 'replace', 'path': '/file~1a', 'before': 'old', 'after': 'new'},
         {'op': 'remove', 'path': '/gone', 'before': 1},
     ]
+
+
+@pytest.mark.parametrize('before,after', [
+    ({'x': True}, {'x': 1}), ({'x': [False]}, {'x': [0]}),
+    ([{'x': True}], [{'x': 1}]), (1, 1.0),
+])
+def test_workspace_changes_preserve_json_types(before, after):
+    diff = changes(before, after)
+    assert diff
+    assert json.dumps(diff[0]['before']) != json.dumps(diff[0]['after'])
+
+
+async def test_credentials_cannot_be_recovered_from_nested_inputs_or_responses(traced_setup):
+    secret = 'credential-"quote"-\\slash-\nnewline-π'
+
+    class EchoClient(ContentClient):
+        async def complete(self, *args, **kwargs):
+            result = await super().complete(*args, **kwargs)
+            if args[1][0]['content'].startswith('Create a fictional'):
+                output = json.loads(result['content'])
+                output['problem'] = secret
+                output['situation'] = json.dumps({'nested': secret})
+                result['content'] = json.dumps(output)
+            return result
+
+    app, runner = traced_setup(EchoClient())
+    runner.registry.scenarios['content_first'].flow.steps['arithmetic'].inputs = {
+        'credential': secret, 'nested': json.dumps({'credential': secret}),
+    }
+    config = copy.deepcopy(app.state.dataset['config'])
+    config['endpoints'][0]['api_key'] = secret
+    app.state.dataset.set_config(config, app.state.dataset['revision'])
+    async with client_for(app) as client:
+        trace = events(await client.post('/api/scenarios/walkthrough', json={'scenario': 'content_first'}))
+    calls = [e for e in trace if e['kind'] == 'Model call finished']
+    idea = next(e for e in calls if e['prompt_source'] == 'brief.md')
+    output = json.loads(idea['response']['raw_output'])
+    assert output['problem'] == '[redacted]'
+    assert json.loads(output['situation'])['nested'] == '[redacted]'
+    downstream = [json.loads(e['messages'][1]['content']) for e in calls if e is not idea]
+    inputs = next(data for data in downstream if 'credential' in data)
+    assert inputs['credential'] == '[redacted]'
+    assert json.loads(inputs['nested'])['credential'] == '[redacted]'
+
+    def check(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                check(key)
+                check(item)
+        elif isinstance(value, list):
+            for item in value:
+                check(item)
+        elif isinstance(value, str):
+            assert secret not in value
+            try:
+                decoded = json.loads(value)
+            except (ValueError, TypeError):
+                return
+            check(decoded)
+    check(trace)
+
+
+@pytest.mark.parametrize('paused', [False, True])
+async def test_http_disconnect_detaches_collector_without_cancelling_worker(traced_setup, paused):
+    fake = ContentClient(hold=True)
+    app, runner = traced_setup(fake)
+    incoming = asyncio.Queue()
+    await incoming.put({'type': 'http.request', 'body': b'{"scenario":"content_first"}', 'more_body': False})
+    scope = {'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
+             'method': 'POST', 'scheme': 'http', 'path': '/api/scenarios/walkthrough',
+             'raw_path': b'/api/scenarios/walkthrough', 'query_string': b'',
+             'root_path': '', 'server': ('testserver', 80), 'client': ('127.0.0.1', 12345),
+             'headers': [(b'host', b'testserver'), (b'content-type', b'application/json'),
+                         (b'x-remix-token', app.state.csrf.encode())]}
+
+    async def send(message):
+        pass
+
+    handler = asyncio.create_task(app(scope, incoming.get, send))
+    try:
+        await asyncio.wait_for(fake.entered.wait(), 5)
+        collector = runner.walkthrough
+        if paused:
+            runner.pause()
+            fake.release.set()
+            async with asyncio.timeout(5):
+                while not runner.status['paused'] or runner.status['active']:
+                    await asyncio.sleep(0)
+        await incoming.put({'type': 'http.disconnect'})
+        await asyncio.wait_for(handler, 5)
+        assert runner.status['running'] and not runner.job.done()
+        assert runner.walkthrough is None
+        assert collector.closed and not collector.events
+        fake.release.set()
+        if paused:
+            runner.resume()
+        await asyncio.wait_for(runner.job, 5)
+        assert runner.status['phase'] == 'complete'
+        assert not collector.events
+    finally:
+        handler.cancel()
+        await asyncio.gather(handler, return_exceptions=True)
+        await runner.stop()
