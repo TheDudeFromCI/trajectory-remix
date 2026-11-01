@@ -291,6 +291,52 @@ def test_review_discovery_sql_and_draft_parity(review_store, query, expected):
     assert [sample['id'] for sample in review_store.samples if SearchQuery(query).matches(sample)] == expected
 
 
+@pytest.mark.parametrize('query,expected', [
+    ('@split:train', ['train']),
+    ('@split:test', ['test']),
+    ('@split:DEV', ['development', 'dev']),
+    ('@split:unknown', ['unknown', 'missing', 'null', 'invalid', 'non-string']),
+    ('-@split:unknown', ['train', 'test', 'development', 'dev']),
+    ('(@split:train | @split:dev) -@name:dev', ['train', 'development']),
+    ('@split:unknown @name:missing', ['missing']),
+])
+def test_split_property_sql_and_draft_parity(search_store, query, expected):
+    samples = [
+        {'id': value, 'metadata': {'split': value}, 'replay': {}}
+        for value in ('train', 'test', 'development', 'dev', 'unknown')
+    ] + [
+        {'id': 'missing', 'replay': {}},
+        {'id': 'null', 'metadata': {'split': None}, 'replay': {}},
+        {'id': 'invalid', 'metadata': {'split': 'other'}, 'replay': {}},
+        {'id': 'non-string', 'metadata': {'split': []}, 'replay': {}},
+    ]
+    search_store.replace(samples, search_store.info()[0])
+    total, result = search_store.listing(query)
+    assert total == len(expected)
+    assert [row['id'] for row in result] == expected
+    assert [sample['id'] for sample in search_store.samples if SearchQuery(query).matches(sample)] == expected
+
+
+def test_split_filters_before_pagination_and_tracks_metadata_updates(search_store, monkeypatch):
+    samples = [
+        {'id': str(i), 'metadata': {'split': split}, 'replay': {}}
+        for i, split in enumerate(('test', 'train', 'test', 'test'))
+    ]
+    search_store.replace(samples, search_store.info()[0])
+    updated = search_store.samples[1]
+    updated['metadata']['split'] = 'test'
+    search_store.samples[1] = updated
+
+    def forbidden(*args):
+        raise AssertionError('Split discovery must not decode trajectory sources')
+
+    monkeypatch.setattr(SQLiteSamples, '__iter__', forbidden)
+    monkeypatch.setattr(SQLiteSamples, '__getitem__', forbidden)
+    total, page = search_store.listing('@split:test', offset=1, limit=2, dashboard=True)
+    assert total == 4
+    assert [row['id'] for row in page] == ['1', '2']
+
+
 def test_review_discovery_uses_metadata_before_pagination(review_store, monkeypatch):
     def forbidden(*args):
         raise AssertionError('Review discovery must not decode trajectory sources')

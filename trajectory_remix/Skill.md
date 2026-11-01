@@ -13,7 +13,7 @@ using `get_authoring_guide(topic="review")`.
 
 Find existing trajectories with `list_trajectories(query=...)`. Its query language
 supports spaces (AND), `|` (OR), `-` (negation), parentheses, `*` wildcards,
-`#tags`, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch` properties. Read
+`#tags`, and `@name`, `@uuid`, `@windows`, `@uses_tool`, `@state`, `@batch`, `@split` properties. Read
 [the search guide](guides/search.md) with `get_authoring_guide(topic="search")`
 for examples and precise matching rules.
 
