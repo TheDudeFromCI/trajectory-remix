@@ -90,7 +90,7 @@ def new_sample():
         "id": ident,
         "uuid": ident,
         "tick-policy": "external-first",
-        "metadata": {"validation_level": -3},
+        "metadata": {"validation_level": -3, "split": "train"},
         "defaults": {"implicit-noop-loss-weight": 0.1},
         "replay": {
             "0": [

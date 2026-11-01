@@ -573,7 +573,8 @@ class TrajectoryCommands:
     ):
         """Create a trajectory from full JSON, an empty draft, or the dashboard demo template.
 
-        Empty drafts need events before they compile. IDs default to UUIDs.
+        Empty and demo drafts default to the train split. Empty drafts need events
+        before they compile. IDs default to UUIDs.
         """
         self._editable(expected_revision)
         if sample is None:

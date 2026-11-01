@@ -30,6 +30,7 @@ async def test_crud_compile_frame_export_roundtrip(client, tmp_path):
     frame = (await client.get(f"/api/frame/{p['plan_id']}/2")).json()
     assert frame["tick"] == 2
     assert s["metadata"]["validation_level"] == -3
+    assert s["metadata"]["split"] == "train"
     assert (await client.post("/api/export", json={})).text == ""
     await client.post("/api/samples/0/approve")
     s = (await client.get("/api/samples/0")).json()
