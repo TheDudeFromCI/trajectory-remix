@@ -1171,6 +1171,7 @@ class Compiler:
                     )
         # Use the actual expanded schemas (including randomized additions), and
         # the normal visibility predicate so closed/replaced context cannot count.
+        # Listings must precede the request tick, even if visible in its D phase.
         shown = {
             item["path"]: {
                 schema["function"]["name"]
@@ -1190,6 +1191,7 @@ class Compiler:
             query = {"tick": call["request_start"], "phase": "D"}
             if not any(
                 call["tool"] in shown[path]
+                and row["tick"] < call["request_start"]
                 and visible_to(query, row, list(windows.values()))
                 for path, row in shown_rows.items()
             ):

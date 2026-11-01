@@ -201,12 +201,18 @@ def test_show_tools_is_literal_masked_and_deterministic(compiler, sample):
 
 
 @pytest.mark.parametrize(
-    "listing", ["missing", "same_tick", "late", "closed", "replaced", "wrong_tool"]
+    "listing",
+    ["missing", "earlier", "same_tick", "same_tick_first", "late", "closed", "replaced", "wrong_tool"],
 )
 def test_tool_listing_warning_respects_visible_context(compiler, sample, listing):
     sample["replay"]["3"] = [call("calculator", args={"expression": "2+2"})]
     if listing != "missing":
-        at = "3" if listing == "same_tick" else "4" if listing == "late" else "1"
+        at = (
+            "3" if listing in ("same_tick", "same_tick_first")
+            else "4" if listing == "late"
+            else "2" if listing == "earlier"
+            else "1"
+        )
         sample["replay"].setdefault(at, []).append(
             {
                 "op": "show_tools",
@@ -214,6 +220,8 @@ def test_tool_listing_warning_respects_visible_context(compiler, sample, listing
                 "tools": ["file_list" if listing == "wrong_tool" else "calculator"],
             }
         )
+        if listing == "same_tick_first":
+            sample["replay"][at].reverse()
     if listing == "closed":
         sample["replay"]["2"] = [
             {"op": "generate", "window": "a", "content": "<|eos|>"}
@@ -230,10 +238,12 @@ def test_tool_listing_warning_respects_visible_context(compiler, sample, listing
         ]
     plan = compiler.compile(sample)
     warnings = [d for d in plan["diagnostics"] if d.get("code") == "tool_not_shown"]
-    assert bool(warnings) == (listing != "same_tick")
+    assert bool(warnings) == (listing != "earlier")
     if warnings:
         assert warnings[0]["severity"] == "warning"
-        assert warnings[0]["path"] == "replay[3][0]"
+        assert warnings[0]["path"] == (
+            "replay[3][1]" if listing == "same_tick_first" else "replay[3][0]"
+        )
         assert "calculator" in warnings[0]["message"]
 
 
