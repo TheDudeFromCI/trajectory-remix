@@ -183,10 +183,14 @@ class SearchQuery:
             return ("tag", value[1:])
         if value.startswith("@"):
             name, separator, value = value[1:].partition(":")
-            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch", "generation", "errors", "warnings"):
-                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, @batch, @generation, @errors, or @warnings")
+            if name not in ("name", "uuid", "windows", "uses_tool", "state", "batch", "generation", "split", "errors", "warnings"):
+                raise SearchSyntaxError(f"unknown property @{name}; use @name, @uuid, @windows, @uses_tool, @state, @batch, @generation, @split, @errors, or @warnings")
             if not separator or not value:
                 raise SearchSyntaxError(f"supply a value after @{name}:")
+            if name == "split":
+                if value not in ("unknown", "test", "train", "dev"):
+                    raise SearchSyntaxError("@split requires unknown, test, train, or dev")
+                return ("split", value)
             if name in ("errors", "warnings"):
                 if value not in ("true", "false"):
                     raise SearchSyntaxError(f"@{name} requires true or false")
@@ -228,6 +232,12 @@ class SearchQuery:
                 args.append(node[2])
                 return f"m.window_count {node[1]} ?"
             args.append(node[1])
+            if kind == "split":
+                return """CASE
+                    WHEN json_extract(m.properties, '$.split') IN ('train', 'test')
+                        THEN json_extract(m.properties, '$.split')
+                    WHEN json_extract(m.properties, '$.split') IN ('dev', 'development') THEN 'dev'
+                    ELSE 'unknown' END = ?"""
             if kind in ("errors", "warnings"):
                 return f"(SELECT d.{kind} FROM trajectory_search_diagnostics d WHERE d.trajectory_uuid=s.uuid) = ?"
             if kind == "state":
@@ -279,9 +289,16 @@ class SearchQuery:
                 return glob_match(node[1], trajectory_uuid(sample))
             if kind == 'generation':
                 return generation_matches(sample, node[1], store or getattr(compiler, 'tool_store', None))
-            if kind in ("state", "batch"):
+            if kind in ("state", "batch", "split"):
                 metadata = sample.get("metadata")
                 metadata = metadata if isinstance(metadata, dict) else {}
+                if kind == "split":
+                    split = metadata.get("split")
+                    if split in ("dev", "development"):
+                        split = "dev"
+                    elif split not in ("train", "test"):
+                        split = "unknown"
+                    return split == node[1]
                 if kind == "state":
                     level = metadata.get("validation_level")
                     return (level if level is not None else -3) == node[1]

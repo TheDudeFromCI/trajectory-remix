@@ -70,6 +70,7 @@ are supported; arbitrary metadata keys are not query-language properties.
 | `@uuid` | Immutable trajectory UUID. Matches the full UUID. | `@uuid:12345678-*` |
 | `@state` | Validation stage: unfinished (-3), rejected (-2), unsuccessful (-1), pending (0), candidate (1), validated (2), ready (3). Accepts the name or numeric level; missing/null levels count as unfinished, matching the dashboard. | `@state:candidate`, `@state:-2` |
 | `@batch` | Generation batch ID from `metadata.generation_batch`. Missing/null IDs do not match, including `@batch:*`. | `@batch:12345678-*`, `-@batch:*` |
+| `@split` | Dataset partition from `metadata.split`: `unknown`, `test`, `train`, or `dev`. `dev` matches stored `development` or `dev`; missing, null, and unrecognized values count as `unknown`. | `@split:unknown`, `@split:test`, `@split:train`, `@split:dev` |
 | `@generation` | Automated generation status, independent of validation: `unfinished` or `complete`. Excludes manual entries and known copies of another sample's generation checkpoint. | `@generation:unfinished`, `@generation:complete @state:pending` |
 | `@windows` | Number of distinct declared windows, including implicit visible tool-call windows. Repeated opens/calls in one window count once; invisible calls add no window. | `@windows:>5`, `@windows:<=3`, `@windows:2` |
 | `@uses_tool` | A tool called by an authored `tool-call` or `invisible-tool-call` event. Merely advertising a tool with `show_tools` does not count. | `@uses_tool:calculator`, `@uses_tool:file_*` |
