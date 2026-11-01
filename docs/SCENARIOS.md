@@ -98,6 +98,31 @@ switching tasks does not cancel or delete their saved content.
 
 ## Generation activity log
 
+For a complete debugging trace, choose **Generate & download walkthrough** in
+the generation setup panel. It uses the selected scenario, conditions and count,
+with the same normal pipeline, concurrency, retries and compiler checks as Start.
+The browser automatically downloads `generation-walkthrough.md` when the run
+finishes or stops, including failed, API-paused and cancelled runs. Pause/Resume
+and Cancel remain available in Generation Control while the download is pending.
+
+The verbose Markdown includes the flow and sampled conditions; exact system/user
+messages and prompt sources; original JSON schemas, provider decoding schemas and
+local constraints; returned reasoning when available; raw and parsed responses;
+token usage with its provider/estimated source; every step, operation, retry,
+fallback and skip; compiler diagnostics, tool outcomes and sandbox state changes
+by tick; and workspace changes after each call. Overlapping calls have paired
+start/finish event IDs. Saved review checklists are included with an explanation
+that semantic validation remains a separate operation, not part of creation.
+Configured endpoint credentials are redacted.
+
+`POST /api/scenarios/walkthrough` accepts the same creation options as `/run` and
+returns an authenticated, non-cacheable Markdown attachment in that request.
+The walkthrough exists only in request memory and is released after delivery or
+disconnect; it is never written to SQLite or exposed as a saved report. Normal
+drafts, checkpoints and generation records are still saved. A disconnect leaves
+normal generation running but discards its walkthrough; a process restart loses
+the report. Existing runs cannot acquire a complete trace retroactively.
+
 Activity is an append-only, project-wide SQLite journal. **Clear Log is the only
 action that removes entries.** Failed attempts, Pause/Cancel, resuming an older
 sample, dataset-wide resume, restarting from the beginning, deleting a sample,

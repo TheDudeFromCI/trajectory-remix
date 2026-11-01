@@ -1213,6 +1213,36 @@ assert.equal($("pause-run").disabled, false);
 assert.equal($("generation-progress").getAttribute("aria-label"), "Generation progress");
 assert.match($("generation-progress").title, /steps complete/);
 assert.equal($("scenario-tag-controls").hidden, true);
+assert.equal($("generate-walkthrough").hidden, false);
+assert.equal($("generate-walkthrough").disabled, false);
+const beforeWalkthroughFetch = w.fetch;
+let walkthroughBody, releaseWalkthrough, walkthroughRequests = 0;
+w.fetch = async (path, options) => {
+  if (path === "/api/scenarios/walkthrough") {
+    walkthroughRequests++;
+    walkthroughBody = JSON.parse(options.body);
+    await new Promise(resolve => { releaseWalkthrough = resolve; });
+    return new w.Response("# Scenario generation walkthrough\npartial or complete trace", {
+      status: 200, headers: {"content-type": "text/markdown"},
+    });
+  }
+  return beforeWalkthroughFetch(path, options);
+};
+const walkthroughDownload = click("generate-walkthrough");
+await waitFor(() => releaseWalkthrough);
+assert.equal($("generate-walkthrough").getAttribute("aria-busy"), "true");
+await click("generate-walkthrough");
+assert.equal(walkthroughRequests, 1);
+assert.equal(walkthroughBody.scenario, "user_scenario");
+assert.equal(walkthroughBody.batch_size, 1);
+assert.equal(walkthroughBody.tags, null);
+releaseWalkthrough();
+await walkthroughDownload;
+assert.equal(downloadedFilename, "generation-walkthrough.md");
+assert.match(await downloadedBlob.text(), /Scenario generation walkthrough/);
+assert.equal($("generate-walkthrough").hasAttribute("aria-busy"), false);
+w.fetch = beforeWalkthroughFetch;
+await click("generate-one");
 const beforeBatchStartFetch = w.fetch;
 let batchStartBody;
 let batchQueryRequested = false;

@@ -472,6 +472,8 @@ function renderGenerationAction(recoveryDisabled) {
   $("pause-run").hidden = !s.running && !setup && !(mode !== "resume-all" && canContinue);
   $("pause-run").textContent = s.running ? s.paused || s.pause_requested ? "Resume" : "Pause" : setup ? "Start" : "Resume";
   $("pause-run").disabled = migrationBusy || !!state.validation_status?.running || (setup && !state.scenarios?.length);
+  $("generate-walkthrough").hidden = !setup;
+  $("generate-walkthrough").disabled = $("pause-run").disabled || s.running;
   $("stop-run").hidden = !s.running;
   $("stop-run").disabled = !s.running;
   $("resume-all-generations-panel").hidden = !bulk || s.running || !state.unfinished_generation_count;
@@ -3134,6 +3136,21 @@ $("pause-run").onclick = busyAction("pause-run", async () => {
   } else await json("pause", "POST", { resume: state.status.paused || state.status.pause_requested });
   generationPanelIntent = null;
   await refresh();
+});
+$("generate-walkthrough").onclick = busyAction("generate-walkthrough", async () => {
+  if (hasPendingChanges()) await compileSample(true);
+  const count = $("generation-count");
+  if (!count.reportValidity()) return;
+  const request = download("scenarios/walkthrough", "generation-walkthrough.md", "POST", {
+    scenario: $("scenario-type").value, tags: selectedScenarioTags(), batch_size: Number(count.value),
+  });
+  generationPanelIntent = null;
+  toast("Generating walkthrough. The download starts when generation finishes or stops.", false, 6000);
+  try {
+    await request;
+  } finally {
+    await refresh();
+  }
 });
 $("close-export").onclick = () => $("export-dialog").close();
 $("download-export").onclick = busyAction("download-export", async () => {

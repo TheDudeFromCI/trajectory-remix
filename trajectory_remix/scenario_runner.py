@@ -134,6 +134,9 @@ class ScenarioRunner(ModelSession):
             db.execute(statement, values)
 
     def log(self, message, level="info", step=None):
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is not None:
+            walkthrough.event('Activity', step, level=level, message=message)
         entry = {
             "time": datetime.now(UTC).isoformat(),
             "message": self.clean(message),
@@ -294,6 +297,9 @@ class ScenarioRunner(ModelSession):
             "tool_contracts": public_tool_contracts(self.compiler.tools.schemas()),
         }
         self.builder = SampleBuilder(self.compiler, self.config)
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is not None:
+            self.builder.plan_observer = walkthrough.observe_plan
         self.builder.sample["metadata"].update(
             generation_mode=self.scenario.flow.generation_mode,
             origin="automation",
@@ -339,6 +345,8 @@ class ScenarioRunner(ModelSession):
         self.builder.sample["metadata"].update(
             generation_phase="planning", generation_job=self.snapshot["id"]
         )
+        if walkthrough is not None:
+            walkthrough.attempt_started()
         self.publish()
         self.log(f"Starting {name}; maximum concurrent LLM calls: {max_parallel}")
         if _schedule:
@@ -734,11 +742,26 @@ class ScenarioRunner(ModelSession):
         return context["steps"]
 
     async def execute_step(self, name, step, context, path):
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is None:
+            return await self._execute_step(name, step, context, path)
+        with walkthrough.scope('Step', path, definition=step.model_dump()) as event:
+            try:
+                output = await self._execute_step(name, step, context, path)
+                event['output'] = output
+                return output
+            finally:
+                event['record'] = copy.deepcopy(self.snapshot['steps'].get(path, {}))
+
+    async def _execute_step(self, name, step, context, path):
         await self.gate()
         cached = self.snapshot["steps"].get(path)
         if cached and cached.get("state") in ("complete", "fallback", "skipped"):
             return copy.deepcopy(cached.get("output"))
         when = resolve(step.when, context)
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is not None:
+            walkthrough.event('Step condition', path, expression=step.when, result=when)
         if type(when) is not bool:
             raise ValueError(f"{path}: when must resolve to a boolean")
         if not when:
@@ -845,6 +868,15 @@ class ScenarioRunner(ModelSession):
                 await self.gate()
 
     async def dispatch(self, step, inputs, context, path):
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is None:
+            return await self._dispatch(step, inputs, context, path)
+        with walkthrough.scope('Operation', path, uses=step.uses, inputs=inputs) as event:
+            output = await self._dispatch(step, inputs, context, path)
+            event['output'] = output
+            return output
+
+    async def _dispatch(self, step, inputs, context, path):
         match step.uses:
             case "llm.generate" | "llm.content":
                 return await self.llm(step, inputs, context, path)
@@ -867,6 +899,10 @@ class ScenarioRunner(ModelSession):
                         else copy.deepcopy(outputs)
                     )
                     finished = resolve(step.until, local)
+                    walkthrough = getattr(self, 'walkthrough', None)
+                    if walkthrough is not None:
+                        walkthrough.event('Repeat condition', path, iteration=index,
+                                          expression=step.until, result=finished, history=history)
                     if type(finished) is not bool:
                         raise ValueError("Repeat until must resolve to a boolean")
                     if finished:
@@ -1132,6 +1168,9 @@ class ScenarioRunner(ModelSession):
             draft['metadata']['generation_metrics'] = copy.deepcopy(self.snapshot['request_metrics'])
             draft['metadata']['generation_elapsed_seconds'] = self.elapsed_seconds()
         compiled = self.compiler.compile(draft)
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is not None:
+            walkthrough.observe_plan(compiled)
         if self.content_first:
             draft['metadata']['generation_record']['diagnostics'] = compiled['diagnostics']
         if self.state_override is not None:
