@@ -42,7 +42,8 @@ class ValidationRunner(ModelSession):
             self.snapshot = json.loads(row[0])
             self.status = self.snapshot['status']
             self.logs.extend(self.snapshot.get('logs', []))
-            if self.status.get('running'):
+            batch = self.snapshot.get('batch')
+            if self.status.get('running') or (batch and batch['completed'] < batch['total'] and self.status['phase'] == 'complete'):
                 self.status.update(running=False, phase='interrupted', active=[])
                 self.persist()
 
@@ -54,7 +55,22 @@ class ValidationRunner(ModelSession):
         return time.monotonic() - self.started if hasattr(self, 'started') else 0
 
     async def gate(self):
+        if not self.resume_event.is_set():
+            self.status['paused'] = not bool(self.status['active'])
+            self.persist()
         await self.resume_event.wait()
+
+    def pause(self):
+        if self.status.get('running'):
+            self.resume_event.clear()
+            self.status.update(pause_requested=True, paused=not bool(self.status['active']))
+            self.log('Pause requested; active LLM calls will finish', 'warning')
+
+    def resume(self):
+        if self.status.get('running'):
+            self.status.update(pause_requested=False, paused=False)
+            self.resume_event.set()
+            self.log('Resumed')
 
     def persist(self):
         if self.snapshot is None:
@@ -68,7 +84,8 @@ class ValidationRunner(ModelSession):
         self.logs.append({'time': time.time(), 'message': self.clean(message), 'level': level, 'step': step})
         self.persist()
 
-    def start(self, sample_id, *, record=True, endpoint=None, resume=False, auto_repair=False):
+    def start(self, sample_id, *, record=True, endpoint=None, resume=False, auto_repair=False,
+              _schedule=True, _batch=None):
         if not isinstance(sample_id, str) or not sample_id.strip():
             raise ValueError('Select a saved trajectory to validate')
         if type(auto_repair) is not bool:
@@ -119,9 +136,11 @@ class ValidationRunner(ModelSession):
             'auto_repair': auto_repair, 'record': record, 'endpoint': endpoint,
             'repair_attempts': self.snapshot['repair_attempts'],
             'max_repair_attempts': self.config.get('validation', {}).get('max_repair_attempts', 3),
-            'active': [], 'completed': 0, 'total': len(checklist.checks), 'pause_requested': False,
+            'active': [], 'completed': 0, 'total': len(checklist.checks), 'pause_requested': False, 'paused': False,
             'model_requests': 0, 'completed_model_seconds': 0, 'last_error': None, 'result': None}
-        if not resume:
+        if _batch is not None:
+            self.snapshot['batch'] = self.status['batch'] = _batch
+        if not resume and _batch is None:
             self.logs.clear()
         self.started = time.monotonic()
         self.resume_event = asyncio.Event(); self.resume_event.set()
@@ -132,14 +151,104 @@ class ValidationRunner(ModelSession):
         self.builder.next_tick = 0
         self.scenario = SimpleNamespace(prompts={}, flow=SimpleNamespace(schemas={}, generation_mode='content-first' if self.content_first else 'existing'))
         self.persist()
-        self.job = asyncio.create_task(self.run(sample, checklist, endpoint, record))
+        self._run_args = (sample, checklist, endpoint, record)
+        if _schedule:
+            self.job = asyncio.create_task(self.run(*self._run_args))
+            self.job.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+        return self.snapshot['id']
+
+    @staticmethod
+    def pending(sample):
+        metadata = sample.get('metadata', {})
+        return metadata.get('validation_level') == 0 and metadata.get('generation_phase') != 'planning'
+
+    def start_all(self, *, endpoint=None, resume=False):
+        if type(resume) is not bool:
+            raise ValueError('resume must be a boolean')
+        if endpoint is not None and (not isinstance(endpoint, str) or not endpoint):
+            raise ValueError('endpoint must be a nonempty endpoint ID')
+        if self.status.get('running'):
+            raise ValueError('Trajectory validation is already running')
+        owner = self.commands.runner
+        if owner.status['running'] or owner.scenario_runner.status['running']:
+            raise ValueError('Finish or stop generation before validating trajectories')
+        if getattr(owner, 'tokenizer_migration', None) and owner.tokenizer_migration.running:
+            raise ValueError('Wait for tokenizer migration to finish')
+        endpoint = endpoint or self.state['config'].get('validation', {}).get('endpoint', 'validator')
+        if not isinstance(endpoint, str) or endpoint not in {e['id'] for e in self.state['config']['endpoints']}:
+            raise ValueError('Validation endpoint is not configured')
+        if resume:
+            batch = copy.deepcopy((self.snapshot or {}).get('batch'))
+            if not batch or batch['completed'] >= batch['total']:
+                raise ValueError('No unfinished validation batch to resume')
+            if endpoint != batch['endpoint']:
+                raise ValueError('Validation endpoint changed; start a fresh validation')
+        else:
+            # Select from metadata projections without loading every saved replay.
+            with self.state.store.connect() as db:
+                ids = [row[0] for row in db.execute('''SELECT s.sample_id FROM samples s
+                    JOIN trajectory_metadata m ON m.trajectory_uuid=s.uuid
+                    WHERE json_extract(m.properties,'$.validation_level') = 0
+                      AND json_extract(m.properties,'$.generation_phase') IS NOT 'planning'
+                    ORDER BY s.position''')]
+            if not ids:
+                raise ValueError('No finished pending trajectories are available')
+            batch = {'sample_ids': ids, 'total': len(ids), 'completed': 0, 'results': [], 'endpoint': endpoint}
+            self.snapshot = {'id': str(uuid.uuid4()), 'steps': {}}
+            self.logs.clear()
+        self.snapshot['batch'] = batch
+        self.status.update(running=True, phase='validating', batch=batch, active=[],
+                           paused=False, pause_requested=False, last_error=None, result=None,
+                           endpoint=endpoint, auto_repair=True, record=True)
+        if not resume:
+            self.status['sample_id'] = None
+        self.resume_event = asyncio.Event(); self.resume_event.set()
+        self.persist()
+        self.job = asyncio.create_task(self.run_all(batch, resume))
         self.job.add_done_callback(lambda task: None if task.cancelled() else task.exception())
         return self.snapshot['id']
+
+    async def run_all(self, batch, resume):
+        try:
+            while batch['completed'] < batch['total']:
+                await self.gate()
+                sample_id = batch['sample_ids'][batch['completed']]
+                try:
+                    _, sample = self.commands._find(sample_id)
+                    if not self.pending(sample):
+                        result = {'skipped': True}
+                    else:
+                        reuse = resume and self.snapshot.get('status', {}).get('sample_id') == sample_id and 'source_hash' in self.snapshot
+                        # Preparation is synchronous; the queue task keeps ownership.
+                        self.status['running'] = False
+                        self.start(sample_id, endpoint=batch['endpoint'], record=True, auto_repair=True,
+                                   resume=reuse, _schedule=False, _batch=batch)
+                        result = await self.run(*self._run_args)
+                except Exception as error:
+                    result = {'error': self.clean(str(error))}
+                batch['results'].append({'sample_id': sample_id, **result})
+                batch['completed'] += 1
+                resume = False
+                self.snapshot['batch'] = self.status['batch'] = batch
+                self.status.update(running=True, last_error=None)
+                self.persist()
+                await asyncio.sleep(0)
+            self.status.update(phase='complete', result={'results': batch['results']})
+        except asyncio.CancelledError:
+            self.status.update(phase='cancelled', last_error='Validation cancelled; completed trajectories remain saved')
+            raise
+        finally:
+            self.status.update(running=False, active=[], paused=False, pause_requested=False)
+            self.persist()
 
     async def stop(self):
         if self.job and not self.job.done():
             self.job.cancel()
             await asyncio.gather(self.job, return_exceptions=True)
+            # Cancellation can arrive before the scheduled coroutine starts.
+            if self.status.get('running'):
+                self.status.update(running=False, phase='cancelled', active=[], paused=False, pause_requested=False)
+                self.persist()
 
     async def validate(self, sample_id, *, record=False, endpoint=None, auto_repair=False):
         self.start(sample_id, record=record, endpoint=endpoint, auto_repair=auto_repair)
@@ -150,6 +259,7 @@ class ValidationRunner(ModelSession):
         try:
             sample = copy.deepcopy(self.snapshot.get('candidate', sample))
             while True:
+                await self.gate()
                 self.status.update(phase='validating', completed=0)
                 self.builder.sample = copy.deepcopy(sample)
                 report, failures = await self.evaluate(sample, checklist, endpoint)

@@ -212,7 +212,7 @@ them to 3; subsequent edits preserve that approval. Both CLI and dashboard token
 export exclude levels other than 3, including explicitly selected pending samples.
 Project backups retain all samples.
 
-Select a saved trajectory and choose **Edit → Generation → Validate Trajectory**.
+Select a saved trajectory and choose **Edit → Validation → Validate Trajectory**.
 Choose a validation endpoint and run the review. The default records **Validated
 (2)** or **Rejected (-2)**; turn off recording for a report only. Validation never
 rewrites source unless **Automatically repair issues and validate again** is enabled,
@@ -234,6 +234,14 @@ files; current custom dataset/scenario guidelines supplement them. Samples witho
 a saved scenario contract use the standard shared checklist. No user reply is
 required for an idle trajectory.
 
+Choose **Edit → Validation → Validate All** to review and automatically repair all
+saved Pending (0) trajectories except those still in the generation planning phase.
+The queue records final Validated/Rejected results, continues after individual
+failures, and skips entries that are no longer Pending when their turn arrives.
+Pause/Resume uses the same controls as Generation Control: active model requests
+finish before new requests wait. Cancel preserves completed trajectories; Resume
+Validation continues the remaining queue, including after a server restart.
+
 The dialog reports progress and findings independently of generation. Cancellation,
 provider failures or unresolved evidence preserve the validation journal without
 recording a verdict. Resume reuses completed evidence groups only if source,
@@ -242,8 +250,12 @@ review prevent stale results from being recorded. Start generation and validatio
 as separate operations; neither starts the other.
 
 - `POST /api/validation/run`: `{sample_id, endpoint?, record?, resume?, auto_repair?}`; returns 202.
-- `GET /api/validation/status`: progress and final findings.
-- `POST /api/validation/stop`: cancel without changing source or approval state.
+- `POST /api/validation/run-all`: `{endpoint?, resume?}`; returns 202. Always enables
+  repair and result recording for the dataset-wide queue.
+- `POST /api/validation/pause`: `{resume?: boolean}`; pauses after active requests,
+  or resumes when `resume` is true.
+- `GET /api/validation/status`: progress and final findings, including batch results.
+- `POST /api/validation/stop`: cancel the current trajectory and retain completed batch results.
 - `POST /api/validate`: synchronous review of a saved sample by index, with optional
   endpoint/record/auto_repair fields.
 - MCP `validate_trajectory(semantic=false)` performs compiler checks only.

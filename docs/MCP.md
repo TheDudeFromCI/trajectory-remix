@@ -460,7 +460,7 @@ Then call `validate_trajectory`, `get_window_history` with `window: "chat"`,
 It stops at its first error. Repair that error and run validation again to find
 the next. Open-window warnings are expected for unfinished drafts. Semantic
 validation is opt-in with `semantic: true`; it uses the same standalone service
-and configured validation endpoint as **Edit → Generation → Validate Trajectory**,
+and configured validation endpoint as **Edit → Validation → Validate Trajectory**,
 and can contact provider endpoints. MCP reports do not alter the sample.
 
 `get_window_history` returns cumulative durable text through `end_tick`, even
@@ -970,7 +970,7 @@ the running job, including after the initiating MCP client disconnects.
 
 The standard `user_scenario` and `idle_scenario` flows generate without validation.
 `validate_trajectory(semantic=true)` uses the same explicit service as **Edit →
-Generation → Validate Trajectory**, without recording a sign-off. Samples without
+Validation → Validate Trajectory**, without recording a sign-off. Samples without
 a scenario snapshot use the shared standard checklist; older saved contracts remain
 authoritative. Old noval names are creation aliases, not additional scenario choices.
 

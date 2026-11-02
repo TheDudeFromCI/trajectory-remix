@@ -358,6 +358,7 @@ function renderStatus() {
   $("generate-one").disabled = !switchReady || migrationBusy || !!state.validation_status?.running;
   $("generate-batch").disabled = !switchReady || migrationBusy || !!state.validation_status?.running;
   $("validate-trajectory").disabled = !sample || s.running || migrationBusy;
+  $("validate-all").disabled = s.running || migrationBusy;
   const sampleLocked = s.running && sample?.id === s.draft_id;
   $("delete-sample").disabled = sampleLocked || !sample;
   $("sample-json").readOnly = sampleLocked;
@@ -2637,9 +2638,15 @@ function closeMenus() {
   $("export-menu").hidden = true;
   $("export-menu-button").setAttribute("aria-expanded", "false");
   $("set-state-menu").hidden = true;
+  $("validation-menu").hidden = true;
+  $("validation-menu-button").setAttribute("aria-expanded", "false");
   $("generation-menu").hidden = true;
   $("generation-menu-button").setAttribute("aria-expanded", "false");
 }
+$("validation-menu-button").onclick = () => {
+  $("validation-menu").hidden = false;
+  $("validation-menu-button").setAttribute("aria-expanded", "true");
+};
 $("generation-menu-button").onclick = () => {
   $("generation-menu").hidden = false;
   $("generation-menu-button").setAttribute("aria-expanded", "true");
@@ -3035,42 +3042,64 @@ async function resumeAllGenerations() {
 $("resume-all-generations").onclick = busyAction("resume-all-generations", resumeAllGenerations);
 $("resume-all-generations-panel").onclick = busyAction("resume-all-generations-panel", resumeAllGenerations);
 
+let validationAll = false;
 function renderTrajectoryValidation(status = {}) {
   const busy = !!status.running;
-  $("validation-progress").max = Math.max(1, status.total || 1);
-  $("validation-progress").value = status.completed || 0;
+  if (busy) validationAll = !!status.batch;
+  if (!busy && validationAll !== !!status.batch) status = {};
+  const batch = status.batch;
+  $("validation-title").textContent = validationAll ? "Validate All" : "Validate Trajectory";
+  $("validation-scope").textContent = validationAll ? "Validate and automatically repair all finished Pending trajectories in the dataset. Completed results are saved as Validated or Rejected." : "Review the saved current trajectory.";
+  $("start-validation").textContent = validationAll ? "Validate All" : "Validate";
+  $("validation-progress").max = Math.max(1, batch?.total || status.total || 1);
+  $("validation-progress").value = batch?.completed ?? status.completed ?? 0;
   $("validation-status").textContent = status.last_error || (busy ? `${status.phase === "repairing" ? "Repairing" : "Validating"} ${status.sample_id} (repair attempts ${status.repair_attempts || 0}/${status.max_repair_attempts || 3}): ${status.active?.join(" · ") || "preparing"}` : status.result ? (status.result.valid ? "Validation passed." : `Validation found issues.${status.result.repair_limit_reached ? " Repair attempt limit reached." : ""}`) : status.phase === "idle" ? "Ready to validate." : status.phase || "Ready to validate.");
-  $("validation-findings").textContent = status.result ? JSON.stringify(status.result, null, 2) : "";
-  $("start-validation").disabled = busy || !sample || !!state?.status.running;
+  $("validation-findings").textContent = batch ? JSON.stringify(batch.results || [], null, 2) : status.result ? JSON.stringify(status.result, null, 2) : "";
+  if (batch) $("validation-status").textContent = `${batch.completed}/${batch.total} trajectories processed · ${status.paused ? "Paused" : status.pause_requested ? "Pausing after active calls finish" : status.phase} · ${status.sample_id || "preparing"}${status.last_error ? ` · ${status.last_error}` : ""}`;
+  else if (status.pause_requested) $("validation-status").textContent = status.paused ? "Paused" : "Pausing after active calls finish";
+  $("start-validation").disabled = busy || (!validationAll && !sample) || !!state?.status.running;
+  $("pause-validation").hidden = !busy;
+  $("pause-validation").textContent = status.pause_requested ? "Resume" : "Pause";
   $("cancel-validation").disabled = !busy;
-  $("resume-validation").hidden = !["cancelled", "interrupted", "incomplete"].includes(status.phase) || status.sample_id !== sample?.id;
+  $("resume-validation").hidden = !["cancelled", "interrupted", "incomplete"].includes(status.phase) || (validationAll ? !batch : !!batch || status.sample_id !== sample?.id);
   $("validation-endpoint").disabled = busy;
-  $("validation-record").disabled = busy;
-  $("validation-auto-repair").disabled = busy;
+  $("validation-record").disabled = busy || validationAll;
+  $("validation-auto-repair").disabled = busy || validationAll;
 }
-$("validate-trajectory").onclick = action(async () => {
+async function openValidation(all = false) {
+  validationAll = state.validation_status?.running ? !!state.validation_status.batch : all;
   closeMenus();
   if (hasPendingChanges()) await compileSample(true);
   const choices = state.config.endpoints.map(ep => ep.id);
   const previous = $("validation-endpoint").value;
   $("validation-endpoint").replaceChildren(...choices.map(id => { const option = node("option", "", id); option.value = id; return option; }));
   $("validation-endpoint").value = choices.includes(previous) ? previous : choices.includes(state.config.validation?.endpoint || "validator") ? (state.config.validation?.endpoint || "validator") : (choices[0] || "");
-  if (state.validation_status?.sample_id === sample.id) {
+  if (validationAll || state.validation_status?.sample_id === sample?.id) {
     $("validation-auto-repair").checked = !!state.validation_status.auto_repair;
     if (typeof state.validation_status.record === "boolean") $("validation-record").checked = state.validation_status.record;
     if (choices.includes(state.validation_status.endpoint)) $("validation-endpoint").value = state.validation_status.endpoint;
   }
+  if (validationAll) {
+    $("validation-auto-repair").checked = true;
+    $("validation-record").checked = true;
+  }
   renderTrajectoryValidation(state.validation_status);
   $("validation-dialog").showModal();
-});
+}
+$("validate-trajectory").onclick = action(() => openValidation());
+$("validate-all").onclick = action(() => openValidation(true));
 $("close-validation").onclick = () => $("validation-dialog").close();
 async function startTrajectoryValidation(resume = false) {
   if (hasPendingChanges()) await compileSample(true);
-  await json("validation/run", "POST", {sample_id: sample.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, auto_repair: $("validation-auto-repair").checked, resume});
+  await json(validationAll ? "validation/run-all" : "validation/run", "POST", {sample_id: sample?.id, endpoint: $("validation-endpoint").value, record: $("validation-record").checked, auto_repair: $("validation-auto-repair").checked, resume});
   await refresh();
 }
 $("start-validation").onclick = busyAction("start-validation", () => startTrajectoryValidation());
 $("resume-validation").onclick = busyAction("resume-validation", () => startTrajectoryValidation(true));
+$("pause-validation").onclick = busyAction("pause-validation", async () => {
+  await json("validation/pause", "POST", {resume:!!state.validation_status?.pause_requested});
+  await refresh();
+});
 $("cancel-validation").onclick = busyAction("cancel-validation", async () => { await json("validation/stop", "POST"); await refresh(); });
 
 $("close-settings").onclick = () => $("settings-dialog").close();

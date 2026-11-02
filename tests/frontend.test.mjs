@@ -1259,7 +1259,7 @@ assert.equal($("stop-run").textContent, "Cancel");
 await click("close-generation-panel");
 assert.equal($("generation-panel").hidden, true);
 // Semantic validation is an explicit operation on the saved current sample.
-assert.equal($("validate-trajectory").parentElement.id, "generation-menu");
+assert.equal($("validate-trajectory").parentElement.id, "validation-menu");
 assert.equal($("validate-trajectory").textContent, "Validate Trajectory");
 await click("validate-trajectory");
 assert($("validation-dialog").hasAttribute("open"));
@@ -1268,13 +1268,19 @@ const beforeValidationFetch = w.fetch;
 let validationBody, validationStatus = {running:false, phase:"idle", completed:0, total:4, active:[]};
 let holdValidation = true, releaseValidation, failValidation = false, validationRequests = 0;
 w.fetch = async (path, options) => {
-  if (path === "/api/validation/run") {
+  if (path === "/api/validation/run" || path === "/api/validation/run-all") {
     validationRequests++;
     if (holdValidation) await new Promise(resolve => { releaseValidation = resolve; });
     if (failValidation) return new w.Response(JSON.stringify({detail:"Validation unavailable"}), {status:503});
     validationBody = JSON.parse(options.body);
     validationStatus = {running:true, phase:"validating", completed:1, total:4, active:["layout"], sample_id:validationBody.sample_id};
+    if (path.endsWith("run-all")) validationStatus.batch = {total:3,completed:0};
     return new w.Response(JSON.stringify({job_id:"review",status:validationStatus}), {status:202,headers:{"content-type":"application/json"}});
+  }
+  if (path === "/api/validation/pause") {
+    validationStatus.pause_requested = !JSON.parse(options.body).resume;
+    validationStatus.paused = validationStatus.pause_requested;
+    return new w.Response(JSON.stringify(validationStatus), {status:200,headers:{"content-type":"application/json"}});
   }
   if (path === "/api/validation/stop") {
     validationStatus = {...validationStatus,running:false,phase:"cancelled",active:[]};
@@ -1316,6 +1322,27 @@ assert.equal($("resume-validation").hasAttribute("aria-disabled"), false);
 assert.equal($("resume-validation").disabled, false);
 assert.match($("toast").textContent, /Validation unavailable/);
 failValidation = false;
+await click("resume-validation");
+assert.equal(validationBody.resume, true);
+await click("cancel-validation");
+await click("close-validation");
+await click("validation-menu-button");
+assert.equal($("validation-menu").hidden, false);
+await click("validate-all");
+assert.equal($("validation-menu").hidden, true);
+assert.equal($("validation-title").textContent, "Validate All");
+assert.equal($("validation-auto-repair").checked, true);
+assert.equal($("validation-auto-repair").disabled, true);
+assert.equal($("validation-record").checked, true);
+await click("start-validation");
+assert.equal($("validation-progress").max, 3);
+assert.equal($("pause-validation").hidden, false);
+await click("pause-validation");
+assert.equal($("pause-validation").textContent, "Resume");
+await click("pause-validation");
+assert.equal($("pause-validation").textContent, "Pause");
+await click("cancel-validation");
+assert.equal($("resume-validation").hidden, false);
 await click("resume-validation");
 assert.equal(validationBody.resume, true);
 await click("cancel-validation");

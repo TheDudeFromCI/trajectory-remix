@@ -528,3 +528,138 @@ async def test_auto_repair_can_fix_initial_compiler_error(studio):
     result = await validator.validate('test', record=True, auto_repair=True)
     assert result['valid'] and result['repair_attempts'] == 1
     assert app.state.dataset['samples'][0]['replay']['1'][0]['window'] == 'a'
+
+
+def pending_dataset(app, levels=(0, 0)):
+    template = copy.deepcopy(app.state.dataset['samples'][0])
+    samples = []
+    for index, level in enumerate(levels):
+        sample = copy.deepcopy(template)
+        sample.pop('uuid', None)
+        sample['id'] = f'pending-{index}'
+        sample['metadata'] = {'validation_level': level}
+        samples.append(sample)
+    app.state.dataset.store.replace(samples, app.state.dataset['revision'])
+
+
+async def test_validate_all_selects_only_finished_pending_and_repairs(studio):
+    app, client = studio
+    pending_dataset(app, (0, 0, -3, -2, -1, 1, 2, 3))
+    samples = list(app.state.dataset['samples'])
+    samples[1]['metadata']['generation_phase'] = 'planning'
+    app.state.dataset.store.replace(samples, app.state.dataset['revision'])
+    validator = app.state.validation_runner
+    validator.client = RepairReviewer()
+    response = await client.post('/api/validation/run-all', json={})
+    assert response.status_code == 202, response.text
+    await validator.job
+    batch = validator.status['batch']
+    assert batch['sample_ids'] == ['pending-0']
+    assert batch['completed'] == batch['total'] == 1
+    assert batch['results'][0]['repaired'] and batch['results'][0]['recorded']
+    assert app.state.dataset['samples'][0]['metadata']['validation_level'] == 2
+    assert [s['metadata']['validation_level'] for s in app.state.dataset['samples'][1:]] == [0, -3, -2, -1, 1, 2, 3]
+    assert (await client.post('/api/validation/run-all', json={})).status_code == 422
+
+
+async def test_validate_all_pause_cancel_and_resume_after_restart(studio):
+    app, client = studio
+    pending_dataset(app)
+    reviewer = Reviewer(hold=True)
+    validator = app.state.validation_runner
+    validator.client = reviewer
+    assert (await client.post('/api/validation/run-all', json={})).status_code == 202
+    await asyncio.wait_for(reviewer.entered.wait(), 5)
+    paused = await client.post('/api/validation/pause', json={})
+    assert paused.json()['pause_requested'] and not paused.json()['paused']
+    assert (await client.post('/api/validation/run-all', json={})).status_code == 422
+    reviewer.hold = False
+    reviewer.release.set()
+    async with asyncio.timeout(5):
+        while not validator.status.get('paused'):
+            await asyncio.sleep(0.01)
+    requests = len(reviewer.messages)
+    await asyncio.sleep(0.02)
+    assert len(reviewer.messages) == requests == 1
+    assert validator.status['batch']['completed'] == 0
+    await client.post('/api/validation/pause', json={'resume': True})
+    await validator.job
+    assert validator.status['batch']['completed'] == 2
+
+    # A second pass is interrupted and reconstructed from its durable journal.
+    pending_dataset(app)
+    reviewer = Reviewer(hold=True)
+    validator.client = reviewer
+    validator.start_all()
+    await asyncio.wait_for(reviewer.entered.wait(), 5)
+    await validator.stop()
+    restored = attach(app, Reviewer())
+    assert restored.status['phase'] == 'cancelled'
+    restored.start_all(resume=True)
+    await restored.job
+    assert restored.status['batch']['completed'] == 2
+    assert all(s['metadata']['validation_level'] == 2 for s in app.state.dataset['samples'])
+
+
+async def test_validate_all_continues_after_item_error(studio, monkeypatch):
+    app, _ = studio
+    pending_dataset(app)
+    validator = attach(app, Reviewer())
+    evaluate = validator.evaluate
+
+    async def fail_first(sample, *args):
+        if sample['id'] == 'pending-0':
+            raise ValueError('Review service unavailable')
+        return await evaluate(sample, *args)
+
+    monkeypatch.setattr(validator, 'evaluate', fail_first)
+    validator.start_all()
+    await validator.job
+    results = validator.status['batch']['results']
+    assert results[0]['error'] == 'Review service unavailable'
+    assert results[1]['valid'] and results[1]['recorded']
+    assert app.state.dataset['samples'][0]['metadata']['validation_level'] == 0
+    assert app.state.dataset['samples'][1]['metadata']['validation_level'] == 2
+
+
+async def test_validate_all_resumes_remaining_items_and_rechecks_pending_state(studio, monkeypatch):
+    app, _ = studio
+    pending_dataset(app, (0, 0, 0))
+    reviewer = Reviewer()
+    validator = attach(app, reviewer)
+    evaluate = validator.evaluate
+
+    async def hold_second(sample, *args):
+        if sample['id'] == 'pending-1':
+            reviewer.hold = True
+        return await evaluate(sample, *args)
+
+    monkeypatch.setattr(validator, 'evaluate', hold_second)
+    validator.start_all()
+    await asyncio.wait_for(reviewer.entered.wait(), 5)
+    assert validator.status['batch']['completed'] == 1
+    first = copy.deepcopy(app.state.dataset['samples'][0])
+    await validator.stop()
+    # An item that is no longer Pending must be skipped when its turn arrives.
+    index, last = app.state.commands._find('pending-2')
+    last['metadata']['validation_level'] = 3
+    app.state.commands._commit(last, index, review=True)
+    restored = attach(app, Reviewer())
+    restored.start_all(resume=True)
+    await restored.job
+    assert app.state.dataset['samples'][0] == first
+    assert restored.status['batch']['completed'] == 3
+    assert restored.status['batch']['results'][-1]['skipped']
+    assert app.state.dataset['samples'][2]['metadata']['validation_level'] == 3
+
+
+async def test_validate_all_cancel_before_task_starts_releases_runner(studio):
+    app, _ = studio
+    pending_dataset(app)
+    validator = attach(app, Reviewer())
+    validator.start_all()
+    await validator.stop()
+    assert not validator.status['running'] and validator.status['phase'] == 'cancelled'
+    validator.start_all(resume=True)
+    await validator.job
+    assert validator.status['batch']['completed'] == 2

@@ -470,11 +470,16 @@ Control) to complete existing generated drafts across the whole dataset in one
 pass. Manual entries are ignored. Completed steps are reused; failures and edited
 checkpoints are reported while the pass continues. Pause/Cancel preserve work.
 
-To review a saved trajectory, select **Edit → Generation → Validate Trajectory**.
+To review a saved trajectory, select **Edit → Validation → Validate Trajectory**.
 It runs the same shared checklist service used by explicit MCP semantic validation,
 against original saved requirements plus current custom guidance. Review has its
 own progress, findings, cancellation, resumption and journal. It records Validated
-or Rejected only after a complete result, never Ready, and does not rewrite source.
+or Rejected only after a complete result, never Ready. Enable automatic repair to
+save content fixes and validate again. **Edit → Validation → Validate All** reviews
+and repairs every finished Pending trajectory in the dataset. Pause/Resume lets
+active model calls finish before waiting; Cancel preserves completed results, and
+Resume Validation continues the remaining queue after cancellation or restart.
+Individual failures are reported while the pass continues.
 External MCP review/repair remains available without local inference. Human Ready
 approval is still required for training export.
 

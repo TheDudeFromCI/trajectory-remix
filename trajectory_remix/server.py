@@ -777,6 +777,19 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def validation_status():
         return dict(validator.status)
 
+    @app.post('/api/validation/run-all', status_code=202)
+    async def start_all_validation(request: Request):
+        data = await body(request)
+        editable()
+        job_id = validator.start_all(endpoint=data.get('endpoint'), resume=data.get('resume', False))
+        return {'job_id': job_id, 'status': dict(validator.status)}
+
+    @app.post('/api/validation/pause')
+    async def pause_validation(request: Request):
+        data = await body(request)
+        validator.resume() if data.get('resume') else validator.pause()
+        return dict(validator.status)
+
     @app.post('/api/validation/stop')
     async def stop_validation():
         await validator.stop()
