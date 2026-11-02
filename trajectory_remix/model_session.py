@@ -134,7 +134,16 @@ class ModelSession:
         # A training-tokenizer estimate is for analytics only, never enforcement.
         return count(self.compiler.tokenizer, instructions) + count(self.compiler.tokenizer, data) + 128
 
-    async def llm(
+    async def llm(self, step, inputs, context, path, *args, **kwargs):
+        walkthrough = getattr(self, 'walkthrough', None)
+        if walkthrough is None:
+            return await self._llm(step, inputs, context, path, *args, **kwargs)
+        with walkthrough.scope('Model call', path) as event:
+            result = await self._llm(step, inputs, context, path, *args, _walkthrough=event, **kwargs)
+            event['parsed_output'] = result
+            return result
+
+    async def _llm(
         self,
         step,
         inputs,
@@ -144,10 +153,14 @@ class ModelSession:
         prompt=None,
         max_input_tokens=None,
         rules=None,
+        _walkthrough=None,
     ):
         if step.visible_windows:
             from .llm import selected_windows
             plan = self.compiler.compile(self.builder.sample)
+            walkthrough = getattr(self, 'walkthrough', None)
+            if walkthrough is not None:
+                walkthrough.observe_plan(plan)
             visible = selected_windows(plan, self.compiler, {'visible': step.visible_windows})
             if self.content_first:
                 visible = [window for window in visible if not window['closed']]
@@ -157,10 +170,27 @@ class ModelSession:
             inputs = {**inputs, 'visible_windows': visible}
         instructions, data = self.render_prompt(step, inputs, context, schema, prompt, rules)
         endpoint = self.endpoints[step.endpoint]
+        if _walkthrough is not None:
+            _walkthrough.update(
+                messages=[{'role': 'system', 'content': instructions}, {'role': 'user', 'content': data}],
+                prompt_source=prompt or step.prompt,
+                original_schema=schema or self.scenario.flow.schemas.get(step.output_schema),
+                checklist_rules=rules, profile=step.profile,
+                max_input_tokens=max_input_tokens if max_input_tokens is not None else step.max_input_tokens,
+                budget_settings=self.config.get('content_first', {}),
+                endpoint={key: endpoint[key] for key in (
+                    'id', 'base_url', 'model', 'temperature', 'max_tokens', 'context_size',
+                    'completion_limit_parameter', 'structured_output', 'inference_tokenizer',
+                ) if key in endpoint},
+                reasoning_status='unavailable', provider_request_sent=False,
+            )
         local_constraints = []
         output = self.output_definition(step, schema, local_constraints=local_constraints)
         formatting = response_format(output)
         output_mode = 'native' if output else 'prompted' if schema or step.output_schema else 'text'
+        if _walkthrough is not None:
+            _walkthrough.update(response_format=formatting, output_mode=output_mode,
+                                local_schema_constraints=local_constraints)
         budget = self.request_budget(step.endpoint)
         if budget:
             budget_metrics = budget.check([
@@ -176,6 +206,8 @@ class ModelSession:
                          (f'inference tokenizer unavailable ({detail})' if detail else 'no inference tokenizer configured'),
                          'warning' if detail else 'info', path)
                 self._budget_logged.add(step.endpoint)
+        if _walkthrough is not None:
+            _walkthrough['budget'] = budget_metrics
         system_tokens = budget.output_tokens(instructions) if budget else count(self.compiler.tokenizer, instructions)
         async with self.model_slot():
             self.status["active"].append(path)
@@ -199,6 +231,8 @@ class ModelSession:
                         'decision_tick': self.builder.next_tick, 'started_at': time.time(),
                         'raw_output': '', 'reasoning': ''}
             self.snapshot.setdefault('content_requests', []).append(proposal)
+            if _walkthrough is not None:
+                _walkthrough['response'] = proposal
 
             def sample_stats(final=False):
                 usage = active_stream.get().usage if active_stream is not None else stream_usage
@@ -296,6 +330,8 @@ class ModelSession:
                     output_mode=output_mode, response_format=formatting,
                     local_schema_constraints=local_constraints,
                 )
+                if _walkthrough is not None:
+                    _walkthrough['provider_request_sent'] = True
                 if self.client is not None:
                     # Injected clients use identical rendered messages and request boundaries.
                     request_endpoint = {**endpoint, 'retain_incomplete': True}
@@ -466,6 +502,9 @@ class ModelSession:
                     result = text
                 if schema:
                     jsonschema.validate(result, schema)
+                if _walkthrough is not None:
+                    _walkthrough['output_checks'] = {'json_parse': 'passed' if schema else 'not required',
+                                                     'original_schema': 'passed' if schema else 'not required'}
                 if (
                     path == "idea"
                     and isinstance(result, dict)
@@ -508,6 +547,10 @@ class ModelSession:
                     proposal['finished_at'] = time.time()
                     if proposal['state'] != 'complete':
                         proposal['state'] = 'incomplete'
+                if _walkthrough is not None:
+                    _walkthrough['reasoning'] = streamed_reasoning or stats.inline_reasoning or None
+                    _walkthrough['reasoning_status'] = ('returned by provider' if streamed_reasoning else
+                                                        'returned inline in output' if stats.inline_reasoning else 'unavailable')
                 self.snapshot.setdefault('request_metrics', []).append({
                     'path': path, 'metrics': metrics, 'mode': self.scenario.flow.generation_mode,
                     'raw_proposal': bool(streamed_text),

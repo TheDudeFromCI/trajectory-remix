@@ -591,6 +591,58 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
         scenario_runner.start(data.get("scenario"), data.get("max_parallel"), tags=data.get("tags"), batch_size=data.get("batch_size", 1))
         return {"ok": True}
 
+    @app.post('/api/scenarios/walkthrough')
+    async def generate_walkthrough(request: Request):
+        from .generation_walkthrough import GenerationWalkthrough
+
+        data = await body(request)
+        # Do not attach diagnostics to another request's active generation.
+        if scenario_runner.status['running'] or runner.status['running'] or getattr(scenario_runner, 'walkthrough', None):
+            raise HTTPException(409, 'Generation is already running')
+        walkthrough = GenerationWalkthrough(scenario_runner)
+        scenario_runner.walkthrough = walkthrough
+        disconnect = None
+        try:
+            scenario_runner.start(data.get('scenario'), data.get('max_parallel'),
+                                  tags=data.get('tags'), batch_size=data.get('batch_size', 1))
+            job = scenario_runner.job
+            async def wait_for_disconnect():
+                while True:
+                    if (await request.receive())['type'] == 'http.disconnect':
+                        return
+
+            disconnect = asyncio.create_task(wait_for_disconnect())
+            try:
+                # Waiting on the pair never propagates request cancellation to
+                # generation. ASGI disconnects do not cancel handlers themselves.
+                done, _ = await asyncio.wait((job, disconnect), return_when=asyncio.FIRST_COMPLETED)
+                if disconnect in done:
+                    return Response(status_code=204)
+                await asyncio.shield(job)
+            except asyncio.CancelledError:
+                if not job.cancelled():
+                    raise
+                # Also handle Cancel before the scheduled worker's first turn.
+                if scenario_runner.status['running']:
+                    scenario_runner.status.update(running=False, phase='cancelled', active=[],
+                                                  paused=False, pause_requested=False)
+                    scenario_runner.persist()
+            walkthrough.event('Generation finished', status=scenario_runner.status,
+                              workspace=walkthrough.workspace())
+            return Response(walkthrough.render(), media_type='text/markdown', headers={
+                'Content-Disposition': 'attachment; filename="generation-walkthrough.md"',
+                'Cache-Control': 'no-store',
+            })
+        finally:
+            scenario_runner.walkthrough = None
+            builder = getattr(scenario_runner, 'builder', None)
+            if builder is not None and getattr(builder, 'plan_observer', None) == walkthrough.observe_plan:
+                del builder.plan_observer
+            walkthrough.close()
+            if disconnect is not None:
+                disconnect.cancel()
+                await asyncio.gather(disconnect, return_exceptions=True)
+
     @app.post("/api/scenarios/resume")
     async def resume_generation(request: Request):
         data = await body(request)
