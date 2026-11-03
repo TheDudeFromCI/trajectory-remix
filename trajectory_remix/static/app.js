@@ -231,6 +231,7 @@ async function refresh(initial = false) {
       next.query !== state.query;
     const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
     state = next;
+    if (configDraft && syncConfigDraft() && $("settings-dialog").open) renderConfig();
     renderDatasetTags();
     renderTokenizerMigration(next.tokenizer_migration);
     renderTrajectoryValidation(next.validation_status);
@@ -2291,12 +2292,20 @@ $("export-generation-log").onclick = action(async () => {
   const link = node("a"); link.href = url; link.download = "generation.log"; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 });
+function syncConfigDraft() {
+  // Keep unsaved edits, but never let a previously saved draft hide changes
+  // made by an import or another client to the configuration generation uses.
+  if (configDraft && JSON.stringify(configDraft) !== configBaseline) return false;
+  const next = structuredClone(state.config);
+  next.single_generation = {max_parallel: 1, max_attempts: 3, ...next.single_generation};
+  const baseline = JSON.stringify(next);
+  if (configDraft && baseline === configBaseline) return false;
+  configDraft = next;
+  configBaseline = baseline;
+  return true;
+}
 function openSettings() {
-  if (!configDraft) {
-    configDraft = structuredClone(state.config);
-    configDraft.single_generation = {max_parallel: 1, max_attempts: 3, ...configDraft.single_generation};
-    configBaseline = JSON.stringify(configDraft);
-  }
+  syncConfigDraft();
   $("settings-dialog").showModal();
   renderConfig();
 }

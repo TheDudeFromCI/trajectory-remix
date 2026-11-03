@@ -1,14 +1,15 @@
-"""A complete request-scoped trace, with normal creation and no saved report."""
+"""LLM-focused request diagnostics, with normal creation and no saved report."""
 
 import asyncio
 import copy
 import json
 import re
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from trajectory_remix.generation_walkthrough import changes
+from trajectory_remix.generation_walkthrough import GenerationWalkthrough
 from trajectory_remix.scenarios import Step
 from test_content_first import ByteChatTokenizer, ContentClient, setup
 
@@ -78,12 +79,17 @@ async def test_full_trace_exact_requests_parallelism_workspace_and_no_report_in_
     assert all(starts[e['started_event']]['path'] == e['path'] for e in calls)
     assert any(sum(start < e['sequence'] < finish for start, finish in
                    [(c['started_event'], c['sequence']) for c in calls]) >= 2 for e in trace)
-    compiled = [e for e in trace if e['kind'] == 'Compiler result']
-    assert any(c['tool'] == 'file_write' for e in compiled for c in e['tool_calls'])
-    assert any('workspace change' in json.dumps(t['changes']) for e in compiled for t in e['sandbox_timeline'])
-    assert any(e['workspace_changes'] for e in trace if e['kind'] == 'Operation finished')
-    attempt = next(e for e in trace if e['kind'] == 'Generation attempt')
-    assert attempt['saved_review_checklist']['checks']
+    assert not any(e['kind'] == 'Compiler result' for e in trace)
+    for entry in trace:
+        assert not {'workspace', 'workspace_before', 'workspace_changes', 'sandbox_timeline',
+                    'parsed_output', 'output', 'inputs', 'history'} & entry.keys()
+        if entry['kind'] == 'Model call finished':
+            assert 'response_format' not in entry['response']
+            assert 'reasoning' not in entry  # Retained once in response.
+        if entry['kind'] == 'Step finished':
+            assert set(entry['record']) <= {'state', 'error', 'detail'}
+    assert all(e['elapsed_seconds'] >= 0 for e in trace if e['kind'].endswith(' finished'))
+    assert 'Attempts: 1. Model calls: 5.' in response.text
     sample = app.state.dataset['samples'][0]
     assert sample['metadata']['generation_phase'] == 'complete'
     assert sample['metadata']['validation_level'] == 0
@@ -223,24 +229,6 @@ async def test_disconnected_request_discards_trace_and_leaves_normal_generation_
     assert not collector.events  # In-flight scopes do not recreate the discarded report.
 
 
-def test_lossless_workspace_changes():
-    assert changes({'file/a': 'old', 'gone': 1}, {'file/a': 'new', 'added': 2}) == [
-        {'op': 'add', 'path': '/added', 'after': 2},
-        {'op': 'replace', 'path': '/file~1a', 'before': 'old', 'after': 'new'},
-        {'op': 'remove', 'path': '/gone', 'before': 1},
-    ]
-
-
-@pytest.mark.parametrize('before,after', [
-    ({'x': True}, {'x': 1}), ({'x': [False]}, {'x': [0]}),
-    ([{'x': True}], [{'x': 1}]), (1, 1.0),
-])
-def test_workspace_changes_preserve_json_types(before, after):
-    diff = changes(before, after)
-    assert diff
-    assert json.dumps(diff[0]['before']) != json.dumps(diff[0]['after'])
-
-
 async def test_credentials_cannot_be_recovered_from_nested_inputs_or_responses(traced_setup):
     secret = 'credential-"quote"-\\slash-\nnewline-π'
 
@@ -332,3 +320,47 @@ async def test_http_disconnect_detaches_collector_without_cancelling_worker(trac
         handler.cancel()
         await asyncio.gather(handler, return_exceptions=True)
         await runner.stop()
+
+
+def test_collector_never_copies_workspace_or_non_model_payloads():
+    class Uncopyable:
+        def __deepcopy__(self, memo):
+            raise AssertionError('Trajectory or operation payload was copied')
+
+    runner = SimpleNamespace(state={'config': {'endpoints': []}}, builder=Uncopyable())
+    collector = GenerationWalkthrough(runner)
+    with collector.scope('Operation', 'assemble', uses='remix.assemble', inputs=Uncopyable()) as event:
+        event['output'] = Uncopyable()
+    with collector.scope('Step', 'work', definition={
+        'uses': 'flow.repeat', 'needs': [], 'retries': 0, 'on_failure': {'action': 'reject'},
+    }) as event:
+        event['record'] = {'state': 'complete', 'output': Uncopyable(), 'inputs': Uncopyable()}
+        event['output'] = Uncopyable()
+    collector.finished({'phase': 'complete', 'metrics': Uncopyable()})
+    assert collector.events[-1]['status'] == {'phase': 'complete'}
+    assert collector.events[-2]['record'] == {'state': 'complete'}
+    assert collector.events[1]['kind'] == 'Operation finished'
+    assert 'output' not in collector.events[1]
+
+
+@pytest.mark.parametrize('reopen', [False, True])
+async def test_walkthrough_honors_prompt_only_saved_via_api(traced_setup, reopen):
+    from trajectory_remix.server import create_app
+
+    fake = ContentClient()
+    app, runner = traced_setup(fake)
+    config = copy.deepcopy(app.state.dataset['config'])
+    config['endpoints'][0]['structured_output'] = 'prompted'
+    async with client_for(app) as client:
+        saved = await client.put('/api/config', json={'config': config})
+        assert saved.status_code == 200, saved.text
+    if reopen:
+        app = create_app(app.state.dataset.store.path, client=fake,
+                         scenarios_dir=runner.registry.root)
+    async with client_for(app) as client:
+        trace = events(await client.post('/api/scenarios/walkthrough', json={'scenario': 'content_first'}))
+    calls = [e for e in trace if e['kind'] == 'Model call finished' and e['original_schema']]
+    assert calls
+    assert all(e['endpoint']['structured_output'] == 'prompted' for e in calls)
+    assert all(e['output_mode'] == 'prompted' and e['response_format'] is None for e in calls)
+    assert trace[-1]['status']['phase'] == 'complete'

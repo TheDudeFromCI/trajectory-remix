@@ -298,8 +298,6 @@ class ScenarioRunner(ModelSession):
         }
         self.builder = SampleBuilder(self.compiler, self.config)
         walkthrough = getattr(self, 'walkthrough', None)
-        if walkthrough is not None:
-            self.builder.plan_observer = walkthrough.observe_plan
         self.builder.sample["metadata"].update(
             generation_mode=self.scenario.flow.generation_mode,
             origin="automation",
@@ -745,13 +743,16 @@ class ScenarioRunner(ModelSession):
         walkthrough = getattr(self, 'walkthrough', None)
         if walkthrough is None:
             return await self._execute_step(name, step, context, path)
-        with walkthrough.scope('Step', path, definition=step.model_dump()) as event:
+        with walkthrough.scope('Step', path, definition={
+            'uses': step.uses, 'needs': step.needs, 'retries': step.retries,
+            'on_failure': {'action': step.on_failure.action},
+        }) as event:
             try:
                 output = await self._execute_step(name, step, context, path)
-                event['output'] = output
                 return output
             finally:
-                event['record'] = copy.deepcopy(self.snapshot['steps'].get(path, {}))
+                record = self.snapshot['steps'].get(path, {})
+                event['record'] = {key: record[key] for key in ('state', 'error', 'detail') if key in record}
 
     async def _execute_step(self, name, step, context, path):
         await self.gate()
@@ -871,9 +872,8 @@ class ScenarioRunner(ModelSession):
         walkthrough = getattr(self, 'walkthrough', None)
         if walkthrough is None:
             return await self._dispatch(step, inputs, context, path)
-        with walkthrough.scope('Operation', path, uses=step.uses, inputs=inputs) as event:
+        with walkthrough.scope('Operation', path, uses=step.uses):
             output = await self._dispatch(step, inputs, context, path)
-            event['output'] = output
             return output
 
     async def _dispatch(self, step, inputs, context, path):
@@ -902,7 +902,7 @@ class ScenarioRunner(ModelSession):
                     walkthrough = getattr(self, 'walkthrough', None)
                     if walkthrough is not None:
                         walkthrough.event('Repeat condition', path, iteration=index,
-                                          expression=step.until, result=finished, history=history)
+                                          expression=step.until, result=finished)
                     if type(finished) is not bool:
                         raise ValueError("Repeat until must resolve to a boolean")
                     if finished:
@@ -1168,9 +1168,6 @@ class ScenarioRunner(ModelSession):
             draft['metadata']['generation_metrics'] = copy.deepcopy(self.snapshot['request_metrics'])
             draft['metadata']['generation_elapsed_seconds'] = self.elapsed_seconds()
         compiled = self.compiler.compile(draft)
-        walkthrough = getattr(self, 'walkthrough', None)
-        if walkthrough is not None:
-            walkthrough.observe_plan(compiled)
         if self.content_first:
             draft['metadata']['generation_record']['diagnostics'] = compiled['diagnostics']
         if self.state_override is not None:

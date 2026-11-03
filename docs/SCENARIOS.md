@@ -98,7 +98,7 @@ switching tasks does not cancel or delete their saved content.
 
 ## Generation activity log
 
-For a complete debugging trace, choose **Generate & download walkthrough** in
+For an LLM input/output report, choose **Generate & download walkthrough** in
 the generation setup panel. It uses the selected scenario, conditions and count,
 with the same normal pipeline, concurrency, retries and compiler checks as Start.
 The browser automatically downloads `generation-walkthrough.md` when the run
@@ -107,15 +107,23 @@ and Cancel remain available in Generation Control while the download is pending.
 Pausing keeps the walkthrough only in the current server's memory. It does not
 survive a server restart, even though the generation checkpoint can be resumed.
 
-The verbose Markdown includes the flow and sampled conditions; exact system/user
-messages and prompt sources; original JSON schemas, provider decoding schemas and
-local constraints; returned reasoning when available; raw and parsed responses;
-token usage with its provider/estimated source; every step, operation, retry,
-fallback and skip; compiler diagnostics, tool outcomes and sandbox state changes
-by tick; and workspace changes after each call. Overlapping calls have paired
-start/finish event IDs. Saved review checklists are included with an explanation
-that semantic validation remains a separate operation, not part of creation.
-Configured endpoint credentials are redacted.
+The Markdown includes sampled conditions; exact system/user messages and prompt
+source names; original JSON schemas, provider decoding schemas and local
+constraints; raw responses and returned reasoning once per call; token usage
+with its provider/estimated source; step timings, retries, fallbacks and skips;
+and the final status and errors. A summary counts attempts and model calls and
+sums reported model time. Overlapping calls have paired start/finish event IDs.
+Raw trajectories, compiler results and workspace/sandbox snapshots are not
+collected. Trajectory context actually sent to a model remains in its messages.
+Configured endpoint credentials are redacted. Semantic validation remains a
+separate operation, not part of creation.
+
+A count of one targets one completed sample, not one model call or attempt.
+For example, `kidra_small` generates a workspace and then runs up to ten
+model/tool-feedback decisions per attempt. If it exhausts those decisions
+without finishing, the batch can start a fresh attempt up to its configured
+attempt limit. Normal generation also runs compiler/tool checks and saves
+checkpoints between steps. Report collection adds no model or tool calls.
 
 `POST /api/scenarios/walkthrough` accepts the same creation options as `/run` and
 returns an authenticated, non-cacheable Markdown attachment in that request.

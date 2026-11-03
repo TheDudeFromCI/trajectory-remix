@@ -140,7 +140,6 @@ class ModelSession:
             return await self._llm(step, inputs, context, path, *args, **kwargs)
         with walkthrough.scope('Model call', path) as event:
             result = await self._llm(step, inputs, context, path, *args, _walkthrough=event, **kwargs)
-            event['parsed_output'] = result
             return result
 
     async def _llm(
@@ -158,9 +157,6 @@ class ModelSession:
         if step.visible_windows:
             from .llm import selected_windows
             plan = self.compiler.compile(self.builder.sample)
-            walkthrough = getattr(self, 'walkthrough', None)
-            if walkthrough is not None:
-                walkthrough.observe_plan(plan)
             visible = selected_windows(plan, self.compiler, {'visible': step.visible_windows})
             if self.content_first:
                 visible = [window for window in visible if not window['closed']]

@@ -627,17 +627,13 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                     scenario_runner.status.update(running=False, phase='cancelled', active=[],
                                                   paused=False, pause_requested=False)
                     scenario_runner.persist()
-            walkthrough.event('Generation finished', status=scenario_runner.status,
-                              workspace=walkthrough.workspace())
+            walkthrough.finished(scenario_runner.status)
             return Response(walkthrough.render(), media_type='text/markdown', headers={
                 'Content-Disposition': 'attachment; filename="generation-walkthrough.md"',
                 'Cache-Control': 'no-store',
             })
         finally:
             scenario_runner.walkthrough = None
-            builder = getattr(scenario_runner, 'builder', None)
-            if builder is not None and getattr(builder, 'plan_observer', None) == walkthrough.observe_plan:
-                del builder.plan_observer
             walkthrough.close()
             if disconnect is not None:
                 disconnect.cancel()
