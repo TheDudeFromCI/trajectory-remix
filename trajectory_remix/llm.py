@@ -464,9 +464,6 @@ class SampleBuilder:
 
     def remember_plan(self, plan):
         """Retain only the small fields used by generation scheduling."""
-        observer = getattr(self, 'plan_observer', None)
-        if observer is not None:
-            observer(plan)
         key = self._summary_key()
         summary = copy.deepcopy({name: plan[name] for name in ('max_tick', 'windows', 'tool_calls')})
         self._compiled_summary = (key, copy.deepcopy(summary)) if key is not None else None

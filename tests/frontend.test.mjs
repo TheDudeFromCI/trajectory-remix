@@ -85,7 +85,7 @@ await w.eval(
       /setInterval\(\(\)=>action\(async\(\)=>\{const wasRunning[\s\S]*$/,
       "",
     ) +
-    "\n})()",
+    "\nwindow.__refreshForTest = refresh;\n})()",
 );
 const $ = (id) => w.document.getElementById(id);
 const click = async (id) => {
@@ -392,6 +392,27 @@ outputMode.dispatchEvent(new w.Event("change", {bubbles: true}));
 assert.equal($("save-config").disabled, false);
 await click("save-config");
 assert.equal(w.document.querySelector('[data-config-path="endpoints.0.structured_output"]').value, "prompted");
+// A saved dialog draft must follow server configuration changes rather than
+// displaying Prompt-only while generation will use native mode.
+const configHeaders = {"Content-Type": "application/json", "X-Remix-Token": w.document.querySelector('meta[name="remix-token"]').content};
+const savedConfig = (await (await fetch(base + "/api/state", {headers: configHeaders})).json()).config;
+const externalConfig = structuredClone(savedConfig);
+externalConfig.endpoints[0].structured_output = "native";
+const externalSave = await fetch(base + "/api/config", {
+  method: "PUT", headers: configHeaders,
+  body: JSON.stringify({config: externalConfig}),
+});
+assert.equal(externalSave.status, 200);
+await w.__refreshForTest();
+assert.equal(w.document.querySelector('[data-config-path="endpoints.0.structured_output"]').value, "native");
+const restoredMode = w.document.querySelector('[data-config-path="endpoints.0.structured_output"]');
+restoredMode.value = "prompted";
+restoredMode.dispatchEvent(new w.Event("change", {bubbles: true}));
+// Refresh must also preserve deliberate unsaved edits.
+await w.__refreshForTest();
+assert.equal(w.document.querySelector('[data-config-path="endpoints.0.structured_output"]').value, "prompted");
+await click("save-config");
+
 const optionalTokenizer = w.document.querySelector('[data-config-path="endpoints.0.inference_tokenizer"]');
 optionalTokenizer.value = "";
 optionalTokenizer.dispatchEvent(new w.Event("input", {bubbles: true}));
