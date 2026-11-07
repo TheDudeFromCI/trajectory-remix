@@ -197,8 +197,8 @@ async def test_anchor_offsets_and_preview_retain_prefix(studio):
         studio, "preview_snapshots", sample_id="test", start_tick=6, end_tick=8
     )
     assert [f["tick"] for f in frames["frames"]] == [6, 7, 8]
-    assert frames["frames"][0]["windows"]["a"]["text"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>abc"
-    assert frames["frames"][0]["windows"]["b"]["text"] == "<|cxt|>Window: 1\nPurpose: document<|/cxt|>O"
+    assert frames["frames"][0]["windows"]["a"]["text"] == "<|ctx|>Window: 0\nPurpose: document<|/ctx|>abc"
+    assert frames["frames"][0]["windows"]["b"]["text"] == "<|ctx|>Window: 1\nPurpose: document<|/ctx|>O"
     assert frames["frames"][-1]["windows"]["b"]["status"] == "closed"
     assert frames["frames"][-1]["windows"]["b"]["kv_tokens"] == 0
     history = await call(
@@ -209,7 +209,7 @@ async def test_anchor_offsets_and_preview_retain_prefix(studio):
         start_tick=7,
         end_tick=8,
     )
-    assert history["text"] == "<|cxt|>Window: 1\nPurpose: document<|/cxt|>OK" and history["window"]["close"] == 8
+    assert history["text"] == "<|ctx|>Window: 1\nPurpose: document<|/ctx|>OK" and history["window"]["close"] == 8
     assert len(history["rows"]) == 2 and all(
         r["window"] == "b" for r in history["rows"]
     )

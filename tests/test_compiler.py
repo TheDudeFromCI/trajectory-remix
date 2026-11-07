@@ -38,7 +38,7 @@ def test_bos_noop_eos_masks(compiler, sample):
     assert next(w for w in p["windows"] if w["id"] == "a")["close"] == 3
     assert (
         compiler.frame(p, 2)["windows"]["a"]["text"]
-        == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>x"
+        == "<|ctx|>Window: 0\nPurpose: document<|/ctx|>x"
     )
 
 
@@ -316,7 +316,7 @@ def test_multiple_instant_appends_order(compiler, sample):
     p = compiler.compile(sample)
     assert (
         compiler.frame(p, 1)["windows"]["a"]["text"]
-        == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>abcd"
+        == "<|ctx|>Window: 0\nPurpose: document<|/ctx|>abcd"
     )
     keys = [r for r in p["rows"] if r["op"] == "append"]
     assert visible_to(keys[1], keys[0], p["windows"])

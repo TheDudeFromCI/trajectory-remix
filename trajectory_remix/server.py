@@ -250,7 +250,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             "tokenizer": {
                 "sha256": compiler.fingerprint,
                 "vocab": compiler.tokenizer.get_vocab_size(),
-                "special": compiler.special,
+                "special": compiler.special_tokens,
+                "special_ids": compiler.special_token_ids,
             },
             "tokenizer_migration": dict(migration.status),
             "validation_status": dict(validator.status),

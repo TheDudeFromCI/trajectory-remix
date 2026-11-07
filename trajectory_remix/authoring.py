@@ -332,7 +332,7 @@ class TrajectoryCommands:
             "slot_policy": self.compiler.slot_policy,
             "status": self.runner.status,
             "tokenizer_sha256": self.compiler.fingerprint,
-            "special_tokens": self.compiler.special,
+            "special_tokens": self.compiler.special_tokens,
             "guidance": {"tool": "get_guidance", "instruction": "Read dataset and scenario guidance before creating, validating or repairing trajectories."},
         }
 
@@ -549,7 +549,7 @@ class TrajectoryCommands:
                     limit=event_limit, max_chars=max_chars)
         if "error" in guidance:
             result["guidance"]["error"] = guidance["error"]
-        result["special_tokens"] = self.compiler.special
+        result["special_tokens"] = self.compiler.special_tokens
         result["content_hash"] = DatasetStore.row(sample)[-1]
         result["expected_revision"] = revision
         if revision != self.state["revision"]:
