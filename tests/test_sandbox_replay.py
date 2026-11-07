@@ -37,7 +37,7 @@ def test_history_at_completion_and_backwards_scrubbing(compiler, sample):
             assert compiler.frame(plan, tick)["tool_calls"][-1]["status"] == "running"
             assert "outcome" not in compiler.frame(plan, tick)["tool_calls"][-1]
             text = compiler.frame(plan, tick)["windows"]["second"]["text"]
-            assert text.startswith('<|cxt|>Window: 3\nPurpose: tool<|/cxt|><tool>{"tool": "file_write"')
+            assert text.startswith('<|ctx|>Window: 3\nPurpose: tool<|/ctx|><tool>{"tool": "file_write"')
             assert "<tool_result>" not in text
     assert plan["tool_calls"][-1]["outcome"]["result"]["content"] == "new"
     assert next(w for w in plan["windows"] if w["id"] == "second")["open"] == 0
@@ -204,7 +204,7 @@ def test_paused_request_can_consume_parallel_tool_result(compiler, sample):
     resume = paused + pause_ticks + 1
     assert clock["end"] < resume < write["start"]
     assert write["start"] == plan["anchors"]["2"]["tick"] + 1
-    header = "<|cxt|>Window: 2\nPurpose: tool<|/cxt|>"
+    header = "<|ctx|>Window: 2\nPurpose: tool<|/ctx|>"
     assert compiler.frame(plan, 0)["windows"]["write"]["text"] == header
     during = compiler.frame(plan, clock["end"])
     assert during["windows"]["write"]["text"] == header + prefix

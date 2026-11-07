@@ -20,10 +20,10 @@ def test_named_references_and_headers_share_exported_numeric_slots(compiler, sam
     plan = compiler.compile(sample)
     assert plan["window_slots"]["tool0"] == 4
     assert compiler.frame(plan, plan["max_tick"])["windows"]["reasoning"]["text"] == (
-        "<|cxt|>Window: 2\nPurpose: reasoning<|/cxt|>I'll read the file in Window 4."
+        "<|ctx|>Window: 2\nPurpose: reasoning<|/ctx|>I'll read the file in Window 4."
     )
     assert compiler.frame(plan, 0)["windows"]["tool0"]["text"] == (
-        "<|cxt|>Window: 4\nPurpose: tool<|/cxt|>"
+        "<|ctx|>Window: 4\nPurpose: tool<|/ctx|>"
     )
     assert plan["anchors"]["1"]["tick"] == len("I'll read the file in Window 4.")
     exported = list(chunks(plan, 3))

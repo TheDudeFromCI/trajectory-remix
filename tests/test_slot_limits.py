@@ -33,7 +33,7 @@ def test_uuid_seed_is_stable_unique_and_shared_by_headers_references_and_exports
     fresh = Compiler(compiler.tokenizer, max_window_slots=32)
     assert fresh.compile(original)["window_slots"] == slots
     assert next(e for e in plan["events"] if e["op"] == "generate")["text"] == str(slots["w2"])
-    assert next(w for w in plan["windows"] if w["id"] == "w2")["header"].startswith(f"<|cxt|>Window: {slots['w2']}\n")
+    assert next(w for w in plan["windows"] if w["id"] == "w2")["header"].startswith(f"<|ctx|>Window: {slots['w2']}\n")
     exported = list(chunks(plan, 4))
     assert all(c["trajectory_uuid"] == original["uuid"] and c["window_slots"] == slots for c in exported)
     other = source("00000000-0000-4000-8000-000000000002")

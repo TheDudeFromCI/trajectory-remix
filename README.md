@@ -63,6 +63,14 @@ Restart any other server processes sharing this project to load the new tokenize
 Padding and truncation are disabled when compiling trajectories. Required special tokens must each already map to
 one dedicated ID. They are never silently added or renumbered.
 
+Special-token metadata also identifies the context delimiters `tool`, `/tool`,
+`tool_result`, `/tool_result` (`<tool>`, `</tool>`, `<tool_result>`,
+`</tool_result>`), `msg`, `/msg` (`<|msg|>`, `<|/msg|>`), and `ctx`, `/ctx`
+(`<|ctx|>`, `<|/ctx|>`). Session and tokenizer metadata list their spellings;
+compiled plans and exports report their IDs when they encode as dedicated tokens.
+These delimiters remain visible conditioning context.
+Tokenizers without dedicated context tokens remain supported without modification.
+
 Compilation automatically reuses successful token encodings and the unchanged
 prefix of the previous timeline on the same compiler. This applies to generation,
 resume, previews and exports. Tool scheduling and anchors are still resolved on
@@ -365,7 +373,7 @@ contract; it is not an audit of the current ProjectKidra repository.
 ```
 
 - Phase A opens windows and inserts exactly one BOS followed by an automatic
-  `<|cxt|>Window: 4\nPurpose: tool<|/cxt|>` header (with an actual newline).
+  `<|ctx|>Window: 4\nPurpose: tool<|/ctx|>` header (with an actual newline).
   Both are durable conditioning context excluded from loss. The header uses the
   window's numeric slot and `window-type` (default `document`), including for
   implicitly opened tool windows. Initialization is atomic at the opening tick;

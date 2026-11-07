@@ -130,4 +130,4 @@ def test_window_order_and_prefix_visibility(compiler, sample):
     p = compiler.compile(sample)
     w = selected_windows(p, compiler, {"visible": ["b", "a"], "visible_tick": 1})
     assert [v["window"] for v in w] == ["b", "a"]
-    assert w[1]["content"] == "<|cxt|>Window: 0\nPurpose: document<|/cxt|>x"
+    assert w[1]["content"] == "<|ctx|>Window: 0\nPurpose: document<|/ctx|>x"

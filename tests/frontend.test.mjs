@@ -98,13 +98,16 @@ const waitFor = async (predicate, timeout = 3000) => {
   assert(predicate(), "Timed out waiting for frontend state");
 };
 assert.equal(w.document.querySelectorAll(".window-card").length, 5);
-assert.doesNotMatch($("window-grid").textContent, /<\|cxt\|>/);
+assert.doesNotMatch($("window-grid").textContent, /<\|ctx\|>/);
 // Tokenizer migration accepts pasted JSON and uploads, reports progress, and
 // refreshes the current preview without requiring a page reload.
 await click("file-menu-button");
 await click("migrate-tokenizer-button");
 assert.equal($("tokenizer-migration-dialog").open, true);
 assert.equal($("tokenizer-eos").value, "<|eos|>");
+for (const token of ["<tool>", "</tool>", "<tool_result>", "</tool_result>",
+  "<|msg|>", "<|/msg|>", "<|ctx|>", "<|/ctx|>"])
+  assert($("tokenizer-context-tokens").textContent.includes(token));
 $("tokenizer-config").value = "invalid JSON";
 await $("tokenizer-migration-form").onsubmit({ preventDefault() {} });
 assert.equal($("tokenizer-migration-error").hidden, false);
@@ -144,7 +147,7 @@ assert.equal(
 );
 assert.match(
   $("window-grid").textContent,
-  /<\|cxt\|>Window: \d+↵\nPurpose: reasoning<\|\/cxt\|>/,
+  /<\|ctx\|>Window: \d+↵\nPurpose: reasoning<\|\/ctx\|>/,
 );
 assert.match($("window-grid").textContent, /slot \d+/);
 // Empty windows stay hidden even when their automatic context headers are shown.

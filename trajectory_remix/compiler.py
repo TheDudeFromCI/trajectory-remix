@@ -28,6 +28,18 @@ KEY = re.compile(r"(?:\d+|\{N_TICK:(\d+)\}(?:\+(\d+))?)\Z")
 MAX_TICKS = 100_000
 MAX_ROWS = 500_000
 
+# Protocol delimiters are conditioning context, unlike the BOS/EOS/NOOP controls.
+CONTEXT_TOKENS = {
+    "tool": "<tool>",
+    "/tool": "</tool>",
+    "tool_result": "<tool_result>",
+    "/tool_result": "</tool_result>",
+    "msg": "<|msg|>",
+    "/msg": "<|/msg|>",
+    "ctx": "<|ctx|>",
+    "/ctx": "<|/ctx|>",
+}
+
 
 class FrameIndex:
     """Server-side references to durable rows; implicit NOOPs need no replay work.
@@ -205,6 +217,14 @@ class Compiler:
                 )
         if len(set(self.ids.values())) != 3:
             raise ValueError("BOS, EOS and NOOP must have distinct IDs")
+        self.special_tokens = {**self.special, **CONTEXT_TOKENS}
+        self.special_token_ids = dict(self.ids)
+        for name, spelling in CONTEXT_TOKENS.items():
+            idx = tokenizer.token_to_id(spelling)
+            if idx is not None and tokenizer.encode(
+                spelling, add_special_tokens=False
+            ).ids == [idx]:
+                self.special_token_ids[name] = idx
         self.fingerprint = hashlib.sha256(tokenizer.to_str().encode()).hexdigest()
         self._encodings = OrderedDict()
         self._encoding_tokens = 0
@@ -244,7 +264,7 @@ class Compiler:
             escaped = json.dumps(value, ensure_ascii=False)[1:-1]
             return tool_text(escaped, self.special.values()).replace("<", r"\u003c")
 
-        return f"<|cxt|>Window: {slot}\nPurpose: {field(purpose)}<|/cxt|>"
+        return f"<|ctx|>Window: {slot}\nPurpose: {field(purpose)}<|/ctx|>"
 
     def encode(self, event, path, noop_weight, literal=False, window_slots=None):
         with self._compile_lock:
@@ -1209,7 +1229,7 @@ class Compiler:
             "max_window_slots": self.max_window_slots,
             "slot_policy": self.slot_policy,
             "tokenizer_sha256": self.fingerprint,
-            "special_tokens": self.ids,
+            "special_tokens": self.special_token_ids,
             "max_tick": max_tick,
             "token_max_tick": visible_end,
             "windows": list(windows.values()),
