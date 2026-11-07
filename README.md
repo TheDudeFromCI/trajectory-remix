@@ -70,6 +70,10 @@ Special-token metadata also identifies the context delimiters `tool`, `/tool`,
 compiled plans and exports report their IDs when they encode as dedicated tokens.
 These delimiters remain visible conditioning context.
 Tokenizers without dedicated context tokens remain supported without modification.
+The tokenizer migration dialog lets you edit all eleven special-token spellings.
+Custom context spellings must be dedicated tokens in the replacement tokenizer;
+they are saved with the project and used when compiling canonical protocol text
+and automatic window headers. Source trajectory text remains unchanged.
 
 Compilation automatically reuses successful token encodings and the unchanged
 prefix of the previous timeline on the same compiler. This applies to generation,

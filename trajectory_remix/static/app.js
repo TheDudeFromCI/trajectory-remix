@@ -777,7 +777,8 @@ function renderReplay() {
     if (!unopened && !closed) active++;
     if (closed && !$("show-closed").checked) return;
     const data = currentFrame?.tick === tick ? currentFrame.windows?.[w.id] : null;
-    const body = (data?.text || "").replace(/<\|ctx\|>[\s\S]*?<\|\/ctx\|>/, "");
+    const text = data?.text || "", header = w.header || "";
+    const body = header && text.startsWith(header) ? text.slice(header.length) : text;
     // Wait for frame data before deciding; automatic headers are not content.
     if (data && !$("show-empty").checked && !body.trim()) return;
     const card = node(
@@ -2759,11 +2760,15 @@ $("migrate-tokenizer-button").onclick = action(async () => {
     $("tokenizer-migration-form").reset();
     for (const name of ["bos", "eos", "noop"])
       $("tokenizer-" + name).value = state.tokenizer.special[name];
-    $("tokenizer-context-tokens").textContent = "Special context tokens: " +
-      Object.entries(state.tokenizer.special)
-        .filter(([name]) => !["bos", "eos", "noop"].includes(name))
-        .map(([, spelling]) => spelling).join(", ") +
-      ". Dedicated tokenizer IDs are reported when available; otherwise these remain ordinary text.";
+    $("tokenizer-context-tokens").replaceChildren();
+    for (const [name, spelling] of Object.entries(state.tokenizer.special)) {
+      if (["bos", "eos", "noop"].includes(name)) continue;
+      const control = node("input");
+      control.id = "tokenizer-" + name;
+      control.value = spelling;
+      control.required = true;
+      $("tokenizer-context-tokens").append(field(name, control));
+    }
     $("tokenizer-migration-progress").max = Math.max(1, state.sample_count);
     $("tokenizer-migration-progress").value = 0;
     $("tokenizer-migration-count").textContent = `0 / ${state.sample_count} trajectories converted`;
@@ -2787,7 +2792,7 @@ $("tokenizer-migration-form").onsubmit = async (event) => {
   try {
     let status = await json("tokenizer/migrate", "POST", {
       tokenizer: $("tokenizer-config").value,
-      special: Object.fromEntries(["bos", "eos", "noop"].map(name => [name, $("tokenizer-" + name).value])),
+      special: Object.fromEntries(Object.keys(state.tokenizer.special).map(name => [name, $("tokenizer-" + name).value])),
       expected_revision: state.revision,
     });
     migrationStarting = false;

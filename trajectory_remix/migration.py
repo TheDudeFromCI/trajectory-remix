@@ -5,7 +5,7 @@ import json
 
 from tokenizers import Tokenizer
 
-from .compiler import Compiler
+from .compiler import Compiler, CONTEXT_TOKENS
 from .storage import StorageConflict, TokenizerMigrationError
 
 
@@ -31,8 +31,8 @@ class TokenizerMigration:
         if revision != self.store.info()[0]:
             raise StorageConflict("Dataset changed; reload before migrating the tokenizer")
         special = data.get("special", {})
-        if not isinstance(special, dict) or set(special) - {"bos", "eos", "noop"} or any(not isinstance(v, str) or not v for v in special.values()):
-            raise ValueError("special may contain only nonempty bos, eos and noop token spellings")
+        if not isinstance(special, dict) or set(special) - {"bos", "eos", "noop", *CONTEXT_TOKENS} or any(not isinstance(v, str) or not v for v in special.values()):
+            raise ValueError("special may contain only known special token names with nonempty spellings")
         raw = data.get("tokenizer")
         if not isinstance(raw, (str, dict)):
             raise ValueError("tokenizer must be tokenizer.json text or an object")
@@ -40,7 +40,9 @@ class TokenizerMigration:
             tokenizer = Tokenizer.from_str(raw if isinstance(raw, str) else json.dumps(raw, allow_nan=False))
         except Exception as error:
             raise ValueError(f"Invalid tokenizer configuration: {error}") from error
-        candidate = Compiler(tokenizer, **{**current.special, **special},
+        candidate = Compiler(tokenizer,
+                             **{**current.special, **{k: v for k, v in special.items() if k not in CONTEXT_TOKENS}},
+                             context_tokens={**current.context_tokens, **{k: v for k, v in special.items() if k in CONTEXT_TOKENS}},
                              max_window_slots=current.max_window_slots,
                              slot_policy=current.slot_policy, tools=current.tools)
         self.status = {"status": "running", "converted": 0, "total": len(self.store.samples)}

@@ -105,9 +105,10 @@ await click("file-menu-button");
 await click("migrate-tokenizer-button");
 assert.equal($("tokenizer-migration-dialog").open, true);
 assert.equal($("tokenizer-eos").value, "<|eos|>");
-for (const token of ["<tool>", "</tool>", "<tool_result>", "</tool_result>",
-  "<|msg|>", "<|/msg|>", "<|ctx|>", "<|/ctx|>"])
-  assert($("tokenizer-context-tokens").textContent.includes(token));
+for (const [name, spelling] of Object.entries({tool: "<tool>", "/tool": "</tool>",
+  tool_result: "<tool_result>", "/tool_result": "</tool_result>",
+  msg: "<|msg|>", "/msg": "<|/msg|>", ctx: "<|ctx|>", "/ctx": "<|/ctx|>"}))
+  assert.equal($("tokenizer-" + name).value, spelling);
 $("tokenizer-config").value = "invalid JSON";
 await $("tokenizer-migration-form").onsubmit({ preventDefault() {} });
 assert.equal($("tokenizer-migration-error").hidden, false);
@@ -116,6 +117,11 @@ assert.equal($("start-tokenizer-migration").disabled, false);
 const migrationConfig = JSON.parse(await fs.readFile(new URL("../examples/demo-tokenizer.json", import.meta.url), "utf8"));
 const migrationVocab = migrationConfig.model.vocab;
 [migrationVocab.a, migrationVocab.b] = [migrationVocab.b, migrationVocab.a];
+const customCtx = "<custom:ctx>";
+const customCtxId = Math.max(...Object.values(migrationVocab)) + 1;
+migrationVocab[customCtx] = customCtxId;
+migrationConfig.added_tokens.push({...migrationConfig.added_tokens[0], id: customCtxId, content: customCtx});
+$("tokenizer-ctx").value = customCtx;
 const tokenizerTransfer = new w.DataTransfer();
 tokenizerTransfer.items.add(new w.File([JSON.stringify(migrationConfig)], "new-tokenizer.json"));
 $("tokenizer-file").files = tokenizerTransfer.files;
@@ -135,6 +141,15 @@ assert.equal($("tokenizer-migration-error").hidden, true);
 assert.notEqual(lastPlan.tokenizer_sha256, beforeMigrationPlan.tokenizer_sha256);
 assert.deepEqual(JSON.parse($("sample-json").value), beforeMigrationSource);
 assert.equal($("workspace").inert, false);
+assert.equal(lastPlan.special_tokens.ctx, customCtxId);
+await click("dismiss-tokenizer-migration");
+await click("migrate-tokenizer-button");
+assert.equal($("tokenizer-ctx").value, customCtx);
+// Restore the canonical spelling for the remaining replay checks.
+$("tokenizer-ctx").value = "<|ctx|>";
+$("tokenizer-config").value = JSON.stringify(migrationConfig);
+await $("tokenizer-migration-form").onsubmit({ preventDefault() {} });
+assert.equal($("tokenizer-migration-error").hidden, true);
 await click("dismiss-tokenizer-migration");
 assert.equal($("tokenizer-migration-dialog").open, false);
 await click("preferences-button");

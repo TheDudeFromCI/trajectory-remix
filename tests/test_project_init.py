@@ -19,7 +19,7 @@ def test_init_embeds_tokenizer_and_special_tokens_for_future_launches(tmp_path, 
     store = DatasetStore(project)
     with store.connect() as db:
         embedded, special = db.execute("SELECT tokenizer,special_tokens FROM project").fetchone()
-        assert json.loads(special) == expected.special
+        assert json.loads(special) == expected.tokenizer_config
         assert Tokenizer.from_str(embedded).to_str() == expected.tokenizer.to_str()
     tokenizer_path.unlink()
 

@@ -56,7 +56,7 @@ class SandboxReplayCache:
         if eligible:
             try:
                 key = digest((id(tool.run), tool.file_hash, compiler.fingerprint,
-                              compiler.special, compiler.ids, context.__dict__, args, state))
+                              compiler.special_tokens, compiler.ids, context.__dict__, args, state))
             except (TypeError, ValueError):
                 pass  # Opaque/custom state requires normal tool execution.
         previous = self.previous[index] if index < len(self.previous) else None

@@ -79,7 +79,7 @@ def ratio(numerator, denominator):
 def cache_key(compiler):
     # Definition and compiler changes invalidate persisted values across restarts.
     return hashlib.sha256(json.dumps([
-        implementation_hash(), compiler.fingerprint, compiler.ids,
+        implementation_hash(), compiler.fingerprint, compiler.special_tokens, compiler.ids,
         compiler.max_window_slots, compiler.slot_policy, compiler.tools.fingerprint,
     ], sort_keys=True).encode()).hexdigest()
 

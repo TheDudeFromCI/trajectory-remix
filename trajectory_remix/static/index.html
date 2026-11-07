@@ -441,8 +441,8 @@
               <label>EOS<input id="tokenizer-eos" required /></label>
               <label>NOOP<input id="tokenizer-noop" required /></label>
             </div>
-            <p class="hint" id="tokenizer-context-tokens"></p>
-            <p class="hint">BOS, EOS and NOOP must already exist as dedicated tokens in the new configuration. Saved trajectory text and timing markers are preserved; incompatible trajectories must be repaired before retrying.</p>
+            <div class="migration-special-tokens" id="tokenizer-context-tokens"></div>
+            <p class="hint">BOS, EOS, NOOP and custom context spellings must exist as dedicated tokens in the new configuration. Default context spellings also support ordinary text tokens. Saved trajectory text and timing markers are preserved; incompatible trajectories must be repaired before retrying.</p>
           </fieldset>
           <progress id="tokenizer-migration-progress" max="1" value="0" aria-label="Trajectories converted"></progress>
           <p id="tokenizer-migration-count" role="status" aria-live="polite">0 / 0 trajectories converted</p>
