@@ -189,6 +189,7 @@ class Compiler:
         eos="<|eos|>",
         noop="<|noop|>",
         *,
+        context_tokens=None,
         max_window_slots=None,
         slot_policy="uuid-hash-v1",
         tools=None,
@@ -217,14 +218,25 @@ class Compiler:
                 )
         if len(set(self.ids.values())) != 3:
             raise ValueError("BOS, EOS and NOOP must have distinct IDs")
-        self.special_tokens = {**self.special, **CONTEXT_TOKENS}
+        if context_tokens is None:
+            context_tokens = {}
+        if not isinstance(context_tokens, dict) or context_tokens.keys() - CONTEXT_TOKENS.keys():
+            raise ValueError("Unknown context token names")
+        self.context_tokens = {**CONTEXT_TOKENS, **context_tokens}
+        if any(not isinstance(v, str) or not v for v in self.context_tokens.values()):
+            raise ValueError("Context token spellings must be nonempty strings")
+        self.special_tokens = {**self.special, **self.context_tokens}
+        if len(set(self.special_tokens.values())) != len(self.special_tokens):
+            raise ValueError("Special token spellings must be distinct")
         self.special_token_ids = dict(self.ids)
-        for name, spelling in CONTEXT_TOKENS.items():
+        for name, spelling in self.context_tokens.items():
             idx = tokenizer.token_to_id(spelling)
             if idx is not None and tokenizer.encode(
                 spelling, add_special_tokens=False
             ).ids == [idx]:
                 self.special_token_ids[name] = idx
+            elif spelling != CONTEXT_TOKENS[name]:
+                raise ValueError(f"Tokenizer must contain {spelling!r} as one dedicated token ({name})")
         self.fingerprint = hashlib.sha256(tokenizer.to_str().encode()).hexdigest()
         self._encodings = OrderedDict()
         self._encoding_tokens = 0
@@ -233,6 +245,16 @@ class Compiler:
         self._compile_lock = threading.RLock()
         self._sandbox_invocations = ()
         self.last_compile_reused_tool_ticks = 0
+
+    @property
+    def tokenizer_config(self):
+        return {**self.special, "context_tokens": self.context_tokens}
+
+    def render_context(self, text):
+        """Render canonical replay delimiters using this project's spellings."""
+        replacements = {v: self.context_tokens[k] for k, v in CONTEXT_TOKENS.items()}
+        return re.sub("|".join(re.escape(v) for v in replacements),
+                      lambda match: replacements[match[0]], text)
 
     def slots_for(self, sample):
         names = window_names(sample)
@@ -257,14 +279,15 @@ class Compiler:
             swaps[chosen] = swaps.get(index, index)
         return result
 
-    def window_header(self, slot, purpose):
+    def window_header(self, slot, purpose, *, canonical=False):
         """Frame literal metadata without letting it introduce header/control tokens."""
 
         def field(value):
             escaped = json.dumps(value, ensure_ascii=False)[1:-1]
             return tool_text(escaped, self.special.values()).replace("<", r"\u003c")
 
-        return f"<|ctx|>Window: {slot}\nPurpose: {field(purpose)}<|/ctx|>"
+        tokens = CONTEXT_TOKENS if canonical else self.context_tokens
+        return f"{tokens['ctx']}Window: {slot}\nPurpose: {field(purpose)}{tokens['/ctx']}"
 
     def encode(self, event, path, noop_weight, literal=False, window_slots=None):
         with self._compile_lock:
@@ -282,7 +305,7 @@ class Compiler:
         try:
             source = json.dumps(event, sort_keys=True)
             slots = window_slots if not literal and '{WINDOW' in source else None
-            key = json.dumps([source, noop_weight, literal, slots, self.special, self.ids], sort_keys=True)
+            key = json.dumps([source, noop_weight, literal, slots, self.special_tokens, self.ids], sort_keys=True)
         except (TypeError, ValueError):
             return self._encode(event, path, noop_weight, literal, window_slots)
         cached = self._encodings.get(key)
@@ -326,7 +349,7 @@ class Compiler:
                 mask == "auto" and event["op"] == "generate"
             )
             start = len(text)
-            raw, visible, i = seg["text"], "", 0
+            raw, visible, i = self.render_context(seg["text"]), "", 0
             if literal:
                 visible, i = raw, len(raw)
             while i < len(raw):
@@ -891,6 +914,7 @@ class Compiler:
                             self.window_header(
                                 window_slots[event["window"]],
                                 event.get("window-type", "document"),
+                                canonical=True,
                             )
                             if window_headers
                             else ""

@@ -1,5 +1,7 @@
 import asyncio
+import copy
 
+import pytest
 from tokenizers import Tokenizer
 
 from trajectory_remix.compiler import Compiler, chunks
@@ -66,3 +68,62 @@ async def test_context_metadata_refreshes_after_migration_and_reopen(studio):
     for name, spelling in CONTEXT_TOKENS.items():
         assert state["tokenizer"]["special"][name] == spelling
         assert state["tokenizer"]["special_ids"][name] == replacement.token_to_id(spelling)
+
+
+async def test_custom_context_migration_renders_protocol_and_survives_reopen(studio):
+    app, client = studio
+    store = app.state.dataset.store
+    sample = copy.deepcopy(store.samples[0])
+    sample["replay"]["0"].extend([
+        {"op": "open", "window": "chat"},
+        {"op": "append", "window": "a", "source": "user",
+         "content": "".join(CONTEXT_TOKENS.values())},
+    ])
+    sample["replay"]["1"] = [{"op": "tool-call", "window": "tool",
+        "tool": "time_now", "arguments": {}, "result-anchor": 7}]
+    sample["replay"]["{N_TICK:7}+1"] = [{"op": "tool-call", "window": "tool",
+        "tool": "chat", "arguments": {"content": "Hello"}}]
+    store.replace([sample], 0)
+    custom = {name: f"<custom:{name}>" for name in CONTEXT_TOKENS}
+    tokenizer = Tokenizer.from_str(app.state.compiler.tokenizer.to_str())
+    tokenizer.add_special_tokens(list(custom.values()))
+    response = await client.post("/api/tokenizer/migrate", json={
+        "tokenizer": tokenizer.to_str(), "special": custom,
+        "expected_revision": store.info()[0],
+    })
+    assert response.status_code == 202, response.text
+    await asyncio.wait_for(asyncio.shield(app.state.tokenizer_migration.task), 10)
+    assert app.state.tokenizer_migration.status["status"] == "completed"
+    assert store.samples[0] == sample
+    for compiler in (app.state.compiler, store.load_compiler()):
+        assert compiler.context_tokens == custom
+        plan = compiler.compile(sample)
+        frame = compiler.frame(plan, plan["max_tick"])["windows"]
+        assert frame["a"]["text"] == (
+            custom["ctx"] + "Window: " + str(plan["window_slots"]["a"])
+            + "\nPurpose: document" + custom["/ctx"] + "".join(custom.values())
+        )
+        for name in ("tool", "/tool", "tool_result", "/tool_result"):
+            assert custom[name] in frame["tool"]["text"]
+        assert custom["msg"] + "Kidra: Hello" + custom["/msg"] in frame["chat"]["text"]
+        for name in custom:
+            assert plan["special_tokens"][name] == tokenizer.token_to_id(custom[name])
+    # Omitting the special overrides on a subsequent migration retains them.
+    response = await client.post("/api/tokenizer/migrate", json={
+        "tokenizer": tokenizer.to_str(), "expected_revision": store.info()[0],
+    })
+    assert response.status_code == 202, response.text
+    await app.state.tokenizer_migration.task
+    assert store.load_compiler().context_tokens == custom
+
+
+@pytest.mark.parametrize("name", CONTEXT_TOKENS)
+@pytest.mark.parametrize("spelling", ["", "missing-token", "<|eos|>", 42])
+async def test_invalid_context_override_never_starts_migration(studio, name, spelling):
+    app, client = studio
+    response = await client.post("/api/tokenizer/migrate", json={
+        "tokenizer": app.state.compiler.tokenizer.to_str(),
+        "special": {name: spelling}, "expected_revision": 0,
+    })
+    assert response.status_code == 422, response.text
+    assert app.state.tokenizer_migration.task is None

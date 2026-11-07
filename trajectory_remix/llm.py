@@ -457,7 +457,7 @@ class SampleBuilder:
                 return None
             return json.dumps([self.sample, self.compiler.fingerprint,
                 self.compiler.tools.fingerprint, [id(t.run) for t in self.compiler.tools.tools.values()],
-                self.compiler.special, self.compiler.ids, self.compiler.max_window_slots,
+                self.compiler.special_tokens, self.compiler.ids, self.compiler.max_window_slots,
                 self.compiler.slot_policy], sort_keys=True, allow_nan=False)
         except (TypeError, ValueError, RecursionError):
             return None

@@ -115,7 +115,7 @@ class DatasetStore:
 
         path = Path(path)
         tokenizer = compiler.tokenizer.to_str()
-        special_tokens = encode(compiler.special)
+        special_tokens = encode(compiler.tokenizer_config)
         config = encode(public_config(default_config() if config is None else config))
         path.parent.mkdir(parents=True, exist_ok=True)
         # Reserve exclusively before SQLite opens the file. A failed init removes
@@ -236,7 +236,7 @@ class DatasetStore:
                             progress(converted, total)
                     with self.transaction(expected_revision) as db:
                         db.execute("UPDATE project SET tokenizer=?,special_tokens=?,sample_revision=revision+1,revision=revision+1",
-                                   (compiler.tokenizer.to_str(), encode(compiler.special)))
+                                   (compiler.tokenizer.to_str(), encode(compiler.tokenizer_config)))
                         db.execute("DELETE FROM tool_compilations")
                         db.executemany("INSERT INTO tool_compilations VALUES(?,?,?,?,?)", staged.execute("SELECT * FROM plans"))
                         return db.execute("SELECT revision FROM project").fetchone()[0]
