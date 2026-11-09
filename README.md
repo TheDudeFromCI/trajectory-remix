@@ -101,8 +101,30 @@ step still uses the existing proposal archive and rollback path.
 
 ```bash
 python -m trajectory_remix init --dataset custom.sqlite --tokenizer tokenizer.json \
-  --bos '<s>' --eos '</s>' --noop '<|noop|>'
+  --bos-token '<kidra_bos>' --eos-token '<kidra_eos>' --noop-token '<kidra_noop>' \
+  --tool-token '<kidra_tool>' --tool-end-token '</kidra_tool>'
 ```
+
+All eleven special-token spellings can be overridden during `init`. Omitted
+options keep the program's defaults; overrides are embedded in the dataset and
+used on subsequent startup and export. Each custom spelling must already encode
+as one dedicated token in the supplied tokenizer.
+
+| CLI option | Default spelling |
+| --- | --- |
+| `--bos-token` | `<\|bos\|>` |
+| `--eos-token` | `<\|eos\|>` |
+| `--noop-token` | `<\|noop\|>` |
+| `--tool-token` | `<tool>` |
+| `--tool-end-token` | `</tool>` |
+| `--tool-result-token` | `<tool_result>` |
+| `--tool-result-end-token` | `</tool_result>` |
+| `--msg-token` | `<\|msg\|>` |
+| `--msg-end-token` | `<\|/msg\|>` |
+| `--ctx-token` | `<\|ctx\|>` |
+| `--ctx-end-token` | `<\|/ctx\|>` |
+
+The existing `--bos`, `--eos`, and `--noop` options remain supported as aliases.
 
 The process owns the dataset session. Closing the browser does not stop an active
 generation job. Stop the job in the dashboard or terminate the server.
