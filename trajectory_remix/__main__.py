@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tokenizers import Tokenizer
 
-from .compiler import Compiler, chunks
+from .compiler import CONTEXT_TOKENS, Compiler, chunks
 from .storage import DatasetStore
 from .dataset import training_eligible
 
@@ -21,9 +21,19 @@ def main(argv=None):
     if initializing:
         parser.prog += " init"
         parser.add_argument("--tokenizer", type=Path, required=True, help="Hugging Face tokenizer.json to embed in the new project")
-        parser.add_argument("--bos", default="<|bos|>")
-        parser.add_argument("--eos", default="<|eos|>")
-        parser.add_argument("--noop", default="<|noop|>")
+        for name in ("bos", "eos", "noop"):
+            parser.add_argument(
+                f"--{name}-token", f"--{name}", dest=name,
+                help=f"{name.upper()} spelling; defaults to the compiler's built-in value",
+            )
+        for name, spelling in CONTEXT_TOKENS.items():
+            option = name.lstrip("/").replace("_", "-")
+            if name.startswith("/"):
+                option += "-end"
+            parser.add_argument(
+                f"--{option}-token", dest=name, metavar="TOKEN",
+                help=f"{name} context delimiter (default: {spelling!r})",
+            )
         parser.add_argument("--max-window-slots", type=int, help="Maximum distinct windows per trajectory; unlimited if omitted")
     parser.add_argument(
         "--dataset",
@@ -57,7 +67,12 @@ def main(argv=None):
                 tokenizer = Tokenizer.from_file(str(args.tokenizer))
             except Exception as error:
                 raise ValueError(f"Could not load tokenizer: {error}") from error
-            compiler = Compiler(tokenizer, args.bos, args.eos, args.noop, max_window_slots=args.max_window_slots)
+            controls = {name: getattr(args, name) for name in ("bos", "eos", "noop")
+                        if getattr(args, name) is not None}
+            context_tokens = {name: getattr(args, name) for name in CONTEXT_TOKENS
+                              if getattr(args, name) is not None}
+            compiler = Compiler(tokenizer, **controls, context_tokens=context_tokens,
+                                max_window_slots=args.max_window_slots)
             DatasetStore.initialize(args.dataset, compiler)
             print(f"Initialized {args.dataset} with tokenizer {compiler.fingerprint}")
             return
