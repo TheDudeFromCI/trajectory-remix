@@ -599,6 +599,10 @@ parallel windows, chunk reconstruction, API import/export, key redaction,
 sandbox capabilities/quotas, tool-grounded generation, validation feedback,
 cancellation and failure limits. `docs/EXPORT.md` describes the training adapter.
 
+For general codebase reviews, use the [maintenance sweep guide](docs/MAINTENANCE.md)
+for subsystem priorities, invariants, a review checklist, and validation/handoff
+instructions. Detailed test coverage is in [Verification](docs/TESTING.md).
+
 ## Source map
 
 | File | Responsibility |
