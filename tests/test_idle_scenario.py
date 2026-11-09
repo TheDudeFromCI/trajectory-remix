@@ -345,5 +345,9 @@ def test_adaptive_requests_reuse_visible_contracts_without_changing_existing_mod
     shown = [e for es in runner.builder.sample['replay'].values() for e in es if e['op'] == 'show_tools']
     assert len(shown) == expected
     plan = compiler.compile(runner.closed_draft())
+    listings = [int(tick) for tick, events in runner.builder.sample['replay'].items()
+                for event in events if event['op'] == 'show_tools']
+    assert all(any(tick < call['request_start'] for tick in listings)
+               for call in plan['tool_calls'])
     assert not plan['diagnostics']
     assert all(c['outcome']['ok'] for c in plan['tool_calls'])

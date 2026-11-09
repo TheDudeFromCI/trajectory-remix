@@ -1083,14 +1083,17 @@ class ScenarioRunner(ModelSession):
             existing = self.builder.compile_summary()['tool_calls']
             if sum(not call.get('invisible') for call in existing) + len(group) > self.config.get('max_tool_calls', 64):
                 raise ValueError('Trajectory exceeds the configured tool-call budget')
-            tick = str(self.builder.next_tick if start_tick is None else start_tick)
+            tick = str(max(1, self.builder.next_tick if start_tick is None else start_tick))
             start_tick = None
+            # Tool contracts are external context and must precede the request.
+            # Keep requests aligned with their concurrent reasoning streams.
+            listing_tick = str(int(tick) - 1)
             if not any(
                 event["op"] == "open" and event.get("window") == "tools"
                 for events in self.builder.sample["replay"].values()
                 for event in events
             ):
-                self.builder.sample["replay"].setdefault(tick, []).append(
+                self.builder.sample["replay"].setdefault(listing_tick, []).append(
                     {"op": "open", "window": "tools", "window-type": "tools"}
                 )
             names = {call["tool"] for call in group}
@@ -1105,7 +1108,7 @@ class ScenarioRunner(ModelSession):
                     for name in event['tools']
                 }
             if names:
-                self.builder.sample["replay"].setdefault(tick, []).append(
+                self.builder.sample["replay"].setdefault(listing_tick, []).append(
                     {"op": "show_tools", "window": "tools", "tools": sorted(names)}
                 )
             windows = []

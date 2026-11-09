@@ -33,7 +33,10 @@ let configDraft,
   autoCompileDelayMs = loadAutoCompileDelay(),
   showWindowHeaders = loadShowWindowHeaders(),
   pollBusy = false,
+  refreshPending = false,
   compileBusy = false,
+  compileTask = null,
+  sampleLoadVersion = 0,
   sampleRevision = null;
 const colors = [
   "#7be0c3",
@@ -193,94 +196,118 @@ function diagnostics(items = []) {
   }
 }
 async function refresh(initial = false) {
-  if (pollBusy) return;
+  if (pollBusy) {
+    refreshPending = true;
+    return;
+  }
   pollBusy = true;
   try {
-    const params = new URLSearchParams({
-      offset: String(sampleOffset),
-      limit: String(SAMPLE_PAGE_SIZE),
-      query: $("sample-search").value,
-    });
-    if (sample?.id) params.set("selected_id", sample.id);
-    let next;
-    try {
-      next = await json("state?" + params);
-    } catch (error) {
-      if (error.status !== 422) throw error;
-      $("search-error").textContent = error.message;
-      $("search-error").hidden = false;
-      $("sample-search").setAttribute("aria-invalid", "true");
-      $("sample-list").replaceChildren();
-      $("sample-page-label").textContent = "Invalid query";
-      $("sample-page-prev").disabled = true;
-      $("sample-page-next").disabled = true;
+    do {
+      refreshPending = false;
+      await refreshState(initial);
+      initial = false;
+    } while (refreshPending);
+  } finally {
+    pollBusy = false;
+    renderValidationState();
+  }
+}
+function listingIsCurrent(params) {
+  return params.get("query") === $("sample-search").value &&
+    Number(params.get("offset")) === sampleOffset;
+}
+async function refreshState(initial) {
+  const params = new URLSearchParams({
+    offset: String(sampleOffset),
+    limit: String(SAMPLE_PAGE_SIZE),
+    query: $("sample-search").value,
+  });
+  if (sample?.id) params.set("selected_id", sample.id);
+  let next;
+  try {
+    next = await json("state?" + params);
+  } catch (error) {
+    if (!listingIsCurrent(params)) {
+      refreshPending = true;
       return;
     }
-    const searchWasInvalid = !$("search-error").hidden;
-    $("search-error").hidden = true;
-    $("search-error").textContent = "";
-    $("sample-search").removeAttribute("aria-invalid");
-    if (next.total > 0 && sampleOffset >= next.total) {
-      sampleOffset =
-        Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE;
-    }
-    const changed =
-      !state ||
-      next.revision !== state.revision ||
-      next.offset !== state.offset ||
-      next.query !== state.query;
-    const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
-    state = next;
-    if (configDraft && syncConfigDraft() && $("settings-dialog").open) renderConfig();
-    renderDatasetTags();
-    renderTokenizerMigration(next.tokenizer_migration);
-    renderTrajectoryValidation(next.validation_status);
-    renderStatus();
-    if (changed || initial || searchWasInvalid) renderSamples();
-    if (initial && state.samples.length && !migrationBusy)
-      await selectSample(state.samples[0].index, true);
-    if (
-      !initial &&
-      sample &&
-      next.revision !== sampleRevision &&
-      !migrationBusy &&
-      !compileBusy &&
-      !hasPendingChanges()
-    ) {
-      const current =
-        state.samples.find((s) => s.id === sample.id) ||
-        (Number.isInteger(next.selected_index) && next.selected_index >= 0
-          ? { index: next.selected_index }
-          : null);
-      if (current) await selectSample(current.index, true);
-      else {
-        selected = -1;
-        sample = null;
-        plan = null;
-        renderReplay();
-      }
-    }
-    if (
-      selected >= (state.sample_count ?? state.samples.length) &&
-      !hasPendingChanges()
-    ) {
+    if (error.status !== 422) throw error;
+    $("search-error").textContent = error.message;
+    $("search-error").hidden = false;
+    $("sample-search").setAttribute("aria-invalid", "true");
+    $("sample-list").replaceChildren();
+    $("sample-page-label").textContent = "Invalid query";
+    $("sample-page-prev").disabled = true;
+    $("sample-page-next").disabled = true;
+    return;
+  }
+  if (!listingIsCurrent(params)) {
+    refreshPending = true;
+    return;
+  }
+  const searchWasInvalid = !$("search-error").hidden;
+  $("search-error").hidden = true;
+  $("search-error").textContent = "";
+  $("sample-search").removeAttribute("aria-invalid");
+  if (sampleOffset > 0 && sampleOffset >= next.total) {
+    sampleOffset = Math.max(0,
+      Math.floor((next.total - 1) / SAMPLE_PAGE_SIZE) * SAMPLE_PAGE_SIZE);
+    refreshPending = true;
+    return;
+  }
+  const changed =
+    !state ||
+    next.revision !== state.revision ||
+    next.offset !== state.offset ||
+    next.query !== state.query;
+  const followDraft = !state?.status.running || !sample || sample.id === lastGenerationDraft;
+  state = next;
+  if (configDraft && syncConfigDraft() && $("settings-dialog").open) renderConfig();
+  renderDatasetTags();
+  renderTokenizerMigration(next.tokenizer_migration);
+  renderTrajectoryValidation(next.validation_status);
+  renderStatus();
+  if (changed || initial || searchWasInvalid) renderSamples();
+  if (initial && state.samples.length && !migrationBusy)
+    await selectSample(state.samples[0].index, true);
+  if (
+    !initial &&
+    sample &&
+    next.revision !== sampleRevision &&
+    !migrationBusy &&
+    !compileBusy &&
+    !hasPendingChanges()
+  ) {
+    const current =
+      state.samples.find((s) => s.id === sample.id) ||
+      (Number.isInteger(next.selected_index) && next.selected_index >= 0
+        ? { index: next.selected_index }
+        : null);
+    if (current) await selectSample(current.index, true);
+    else {
       selected = -1;
       sample = null;
       plan = null;
       renderReplay();
     }
-    const draftJustArrived = next.status.draft_id && next.status.draft_id !== lastGenerationDraft;
-    if (draftJustArrived && !hasPendingChanges() && Number.isInteger(next.status.draft_index) && followDraft) {
-      lastGenerationDraft = next.status.draft_id;
-      await selectSample(next.status.draft_index, true);
-    } else if (!sample && state.samples.length && selected < 0 && !hasPendingChanges() && !migrationBusy)
-      await selectSample(state.samples[state.samples.length - 1].index, true);
-    if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
-    if (changed && !$("metrics-panel").hidden && !metricsCalculating) await loadMetrics();
-  } finally {
-    pollBusy = false;
-    renderValidationState();
   }
+  if (
+    selected >= (state.sample_count ?? state.samples.length) &&
+    !hasPendingChanges()
+  ) {
+    selected = -1;
+    sample = null;
+    plan = null;
+    renderReplay();
+  }
+  const draftJustArrived = next.status.draft_id && next.status.draft_id !== lastGenerationDraft;
+  if (draftJustArrived && !compileBusy && !hasPendingChanges() && Number.isInteger(next.status.draft_index) && followDraft) {
+    lastGenerationDraft = next.status.draft_id;
+    await selectSample(next.status.draft_index, true);
+  } else if (!sample && state.samples.length && selected < 0 && !compileBusy && !hasPendingChanges() && !migrationBusy)
+    await selectSample(state.samples[state.samples.length - 1].index, true);
+  if (draftJustArrived) lastGenerationDraft = next.status.draft_id;
+  if (changed && !$("metrics-panel").hidden && !metricsCalculating) await loadMetrics();
 }
 function activeSearchTag() {
   const input = $("sample-search");
@@ -608,17 +635,25 @@ function renderSamples() {
   );
 }
 async function selectSample(index, force = false) {
+  const version = ++sampleLoadVersion;
+  await compileTask;
+  if (version !== sampleLoadVersion) return;
   if (
     !force &&
     hasPendingChanges() &&
     !confirm("Discard unapplied sample edits?")
   )
     return;
+  pause();
+  const revision = editRevision;
+  const response = await api("samples/" + index);
+  const nextSample = await response.json();
+  await compileTask;
+  // A later selection or an edit made while loading takes precedence.
+  if (version !== sampleLoadVersion || revision !== editRevision) return;
   clearTimeout(compileTimer);
   compileTimer = null;
-  pause();
-  const response = await api("samples/" + index);
-  sample = await response.json();
+  sample = nextSample;
   // Rebuild from this source; a previous tokenizer's plan must not supply
   // window colors or other preview state while loading the event editor.
   plan = null;
@@ -650,7 +685,18 @@ function pause() {
   $("play").textContent = "Play";
 }
 async function compileSample(persist = true) {
-  if (compileBusy) return;
+  while (compileTask) {
+    await compileTask;
+    if (!persist || !hasPendingChanges()) return;
+  }
+  compileTask = performCompile(persist);
+  try {
+    await compileTask;
+  } finally {
+    compileTask = null;
+  }
+}
+async function performCompile(persist) {
   const revision = editRevision;
   clearTimeout(compileTimer);
   compileTimer = null;
@@ -669,20 +715,24 @@ async function compileSample(persist = true) {
     }
     // Strip legacy UI state from the source, including Source JSON edits.
     stripCollapseMetadata(sample);
+    // Event controls remain editable during requests; compile exactly what was saved.
+    const source = structuredClone(sample);
     // Persist an invalid draft too: it must remain editable and downloadable.
     if (persist) {
       const result = await json("samples/" + selected, "PUT", {
-        sample,
+        sample: source,
         expected_revision: sampleRevision,
       });
       sampleRevision = result.revision;
       if (revision === editRevision) setDirty(false);
       await refresh();
     }
-    $("sample-json").value = JSON.stringify(sample, null, 2);
+    if (revision === editRevision)
+      $("sample-json").value = JSON.stringify(source, null, 2);
     try {
-      const source = structuredClone(sample);
-      plan = await json("compile", "POST", { sample: source });
+      const compiled = await json("compile", "POST", { sample: source });
+      if (revision !== editRevision) return;
+      plan = compiled;
       previewSources.set(plan, source);
       currentFrame = null;
       frameCache.clear();
@@ -698,6 +748,7 @@ async function compileSample(persist = true) {
       setTick(Math.min(tick, plan.max_tick));
       await fetchFrame();
     } catch (e) {
+      if (revision !== editRevision) return;
       plan = null;
       previewMessage = null;
       renderReplay();
@@ -3199,14 +3250,6 @@ $("generate-walkthrough").onclick = busyAction("generate-walkthrough", async () 
   } finally {
     await refresh();
   }
-});
-$("close-export").onclick = () => $("export-dialog").close();
-$("download-export").onclick = busyAction("download-export", async () => {
-  if (hasPendingChanges()) await compileSample(true);
-  const body = { ticks_per_chunk: Number($("chunk-size").value) };
-  if ($("export-scope").value === "current") body.indices = [selected];
-  await download("export", "kidra-token-chunks.jsonl", "POST", body);
-  $("export-dialog").close();
 });
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {

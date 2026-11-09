@@ -1,5 +1,27 @@
 # Verification
 
+## Run the checks
+
+From the repository root, use Python 3.11+ and Node 22+ for the optional DOM
+checks:
+
+```bash
+python -m pip install -e '.[mcp,test]'
+python -m pytest -q
+npm ci --prefix tests
+python tests/run_frontend.py
+python tests/run_frontend.py editor-state.test.mjs
+```
+
+The frontend runner starts a temporary backend on an available loopback port;
+these checks require local socket access. The focused editor suite controls
+response ordering to cover overlapping saves, typing during a save or sample
+load, rapid sample selection, stale search responses, and pagination after
+deletion. Both suites use an emulated DOM; visual layout still needs a real
+browser check.
+
+## Coverage notes
+
 - Dataset metric regressions cover compiler token/control accounting, actual
   concurrent generation versus open windows, streaming versus instant input,
   canonical same-tick/replacement/closure visibility, tool invocation and latency
