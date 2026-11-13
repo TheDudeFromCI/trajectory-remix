@@ -571,38 +571,6 @@
       <p id="guidelines-provenance" class="hint"></p>
       <article id="guidelines-content" class="markdown-guide" role="tabpanel" tabindex="0"></article>
     </dialog>
-    <dialog id="export-dialog">
-      <p class="hint">Token exports include only Validation 3 trajectories. Approve generated samples after human review.</p>
-      <div class="dialog-header">
-        <h2>Export training streams</h2>
-        <button id="close-export" class="square">×</button>
-      </div>
-      <div class="export-body">
-        <p>
-          Chunks keep all parallel windows for each tick together. Every record
-          includes tokenizer IDs, loss masks, weights, lifecycle metadata and
-          causal visibility rules.
-        </p>
-        <label
-          >Samples
-          <select id="export-scope">
-            <option value="all">Entire dataset</option>
-            <option value="current">Current sample</option>
-          </select></label
-        ><label
-          >Ticks per chunk
-          <input id="chunk-size" type="number" min="1" max="100000" value="64"
-        /></label>
-        <div class="hint">
-          Chunks reference earlier context. Keep the prefix computation graph
-          attached for packed full-gradient training. Do not concatenate windows
-          into a standard single-stream causal sequence.
-        </div>
-        <button id="download-export" class="primary">
-          Download chunked JSONL
-        </button>
-      </div>
-    </dialog>
     <dialog
       id="expanded-window-dialog"
       class="expanded-window-dialog"

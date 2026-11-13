@@ -259,8 +259,10 @@ populations, compatible caching, metadata fields and measurements requiring logs
    compilation fails, so errors can be repaired without losing the work.
 6. Browser drafts are committed to SQLite automatically after the compile delay;
   applied edits and accepted generated trajectories are durable immediately.
-7. **Export tokens** exports the selected sample or whole dataset as chunked
-   token JSONL. Every selected sample must compile before export begins.
+7. **File → Export → Current Trajectory** downloads the selected source as JSON,
+   including unfinished drafts. For training token JSONL, use the headless export
+   command below. Only trajectories marked **Ready** are included, and every
+   included trajectory must compile before the export replaces its output file.
 
 The **Trajectory metadata** section at the bottom of the dataset sidebar edits
 the selected trajectory's `metadata`. Set **Agent name** (`agent_name`) or
@@ -606,8 +608,9 @@ python -m pytest -q
 Optional frontend DOM integration checks (Node 22+):
 
 ```bash
-npm install --prefix tests
+npm ci --prefix tests
 python tests/run_frontend.py
+python tests/run_frontend.py editor-state.test.mjs
 ```
 
 These exercise the actual dashboard JavaScript against a temporary local backend
@@ -617,6 +620,10 @@ The tests cover timeline causality, tokenizer alignment, masks, lifecycle,
 parallel windows, chunk reconstruction, API import/export, key redaction,
 sandbox capabilities/quotas, tool-grounded generation, validation feedback,
 cancellation and failure limits. `docs/EXPORT.md` describes the training adapter.
+
+For general codebase reviews, use the [maintenance sweep guide](docs/MAINTENANCE.md)
+for subsystem priorities, invariants, a review checklist, and validation/handoff
+instructions. Detailed test coverage is in [Verification](docs/TESTING.md).
 
 ## Source map
 

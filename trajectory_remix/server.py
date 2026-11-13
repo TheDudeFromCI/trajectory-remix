@@ -199,6 +199,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
             )
 
     def sample_at(index):
+        if type(index) is not int:
+            raise ValueError("index must be an integer")
         if not 0 <= index < len(state["samples"]):
             raise HTTPException(404, "Sample not found")
         return state["samples"][index]
@@ -364,7 +366,7 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     async def create_sample(request: Request):
         editable()
         data = await body(request)
-        sample = data.get("sample") or new_sample(state["config"].get("default_split", "train"))
+        sample = data["sample"] if "sample" in data else new_sample(state["config"].get("default_split", "train"))
         if "sample" not in data:
             for group in sample["replay"].values():
                 for event in group:
@@ -804,10 +806,10 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
     @app.post("/api/validate")
     async def validate(request: Request):
         data = await body(request)
-        if 'index' in data and type(data['index']) is not int:
-            raise ValueError('index must be an integer')
-        sample = data.get("sample") or sample_at(data.get("index", -1))
-        if data.get('sample') and commands._find(sample.get('id'))[1] != sample:
+        sample = data["sample"] if "sample" in data else sample_at(data.get("index", -1))
+        if not isinstance(sample, dict):
+            raise ValueError("sample must be an object")
+        if 'sample' in data and commands._find(sample.get('id'))[1] != sample:
             raise ValueError('Save the submitted trajectory before validation')
         editable(sample.get("id"))
         return await validator.validate(sample['id'], record=data.get('record', True), endpoint=data.get('endpoint'), auto_repair=data.get('auto_repair', False))

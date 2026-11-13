@@ -54,6 +54,34 @@ async def test_bad_marker_diagnostic(client):
     assert "Invalid marker" in r.json()["diagnostics"][0]["message"]
 
 
+@pytest.mark.parametrize("sample", [None, False, 0, "", [], "trajectory"])
+async def test_create_rejects_explicit_non_object_samples_without_inserting_demo(client, sample):
+    before = (await client.get("/api/state")).json()
+    response = await client.post("/api/samples", json={"sample": sample})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "sample must be an object"
+    after = (await client.get("/api/state")).json()
+    assert after["revision"] == before["revision"]
+    assert after["sample_count"] == 0
+
+
+@pytest.mark.parametrize("index", [None, False, True, 0.0, "0", [], {}])
+@pytest.mark.parametrize("route", ["compile", "validate"])
+async def test_sample_lookup_rejects_non_integer_indices(client, route, index):
+    await client.post("/api/samples", json={})
+    response = await client.post(f"/api/{route}", json={"index": index})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "index must be an integer"
+
+
+@pytest.mark.parametrize("sample", [None, False, 0, "", [], "trajectory"])
+async def test_validate_rejects_non_object_samples(client, sample):
+    await client.post("/api/samples", json={})
+    response = await client.post("/api/validate", json={"sample": sample, "index": 0})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "sample must be an object"
+
+
 @pytest.mark.parametrize("split", ["train", "development", "test"])
 async def test_default_split_preferences_apply_to_new_trajectories(client, tmp_path, split):
     response = await client.post("/api/preferences", json={"default_split": split})

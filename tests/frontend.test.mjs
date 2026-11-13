@@ -1722,6 +1722,7 @@ await click("pause-run");
 assert.equal(switchedCreationRequests.at(-1).batch_size, 1);
 bulkResumeStarted = true; bulkResumePhase = "paused";
 await click("status-button");
+await waitFor(() => $("run-status").textContent === "Paused", 5000);
 await waitFor(() => $("generation-switch-task").hidden === false, 5000);
 await click("generate-batch");
 assert.equal(suspendedTasks, 2);
@@ -1735,6 +1736,7 @@ bulkResumePhase = "paused";
 const creationPauseReads = completedStateReads;
 await click("status-button");
 await waitFor(() => completedStateReads > creationPauseReads, 5000);
+await waitFor(() => $("run-status").textContent === "Paused", 5000);
 await waitFor(() => $("generation-action-title").textContent === "Create trajectories", 5000);
 await click("resume-all-generations"); // Leave a paused creation batch for existing unfinished drafts.
 assert.equal(suspendedTasks, 3);
