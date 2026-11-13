@@ -603,6 +603,8 @@ The proposed `.ktremix` binary training format is documented in the
 [Python multi-shard reader and sampler](examples/ktremix_dataset.py).
 This is a draft format/reference implementation; the current exporter below
 continues to write its existing JSONL format.
+The [50k-parameter training demo](docs/KTREMIX-TRAINING-DEMO.md) exercises raw
+source generation, compilation, compressed sampling and model training together.
 
 ```bash
 python -m trajectory_remix --dataset samples.sqlite --export token-chunks.jsonl --chunk-ticks 64

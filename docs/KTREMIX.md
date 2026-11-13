@@ -119,7 +119,7 @@ Example; UUID/hash values below are placeholders:
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "special_token_ids": {"bos": 1, "eos": 2, "noop": 3}
   },
-  "export": {"split": "train", "minimum_stage": "Ready", "metadata_trimmed": true}
+  "export": {"split": "train", "minimum_stage": "Ready", "include_stale": true, "metadata_trimmed": true}
 }
 ```
 
@@ -396,6 +396,16 @@ is not a reliable substitute for an explicit split/release manifest. The `verify
 command checks index CRC, requested record CRCs, core array invariants, metadata
 JSON and duplicate trajectory UUIDs across shards. Startup does not globally scan
 every sample UUID or parse every optional metadata block.
+
+The planned Export menu includes an **Include stale trajectories** option,
+enabled by default. This is separate from the minimum-stage filter: stale
+signoffs do not change a trajectory's stage or trigger a new review. Record the
+selection in the optional export manifest. This draft does not wire the new
+options into the production exporter.
+
+For a runnable two-layer, approximately 50k-parameter model that generates raw
+sources, compiles, samples and trains against these shards, see the
+[training demo](KTREMIX-TRAINING-DEMO.md).
 
 ## 8. Metadata, validation and extension
 

@@ -1,0 +1,65 @@
+{
+  "description": "One actual CPU run; warm local page cache; not a performance guarantee.",
+  "command": "python examples/train_ktremix.py run /tmp/ktremix-addition --check --rollout-count 256",
+  "environment": {
+    "python": "3.12.14",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "torch": "2.15.0+cpu",
+    "threads": 1,
+    "device": "cpu"
+  },
+  "configuration": {
+    "parameters": 49968,
+    "layers": 2,
+    "vocabulary": 39,
+    "non_special_tokens": 36,
+    "steps": 3000,
+    "batch_size": 16,
+    "seed": 17,
+    "learning_rate": 0.002
+  },
+  "build": {
+    "generation_seconds": 0.10453417299868306,
+    "compilation_seconds": 1.911186010154779,
+    "write_seconds": 0.735797030829417,
+    "trajectories": 2304,
+    "rows": 160489,
+    "targets": 105193,
+    "compressed_bytes": 4673984,
+    "raw_source_bytes": 7607327
+  },
+  "initial_validation": {
+    "loss": 3.638762106621694,
+    "token_accuracy": 0.00720844417746503,
+    "exact_trajectory_accuracy": 0.0,
+    "letters_accuracy": 0.032421875,
+    "noop_accuracy": 0.0,
+    "eos_accuracy": 0.00390625
+  },
+  "final_validation": {
+    "loss": 0.005104611036989502,
+    "token_accuracy": 0.9997425555650905,
+    "exact_trajectory_accuracy": 0.9921875,
+    "letters_accuracy": 0.99921875,
+    "noop_accuracy": 0.9998868394251442,
+    "eos_accuracy": 1.0
+  },
+  "rollout": {
+    "trajectories": 256,
+    "exact_timing_and_closure_accuracy": 0.9921875,
+    "letters_at_correct_tick_accuracy": 0.99921875,
+    "premature_letters": 1,
+    "malformed_trajectories": 0
+  },
+  "timing": {
+    "sample_seconds": 0.7962309751965222,
+    "collate_and_transfer_seconds": 1.6578500191608327,
+    "forward_backward_optimizer_seconds": 25.389576057743398,
+    "evaluation_seconds": 2.482906176992401
+  },
+  "full_command_wall_seconds": 34.04855346499971,
+  "training_trajectories_per_second": 1723.911478660397,
+  "training_rows_per_second": 120130.5918163374,
+  "supervised_targets_per_second": 78756.71632848788,
+  "train_wall_seconds_including_periodic_validation": 28.342500093996932
+}
