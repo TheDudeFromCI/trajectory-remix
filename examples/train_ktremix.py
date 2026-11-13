@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 from pathlib import Path
 import random
-import platform
 import time
 
 import numpy as np
@@ -39,23 +39,34 @@ class GlobalSharedKV(nn.Module):
         self.v = nn.Linear(48, 12, bias=False)
         self.out = nn.Linear(48, 48, bias=False)
         self.ff_norm = nn.LayerNorm(48)
-        self.ff = nn.Sequential(nn.Linear(48, 184, bias=False), nn.GELU(), nn.Linear(184, 48, bias=False))
+        self.ff = nn.Sequential(
+            nn.Linear(48, 184, bias=False),
+            nn.GELU(),
+            nn.Linear(184, 48, bias=False),
+        )
 
     def attend(self, values, key, value, allowed):
-        b, n, _ = values.shape
-        query = self.q(self.norm(values)).view(b, n, 4, 12).transpose(1, 2)
-        attended = F.scaled_dot_product_attention(query, key.expand(-1, 4, -1, -1),
-                                                value.expand(-1, 4, -1, -1),
-                                                attn_mask=allowed[:, None], dropout_p=0.)
-        values = values + self.out(attended.transpose(1, 2).reshape(b, n, 48))
+        batch_size, sequence_length, _ = values.shape
+        query = self.q(self.norm(values))
+        query = query.view(batch_size, sequence_length, 4, 12).transpose(1, 2)
+        attended = F.scaled_dot_product_attention(
+            query,
+            key.expand(-1, 4, -1, -1),
+            value.expand(-1, 4, -1, -1),
+            attn_mask=allowed[:, None],
+            dropout_p=0.0,
+        )
+        values = values + self.out(
+            attended.transpose(1, 2).reshape(batch_size, sequence_length, 48)
+        )
         return values + self.ff(self.ff_norm(values))
 
     def forward(self, memory, queries, memory_allowed, query_allowed):
         normed = self.norm(memory)
         key = self.k(normed)[:, None]
         value = self.v(normed)[:, None]
-        # Both updates read the PRE-layer bank. Updating memory first and then
-        # reading it here would silently change the architecture's depth.
+        # Both paths read the same pre-layer bank: queries cannot see memory
+        # updates from this layer, which keeps the layer's depth well-defined.
         return (self.attend(memory, key, value, memory_allowed),
                 self.attend(queries, key, value, query_allowed))
 
@@ -79,10 +90,16 @@ class TinyKidra(nn.Module):
         return self.tokens(tokens) + self.windows(windows) + self.positions(positions)
 
     def forward(self, batch):
-        memory = self.embed(batch["memory_tokens"], batch["memory_windows"], batch["memory_positions"])
-        queries = self.embed(batch["query_previous"], batch["query_windows"], batch["query_positions"])
+        memory = self.embed(
+            batch["memory_tokens"], batch["memory_windows"], batch["memory_positions"]
+        )
+        queries = self.embed(
+            batch["query_previous"], batch["query_windows"], batch["query_positions"]
+        )
         for layer in self.layers:
-            memory, queries = layer(memory, queries, batch["memory_allowed"], batch["query_allowed"])
+            memory, queries = layer(
+                memory, queries, batch["memory_allowed"], batch["query_allowed"]
+            )
         return F.linear(self.norm(queries), self.tokens.weight)  # tied output head
 
 
@@ -95,39 +112,68 @@ def collate(samples, device="cpu", *, inference_queries=None):
     """
     items = []
     for sample_index, sample in enumerate(samples):
-        a = sample.numpy() if hasattr(sample, "numpy") else {n: np.asarray(v) for n, v in sample.items()}
-        memory = np.flatnonzero((a["row_flags"] & k.DURABLE) != 0)
-        targets = a["target_rows"].astype(np.int64)
+        arrays = (
+            sample.numpy()
+            if hasattr(sample, "numpy")
+            else {name: np.asarray(value) for name, value in sample.items()}
+        )
+        memory_rows = np.flatnonzero((arrays["row_flags"] & k.DURABLE) != 0)
+        targets = arrays["target_rows"].astype(np.int64)
         if inference_queries is None:
-            previous = a["previous_rows"][targets].astype(np.int64)
-            query_previous = a["token_ids"][previous]
-            query_windows = a["window_slots"][a["window_ids"][targets].astype(np.int64)]
-            query_positions = a["position_ids"][targets]
-            frontiers = a["query_frontiers"][targets]
-            labels, weights = a["token_ids"][targets], a["loss_weights"][targets]
+            previous_rows = arrays["previous_rows"][targets].astype(np.int64)
+            query_previous = arrays["token_ids"][previous_rows]
+            target_windows = arrays["window_ids"][targets].astype(np.int64)
+            query_windows = arrays["window_slots"][target_windows]
+            query_positions = arrays["position_ids"][targets]
+            frontiers = arrays["query_frontiers"][targets]
+            labels = arrays["token_ids"][targets]
+            weights = arrays["loss_weights"][targets]
         else:
             live = inference_queries[sample_index]
-            query_previous, query_windows, query_positions, frontiers = map(np.asarray, zip(*live))
-            labels, weights = np.zeros(len(live), dtype=np.int64), np.ones(len(live))
-        start, end = a["visible_from"][memory], a["visible_until"][memory]
-        construction = a["query_frontiers"][memory]
-        items.append({"memory_tokens": a["token_ids"][memory],
-                      "memory_windows": a["window_slots"][a["window_ids"][memory].astype(np.int64)],
-                      "memory_positions": a["position_ids"][memory],
-                      "query_previous": query_previous, "query_windows": query_windows,
-                      "query_positions": query_positions, "labels": labels, "weights": weights,
-                      "memory_allowed": (start[None] <= construction[:, None]) & (construction[:, None] < end[None]),
-                      "query_allowed": (start[None] <= frontiers[:, None]) & (frontiers[:, None] < end[None])})
-    m = max(len(x["memory_tokens"]) for x in items)
-    q = max(len(x["labels"]) for x in items)
+            query_previous, query_windows, query_positions, frontiers = (
+                np.asarray(values) for values in zip(*live)
+            )
+            labels = np.zeros(len(live), dtype=np.int64)
+            weights = np.ones(len(live))
+
+        visible_from = arrays["visible_from"][memory_rows]
+        visible_until = arrays["visible_until"][memory_rows]
+        construction_frontiers = arrays["query_frontiers"][memory_rows]
+        memory_windows = arrays["window_ids"][memory_rows].astype(np.int64)
+        items.append(
+            {
+                "memory_tokens": arrays["token_ids"][memory_rows],
+                "memory_windows": arrays["window_slots"][memory_windows],
+                "memory_positions": arrays["position_ids"][memory_rows],
+                "query_previous": query_previous,
+                "query_windows": query_windows,
+                "query_positions": query_positions,
+                "labels": labels,
+                "weights": weights,
+                # Each memory row is visible only during its explicit lifetime,
+                # both when it was constructed and when a prediction is made.
+                "memory_allowed": (
+                    (visible_from[None] <= construction_frontiers[:, None])
+                    & (construction_frontiers[:, None] < visible_until[None])
+                ),
+                "query_allowed": (
+                    (visible_from[None] <= frontiers[:, None])
+                    & (frontiers[:, None] < visible_until[None])
+                ),
+            }
+        )
+
+    max_memory_rows = max(len(item["memory_tokens"]) for item in items)
+    max_queries = max(len(item["labels"]) for item in items)
     batch = {}
     for name in items[0]:
         if name == "memory_allowed":
-            shape, dtype = (len(items), m, m), np.bool_
+            shape, dtype = (len(items), max_memory_rows, max_memory_rows), np.bool_
         elif name == "query_allowed":
-            shape, dtype = (len(items), q, m), np.bool_
+            shape, dtype = (len(items), max_queries, max_memory_rows), np.bool_
         else:
-            shape = (len(items), m if name.startswith("memory_") else q)
+            length = max_memory_rows if name.startswith("memory_") else max_queries
+            shape = (len(items), length)
             dtype = np.float32 if name == "weights" else np.int64
         out = np.zeros(shape, dtype=dtype)
         for i, item in enumerate(items):
@@ -136,12 +182,17 @@ def collate(samples, device="cpu", *, inference_queries=None):
                 out[i, :value.shape[0], :value.shape[1]] = value
             else:
                 out[i, :len(value)] = value
+        # Padding is zero-filled. The attention masks exclude padded memory rows.
         batch[name] = torch.from_numpy(out).to(device)
     return batch
 
 
 def objective(logits, batch):
-    losses = F.cross_entropy(logits.reshape(-1, 39), batch["labels"].reshape(-1), reduction="none")
+    losses = F.cross_entropy(
+        logits.reshape(-1, 39),
+        batch["labels"].reshape(-1),
+        reduction="none",
+    )
     weights = batch["weights"].reshape(-1)
     return (losses * weights).sum() / weights.sum()
 
@@ -185,7 +236,9 @@ def rollout(model, sources, device):
         for tick, events in source["replay"].items():
             for event in events:
                 if event["op"] == "append":
-                    external.setdefault(int(tick), []).append(({"letters": 0, "digits": 1}[event["window"]], VOCAB[event["content"]]))
+                    window = {"letters": 0, "digits": 1}[event["window"]]
+                    token = VOCAB[event["content"]]
+                    external.setdefault(int(tick), []).append((window, token))
                 elif event["op"] == "generate":
                     expected[int(tick)] = VOCAB[event["content"]]
         runtime = Execution()
@@ -201,13 +254,15 @@ def rollout(model, sources, device):
             queries = []
             for window in live_windows:
                 previous = runtime.latest[window]
-                queries.append((runtime.a["token_ids"][previous], window,
-                                runtime.a["position_ids"][previous] + 1, runtime.frontier))
+                previous_token = runtime.a["token_ids"][previous]
+                next_position = runtime.a["position_ids"][previous] + 1
+                queries.append((previous_token, window, next_position, runtime.frontier))
             if any(q[2] >= 12 for q in queries):
                 malformed = True
                 break
             logits = model(collate([runtime.a], device, inference_queries=[queries]))
-            predictions = dict(zip(live_windows, logits[0, :len(queries)].argmax(-1).tolist()))
+            predicted_tokens = logits[0, :len(queries)].argmax(-1).tolist()
+            predictions = dict(zip(live_windows, predicted_tokens))
             token = predictions.get(2, NOOP)
             # The reserve is a genuine trained prediction, not forced to NOOP.
             if predictions.get(3, NOOP) != NOOP or token == BOS or 26 <= token < 36:
@@ -295,7 +350,12 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
         free_running = rollout(model, [json.loads(line) for line in source_lines], device)
         synchronize(device)
         timing["evaluation_seconds"] += time.perf_counter() - before
-    active_seconds = sum(timing[n] for n in ("sample_seconds", "collate_and_transfer_seconds", "forward_backward_optimizer_seconds"))
+    active_phases = (
+        "sample_seconds",
+        "collate_and_transfer_seconds",
+        "forward_backward_optimizer_seconds",
+    )
+    active_seconds = sum(timing[name] for name in active_phases)
     # Saving a state_dict is for the demo's locally produced checkpoint only.
     torch.save(model.state_dict(), directory / "model.pt")
     report = {"parameters": count, "layers": 2, "vocabulary": 39, "non_special_tokens": 36,
@@ -329,7 +389,11 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=.002)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threads", type=int, default=1)
-    parser.add_argument("--check", action="store_true", help="fail unless held-out letters >=99%% and exact free rollouts >=95%%")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="fail unless held-out letters >=99%% and exact free rollouts >=95%%",
+    )
     args = parser.parse_args()
     for name in ("train_samples", "validation_samples", "shard_size", "max_gap", "steps", "batch_size",
                  "eval_every", "rollout_count", "threads"):
@@ -342,16 +406,34 @@ def main():
     torch.set_num_threads(args.threads)
     started = time.perf_counter()
     if args.command in ("run", "generate"):
-        report = build_dataset(args.directory, train_samples=args.train_samples,
-                               validation_samples=args.validation_samples, shard_size=args.shard_size,
-                               seed=args.seed, max_gap=args.max_gap)
+        report = build_dataset(
+            args.directory,
+            train_samples=args.train_samples,
+            validation_samples=args.validation_samples,
+            shard_size=args.shard_size,
+            seed=args.seed,
+            max_gap=args.max_gap,
+        )
         print(json.dumps({"build": report}), flush=True)
     if args.command in ("run", "train"):
-        report = train(args.directory, steps=args.steps, batch_size=args.batch_size, seed=args.seed,
-              device=args.device, eval_every=args.eval_every, learning_rate=args.learning_rate,
-              rollout_count=args.rollout_count)
-    (args.directory / "last-command.json").write_text(json.dumps({"command": args.command,
-        "wall_seconds": time.perf_counter() - started, "options": vars(args)}, default=str, indent=2) + "\n")
+        report = train(
+            args.directory,
+            steps=args.steps,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            device=args.device,
+            eval_every=args.eval_every,
+            learning_rate=args.learning_rate,
+            rollout_count=args.rollout_count,
+        )
+    command_report = {
+        "command": args.command,
+        "wall_seconds": time.perf_counter() - started,
+        "options": vars(args),
+    }
+    (args.directory / "last-command.json").write_text(
+        json.dumps(command_report, default=str, indent=2) + "\n"
+    )
     if args.check:
         if (report["history"][-1]["validation"]["letters_accuracy"] < .99 or
                 report["rollout"]["exact_timing_and_closure_accuracy"] < .95):

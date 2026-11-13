@@ -88,6 +88,7 @@ def _json(data, what):
     try:
         def invalid(value):
             raise ValueError(f"nonfinite JSON: {value}")
+
         def pairs(values):
             result = {}
             for key, value in values:
@@ -95,8 +96,12 @@ def _json(data, what):
                     raise ValueError(f"duplicate key: {key}")
                 result[key] = value
             return result
-        result = json.loads(bytes(data).decode("utf-8"), parse_constant=invalid,
-                            object_pairs_hook=pairs)
+
+        result = json.loads(
+            bytes(data).decode("utf-8"),
+            parse_constant=invalid,
+            object_pairs_hook=pairs,
+        )
     except (ValueError, UnicodeError) as error:
         raise FormatError(f"Invalid {what} JSON") from error
     if not isinstance(result, dict):
@@ -136,9 +141,18 @@ def _compatibility(manifest):
             if type(value) is not int or not 0 <= value <= NONE:
                 raise ValueError("control token ID")
         # Fingerprint actual tokenizer identity, all control IDs and model contract.
-        return canonical({"array_schema": manifest["array_schema"],
-                          "execution_contract": execution,
-                          "tokenizer": {"sha256": digest, "special_token_ids": controls}})
+        # A dataset may combine shards only when tokenization and training
+        # semantics agree, even if their dataset IDs differ.
+        return canonical(
+            {
+                "array_schema": manifest["array_schema"],
+                "execution_contract": execution,
+                "tokenizer": {
+                    "sha256": digest,
+                    "special_token_ids": controls,
+                },
+            }
+        )
     except (KeyError, TypeError, ValueError) as error:
         raise FormatError(f"Invalid manifest: {error}") from error
 
@@ -150,7 +164,10 @@ class Sample:
         self._data = memoryview(payload)
         self.uuid, _, _, raw_size, rows, frames, windows, _, _, _, _, targets, _ = entry
         self.uuid = str(uuid.UUID(bytes=self.uuid))
-        self.rows, self.frames, self.windows, self.targets = rows, frames, windows, targets
+        self.rows = rows
+        self.frames = frames
+        self.windows = windows
+        self.targets = targets
         if len(self._data) != raw_size or raw_size < RECORD.size:
             raise FormatError("Record size mismatch")
         fields = RECORD.unpack_from(self._data)
@@ -167,7 +184,10 @@ class Sample:
         counts = {"R": rows, "F+1": frames + 1, "W": windows, "Q": targets}
         self._columns, seen, extents = {}, set(), []
         for i in range(count):
-            cid, dtype, flags, offset, length, byte_size, reserved = COLUMN.unpack_from(self._data, 64 + i * 32)
+            directory_offset = 64 + i * 32
+            cid, dtype, flags, offset, length, byte_size, reserved = COLUMN.unpack_from(
+                self._data, directory_offset
+            )
             if cid in seen or reserved or flags & ~1:
                 raise FormatError("Duplicate column or unsupported directory flags")
             seen.add(cid)
@@ -212,10 +232,15 @@ class Sample:
     def numpy(self):
         """Read-only NumPy views; no per-token Python objects or extra data copies."""
         import numpy as np
+
         result = {}
         for name, (dtype, offset, size) in self._columns.items():
-            value = np.frombuffer(self._data, dtype=DTYPES[dtype][2],
-                                  count=size // DTYPES[dtype][1], offset=offset)
+            value = np.frombuffer(
+                self._data,
+                dtype=DTYPES[dtype][2],
+                count=size // DTYPES[dtype][1],
+                offset=offset,
+            )
             value.flags.writeable = False
             result[name] = value
         return result
@@ -311,7 +336,9 @@ class Shard:
                 raise FormatError("Truncated file or unexpected trailing bytes")
             if not 0 < manifest_size <= 1 << 20 or manifest_offset != 128:
                 raise FormatError("Invalid/oversized manifest")
-            if index_offset != align(128 + manifest_size) or data_offset != align(index_offset + count * 64):
+            expected_index_offset = align(128 + manifest_size)
+            expected_data_offset = align(index_offset + count * 64)
+            if index_offset != expected_index_offset or data_offset != expected_data_offset:
                 raise FormatError("Invalid manifest/index layout")
             if data_offset > file_size:
                 raise FormatError("Index exceeds file bounds")
@@ -321,8 +348,16 @@ class Shard:
         self.manifest = _json(encoded, "manifest")
         self.compatibility = _compatibility(self.manifest)
         self.dataset_id, self.shard_id = str(uuid.UUID(bytes=dataset)), str(uuid.UUID(bytes=shard))
-        if type(self.manifest.get("sample_count")) is not int or (self.manifest.get("dataset_id"), self.manifest.get("shard_id"),
-                self.manifest.get("sample_count")) != (self.dataset_id, self.shard_id, count):
+        manifest_identity = (
+            self.manifest.get("dataset_id"),
+            self.manifest.get("shard_id"),
+            self.manifest.get("sample_count"),
+        )
+        if type(manifest_identity[2]) is not int or manifest_identity != (
+            self.dataset_id,
+            self.shard_id,
+            count,
+        ):
             raise FormatError("Manifest/header identities or count disagree")
         self.count, self._index_offset, self._data_offset = count, index_offset, data_offset
         self._file_size, self._index_crc = file_size, index_crc
@@ -344,7 +379,8 @@ class Shard:
     def entry(self, index):
         if not 0 <= index < self.count:
             raise IndexError(index)
-        entry = INDEX.unpack_from(self._mapping(), self._index_offset + index * 64)
+        index_position = self._index_offset + index * 64
+        entry = INDEX.unpack_from(self._mapping(), index_position)
         _, offset, stored, raw, rows, frames, windows, _, codec, flags, reserved, targets, tail = entry
         if (flags or reserved or tail or codec not in (0, 1, 2) or
                 offset % 64 or offset < self._data_offset or offset + stored > self._file_size or
@@ -395,7 +431,10 @@ class Dataset:
     def __init__(self, paths, *, max_open_shards=32, verify_index=False):
         if max_open_shards < 1:
             raise ValueError("max_open_shards must be positive")
-        self.shards, self._ends, self._lru, self._closed = [], [], OrderedDict(), False
+        self.shards = []
+        self._ends = []
+        self._lru = OrderedDict()
+        self._closed = False
         self.max_open_shards = max_open_shards
         seen, compatibility, total = set(), None, 0
         try:
@@ -411,6 +450,7 @@ class Dataset:
                 compatibility = shard.compatibility
                 self.shards.append(shard)
                 total += shard.count
+                # Cumulative endpoints map a global sample index to its shard.
                 self._ends.append(total)
                 if verify_index:
                     shard.release_mapping()
@@ -444,7 +484,12 @@ class Dataset:
         return self[rng.randrange(self.count)]
 
     def epoch_indices(self, seed=0, epoch=0, *, rank=0, world_size=1, worker_id=0, num_workers=1):
-        if world_size < 1 or num_workers < 1 or not 0 <= rank < world_size or not 0 <= worker_id < num_workers:
+        if (
+            world_size < 1
+            or num_workers < 1
+            or not 0 <= rank < world_size
+            or not 0 <= worker_id < num_workers
+        ):
             raise ValueError("Invalid rank/worker partition")
         order = list(range(self.count))
         digest = hashlib.sha256(f"{seed}:{epoch}".encode()).digest()
@@ -490,7 +535,10 @@ def encode_sample(ident, columns, metadata=None):
     ident = uuid.UUID(str(ident)).bytes
     if set(columns) != set(BY_NAME):
         raise ValueError("Writer requires exactly the 16 standard columns")
-    encoded = {name: _column_bytes(columns[name], info[1]) for name, info in BY_NAME.items()}
+    encoded = {
+        name: _column_bytes(columns[name], info[1])
+        for name, info in BY_NAME.items()
+    }
     rows = len(encoded["token_ids"]) // 4
     frames = len(encoded["frame_offsets"]) // 8 - 1
     windows = len(encoded["window_slots"]) // 4
@@ -501,8 +549,23 @@ def encode_sample(ident, columns, metadata=None):
     meta = b"" if metadata is None else canonical(metadata)
     directory_end = 64 + len(COLUMNS) * 32
     payload = bytearray(align(directory_end + len(meta)))
-    RECORD.pack_into(payload, 0, RECORD_MAGIC, 1, 0, 64, ident, len(COLUMNS), len(meta),
-                     rows, frames, windows, targets, 32, 0)
+    RECORD.pack_into(
+        payload,
+        0,
+        RECORD_MAGIC,
+        1,
+        0,
+        64,
+        ident,
+        len(COLUMNS),
+        len(meta),
+        rows,
+        frames,
+        windows,
+        targets,
+        32,
+        0,
+    )
     payload[directory_end:directory_end + len(meta)] = meta
     for ordinal, (cid, (name, dtype, dimension)) in enumerate(COLUMNS.items()):
         value = encoded[name]
@@ -511,13 +574,19 @@ def encode_sample(ident, columns, metadata=None):
             raise ValueError(f"Wrong column length: {name}")
         offset = align(len(payload))
         payload.extend(b"\0" * (offset - len(payload)))
-        COLUMN.pack_into(payload, 64 + ordinal * 32, cid, dtype, 1, offset, count, len(value), 0)
+        column_position = 64 + ordinal * 32
+        COLUMN.pack_into(
+            payload, column_position, cid, dtype, 1, offset, count, len(value), 0
+        )
         payload.extend(value)
     payload.extend(b"\0" * (align(len(payload)) - len(payload)))
     if len(payload) > NONE:
         raise ValueError("Record exceeds uint32 size limit")
     payload = bytes(payload)
-    entry = (ident, 0, len(payload), len(payload), rows, frames, windows, 0, 0, 0, 0, targets, 0)
+    entry = (
+        ident, 0, len(payload), len(payload), rows, frames, windows,
+        0, 0, 0, 0, targets, 0,
+    )
     Sample(payload, entry).validate()
     return payload, entry
 
@@ -554,11 +623,14 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_name = None
     try:
-        with tempfile.NamedTemporaryFile("w+b", dir=path.parent, prefix=".ktremix-", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            "w+b", dir=path.parent, prefix=".ktremix-", delete=False
+        ) as stream:
             temp_name = stream.name
             stream.write(b"\0" * 128)
             stream.write(encoded_manifest)
-            # Sparse reserved index region: all bytes read as zero until filled.
+            # Reserve the index before streaming records; each index entry is
+            # filled as soon as its independently encoded trajectory is written.
             stream.seek(data_offset)
             seen, actual = set(), 0
             for actual, (ident, columns, metadata) in enumerate(samples, 1):
@@ -570,7 +642,9 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
                 seen.add(entry[0])
                 selected = CODECS[codec]
                 if selected == 1:
-                    stored = _lz4().compress(payload, mode="fast", acceleration=1, store_size=False)
+                    stored = _lz4().compress(
+                        payload, mode="fast", acceleration=1, store_size=False
+                    )
                 elif selected == 2:
                     stored = zlib.compress(payload, level=1)
                 else:
@@ -599,9 +673,11 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
                     raise FormatError("Internal index write failure")
                 checksum = zlib.crc32(block, checksum)
                 remaining -= len(block)
-            h = [MAGIC, 1, 0, 128, 0, end, 128, len(encoded_manifest), index_offset,
-                 count, 64, 64, data_offset, dataset, shard, 0,
-                 crc(encoded_manifest), checksum & 0xFFFFFFFF, b"\0" * 4]
+            h = [
+                MAGIC, 1, 0, 128, 0, end, 128, len(encoded_manifest),
+                index_offset, count, 64, 64, data_offset, dataset, shard, 0,
+                crc(encoded_manifest), checksum & 0xFFFFFFFF, b"\0" * 4,
+            ]
             h[15] = crc(HEADER.pack(*h))
             stream.seek(0)
             stream.write(HEADER.pack(*h))
@@ -654,7 +730,10 @@ def demo_manifest(dataset_id=None, shard_index=0):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     demo = sub.add_parser("demo", help="write two small synthetic shards (3 and 7 samples)")
     demo.add_argument("directory", type=Path)
@@ -672,8 +751,10 @@ def main(argv=None):
     if args.command == "demo":
         dataset_id, offset = uuid.uuid4(), 0
         for i, count in enumerate((3, 7)):
-            examples = [(uuid.uuid5(dataset_id, str(j)), demo_columns(j), {"synthetic": True})
-                        for j in range(offset, offset + count)]
+            examples = [
+                (uuid.uuid5(dataset_id, str(j)), demo_columns(j), {"synthetic": True})
+                for j in range(offset, offset + count)
+            ]
             path = args.directory / f"demo-{i:05d}.ktremix"
             write_shard(path, examples, demo_manifest(dataset_id, i), codec=args.codec)
             print(path)
@@ -706,16 +787,25 @@ def main(argv=None):
             if args.epoch is None:
                 if args.rank or args.world_size != 1:
                     parser.error("rank/world-size partitioning requires --epoch")
+                # Sampling with replacement is useful for randomized training.
                 samples = (dataset.sample(rng) for _ in range(args.count))
             else:
                 import itertools
+
+                # An epoch visits each partitioned trajectory once, without padding.
                 indices = dataset.epoch_indices(args.seed, args.epoch, rank=args.rank,
                                                 world_size=args.world_size)
                 samples = (dataset[i] for i in itertools.islice(indices, args.count))
             for sample in samples:
-                print(json.dumps({"uuid": sample.uuid, "rows": sample.rows, "frames": sample.frames,
-                                  "windows": sample.windows, "targets": sample.targets,
-                                  "first_token_ids": list(sample.column("token_ids")[:12])}))
+                summary = {
+                    "uuid": sample.uuid,
+                    "rows": sample.rows,
+                    "frames": sample.frames,
+                    "windows": sample.windows,
+                    "targets": sample.targets,
+                    "first_token_ids": list(sample.column("token_ids")[:12]),
+                }
+                print(json.dumps(summary))
 
 
 if __name__ == "__main__":

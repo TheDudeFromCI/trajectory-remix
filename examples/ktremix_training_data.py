@@ -39,6 +39,9 @@ def make_source(seed, index=0, split="train", max_gap=5):
     rng = random.Random(f"{seed}:{split}:{index}")
     letters = [rng.choice(string.ascii_lowercase) for _ in range(10)]
     digits = [rng.randrange(10) for _ in range(10)]
+
+    # Give each input stream its own arrival schedule so the result becomes
+    # available progressively rather than as one preassembled example.
     arrivals = []
     for _ in range(2):
         tick, times = 0, []
@@ -46,16 +49,34 @@ def make_source(seed, index=0, split="train", max_gap=5):
             tick += rng.randint(1, max_gap)
             times.append(tick)
         arrivals.append(times)
+
     replay = {}
+
     def add(tick, event):
         replay.setdefault(str(tick), []).append(event)
-    for wid, values, times in zip(("letters", "digits"), (letters, list(map(str, digits))), arrivals):
+
+    streams = ("letters", "digits")
+    values_by_stream = (letters, list(map(str, digits)))
+    for wid, values, times in zip(streams, values_by_stream, arrivals):
         add(times[0], {"op": "open", "window": wid, "window-type": "document"})
         for value, tick in zip(values, times):
-            add(tick, {"op": "append", "window": wid, "source": "user", "content": value,
-                       "loss": {"mask": "exclude"}})
+            add(
+                tick,
+                {
+                    "op": "append",
+                    "window": wid,
+                    "source": "user",
+                    "content": value,
+                    "loss": {"mask": "exclude"},
+                },
+            )
+
+    # A result can be predicted as soon as both corresponding input values arrive.
     output_ticks = [max(a, b) for a, b in zip(*arrivals)]
-    add(output_ticks[0], {"op": "open", "window": "result", "window-type": "reasoning"})
+    add(
+        output_ticks[0],
+        {"op": "open", "window": "result", "window-type": "reasoning"},
+    )
     for letter, digit, tick in zip(letters, digits, output_ticks):
         value = chr((ord(letter) - ord('a') + digit) % 26 + ord('a'))
         add(tick, {"op": "generate", "window": "result", "content": value})
@@ -80,7 +101,9 @@ class Execution:
     another reserve. NOOPs are decisions, never memory. Read-only inputs persist.
     """
     def __init__(self):
-        self.a, self.frontier, self.latest = new_columns(), 0, {}
+        self.a = new_columns()
+        self.frontier = 0
+        self.latest = {}
         self.activated, self.closed, self.sleeping = False, False, False
         self.ticks, self.row_ticks = [], []
         self.opened_inputs = set()
@@ -102,11 +125,23 @@ class Execution:
         previous = self.latest.get(window, k.NONE)
         position = 0 if previous == k.NONE else a["position_ids"][previous] + 1
         durable = bool(flags & k.DURABLE)
+
+        # A durable row becomes visible only after its construction frontier.
+        # Model rows in one frame share a commit frontier and cannot see each other.
+        visible_from = 0
+        if durable:
+            visible_from = q + 1 if commit is None else commit
+
         for name, value in {
-            "token_ids": token, "window_ids": window, "position_ids": position,
-            "query_frontiers": q, "visible_from": (q + 1 if commit is None else commit) if durable else 0,
-            "visible_until": k.FOREVER if durable else 0, "previous_rows": previous,
-            "loss_weights": loss, "row_flags": flags,
+            "token_ids": token,
+            "window_ids": window,
+            "position_ids": position,
+            "query_frontiers": q,
+            "visible_from": visible_from,
+            "visible_until": k.FOREVER if durable else 0,
+            "previous_rows": previous,
+            "loss_weights": loss,
+            "row_flags": flags,
         }.items():
             a[name].append(value)
         if loss > 0:
@@ -128,11 +163,19 @@ class Execution:
             self.a["window_activation_frontiers"][window] = self.frontier
 
     def query_windows(self):
-        return ([2] if not self.closed else []) + ([3] if self.activated else [])
+        windows = []
+        if not self.closed:
+            windows.append(2)
+        if self.activated:
+            windows.append(3)
+        return windows
 
     def commit(self, predictions, tick):
         a, boundary = self.a, self.frontier + 1
         activate = False
+
+        # All predictions for this tick are recorded at one shared boundary.
+        # NOOP rows carry loss but never become durable context for later queries.
         for window, token in predictions.items():
             if token == NOOP:
                 flags = k.MODEL | k.NOOP
@@ -153,10 +196,14 @@ class Execution:
         if activate:
             self.activated = True
             a["window_activation_frontiers"][2] = boundary
-            for name, value in {"window_slots": 3, "window_open_frontiers": boundary,
-                                "window_close_frontiers": k.FOREVER,
-                                "window_activation_frontiers": k.FOREVER,
-                                "window_flags": k.INITIALLY_AVAILABLE}.items():
+            new_window = {
+                "window_slots": 3,
+                "window_open_frontiers": boundary,
+                "window_close_frontiers": k.FOREVER,
+                "window_activation_frontiers": k.FOREVER,
+                "window_flags": k.INITIALLY_AVAILABLE,
+            }
+            for name, value in new_window.items():
                 a[name].append(value)
             self.insert(BOS, 3, k.DURABLE | k.BOS, 0, tick)
         self.sleeping = all(token == NOOP for token in predictions.values())
@@ -198,7 +245,8 @@ def build_dataset(directory, *, train_samples=2048, validation_samples=256,
     report = {"generation_seconds": 0., "compilation_seconds": 0., "write_seconds": 0.,
               "trajectories": train_samples + validation_samples, "rows": 0, "targets": 0}
     dataset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{CONTRACT}/{seed}/{max_gap}")
-    for split, count in (("train", train_samples), ("validation", validation_samples)):
+    splits = (("train", train_samples), ("validation", validation_samples))
+    for split, count in splits:
         raw_path = directory / f"{split}.jsonl"
         start = time.perf_counter()
         with raw_path.open("w") as stream:
@@ -216,19 +264,35 @@ def build_dataset(directory, *, train_samples=2048, validation_samples=256,
                         report["compilation_seconds"] += time.perf_counter() - before
                         report["rows"] += len(columns["token_ids"])
                         report["targets"] += len(columns["target_rows"])
-                        metadata.update(split=split, source_sha256=hashlib.sha256(k.canonical(source)).hexdigest())
+                        source_digest = hashlib.sha256(k.canonical(source)).hexdigest()
+                        metadata.update(split=split, source_sha256=source_digest)
                         yield source["uuid"], columns, metadata
-                manifest = {"dataset_id": str(dataset_id), "shard_id": str(uuid.uuid5(dataset_id, f"{split}/{shard_index}")),
-                            "execution_contract": CONTRACT, "split": split,
-                            "shard_index": shard_index, "active_window_limit": 3,
-                            "tokenizer": {"sha256": compiler.fingerprint,
-                                          "special_token_ids": {"bos": BOS, "eos": EOS, "noop": NOOP}},
-                            "compiler": "Remix replay + fixture-only progressive/sleep adapter"}
+                manifest = {
+                    "dataset_id": str(dataset_id),
+                    "shard_id": str(uuid.uuid5(dataset_id, f"{split}/{shard_index}")),
+                    "execution_contract": CONTRACT,
+                    "split": split,
+                    "shard_index": shard_index,
+                    "active_window_limit": 3,
+                    "tokenizer": {
+                        "sha256": compiler.fingerprint,
+                        "special_token_ids": {"bos": BOS, "eos": EOS, "noop": NOOP},
+                    },
+                    "compiler": "Remix replay + fixture-only progressive/sleep adapter",
+                }
                 before = time.perf_counter()
                 compiled_before = report["compilation_seconds"]
-                k.write_shard(directory / f"{split}-{shard_index:04}.ktremix", records(), manifest,
-                              sample_count=min(shard_size, count - offset), codec="lz4")
-                report["write_seconds"] += time.perf_counter() - before - (report["compilation_seconds"] - compiled_before)
+                shard_path = directory / f"{split}-{shard_index:04}.ktremix"
+                k.write_shard(
+                    shard_path,
+                    records(),
+                    manifest,
+                    sample_count=min(shard_size, count - offset),
+                    codec="lz4",
+                )
+                write_elapsed = time.perf_counter() - before
+                compile_elapsed = report["compilation_seconds"] - compiled_before
+                report["write_seconds"] += write_elapsed - compile_elapsed
     report["compressed_bytes"] = sum(p.stat().st_size for p in directory.glob("*.ktremix"))
     report["raw_source_bytes"] = sum(p.stat().st_size for p in directory.glob("*.jsonl"))
     (directory / "build.json").write_text(json.dumps(report, indent=2) + "\n")
