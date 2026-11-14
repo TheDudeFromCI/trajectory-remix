@@ -14,7 +14,7 @@ from trajectory_remix.graph.studio_api import create_studio_app
 from test_graph_compiler import profile
 
 
-def main():
+def main(script='graph_frontend.mjs'):
     with tempfile.TemporaryDirectory(prefix='graph-dom-', dir='/tmp') as tmp:
         path = Path(tmp) / 'graph.sqlite'
         GraphStore.initialize(path, {'tokenizer_profiles': {'bytes': profile().model_dump(mode='json')}})
@@ -30,7 +30,7 @@ def main():
                 time.sleep(.01)
             if not server.started:
                 raise RuntimeError('Test server did not start')
-            subprocess.run(['node', str(Path(__file__).with_name('graph_frontend.mjs')), f'http://127.0.0.1:{port}'], check=True)
+            subprocess.run(['node', str(Path(__file__).with_name(script)), f'http://127.0.0.1:{port}'], check=True)
         finally:
             server.should_exit = True; thread.join(timeout=5); sock.close()
 

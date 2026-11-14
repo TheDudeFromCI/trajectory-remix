@@ -2,6 +2,7 @@
   "private": true,
   "description": "Optional DOM integration checks; no frontend runtime dependencies",
   "devDependencies": {
-    "happy-dom": "21.0.4"
+    "happy-dom": "21.0.4",
+    "playwright": "1.56.1"
   }
 }

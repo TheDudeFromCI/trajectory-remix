@@ -3,13 +3,15 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="remix-token" content="__REMIX_TOKEN__"><title>Trajectory Remix</title>
 <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/graph.css">
-<script type="module" src="/static/graph.js"></script></head>
+<link rel="stylesheet" href="/static/sampler.css">
+<script type="module" src="/static/graph.js"></script>
+<script type="module" src="/static/sampler.js"></script></head>
 <body class="graph-studio">
 <header class="toolbar"><nav class="menu-bar" aria-label="Application menu">
 <button id="import-button">Import</button><button id="export-button">Export</button>
 <button id="undo-edit" disabled>Undo</button><button id="redo-edit" disabled>Redo</button>
 <button id="settings-button">Project Settings</button><button id="preferences-button">Preferences</button>
-<button id="metrics-button">Dataset Metrics</button><span class="menu-label">Trajectory Remix</span>
+<button id="metrics-button">Dataset Metrics</button><button id="generation-settings-button">Generation Settings</button><span class="menu-label">Trajectory Remix</span>
 </nav><input id="file-input" type="file" accept=".json,.jsonl" hidden></header>
 <div id="status" role="status" aria-live="polite"></div>
 <div class="workspace" id="workspace">
@@ -46,4 +48,30 @@
 <dialog id="settings-dialog"><h2>Project Settings</h2><p>Tools, tokenizer definitions and dedicated control maps, endpoint roles, split ratios and log cap belong to this project. A tokenizer is optional.</p><textarea id="settings-json" aria-label="Project settings JSON" spellcheck="false"></textarea><button id="settings-save">Save settings</button><button id="logs-clear">Clear Log Cache</button><span id="log-usage"></span><button data-close>Close</button></dialog>
 <dialog id="export-dialog"><h2>Export</h2><label>Format <select id="export-format"><option value="raw">Raw JSONL</option><option value="compiled">Compiled KTREMIX</option></select></label><label>Export tokenizer <select id="export-profile"></select></label><label>Minimum stage <select id="export-stage"><option value="3">Ready</option><option value="2">Validated</option><option value="1">Candidate</option><option value="0">Pending</option><option value="">All</option></select></label><label>Trajectories per file <input id="export-shard" type="number" min="1" value="256"></label><label>Metadata <select id="export-metadata"><option value="all_metrics">All metrics</option><option value="measured_metrics">Measured metrics only</option><option value="remove_all">Remove all</option><option value="full">Keep full metadata</option></select></label><label><input id="export-stale" type="checkbox" checked> Include stale</label><label><input id="export-exclude" type="checkbox"> Exclude missing split</label><p>Missing splits warn and assign automatically; intentional Auto does not warn. Family conflicts block export. Completed files expire after 24 hours.</p><button id="export-start">Start export job</button><button data-close>Close</button></dialog>
 <dialog id="metrics-dialog"><h2>Dataset Metrics</h2><p>Saved source observations, unavailable/stale values and frozen proposal coverage for the current search. Accepted coverage uses Candidate or higher.</p><button id="metrics-calculate">Calculate Missing Metrics for search</button><pre id="metrics-values"></pre><button data-close>Close</button></dialog>
+<dialog id="sampler-dialog" aria-labelledby="sampler-title">
+<div class="sampler-heading"><div><small>GENERATION SETTINGS · GUIDED EDITOR</small><h2 id="sampler-title">Shape the next scenario</h2></div><button id="sampler-close" aria-label="Close Generation Settings">Close</button></div>
+<p class="sampler-intro">Choose what to practice, then refine the setting. The sampler combines eligible choices into a proposal; it does not generate a trajectory.</p>
+<div class="sampler-tabs" role="tablist" aria-label="Generation settings">
+<button id="sampler-matrix-tab" role="tab" aria-selected="true" aria-controls="sampler-matrix-panel">Sampler Matrix <small>Project defaults</small></button>
+<button id="sampler-pins-tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="sampler-pins-panel">Proposal pins <small>This preview only</small></button></div>
+<div class="sampler-layout"><div>
+<section id="sampler-matrix-panel" role="tabpanel" aria-labelledby="sampler-matrix-tab">
+<div class="sampler-notice">Changes apply to <b>future runs</b>. Running runs and historical targets keep their saved definitions.</div>
+<label for="sampler-search">Find a setting or behavior</label><input id="sampler-search" type="search" placeholder="Try “handoff”, “patience” or “tool access”">
+<div class="sampler-navigation"><button id="sampler-expand">Expand matching sections</button><button id="sampler-collapse">Collapse sections</button><span id="sampler-matches" role="status"></span></div>
+<div id="sampler-sections"></div>
+</section>
+<section id="sampler-pins-panel" role="tabpanel" aria-labelledby="sampler-pins-tab" hidden>
+<h3>Keep a choice fixed</h3><p>Any lets the sampler choose. A pin requests one value for this preview; it never changes a project weight. Incompatible pins return an error instead of being relaxed.</p><div id="sampler-pins"></div><button id="sampler-clear-pins">Reset all to Any</button>
+<p>These pins stay in this editor session. Run creation can pass the same supported overrides through the shared API when its generation driver is installed.</p>
+</section></div>
+<aside class="sampler-summary" aria-label="Sampling behavior summary">
+<small>WHAT WILL HAPPEN</small><h3>Your sampling recipe</h3><div id="sampler-recipe"></div>
+<hr><h3>Try one proposal</h3><p>One deterministic example, not a distribution test. Save matrix edits first. No model or tokenizer is used.</p>
+<label for="sampler-seed">Fixed seed (whole number)</label><input id="sampler-seed" type="number" step="1" value="137">
+<button id="sampler-preview">Preview saved recipe</button><p id="sampler-preview-state" role="status">No preview yet.</p><div id="sampler-result"></div>
+</aside></div>
+<div class="sampler-footer"><span id="sampler-state" role="status">Loading…</span><button id="sampler-discard">Discard matrix edits / reload</button><button id="sampler-save" class="sampler-primary">Save for future runs</button></div>
+<p id="sampler-error" role="alert" tabindex="-1"></p>
+</dialog>
 </body></html>
