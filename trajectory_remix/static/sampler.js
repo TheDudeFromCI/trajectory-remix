@@ -193,7 +193,7 @@ export class GuidedSampler {
     // Scalar top-level edits must write through to the original matrix, too.
     const top = this.sections.at(-1).cards;
     Object.entries(m).filter(([k, v]) => v === null || typeof v !== 'object').forEach(([k]) => {
-      const card = top.find(c => c.dataset.search.startsWith(k + ' '));
+      const card = top.find(c => c.dataset.search.startsWith(k.replaceAll('_', ' ') + ' '));
       if (card) { card.replaceChildren(el('h4', human(k)), this.field(m, k, k)); }
     });
     this.metricsSection(); this.filter();

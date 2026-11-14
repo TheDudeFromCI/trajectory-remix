@@ -19,6 +19,7 @@ try {
   // Seed the shared backend with an extension that the UI must not drop.
   const initial = await api('/sampler');
   initial.configuration.matrix.custom_extension = {owner:'keep me',nested:{flag:true,values:[1,'two']}};
+  initial.configuration.matrix.custom_scalar = 'Original custom value';
   initial.configuration.matrix.dimensions.user_tone[0].custom_note = 'preserve this';
   await api('/sampler','PUT',{matrix:initial.configuration.matrix, metric_options:initial.configuration.metric_options,expected_revision:initial.settings_revision});
   await page.getByRole('button',{name:'Generation Settings',exact:true}).click();
@@ -55,6 +56,12 @@ try {
   assert.equal(updated.configuration.matrix.dimensions.user_tone[0].custom_note,'preserve this');
   assert.equal(updated.configuration.matrix.dimensions.user_tone[0].description,'A calm, direct person who appreciates clear explanations.');
   assert.deepEqual((await api('/sampler/proposals/'+snapshot.id)).frozen,snapshot.frozen);
+  // Custom scalar keys with underscores must write through, not edit a presentation copy.
+  await page.locator('#sampler-search').fill('custom scalar');
+  await page.locator('[data-path="custom_scalar"]').fill('Edited custom value');
+  await page.locator('#sampler-save').click();
+  await page.waitForFunction(()=>!globalThis.guidedSampler.dirty && !globalThis.guidedSampler.busy);
+  assert.equal((await api('/sampler')).configuration.matrix.custom_scalar,'Edited custom value');
   // Per-metric tolerance is opt-in, two bands, and supports clearing after errors.
   await page.locator('#sampler-search').fill('authored windows');
   const metric = page.locator('#sampler-sections > details:visible .sampler-card:visible').first();
