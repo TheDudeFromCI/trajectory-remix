@@ -379,6 +379,11 @@ export class StudioUI {
   }
   async init() {
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('preview-debounce').value = this.prefs.debounce;
+    on('trajectory-tab', 'click', () => { $('workspace').hidden = false; $('sampler-workspace').hidden = true; $('trajectory-tab').setAttribute('aria-pressed', 'true'); $('sampler-tab').setAttribute('aria-pressed', 'false'); });
+    on('sampler-tab', 'click', async () => {
+      $('workspace').hidden = true; $('sampler-workspace').hidden = false; $('trajectory-tab').setAttribute('aria-pressed', 'false'); $('sampler-tab').setAttribute('aria-pressed', 'true');
+      if (!this.sampler) { const {SamplerUI} = await import('/static/sampler.js'); this.sampler = new SamplerUI($('sampler-workspace'), api); await this.sampler.init(); }
+    });
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
     on('delete-sample', 'click', async () => { if (!this.id) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; $('window-grid').replaceChildren(); $('timeline').replaceChildren(); await this.listing(); });

@@ -12,6 +12,8 @@
 <button id="metrics-button">Dataset Metrics</button><span class="menu-label">Trajectory Remix</span>
 </nav><input id="file-input" type="file" accept=".json,.jsonl" hidden></header>
 <div id="status" role="status" aria-live="polite"></div>
+<nav class="studio-tabs" aria-label="Workspace"><button id="trajectory-tab" aria-pressed="true">Trajectory Studio</button><button id="sampler-tab" aria-pressed="false">Sampler Matrix</button></nav>
+<section id="sampler-workspace" hidden aria-label="Sampler Matrix"></section>
 <div class="workspace" id="workspace">
 <aside class="sidebar"><div class="side-heading">DATASET <span id="sample-count" class="badge">0</span><button id="new-sample">+</button></div>
 <input id="sample-search" class="search" placeholder="Search source text" aria-label="Search source text">

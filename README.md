@@ -20,6 +20,10 @@ only for Tick history or compiled export. Generation/review and graph metric
 calculation drivers are separate integrations. Graph projects do not migrate
 replay projects. The instructions below describe the existing replay workflow.
 
+The [scenario-first Sampler Matrix](docs/SAMPLER-SCENARIO.md) connects sampled
+project briefs, competencies and decision conditions to their controlling weights
+and constraints, with fixed-seed comparisons for future-run configuration edits.
+
 ## Install and start (replay projects)
 
 ```bash
