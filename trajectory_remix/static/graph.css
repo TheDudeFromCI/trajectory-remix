@@ -1,0 +1,36 @@
+.graph-studio {height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.graph-studio .workspace {flex:1;min-height:0;display:flex;overflow:hidden}
+.graph-studio .sidebar {width:270px;flex-shrink:0;overflow:auto;padding:12px;border-right:1px solid var(--border,#334155)}
+.graph-studio main {flex:1;min-width:0;overflow:auto;display:flex;flex-direction:column}
+.graph-studio .replay-view {min-height:220px;flex:1;overflow:auto}
+.graph-studio .window-grid {padding:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.graph-studio .window-card {border:1px solid #465263;border-radius:6px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.graph-studio .timeline-section {min-height:160px;flex:none;padding:12px}
+.graph-studio .editor {padding:16px;border-top:1px solid #465263;min-height:300px;overflow:visible}
+.graph-studio label {display:block;margin:5px 0;font-size:12px}
+.graph-studio input:not([type=checkbox]),.graph-studio select {max-width:100%}
+.graph-studio textarea {width:100%;min-height:120px;font-family:monospace}
+.graph-studio #source-json,.graph-studio #settings-json {min-height:300px}
+.graph-studio .graph-editor-grid {display:grid;grid-template-columns:minmax(180px,1fr) minmax(250px,2fr);gap:20px}
+.graph-studio .token-block {display:inline-block;border:1px solid #80a6cc;border-radius:3px;padding:1px 4px;font-size:10px;margin:2px;text-transform:uppercase;color:#a8c9f1}
+.graph-studio .event-node {margin:4px;border:1px solid #586578;white-space:pre-wrap}
+.graph-studio .event-node.selected {border-color:#7abaff;background:#244462}
+.graph-studio #scrubber {width:100%}
+.graph-studio #tick-number {width:70px}
+.graph-studio #timeline {max-height:180px;overflow:auto}
+.graph-studio #status {min-height:22px;color:#f5c86c;padding:2px 12px}
+.graph-studio #job-status-bar {border-top:1px solid #465263;padding:6px;display:flex;gap:8px;overflow:auto;min-height:40px}
+.graph-studio dialog {width:min(800px,90vw);max-height:85vh;overflow:auto;background:#18202b;color:#e0e8f2;border:1px solid #53647a;border-radius:8px;padding:24px}
+.graph-studio dialog::backdrop {background:#0007}
+.graph-studio .job-logs {white-space:pre-wrap;max-height:260px;overflow:auto}
+.graph-studio .sample-row {display:block;width:100%;text-align:left;margin:5px 0;overflow-wrap:anywhere}
+.graph-studio .sample-row.selected {border-color:#7abaff}
+.graph-studio .diagnostic {display:block;text-align:left;color:#f5c86c}
+.graph-studio #dependencies button {margin:3px}
+@media(max-width:800px){.graph-studio .sidebar{width:210px}.graph-studio .graph-editor-grid{grid-template-columns:1fr}}
+
+.graph-studio [hidden] {display:none!important}
+.graph-studio .timeline-lanes {position:relative;min-width:100%}
+.graph-studio .timeline-lanes .event-node {position:absolute;margin:0;min-height:32px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:1}
+.graph-studio .dependency-edges {position:absolute;inset:0;pointer-events:none}
+.graph-studio .timeline-cursor {position:absolute;top:0;bottom:0;border-left:2px solid #81dac8;pointer-events:none;z-index:2}

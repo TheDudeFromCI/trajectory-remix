@@ -1,5 +1,8 @@
 # Graph compilation, preview and export
 
+The [manual graph studio](GRAPH-STUDIO.md) supplies authenticated REST, manual
+authoring, read-only previews, import/export jobs and focused agent tasks.
+
 The opt-in `trajectory_remix.graph.compiler` and `.export` services consume the
 [graph source contracts](GRAPH-SOURCE.md). They do not read replay sources,
 execute tools, call models, mutate source/settings, or calculate stored metrics.

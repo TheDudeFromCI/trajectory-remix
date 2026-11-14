@@ -13,6 +13,24 @@ from .dataset import training_eligible
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in ('graph-init', 'graph-studio'):
+        graph_parser = argparse.ArgumentParser(prog='trajectory-remix ' + argv[0])
+        graph_parser.add_argument('--dataset', type=Path, required=True)
+        if argv[0] == 'graph-studio':
+            graph_parser.add_argument('--port', type=int, default=8765)
+        graph_args = graph_parser.parse_args(argv[1:])
+        try:
+            if argv[0] == 'graph-init':
+                from .graph.storage import GraphStore
+                GraphStore.initialize(graph_args.dataset)
+                print(f'Initialized graph project {graph_args.dataset}')
+            else:
+                import uvicorn
+                from .graph.studio_api import create_studio_app
+                uvicorn.run(create_studio_app(graph_args.dataset), host='127.0.0.1', port=graph_args.port)
+        except (ValueError, OSError, sqlite3.Error) as error:
+            graph_parser.exit(1, f'Trajectory Remix: {error}\n')
+        return
     parser = argparse.ArgumentParser(
         description="Trajectory Remix — local Kidra dataset studio"
     )

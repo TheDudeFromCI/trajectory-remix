@@ -4,7 +4,7 @@ import asyncio
 import copy
 import json
 import secrets
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, closing
 from pathlib import Path
 from tempfile import TemporaryFile
 
@@ -41,6 +41,18 @@ MAX_BODY = 40_000_000
 
 
 def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=None, scenarios_dir=None):
+    # Dispatch by the explicit format table without constructing legacy tokenizers.
+    import sqlite3
+    graph = False
+    if Path(dataset).is_file():
+        try:
+            with closing(sqlite3.connect(Path(dataset).resolve().as_uri() + "?mode=ro", uri=True)) as db:
+                graph = db.execute("SELECT 1 FROM sqlite_master WHERE name='graph_project'").fetchone()
+        except sqlite3.DatabaseError:
+            pass  # Preserve DatasetStore's existing invalid-project diagnostics.
+    if graph:
+        from .graph.studio_api import create_studio_app
+        return create_studio_app(dataset, mcp_allowed_origins=mcp_allowed_origins)
     store = DatasetStore(dataset)
     compiler, tool_diagnostics = store.configure_tools(ToolRegistry(tools_dir) if tools_dir is not None else default_registry())
     config = validate_config(json.loads(store.info()[3]))

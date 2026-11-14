@@ -1,5 +1,8 @@
 # Graph jobs, recovery and bulk operations
 
+The [manual graph studio](GRAPH-STUDIO.md) supplies authenticated REST, manual
+authoring, read-only previews, import/export jobs and focused agent tasks.
+
 The graph runtime extends the [source/CAS service](GRAPH-SOURCE.md) from PR #71
 and uses the [temporary artifact service](GRAPH-COMPILER.md) from PR #72.
 It is independent of the replay dashboard, generation checkpoints and its
@@ -193,8 +196,8 @@ return 404. Startup and the host's periodic sweep call `ArtifactService.expire()
 
 `job_router(jobs, bulk, artifacts, worker)` mounts the shared application layer at
 `/api/v1`. `create_job_app(path, handlers=..., bulk_handlers=...)` is a headless
-factory, independent of the replay dashboard. The studio must mount the router
-inside its authenticated local transport and preserve its Host/origin policy.
+factory, independent of the replay dashboard. The manual studio mounts this router
+inside its authenticated local transport and preserves its Host/origin policy.
 Do not expose the headless factory as an authenticated public deployment.
 
 | Route | Result |
@@ -241,5 +244,5 @@ concurrent claims/bulk workers, pause/cancel/restart fencing, ignored provider
 cancellation, endpoint claim leases, search-wide snapshots, partial results,
 changed-only Undo/Redo, log eviction/clear/export, real raw artifact jobs and
 HTTP controls/downloads. No benchmarks, scale tests, full training or live model
-calls are part of this validation. Real Flow/review/repair and the completed
-studio UI remain downstream integrations.
+calls are part of this validation. Real Flow/review/repair and graph metric
+population views remain downstream integrations; the manual studio uses these services today.

@@ -77,11 +77,17 @@ class JobWorker:
                 self.jobs.append_log(job, 'No driver registered; manual Resume after driver installation.')
         except (Fenced, asyncio.CancelledError):
             pass
-        except Exception:
-            # Keep provider/driver exception bodies out of durable logs.
+        except Exception as error:
+            # Keep provider/driver exception bodies out of durable logs. Local
+            # export validation has no transport secrets and must be actionable.
             if self.jobs.inspect(job)['state'] == 'running':
                 self.jobs.control(job, 'pause')
-                self.jobs.append_log(job, 'Operation interrupted; completed commits retained. Manual Resume required.')
+                if j['kind'] == 'export' and isinstance(error, ValueError):
+                    self.jobs.append_log(job, 'Export blocked: ' + str(error)[:2000])
+                elif j['kind'] == 'export' and isinstance(error, ImportError):
+                    self.jobs.append_log(job, 'Export dependencies unavailable; install trajectory-remix[export].')
+                else:
+                    self.jobs.append_log(job, 'Operation interrupted; completed commits retained. Manual Resume required.')
         finally:
             # Resume can arrive while a fenced thread is settling. Start the new
             # epoch only after that thread has returned, never run both epochs.

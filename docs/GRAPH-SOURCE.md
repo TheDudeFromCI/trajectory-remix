@@ -1,12 +1,16 @@
 # Graph authoring foundation
 
+The [manual graph studio](GRAPH-STUDIO.md) supplies authenticated REST, manual
+authoring, read-only previews, import/export jobs and focused agent tasks.
+
 `trajectory_remix.graph` provides a tokenizer-free source model, structural
 validation, SQLite persistence and application commands. It is a separate new
-path: the existing dashboard, CLI, MCP and replay database are unchanged. There
-is no old-project reader or migrator. Explicit scheduling/preview and temporary
+format with its own manual studio, REST and focused MCP tasks. The replay
+database and its old dashboard remain separate; there is no old-project reader
+or migrator. Explicit scheduling/preview and temporary
 compiled export are available through the separate [compiler services](GRAPH-COMPILER.md).
 The [durable job service](GRAPH-JOBS.md) supplies ownership, workers and bulk
-operations. Full studio integration, sampling and model calls are separate work.
+operations. Sampling and model calls are separate work.
 
 ## Source and schema
 

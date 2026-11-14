@@ -4,7 +4,23 @@ Local Kidra trajectory authoring, playback, synthesis and training-export studio
 Python 3.11+. No Node build, external assets, accounts, or Docker daemon required.
 The dashboard is served only on `127.0.0.1`.
 
-## Install and start
+## Manual graph projects
+
+The [graph studio](docs/GRAPH-STUDIO.md) supports dependency authoring,
+diagnostics, Graph/Tick history, independent jobs and real raw/compiled export.
+Create a project without a tokenizer:
+
+```bash
+python -m trajectory_remix graph-init --dataset graph.sqlite
+python -m trajectory_remix graph-studio --dataset graph.sqlite
+```
+
+Tokenizer definitions are optional Project Settings; select a compatible profile
+only for Tick history or compiled export. Generation/review and graph metric
+calculation drivers are separate integrations. Graph projects do not migrate
+replay projects. The instructions below describe the existing replay workflow.
+
+## Install and start (replay projects)
 
 ```bash
 cd trajectory-remix
