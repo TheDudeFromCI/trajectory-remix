@@ -3,8 +3,9 @@
 `trajectory_remix.graph` provides a tokenizer-free source model, structural
 validation, SQLite persistence and application commands. It is a separate new
 path: the existing dashboard, CLI, MCP and replay database are unchanged. There
-is no old-project reader or migrator. REST/studio integration, scheduling,
-compiled export, workers, sampling and model calls are subsequent work.
+is no old-project reader or migrator. Explicit scheduling/preview and temporary
+compiled export are available through the separate [compiler services](GRAPH-COMPILER.md).
+REST/studio integration, durable workers, sampling and model calls are subsequent work.
 
 ## Source and schema
 

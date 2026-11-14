@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a 49,968-parameter, two-layer global shared-KV model on KTREMIX.
+"""Train an approximately 50k-parameter, two-layer global shared-KV model on KTREMIX.
 
 See docs/KTREMIX-TRAINING-DEMO.md. Run from a source checkout:
   python examples/train_ktremix.py run /tmp/letter-addition
@@ -20,8 +20,9 @@ from torch import nn
 from torch.nn import functional as F
 
 import ktremix_dataset as k
-from ktremix_training_data import (BOS, EOS, NOOP, VOCAB, CONTRACT, Execution,
-                                    build_dataset)
+from ktremix_training_data import (BOS, EOS, NOOP, VOCAB, CONTRACT, Frame,
+                                    Emission, Token, CONTROLS, compiler, build_dataset)
+from trajectory_remix.graph.models import GraphSource
 
 
 class GlobalSharedKV(nn.Module):
@@ -40,9 +41,9 @@ class GlobalSharedKV(nn.Module):
         self.out = nn.Linear(48, 48, bias=False)
         self.ff_norm = nn.LayerNorm(48)
         self.ff = nn.Sequential(
-            nn.Linear(48, 184, bias=False),
+            nn.Linear(48, 144, bias=False),
             nn.GELU(),
-            nn.Linear(184, 48, bias=False),
+            nn.Linear(144, 48, bias=False),
         )
 
     def attend(self, values, key, value, allowed):
@@ -74,9 +75,9 @@ class GlobalSharedKV(nn.Module):
 class TinyKidra(nn.Module):
     def __init__(self):
         super().__init__()
-        self.tokens = nn.Embedding(39, 48)
+        self.tokens = nn.Embedding(len(VOCAB), 48)
         self.windows = nn.Embedding(4, 48)
-        self.positions = nn.Embedding(12, 48)
+        self.positions = nn.Embedding(128, 48)
         self.layers = nn.ModuleList([GlobalSharedKV(), GlobalSharedKV()])
         self.norm = nn.LayerNorm(48)
         self.apply(self.initialize)
@@ -96,11 +97,20 @@ class TinyKidra(nn.Module):
         queries = self.embed(
             batch["query_previous"], batch["query_windows"], batch["query_positions"]
         )
-        for layer in self.layers:
-            memory, queries = layer(
-                memory, queries, batch["memory_allowed"], batch["query_allowed"]
-            )
-        return F.linear(self.norm(queries), self.tokens.weight)  # tied output head
+        # Rebuild memory for each query's currently visible context. Original
+        # construction masks alone retain indirect copies of closed/replaced
+        # text in surviving windows. Intersect at EVERY layer, including memory
+        # construction, so erased content cannot return through hidden states.
+        outputs = []
+        for index in range(queries.shape[1]):
+            current = batch["query_allowed"][:, index:index + 1]
+            live_memory = memory
+            query = queries[:, index:index + 1]
+            construction = batch["memory_allowed"] & current
+            for layer in self.layers:
+                live_memory, query = layer(live_memory, query, construction, current)
+            outputs.append(F.linear(self.norm(query), self.tokens.weight))
+        return torch.cat(outputs, dim=1)
 
 
 def collate(samples, device="cpu", *, inference_queries=None):
@@ -189,7 +199,7 @@ def collate(samples, device="cpu", *, inference_queries=None):
 
 def objective(logits, batch):
     losses = F.cross_entropy(
-        logits.reshape(-1, 39),
+        logits.reshape(-1, len(VOCAB)),
         batch["labels"].reshape(-1),
         reduction="none",
     )
@@ -223,69 +233,78 @@ def evaluate(model, dataset, batch_size, device):
 
 
 @torch.no_grad()
-def rollout(model, sources, device):
-    """Teacher-free execution: only external stimuli, model outputs and BOS.
+def rollout(model, sources, device, *, seed=17):
+    """Free-running predictions, scored against authored emissions afterwards.
 
-    Ground-truth outputs are used solely for scoring afterwards. An error cannot
-    be corrected by injecting a later authored output into the model's context.
+    External fixture stimuli follow the compiled schedule. Agent text, headers,
+    NOOP and EOS all come from the model; no teacher outputs enter its context.
     """
     model.eval()
-    exact, letters_correct, premature, failures, examples = 0, 0, 0, 0, []
-    for source in sources:
-        external, expected = {}, {}
-        for tick, events in source["replay"].items():
-            for event in events:
-                if event["op"] == "append":
-                    window = {"letters": 0, "digits": 1}[event["window"]]
-                    token = VOCAB[event["content"]]
-                    external.setdefault(int(tick), []).append((window, token))
-                elif event["op"] == "generate":
-                    expected[int(tick)] = VOCAB[event["content"]]
-        runtime = Execution()
-        observed, malformed = {}, False
-        # Bounded evaluation horizon also catches late/missing EOS and no wake.
-        for tick in range(max(expected) + 12):
-            updates = external.get(tick, [])
-            if runtime.sleeping and not updates:
+    exact, letters_correct, failures, examples = 0, 0, 0, []
+    for raw in sources:
+        source = GraphSource.model_validate(raw)
+        c = compiler(seed)
+        schedule = list(c.frames(source))
+        expected = {f.tick: e.tokens[0].id for f in schedule for e in f.outputs
+                    if e.event and e.window == "result"}
+        external = {f.tick: f.inputs for f in schedule if f.inputs}
+        runtime = c._runtime_for(source)
+        observed, malformed, sleeping = {}, False, False
+        for tick in range(max(expected) + 16):
+            inputs = external.get(tick, ())
+            # Apply external updates through the same runtime as export. Keep
+            # the generation phase separate so queries see all current inputs.
+            runtime.apply_inputs(inputs)
+            if sleeping and not inputs:
                 continue
-            for window, token in updates:
-                runtime.external(token, window, tick)
-            live_windows = runtime.query_windows()
+            live = [(w, i) for w, i in sorted(runtime.live.items()) if runtime.instances[i].writable]
+            live.append(("@available", runtime.available))
             queries = []
-            for window in live_windows:
-                previous = runtime.latest[window]
-                previous_token = runtime.a["token_ids"][previous]
-                next_position = runtime.a["position_ids"][previous] + 1
-                queries.append((previous_token, window, next_position, runtime.frontier))
-            if any(q[2] >= 12 for q in queries):
-                malformed = True
+            for w, index in live:
+                previous = runtime._latest(index)
+                position = runtime.a["position_ids"][previous] + 1
+                if position >= 128:
+                    malformed = True
+                    break
+                queries.append((runtime.a["token_ids"][previous], runtime.instances[index].slot,
+                                position, runtime.frontier))
+            if malformed:
                 break
-            logits = model(collate([runtime.a], device, inference_queries=[queries]))
-            predicted_tokens = logits[0, :len(queries)].argmax(-1).tolist()
-            predictions = dict(zip(live_windows, predicted_tokens))
-            token = predictions.get(2, NOOP)
-            # The reserve is a genuine trained prediction, not forced to NOOP.
-            if predictions.get(3, NOOP) != NOOP or token == BOS or 26 <= token < 36:
-                malformed = True
+            prediction = model(collate([runtime.columns()], device, inference_queries=[queries]))
+            tokens = prediction[0, :len(queries)].argmax(-1).tolist()
+            outputs = []
+            for (window, index), token in zip(live, tokens):
+                opening = False
+                if window == "@available" and token != NOOP:
+                    if "result" in runtime.live or any(w.logical == "result" for w in runtime.instances):
+                        malformed = True
+                        break
+                    window, opening = "result", True
+                if token == BOS or (window == "@available" and token == EOS):
+                    malformed = True
+                    break
+                control = next((name for name, value in CONTROLS.items() if value == token), None)
+                if window == "result" and token != NOOP:
+                    observed[tick] = token
+                outputs.append(Emission(None, window, (Token(token, control),), True, 1., opening=opening))
+            if malformed:
                 break
-            if token != NOOP:
-                observed[tick] = token
-                if token < 26 and expected.get(tick, NOOP) == NOOP:
-                    premature += 1
-            runtime.commit(predictions, tick)
-            if runtime.closed:
+            runtime.apply(Frame(tick, (), tuple(outputs)))
+            sleeping = all(t == NOOP for t in tokens)
+            if any(e.tokens[0].control == "eos" and e.window == "result" for e in outputs):
                 break
-        matches = sum(observed.get(t) == value for t, value in expected.items() if value < 26)
-        letters_correct += matches
+        letter_ticks = {f.tick for f in schedule for e in f.outputs
+                        if e.event and e.event.startswith("sum-") and e.tokens[0].control != "eos"}
+        letters_correct += sum(observed.get(tick) == expected[tick] for tick in letter_ticks)
         passed = not malformed and observed == expected
         exact += int(passed)
         failures += int(malformed)
         if len(examples) < 3:
-            examples.append({"id": source["id"], "expected": expected, "observed": observed,
-                             "exact": passed, "malformed": malformed})
-    return {"trajectories": len(sources), "exact_timing_and_closure_accuracy": exact / len(sources),
-            "letters_at_correct_tick_accuracy": letters_correct / (10 * len(sources)),
-            "premature_letters": premature, "malformed_trajectories": failures, "examples": examples}
+            examples.append(dict(id=source.id, expected=expected, observed=observed,
+                                 exact=passed, malformed=malformed))
+    return dict(trajectories=len(sources), exact_timing_and_closure_accuracy=exact / len(sources),
+                letters_at_correct_tick_accuracy=letters_correct / (10 * len(sources)),
+                malformed_trajectories=failures, examples=examples)
 
 
 def synchronize(device):
@@ -300,7 +319,7 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
     rng = random.Random(seed)
     model = TinyKidra().to(device)
     count = sum(p.numel() for p in model.parameters())
-    assert count == 49968, count
+    assert 45000 <= count <= 55000, count
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=.01)
     timing = {"sample_seconds": 0., "collate_and_transfer_seconds": 0.,
               "forward_backward_optimizer_seconds": 0., "evaluation_seconds": 0.}
@@ -347,7 +366,7 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
         train_elapsed = time.perf_counter() - start
         source_lines = (directory / "validation.jsonl").read_text().splitlines()[:rollout_count]
         before = time.perf_counter()
-        free_running = rollout(model, [json.loads(line) for line in source_lines], device)
+        free_running = rollout(model, [json.loads(line) for line in source_lines], device, seed=seed)
         synchronize(device)
         timing["evaluation_seconds"] += time.perf_counter() - before
     active_phases = (
@@ -358,7 +377,7 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
     active_seconds = sum(timing[name] for name in active_phases)
     # Saving a state_dict is for the demo's locally produced checkpoint only.
     torch.save(model.state_dict(), directory / "model.pt")
-    report = {"parameters": count, "layers": 2, "vocabulary": 39, "non_special_tokens": 36,
+    report = {"parameters": count, "layers": 2, "vocabulary": len(VOCAB), "non_special_tokens": 36,
               "device": str(device), "torch": torch.__version__, "threads": torch.get_num_threads(),
               "python": platform.python_version(), "platform": platform.platform(),
               "steps": steps, "batch_size": batch_size, "seed": seed, "learning_rate": learning_rate,
