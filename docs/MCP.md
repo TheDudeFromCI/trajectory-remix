@@ -1,147 +1,62 @@
-# MCP trajectory authoring
+# MCP setup and tool overview
 
-Trajectory Remix exposes MCP tools over **Streamable HTTP** at `/mcp` and over
-**stdio**, using the existing official Python MCP SDK. Both transports share the
-running dashboard's command handlers, dataset, tokenizer, generation loop and
-saves. The stdio bridge connects through the dashboard's guarded local API;
-HTTP requests use the same in-process dataset owner.
+Trajectory Remix includes an [MCP](https://modelcontextprotocol.io) server so AI
+agents can create, inspect, edit, review and repair trajectories in your running
+project. It works over **Streamable HTTP** (at `/mcp`) and **stdio**. Both share the
+dashboard's dataset, tokenizer and undo history, so agent edits appear in the
+dashboard on its next refresh (about 1.5 seconds). Pending browser edits are
+protected by revision checks.
 
-Start with the [short agent guides](../trajectory_remix/guides/start.md), also available through `get_authoring_guide`. Call `get_authoring_guide(topic="example")` to retrieve the complete bundled example without importing it. Built-in sandbox tools are synthetic; authors supply specialist replies. Custom Python tools are trusted modules configured by the server operator.
-
-## Learn one task at a time
-
-`get_authoring_guide()` returns a short starting page. Request one `topic` for
-the next task; it does not concatenate the lessons or load the entire manual:
-
-| Topic | Walkthrough |
-| --- | --- |
-| `review` | [Review shared context, evidence lifetimes, tool necessity and semantic correctness before sign-off](../trajectory_remix/guides/review.md) |
-| `first` | [Create a tiny trajectory; learn start ticks, token streams and closure](../trajectory_remix/guides/first.md) |
-| `parallel` | [Overlap independent specialist work and anchor dependent follow-ups](../trajectory_remix/guides/parallel.md) |
-| `edit` | [Repair wording and timing with targeted event edits](../trajectory_remix/guides/edit.md) |
-| `sandbox` | [Seed trajectory files and verify visible reads](../trajectory_remix/guides/sandbox.md) |
-| `tools` | [Choose a small starter tool set and defer advanced tools](../trajectory_remix/guides/tools.md) |
-| `reference` | [Complete Skill.md manual](../trajectory_remix/Skill.md) |
-| `example` | [Complete build-graph trajectory JSON](../examples/build-graph-analysis.json) |
-
-Existing callers that need the full manual must now pass `topic: "reference"`;
-the response still contains `content`. Both transports support the same topics.
-Tool pruning is a client/agent configuration recommendation, not a server-side
-restriction. Batching, full-source replacement and ephemeral workbench execution
-remain available for advanced workflows.
+This page covers connecting a client and the list of tools. Day-to-day editing
+rules are in the [MCP authoring reference](MCP-AUTHORING.md).
 
 ## Setup
 
-Install the optional MCP dependency in the dashboard's virtual environment:
+Install the MCP extra in the dashboard's environment (`scripts/install.sh` already
+does this), then start the dashboard on an initialized project:
 
 ```bash
 python -m pip install -e '.[mcp]'
-python -m trajectory_remix init \
-  --tokenizer examples/demo-tokenizer.json \
-  --dataset project.sqlite
 python -m trajectory_remix --dataset project.sqlite
 ```
 
+Restart the dashboard after installing the extra. Without it, `/mcp` returns `503`
+with install instructions and the rest of the dashboard still works.
+
+This is a trusted, single-user local service, not an authenticated public server.
+MCP does not expose endpoint credentials, arbitrary file paths, shell execution
+or provider settings.
+
 ### Streamable HTTP and llama.cpp Web UI
 
-The endpoint is **`http://127.0.0.1:8765/mcp`**. It is served by the dashboard
-when `.[mcp]` is installed; no separate bridge process or new dependency is needed.
-Restart the dashboard after installing the extra. Without the optional SDK,
-`/mcp` returns `503` with installation instructions and the dashboard still works.
+Connect to **`http://127.0.0.1:8765/mcp`**. The dashboard root `/` only serves the
+dashboard, so the URL must end in `/mcp`.
 
-For llama.cpp Web UI at `http://127.0.0.1:8123`, start Remix with:
+For a browser-based client such as the llama.cpp Web UI on port 8123, allow its
+origin when starting Remix:
 
 ```bash
 python -m trajectory_remix --dataset project.sqlite \
   --mcp-allow-origin http://127.0.0.1:8123
 ```
 
-Set the UI's MCP transport to `streamable_http`, URL to
-`http://127.0.0.1:8765/mcp`, and leave authentication unset for this local service.
-The llama.cpp `--ui-mcp-proxy` option may stay enabled. Include `/mcp` in the
-upstream URL; the proxy does not turn the dashboard root into an MCP endpoint.
-The proxy must preserve POST bodies, Accept/Content-Type, `Mcp-Session-Id` and
-`Mcp-Protocol-Version` headers and allow streaming responses.
+In the client, choose the `streamable_http` transport, enter the URL above, and leave
+authentication unset. llama.cpp's `--ui-mcp-proxy` may stay enabled; include `/mcp`
+in the upstream URL. A proxy must pass POST bodies, the `Accept` and `Content-Type`
+headers, and `Mcp-Session-Id` / `Mcp-Protocol-Version`, and allow streaming responses.
 
-Direct browser access is allowed only for explicitly configured origins. Use
-the actual address shown in the browser: `localhost` and `127.0.0.1` differ.
-Repeat `--mcp-allow-origin` for multiple UIs; wildcards and opaque `null` origins
-are rejected. Allowed origins receive scoped CORS preflight responses for
-GET/POST/DELETE and can read the session headers. An absent Origin is permitted
-for local clients such as curl; same-origin dashboard requests are also allowed.
-Other cross-origin MCP requests are rejected. The `/api/` dashboard routes retain
-their session-token and same-origin requirements; CORS is not enabled for them.
-This remains a trusted local, single-user service, not an authenticated public
-MCP server. Allowing an origin grants that UI access to the authoring tools.
+About origins:
 
-The SDK handles the initialize/initialized handshake, JSON-RPC requests, session
-IDs and protocol negotiation. POST requests accept `application/json` with
-`Accept: application/json, text/event-stream`; normal responses are JSON.
-Notifications return `202`. A successful initialize returns `Mcp-Session-Id`;
-send that header and the negotiated `Mcp-Protocol-Version` on later requests.
-Use DELETE to end the transport session. Unknown/expired session IDs return 404,
-so initialize again after a server restart. MCP transport sessions are separate
-from synthetic `create_tool_session` workbenches, and both share the project.
-
-GET with `Accept: text/event-stream` and a valid session opens the optional SSE
-notification stream while POST requests continue to work. There is no legacy
-`/sse` endpoint or persistent event replay store.
-
-Test initialization directly, independently of llama.cpp:
-
-```bash
-curl -i http://127.0.0.1:8765/mcp \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl-test","version":"1"}}}'
-```
-
-Expect `200`, a JSON-RPC initialize result and the `Mcp-Session-Id` header. Copy
-that ID below (use the response's protocol version if it differs):
-
-```bash
-REMIX_MCP_SESSION='paste-session-id-here'
-curl -i http://127.0.0.1:8765/mcp \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26' \
-  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-curl -i http://127.0.0.1:8765/mcp \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-curl -i http://127.0.0.1:8765/mcp \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_session","arguments":{}}}'
-curl -i -X DELETE http://127.0.0.1:8765/mcp \
-  -H "Mcp-Session-Id: $REMIX_MCP_SESSION" -H 'Mcp-Protocol-Version: 2025-03-26'
-```
-
-The initialized notification returns `202`; list/call return `200` with JSON-RPC
-results. To check CORS, repeat initialization with
-`-H 'Origin: http://127.0.0.1:8123'` and inspect `Access-Control-Allow-Origin`
-and `Access-Control-Expose-Headers`.
-
-#### Diagnosing proxy errors
-
-Before this endpoint was added, direct `POST /` returned `405`, `Allow: GET`,
-and `{"detail":"Method Not Allowed"}` from Remix; `/mcp` returned 404 because
-only stdio MCP existed. This reproduces the reported response without llama.cpp.
-A proxy's outer `Server: llama.cpp` header alone does not identify who generated
-the body. The current root remains a GET-only dashboard; use `/mcp` for MCP.
-
-If the direct initialize/list/call sequence succeeds but the proxied equivalent
-fails, compare the proxy's upstream path, method, Origin, Accept, session and
-protocol headers with these working requests. The observed `feature_disabled`
-403 is not a Remix error payload; inspect llama.cpp's proxy/access configuration
-and logs to locate it. An unexpected Origin can also produce a Remix 403 with a
-`detail` message; permit the actual UI origin explicitly. We cannot establish
-the behavior of a separate llama.cpp installation from direct server tests alone.
+- Use the exact address shown in your browser: `localhost` and `127.0.0.1` are
+  different origins. Repeat `--mcp-allow-origin` to allow several.
+- Wildcards and `null` origins are rejected. Requests with no `Origin` header (such
+  as curl) and same-origin dashboard requests are allowed.
+- Allowing an origin gives that UI access to the authoring tools. The `/api/`
+  dashboard routes keep their own session-token and same-origin checks.
 
 ### Stdio clients
 
-Configure your MCP client to launch the bridge. Use absolute paths appropriate
-for your checkout; the client starts this command as a subprocess:
+Configure your client to launch the bridge, using absolute paths:
 
 ```json
 {
@@ -157,827 +72,151 @@ for your checkout; the client starts this command as a subprocess:
 }
 ```
 
-On Windows, use the virtual environment's `Scripts/python.exe`. The installed
-`trajectory-remix-mcp --url http://127.0.0.1:8765` entry point is equivalent.
-Use the dashboard's port if you changed `--port`. Keep the dashboard running;
-exiting the MCP client leaves it running. The bridge writes only MCP messages to
-stdout. Running it interactively waits for an MCP client on stdin.
+On Windows use `.venv/Scripts/python.exe`. The `trajectory-remix-mcp --url …` entry
+point is equivalent. Match `--url` to your dashboard port. Unlike HTTP clients, the
+bridge's `--url` is the dashboard **root**, not `/mcp`.
 
-Only loopback HTTP URLs (`127.0.0.1`, `localhost`, `[::1]`) are accepted. The bridge
-bootstraps the same local session token as the browser, sends it in a header, and
-refreshes it after a dashboard restart. Host and Origin checks also apply to
-the bridge's API routes. The stdio bridge's `--url` targets the dashboard root;
-Streamable HTTP clients instead connect to `/mcp`. There is no remote hosting.
-MCP does not expose endpoint credentials, arbitrary file
-paths, shell execution, or provider configuration.
+Keep the dashboard running; closing the client leaves it running. The bridge accepts
+only loopback URLs (`127.0.0.1`, `localhost`, `[::1]`) and fetches the same local
+session token as the browser, refreshing it after a restart.
 
-## Tools
+### Check the connection
 
-All responses are available both as JSON text and MCP `structuredContent`.
-Edits return `sample_id`, the new dataset `revision`, and `saved: true` (dry runs return `saved: false`).
+Call `get_session` from your client. It returns the revision, generation status,
+tokenizer fingerprint and special-token spellings.
+
+To test HTTP directly, independent of any client:
+
+```bash
+curl -i http://127.0.0.1:8765/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl-test","version":"1"}}}'
+```
+
+Expect `200`, an initialize result, and an `Mcp-Session-Id` header. Send that header
+and `Mcp-Protocol-Version` on later requests (`notifications/initialized` returns
+`202`, then `tools/list` and `tools/call` return `200`). End the session with
+`DELETE /mcp`. After a server restart, old session IDs return `404`, so initialize
+again. To test CORS, repeat the first request with `-H 'Origin: http://127.0.0.1:8123'`
+and check `Access-Control-Allow-Origin`.
+
+### Troubleshooting
+
+- **`405 Method Not Allowed` on `POST /`:** the client is using the dashboard root.
+  Use `/mcp`.
+- **`503` from `/mcp`:** the MCP extra is not installed. Install it and restart.
+- **`403` with a `detail` message:** the request's `Origin` is not allowed. Add it
+  with `--mcp-allow-origin`.
+- **A `feature_disabled` `403`:** this is not a Remix error. Check the access settings
+  and logs of the proxy in front of Remix.
+- If direct curl requests work but proxied ones fail, compare the proxy's upstream
+  path, method, `Origin`, `Accept` and session headers against the working requests.
+
+## Learn one task at a time
+
+An agent should start with `get_authoring_guide()`, which returns a short starting
+page. Ask for one `topic` at a time rather than loading the whole manual:
+
+| Topic | What it teaches |
+| --- | --- |
+| `first` | [Create a tiny trajectory: start ticks, token streams, closure](../trajectory_remix/guides/first.md) |
+| `parallel` | [Overlap independent specialist work and anchor follow-ups](../trajectory_remix/guides/parallel.md) |
+| `edit` | [Repair wording and timing with targeted edits](../trajectory_remix/guides/edit.md) |
+| `sandbox` | [Seed files and verify visible reads](../trajectory_remix/guides/sandbox.md) |
+| `tools` | [Choose a small starter tool set](../trajectory_remix/guides/tools.md) |
+| `review` | [Semantic review checklist before sign-off](../trajectory_remix/guides/review.md) |
+| `search` | [Search query syntax](../trajectory_remix/guides/search.md) |
+| `metrics` | [Dataset metrics and annotation repair](../trajectory_remix/guides/metrics.md) |
+| `reference` | [Complete manual (Skill.md)](../trajectory_remix/Skill.md) |
+| `example` | [Complete build-graph trajectory JSON](../examples/build-graph-analysis.json) |
+
+`example` returns the full source JSON as a string in `content`, without changing the
+project. To use it, parse the string and pass it as `sample` to `create_trajectory`.
+It was timed for another tokenizer, so run `validate_trajectory` and retime if needed.
+To reduce the tool list shown to a model, prune it in your client; the server does
+not restrict tools.
+
+## Tool catalogue
+
+All responses are JSON text plus MCP `structuredContent`. Errors set `isError` with
+a message and, where applicable, a code (`conflict`, `busy`, `not_found`,
+`invalid_arguments`, `unknown_tool`, `quota_exceeded`). Unknown arguments are rejected.
+A failed `validate_trajectory` is a successful inspection that returns `valid: false`.
+
+### Guidance and session
 
 | Tool | Purpose |
 | --- | --- |
-| `get_guidance` | Read the complete editor guidance bundle: standard guides, custom dataset/scenario Markdown, scenario creation/review/repair prompts and checklists. Select `scenario` before creation or `sample_id` for the saved review contract. |
-| `get_authoring_guide` | Read a short starting guide or one lesson by `topic`; `reference` returns Skill.md and `example` returns the complete build-graph JSON trajectory. |
-| `get_session` | Read revision, generation status, tokenizer fingerprint and special token spellings. |
-| `get_review_checklist` | Automatically resolve a trajectory's scenario tag/provenance and fetch its semantic checklist and results schema. |
-| `review_trajectory` | Prepare an API-free review with the automatically fetched checklist, guide, source and compiler diagnostics; optionally omit full source. |
-| `repair_trajectory` | Apply atomic targeted edits using original event IDs, revision and checklist hash; compile the candidate, invalidate old assessments and return the checklist. Supports dry runs. |
-| `record_trajectory_review` | Validate every category/rule result and record the code-computed review verdict at 2/-2 without model calls. |
-| `query_trajectories` | Filter metadata scalars, tags and counts in SQL; return paginated UUIDs, hashes and summaries. |
-| `get_metadata_counts` | Group matching trajectories by metadata values, tags or cached counts. |
-| `list_trajectories` | Search readable text with AND/OR, negation, groups, wildcards, properties and tags; paginate trajectory attributes. |
-| `get_trajectory` | Read complete source JSON, including invalid drafts. |
-| `create_trajectory` | Create from full JSON, an empty draft, or `template: "demo"`. |
-| `duplicate_trajectory` | Deep-copy source and metadata under a new ID. |
-| `replace_trajectory` | Replace complete JSON, including otherwise malformed replay structures. |
-| `delete_trajectory` | Remove a trajectory from the session. |
-| `get_trajectory_metadata` | Read all top-level attributes except `replay`. |
-| `update_trajectory_metadata` | Merge-patch ID, defaults, metadata, schema/policy and other attributes. |
-| `list_events` | Read raw events with their current addresses; optionally filter by window. |
-| `get_event` | Read one raw event. |
-| `create_event` | Insert an event at a numeric or anchor tick, optionally at a list position. |
-| `update_event` | Set/remove settings such as window, operation, source, delivery, rate or loss. |
-| `move_event` | Move/reorder an event, or shift its numeric tick / anchor offset. |
-| `duplicate_event` | Copy an event to another tick/position. |
-| `patch_event_content` | Replace text/segments, or apply character-range patches. |
-| `delete_event` | Remove an event and its empty tick group. |
-| `rename_window` | Rename a window across all events, rejecting collisions. |
-| `apply_batch` | Apply up to 100 source edits atomically, with final validation and optional dry run. |
-| `diff_trajectories` | Compare source JSON against another sample or candidate; return JSON Patch and optional text diff. |
-| `get_edit_history` | View the session's available source undo/redo actions and optional patch details. |
-| `undo_edits` | Undo one or more source actions as one revision change. |
-| `redo_edits` | Reapply undone source actions. |
-| `validate_trajectory` | Compile and optionally run configured semantic LLM validators. |
-| `sign_off_trajectory` | Record the calling agent's completed review as Validated (2) or Rejected (-2), with reviewer, summary and required reviewed revision; no model API calls. |
-| `get_diagnostics` | Read compiler errors/warnings, optionally filtered by severity. |
-| `get_anchors` | Read resolved anchor ticks, phases and owning event paths/windows. |
-| `get_window_history` | Read one window's lifecycle, cumulative text, event spans and token rows. |
-| `preview_snapshots` | Read post-commit window state at ticks across an inclusive range. |
-| `list_simulated_tools` | Discover the simulated tools' exact schemas and per-session availability. |
-| `create_tool_call` | Schedule an executable tool event with a shared request/result window open from tick 0. |
-| `get_sandbox_state` | Inspect trajectory sandbox state and call statuses at a selected tick. |
-| `create_tool_session` | Create an isolated virtual-tool workbench with clock and quotas. |
-| `list_tool_sessions` | List workbenches with quotas, clock and state counts. |
-| `get_tool_session` | Inspect virtual files, memories, notes, skills and actual-call logs. |
-| `call_simulated_tool` | Execute a simulated tool, optionally recording its real call/result on a trajectory. |
-| `record_tool_interaction` | Record an earlier actual interaction without executing it again. |
-| `reset_tool_session` | Clear a workbench and restore its initial clock/budget. |
-| `delete_tool_session` | Destroy a workbench's RAM state and log. |
-| `save_dataset` | Report a checkpoint; applied source edits already commit to SQLite. |
-
-Tools include JSON input schemas, read-only/destructive annotations, strict type
-validation, and rejection of unknown argument names. Errors set MCP `isError`
-and include a message, plus a code where applicable (`conflict`, `busy`,
-`not_found`, `invalid_arguments`, `unknown_tool`, `quota_exceeded`). Compilation errors include
-diagnostic paths. A failed `validate_trajectory` is a successful inspection:
-it returns `valid: false` with diagnostics.
-
-## Complete example trajectory
-
-The [build-graph analysis example](../examples/build-graph-analysis.json)
-is bundled with the Python package. Retrieve it without GitHub or local
-filesystem access through the existing read-only guide tool:
-
-```json
-{"name": "get_authoring_guide", "arguments": {"topic": "example"}}
-```
-
-The response contains `content`, a string holding the full source JSON
-trajectory, not a summary or a Markdown guide. Parse `content` as JSON
-to obtain the sample object. Retrieval does not modify the project or
-increment the revision. To import it, pass that parsed object as the
-`sample` argument to `create_trajectory`, optionally supplying an
-unused `sample_id`. Omitting `topic` still returns the short starting guide.
-
-The scenario uses seven invisible `file_write` calls at tick 0 to seed
-six virtual Python modules and `build_config.json`; a user request is
-appended at tick 1; two independent `file_list` and `file_read`
-operations run concurrently beginning at tick 2. Kidra's reasoning and
-chat are generated in separate windows, followed by explicit EOS events.
-The response is synthetic example text, not a code execution result.
-
-Compilation depends on the tokenizer used to generate the fixed
-start ticks. The repository's character-level demo tokenizer cannot
-reproduce the original generated-token durations without retiming.
-After importing into a project, run `validate_trajectory` with a
-compatible tokenizer and adjust scheduling if necessary.
-
-## Editing rules
-
-### Trajectory sandbox history
-
-`create_tool_call` schedules an executable synthetic tool event in a trajectory.
-It accepts `sample_id`, string `tick` (numeric or anchor expression), `tool`, and
-an `arguments` object. Optional fields are `duration_ticks` (default 0), `window`
-(tool window ID; generated when omitted), `outcome` (recorded subagent
-only), `position`, `expected_revision`, `delivery` (`instant` or `stream`),
-`content` or `segments` (custom request text), `loss` (request supervision),
-`tokens_per_tick` (streamed result rate, default 1), and `auto_anchor` (default
-false; allocate an unused post-result anchor ID and persist it as `result-anchor`).
-
-Set `invisible: true` for external sandbox activity and optionally supply `source`
-(for example `"user"` or `"coder"`). This creates `op: "invisible-tool-call"` in
-source. Every registered tool may run invisibly, without a `window`, request
-content, delivery settings, loss or recorded outcome. Such calls have no model
-request/result tokens; tools may still write masked content into open windows.
-Built-ins skip implicit call-budget and clock increments for invisible calls.
-Hidden failures are author-facing compilation errors. Invisible schema arguments
-are accepted only in invisible trajectory calls.
-Compilation must succeed before one
-undoable source edit commits. It is also available inside `apply_batch`. Save
-immediately, as with other edits.
-
-```json
-{
-  "name": "create_tool_call",
-  "arguments": {
-    "sample_id": "example",
-    "tick": "150",
-    "tool": "file_write",
-    "arguments": {"path": "/example.txt", "content": "new"},
-    "duration_ticks": 25,
-    "window": "write-result",
-    "expected_revision": 5
-  }
-}
-```
-
-The tool window exists from tick 0. The `<tool>` request always emits one model
-token per tick starting at `tick`; execution starts on the next tick after its
-final token. Unfinished tools run every tick and may update state or emit output
-on each invocation. Built-ins retain duration as a compatibility delay.
-`delivery` controls `<tool_result>`: `instant` inserts output at its invocation
-tick; `stream` queues it at `tokens_per_tick`. State changes occur when reported.
-Custom `content`/`segments` can include anchors
-and NOOPs to pause a request while a parallel call returns, then resume with its
-result. Omitted text produces a canonical request from `tool` and `arguments`;
-those structured fields always determine execution. Result text is always masked.
-With `auto_anchor: true`, the returned `tool_call.result_anchor` identifies a
-phase-B anchor at `tool_call.result_end`, the final result token's tick. Use
-`{N_TICK:id}+1` to schedule follow-up calls or close the same tool window.
-Multiple calls can share an open tool window. Equal completions use stable
-replay order. Use `list_simulated_tools` for exact argument schemas. Runtime
-built-in failures become `{ok:false,error:...}` observations. The legacy recorded
-`outcome` is author-only context consumed by the built-in subagent; it never
-overrides a deterministic tool's actual result.
-
-`get_sandbox_state(sample_id, tick, include_calls=true)` returns `revision`, `tick`
-and the opaque `sandbox` dictionary, plus separate `tool_calls` when requested.
-The dictionary starts empty; tools own all of its keys. Invisible calls
-are marked `invisible: true` and include `source` in this author-facing history.
-Each visible call has resolved `request_start`, `result_end`, execution
-`start`/`end`, arguments and status (`composing`, `running`, `completed`, `failed`);
-composing and running calls omit their future outcome. The output limit is 4 MB;
-use `include_calls=false` to omit call logs when inspecting a large state.
-`preview_snapshots` also includes sandbox state for each requested tick.
-
-Scheduled calls execute against the trajectory's sandbox. Interactive
-`create_tool_session` / `call_simulated_tool` workbenches have independent RAM
-state. `record_tool_interaction` retains an actual workbench observation as text;
-it does not schedule an executable replay event or copy unrecorded workbench
-state. Generated LLM tool interactions automatically use executable events.
-
-### Source editing
-
-- Address trajectories by their stable `sample_id`, not the dashboard's list index.
-  IDs must be unique and nonempty. Duplicates receive a UUID unless you specify
-  `new_sample_id`.
-- Read the current revision with `get_session` or any source read. Pass it as
-  `expected_revision` to each edit to reject stale writes. The check covers the
-  whole dataset, including browser edits. Each successful edit increments the
-  revision once. If you omit it, the edit applies to the latest source.
-- Events are addressed by the exact **string** tick key and a zero-based
-  `event_index` within that key. Use `list_events` after inserting, moving or
-  deleting events. `position` defaults to appending; for moves it indexes the
-  destination array **after** removing the original event.
-- Edits work on copies and commit atomically. `validate: true` compiles the
-  candidate first and rejects the whole edit on an error. The default is false,
-  allowing multi-step repairs, incomplete new windows, and temporarily dangling
-  anchor references. Compiler warnings do not reject an edit.
-- An empty new trajectory is an authoring draft and needs executable events
-  before validation can pass. Supply full `sample` JSON to import a trajectory,
-  or use `template: "demo"` for a compilable example.
-- Generation must be stopped before editing. Read tools remain available during
-  generation. Source edits commit immediately to SQLite. `save_dataset` reports
-  a checkpoint and never loads or rewrites all trajectories.
-- The browser reloads a clean selected sample on the next 1.5-second poll.
-  If it has pending edits, a conflicting save is rejected and its draft stays
-  visible. Copy any text you need before selecting the sample again to reload it.
-
-Metadata uses **JSON Merge Patch (RFC 7396)** against top-level attributes:
-objects merge recursively, arrays replace, and null removes a field. `replay`
-is excluded. For example:
-
-```json
-{
-  "sample_id": "example",
-  "patch": {
-    "metadata": {"title": "Reviewed response", "tags": ["reviewed"], "obsolete": null},
-    "defaults": {"implicit-noop-loss-weight": 0.2}
-  },
-  "expected_revision": 5
-}
-```
-
-For `update_event`, settings replace individual field values; `remove_fields`
-removes optional fields. Use `patch_event_content` for text/segments. Changing an
-event's `window` affects that event alone; `rename_window` changes all event
-references and unescaped `{WINDOW:id}` markers in content/segments. Other
-free-form content, escaped markers and metadata are not rewritten by a rename.
-Close windows using a generate event with the configured EOS token, never `close`.
-
-Every window receives an automatic masked header at opening. Use
-`{WINDOW:tool0}` in authored content to refer to a stable logical window ID;
-compilation/export resolves the marker to a numeric slot shared with its header.
-`get_window_history` and timeline snapshots include these headers in `text` and
-return `header`/`slot` in window metadata. Literal markers use `\{WINDOW:tool0}`.
-
-`move_event` accepts either `to_tick` or a signed `tick_offset`. Offsetting
-`"12"` by `-2` produces `"10"`; offsetting `"{N_TICK:7}+1"` by `2` produces
-`"{N_TICK:7}+3"`. Negative resulting ticks/offsets are rejected. Anchor expressions
-remain attached to their anchors. Duplicating events copies marker IDs verbatim;
-edit any duplicate anchor definitions before validating.
-
-## Example authoring sequence
-
-Each block below is the arguments object for the named tool. Use the revision
-returned by the preceding edit for the next `expected_revision`.
-
-`create_trajectory`:
-
-```json
-{"sample_id": "example"}
-```
-
-`create_event` to open a window:
-
-```json
-{
-  "sample_id": "example",
-  "tick": "0",
-  "event": {"op": "open", "window": "chat", "window-type": "chat"},
-  "validate": true
-}
-```
-
-`create_event` to stream a response (use your `get_session` EOS spelling):
-
-```json
-{
-  "sample_id": "example",
-  "tick": "1",
-  "event": {"op": "generate", "window": "chat", "content": "Hello!<|eos|>"},
-  "validate": true
-}
-```
-
-`patch_event_content`:
-
-```json
-{
-  "sample_id": "example", "tick": "1", "event_index": 0,
-  "expected_text": "Hello!<|eos|>",
-  "patches": [{"start": 0, "end": 5, "text": "Welcome"}],
-  "validate": true
-}
-```
-
-Patches use Unicode character indexes into the original text, with inclusive
-`start` and exclusive `end`. They must not overlap and are applied together;
-`start == end` inserts text. For segmented events, use `segment_index` with
-patches, or supply the complete replacement `segments` array. Supply exactly
-one of `content`, `segments`, or `patches`. Replacing text removes segments and
-vice versa; other settings and event-level loss remain intact.
-
-Then call `validate_trajectory`, `get_window_history` with `window: "chat"`,
-`preview_snapshots` for a range within `0..max_tick`, and `save_dataset`.
-
-## Inspection and limits
-
-`validate_trajectory` and `get_diagnostics` use the tokenizer-aware compiler.
-It stops at its first error. Repair that error and run validation again to find
-the next. Open-window warnings are expected for unfinished drafts. Semantic
-validation is opt-in with `semantic: true`; it uses the same standalone service
-and configured validation endpoint as **Edit → Validation → Validate Trajectory**,
-and can contact provider endpoints. MCP reports do not alter the sample.
-
-`get_window_history` returns cumulative durable text through `end_tick`, even
-when `start_tick` is later than zero. Its events overlap the selected range, and
-its token rows are restricted to the range. NOOP rows are excluded unless
-`include_noops: true`. `offset`/`limit` paginate rows; `total_rows` gives the
-filtered total. Control tokens remain in rows but are omitted from display text.
-
-Snapshots are structured window-state previews, including text, historical
-durable-token counts (`cached_tokens`), window status (`pending`, `open`,
-`closed`), and live `kv_tokens`. They show state **after phase D** at each
-selected tick, including content before the requested range. Closed windows
-retain display text and have zero live KV. Bounds are inclusive; `step` samples
-`start_tick`, `start_tick + step`, and so on through `end_tick`. `windows` filters
-the returned windows.
-
-Preview requests are bounded to 100 frames and 4 MB of frame JSON, independently
-of the complete plan's row count. A trajectory above 50,000 rows can be inspected
-with a small range, including all context preceding that range. Narrow the tick
-range, increase `step`, or filter `windows` to reduce output. These filters do
-not remove historical context or change replay timing. Sandbox/tool history is
-still included, so a large sandbox can exceed the output budget even with a
-window filter; use `get_sandbox_state(include_calls=False)` to omit call logs.
-The compiler's 100,000-tick and 500,000-row safety limits remain in effect;
-expanded rows include implicit NOOPs for idle windows. List/history page sizes
-are bounded to 5,000 entries. Full source reads return untruncated sample JSON.
-The existing 40 MB request limit also applies.
-
-Dashboard previews use the same compiled-plan cache as MCP inspection: at most
-six entries and 500,000 retained rows across entries, with 15-minute idle expiry.
-Within a dataset revision, unchanged source/tool definitions reuse compilation;
-edits receive a new plan ID. Revision invalidation preserves tool-dependency
-checks and pinning when a previously previewed draft is saved. The dashboard
-requests up to eight frames at a time (API maximum 16),
-retains only the current range, and falls back to a single frame if a range
-exceeds 4 MB. Seeking requests the selected tick directly. A missing cached ID
-returns an explicit expired-preview error; recompilation restores it.
-
-`POST /api/compile` returns `valid`, `plan_id`, `row_count`, compact timeline
-intervals/lifetimes and `preview.available`. It omits expanded `rows`, event
-text, tool arguments/results and sandbox history. An oversized timeline returns
-HTTP 200 with `valid: true`, `preview.available: false` and an actionable message;
-compiler errors still return diagnostics with HTTP 422.
-`GET /api/frames/{plan_id}?start_tick=N&end_tick=M` returns inclusive post-commit
-frames with at most 16 frames and 4 MB per response; `/api/frame/{plan_id}/{tick}`
-returns one bounded snapshot. Preview output limits return HTTP 413 with
-`code: "preview_limit"`, independently of compilation validity.
-
-## Custom dataset guidance
-
-`get_guidance()` returns the exact bundle shown in **View → Trajectory Guidelines**.
-Each entry in `documents` has an ID, title, content, format, source and editable
-flag. Standard files are read-only. `get_guidance(scenario="user_scenario")` includes
-that scenario's prompts and rules before creation; `get_guidance(sample_id="id")`
-uses the sample's saved checklist when present. Select only one of these arguments.
-The response lists available scenarios, including custom scopes retained without
-scenario files. The dashboard uses the same command via `GET /api/guidance`.
-
-Edit custom Markdown in **Generation Settings → Custom Guidelines**. The project's
-`review_guidance` configuration accepts `guide`, `checklist`, and `scenarios`, a map
-from scenario names to additional `guide`/`checklist` pairs. Each text field accepts
-up to 200,000 characters. Configuration persists with the SQLite dataset and its
-normal configuration import/export. Clearing the text removes the requirement.
-
-Current dataset and matching scenario additions supplement the saved standard
-scenario checklist. `review_trajectory` and `repair_trajectory` return the guidance
-bundle. Each nonempty custom scope adds a `$custom.dataset` or `$custom.scenario`
-check whose result is `{"valid": true/false, "feedback": [...]}`; follow the returned
-`results_schema`, including all existing per-rule scenario results. The custom
-text participates in `checklist_hash`, so repairs and review recording reject an
-outdated contract even if the sample's saved scenario snapshot is unchanged.
-Dataset-only custom requirements can also be reviewed without a scenario registry.
-Compiler validation remains separate from an agent's semantic assessment;
-`validate_trajectory` points agents to the guidance tool before that assessment.
-
-## Scenario review and repair
-
-The bundled flow declares `tag: user_scenario` in flow.yaml. Generation adds
-`"user_scenario"` to `metadata.tags`, searchable as `#user_scenario`, as well as
-all sampled scenario tag names and `role:trait` names. Custom flows can define
-another unique `tag`; the default is the scenario folder name. `metadata.scenario`
-retains that folder identity. Newly generated samples also save a portable
-`metadata.review_checklist` containing the original rules and review/repair
-prompts, without endpoint configuration or credentials.
-
-Use these authoring MCP calls (not synthetic tools within a replay):
-
-```json
-{"name":"list_trajectories","arguments":{"query":"@state:candidate #user_scenario","limit":5}}
-```
-
-For each matching sample:
-
-```json
-{"name":"review_trajectory","arguments":{"sample_id":"example-1"}}
-```
-
-The response automatically includes `checklist`, `guide`, current `sample`,
-`context` (concept, roles and selected scenario traits), compiler diagnostics,
-`source_hash` and `revision`. The checklist includes `scenario`, `tag`,
-`checklist_hash`, every rule's requirement/scope/applicability, repair guidance,
-and the complete `results_schema`. Its `source` is `generation_snapshot` when
-saved with the sample, or `scenario_registry` for older/tag-only samples.
-`include_source:false` omits the potentially large source; inspect bounded events,
-window histories and snapshots instead. `get_review_checklist(sample_id=...)`
-retrieves only the checklist when the source is already known.
-
-A saved snapshot takes precedence over changed scenario files and survives
-export/import and a server without --scenarios-dir. Older/tag-only samples resolve
-by tag, then `metadata.scenario`, including aliases for retired names. Manual or
-unrecognized samples use the common review contract; custom dataset/scenario
-requirements are included. Ambiguous/conflicting scenario identities still fail
-explicitly. Older samples are not silently retagged or rewritten. A generated snapshot is source provenance, not proof of
-review correctness or authenticity; editing it changes the source/checklist hash.
-
-Evaluate every rule independently, following the returned review guide. Apply
-fixes with `repair_trajectory`, passing `sample_id`, `expected_revision`,
-`checklist_hash`, and a nonempty `edits` array (at most 32). Actions match the
-generation repair schema: replace/delete an original `event_id`, insert_before/
-insert_after it, append an event at a tick, or replace_text using an exact unique
-`old` string, `new` string and JSON-pointer `field`. The entire candidate must
-compile before a single undoable commit; identity and metadata cannot be edited
-through this schema. `dry_run:true` validates without saving. The response
-contains compiler diagnostics, the automatically fetched checklist and
-`review_required:true`; saved repairs invalidate prior assessments.
-
-Reread `review_trajectory` after all repairs, review the entire trajectory again,
-and call `record_trajectory_review` with that revision and checklist hash, your
-`reviewer`, a specific `summary`, and `results` matching `checklist.results_schema`.
-Results are keyed by qualified category, such as `validate.reasoning`, each with
-its required `checks` object containing every rule's evidence/status/feedback.
-The schema is generated dynamically; do not hard-code the bundled list or omit
-passing categories. Group-scoped generation rules still need a whole-trajectory
-assessment in this final external review. Legacy checks without rules retain
-valid/feedback responses as indicated by the returned schema.
-
-Missing/extra categories or rules, invalid types/applicability, blank evidence,
-contradictory feedback, unresolved context, stale revisions and changed checklist
-hashes cannot approve a sample. Inspect missing evidence before recording a
-verdict. Code derives acceptance and preserves per-item results and the checklist
-hash in the evaluation. All accepted checks record state 2; failures record -2.
-Compiler errors block passing reviews but can accompany a rejection. Warnings
-remain the reviewer's responsibility. No tool in this workflow calls a model
-endpoint or grants human Ready (3). For manual/non-scenario samples,
-`sign_off_trajectory` remains the general unstructured sign-off tool.
-
-## Atomic batches and diffs
-
-`apply_batch` accepts an `edits` array containing `{name, arguments}` objects.
-This differs from `repair_trajectory`, whose `edits` use `action` and original
-`event_id` references. Repair tools cannot be nested inside apply_batch.
-Supported names are the twelve trajectory/event mutation commands from
-`create_trajectory` through `rename_window`; the input schema enumerates them.
-Read tools, saves, batches, history actions and simulated-tool commands cannot
-be nested in a batch. Supply `expected_revision` on the outer batch only.
-
-For example, this batch creates a generated stream and its opener together:
-
-```json
-{
-  "edits": [
-    {
-      "name": "create_event",
-      "arguments": {
-        "sample_id": "example", "tick": "1",
-        "event": {"op": "generate", "window": "new-chat", "content": "OK<|eos|>"}
-      }
-    },
-    {
-      "name": "create_event",
-      "arguments": {
-        "sample_id": "example", "tick": "0",
-        "event": {"op": "open", "window": "new-chat"}
-      }
-    }
-  ],
-  "validate": true,
-  "dry_run": true,
-  "expected_revision": 5
-}
-```
-
-The default `validate: true` compiles changed surviving samples at the end, so
-an intermediate state may be invalid. Individual edits may also explicitly
-request validation. Any failed edit or final validation leaves source, revision,
-and history unchanged. Unchanged invalid samples do not block editing another
-sample. A successful batch increments the revision once and creates one undo
-action, across all affected samples. Intermediate revision numbers are private.
-
-`dry_run: true` validates and returns prospective results/changes without editing
-anything. Batch `changes` are RFC 6902 add/remove/replace operations against the
-dataset's **sample array**. Diff-tool `changes` are operations against a **single
-sample object**. These are inspection outputs; the batch interface accepts named
-edits, not arbitrary patches.
-
-`diff_trajectories` requires `sample_id` and exactly one of `other_sample_id` or
-`other_sample` (candidate JSON). `ignore_id: true` helps compare duplicates.
-`offset`/`limit` paginate operations. `include_unified: true` adds a readable JSON
-diff, capped at 200,000 characters with `unified_truncated` indicating truncation.
-Diffs work on invalid drafts and never compile or mutate either input.
-
-## Undo and redo
-
-`get_edit_history` lists undo actions newest first and redo actions in the order
-they will be reapplied. `include_changes: true` adds each action's forward patch.
-Use `undo_edits` / `redo_edits` with `steps` (1–50, default 1) and optional
-`expected_revision`. Multiple steps are restored atomically and increment the
-revision once. Undo is allowed to restore an invalid draft. New source changes
-discard the redo branch. Source changes made by browser CRUD/import, generation,
-MCP edits, batches and tool-interaction recording share this history.
-
-The dashboard also has **Edit → Undo / Redo**. It persists pending source edits
-before undoing them. During an active compilation, wait for it to finish.
-Outside focused text editors and open dialogs, Ctrl/Cmd+Z undoes, and
-Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes. Text inputs retain native text undo.
-
-History retains up to 50 actions / 32 MB of serialized history entries in RAM.
-Old or oversized actions may be evicted, with a notice in `get_edit_history`.
-History resets on restart and is not written to datasets. Configuration changes,
-credentials, saves, and virtual-tool session state are excluded. Undo/redo must
-wait until generation is stopped; each undo/redo commits immediately to SQLite.
-External sample changes invalidate local history, so undo cannot overwrite another
-writer. Bulk replacement imports clear history to keep memory bounded.
-
-## Simulated Remix tool sessions
-
-These commands use the same `Sandbox` dispatcher as trajectory generation:
-
-- Chat messages: `chat` with `{"content":"Hello!"}`. It requires an open
-  window named `chat`. For `call_simulated_tool`, supply `record_sample_id` to
-  use that trajectory's open chat window and agent name, and record the message
-  as an undoable edit. Standalone sessions have no chat window and return an
-  error observation. Scheduled `create_tool_call` events check the window at
-  completion. `metadata.agent_name` supplies the speaker (default: Kidra), and
-  `metadata.user_name` can store the user's name.
-- Synthetic clock: `time_now`, `time_advance`, `time_set`.
-- Virtual RAM filesystem: `file_write`, `file_read`, `file_list`, `file_delete`.
-- Versioned artifacts: `file_stat`, `file_patch`; writes return a `version`.
-  `file_read` optionally accepts a pinned `version`, and writes/patches accept
-  `expected_version` to reject stale changes. Old versions remain readable after
-  editing or deleting the current file, within the session's storage quota.
-- Lexical memory search: `memory_save`, `memory_search`.
-- Prioritized TODO tasks: `note_save`, `note_list`, `note_delete`. The compiler
-  opens a managed `notes` JSON context window for trajectories using these tools.
-- Text skills: `skill_save`, `skill_load`, `skill_list`.
-- Authored synthetic delegation: `subagent`; the author supplies its outcome.
-- Conversation inspection: `subagent_list`, `subagent_get`, `subagent_close`.
-- Coordination status: `runtime_status` returns synthetic time, completed call
-  count, task counts and subagent identities/statuses.
-
-Start with `list_simulated_tools` to read exact names, required arguments and
-availability. Create a workbench with `create_tool_session`, for example:
-
-```json
-{
-  "session_id": "experiment",
-  "clock_seed": "2030-01-01T09:00:00Z",
-  "tick_rate": 10,
-  "max_calls": 64
-}
-```
-
-Clock and call-budget defaults come from the dashboard configuration. Sessions
-are independent of each other and of generation sandboxes. They are not tied
-to a sample ID; record their interactions into any suitable trajectory. Virtual
-paths never access host files. Sessions do not expose shell commands, process
-execution, arbitrary URL fetching, or host credentials.
-
-`call_simulated_tool` can execute and record a call together:
-
-```json
-{
-  "session_id": "experiment",
-  "name": "file_write",
-  "arguments": {"path": "/report.txt", "content": "Verified 192 files."},
-  "record_sample_id": "example",
-  "expected_revision": 7
-}
-```
-
-Without `record_sample_id`, the call changes only the workbench. The response
-contains an interaction ID, the actual arguments, outcome and synthetic clock.
-`outcome.ok: false` represents an actual simulated failure (for example a missing
-file) and may also be recorded. Invalid arguments are rejected before execution.
-Every dispatched workbench call consumes call budget and advances the workbench's
-logical tick (one tick for instant calls). Simulated elapsed seconds are derived
-from that tick and `tick_rate` (default 10 tokens/s), never from call count.
-`time_advance` additionally shifts the synthetic anchor by its requested seconds.
-Source inspection with `get_tool_session` does not advance ticks or consume calls. `time_set` replaces the clock with supplied
-local date/time fields, randomizing explicit nulls deterministically. All seven
-fields are required; see [synthetic time rules](SANDBOX.md#setting-synthetic-time).
-
-Recording appends supervised `<tool>` request text followed by masked
-`<tool_result>` content in the same tool window, open from tick 0. The response's
-`call_window` and `result_window` identify that same window. Results remain open
-for subsequent trajectory reasoning; close them
-later with generated EOS if appropriate. Marker-looking strings and special
-tokens in tool JSON are escaped as literal data while preserving their decoded
-values. Recording requires a compilable sample or a new empty draft and stopped
-generation. Source and virtual state/log commit together; a rejected recording
-leaves them unchanged. Undoing a recording restores source only, so it never
-silently reverses a tool experiment.
-
-Use `record_tool_interaction` with `sample_id`, `session_id` and `interaction_id`
-to record a retained earlier result without consuming another call. Recording
-the same interaction twice in one sample is rejected. A recording removed by
-undo may be recorded again from the retained log.
-
-`get_tool_session` returns RAM state and the call log; `include_state` and
-`include_log` can reduce its output. `list_tool_sessions` gives summaries.
-`reset_tool_session` clears state/log and restores the initial clock and budget;
-`delete_tool_session` destroys it. There are at most eight sessions, each limited
-to 256 calls, up to 2 MB of virtual storage, and a 4 MB retained call log. Old log
-entries are evicted, so record useful interactions before they expire. Session
-state and logs disappear on server shutdown and are excluded from dataset saves
-unless explicitly recorded as trajectory events. In-flight calls prevent another
-call, reset or deletion of that workbench; cancellation preserves prior state.
-
-`subagent` is available without any configured endpoint. Supply an authored
-`outcome` at the top level of `call_simulated_tool`, separate from the model's
-`arguments`:
-
-```json
-{
-  "session_id": "experiment",
-  "name": "subagent",
-  "arguments": {"task": "Implement the parser"},
-  "outcome": {
-    "ok": true,
-    "result": {"conversationId": "coder", "response": "I used a state machine."}
-  }
-}
-```
-
-Read retained history using `subagent_get` or `get_tool_session`, then author the
-next response yourself. Follow up with `arguments: {"task":"Why that choice?",
-"resume":"coder"}` and another authored `outcome`. Replies should reflect only
-that specialist's task, retained history and explicitly supplied artifact versions.
-Independent calls create independent conversations. The author may choose an ID;
-otherwise Remix assigns one. No model/provider request or real agent launch occurs.
-A missing outcome becomes a failed synthetic turn; malformed outcomes are rejected
-before workbench dispatch. Deterministic tools reject authored outcome overrides.
-For timestamped executable replay, supply the same outcome to `create_tool_call`.
-The generation tool loop advertises every public tool schema, including `subagent`; the built-in subagent does not invoke nested providers;
-authored seed conversations remain available for inspection by ordinary tools.
-
-Optional `artifacts` is an array of `{"path":"/code.py","version":"sha256:..."}`
-references. Only those immutable versions are resolved into the delegated context;
-the parent's other RAM state and trajectory context are excluded. This keeps source
-prompts and compiled requests compact while supplying reviewers with actual source.
-`subagent_get` accepts `conversationId`; list/get reveal retained history and
-statuses (`running`, `ready`, `failed`, `closed`). Close retains history and prevents
-further resumes. A failed dispatched turn returns its `conversationId` alongside
-`ok: false` and `error` for inspection or retry. Resuming an unknown, running or
-closed conversation fails. Replay
-checks availability at dispatch, so a later completion cannot justify an early
-resume. Parallel recorded conversations remain independent.
-
-`note_save` uses `name` to identify a TODO task. New tasks require `description`,
-`priority` (`critical`, `very high`, `high`, `medium`, `low`, `very low`)
-and `status` (`not started`, `doing`, `paused`, `blocked`, `done`).
-Optionally provide `blocked_by` as an array of task names. Updates retain
-omitted fields; clear blockers with an empty array. Cycles are rejected and
-all blockers must be done before completing a task. `note_list` returns the
-six priority buckets, matching the always-open, externally updated `notes`
-context window. This window occupies a project slot and appears at tick zero
-in trajectories that invoke note tools; it may not be manually authored.
-
-Synthetic subagent responses are bounded to nonempty text of at most 200,000
-characters and recorded outcomes to 200,000 bytes. Conversation state and artifact
-versions count toward storage quotas. Parallelism is represented by overlapping
-scheduled calls, not a background worker registry. Test results can be authored
-scenario data; Remix does not execute them or verify arbitrary prose claims.
-See [sandbox behavior](SANDBOX.md) for timing and compatibility details.
-
-## Verification
-
-```bash
-python -m pip install -e '.[mcp,test]'
-python -m pytest -q
-python tests/run_frontend.py
-```
-
-MCP tests use the official client for initialization, tool discovery, structured
-results and error handling, including a real stdio subprocess connected to a
-temporary live dashboard. Core authoring tests run without the MCP extra; MCP
-protocol tests are skipped when the SDK is absent. DOM tests cover external edits
-and pending-browser-draft conflicts. Semantic providers are mocked in tests.
-
-Tests also cover batch rollback and final-state validation, JSON Patch roundtrips,
-history across browser/generation/MCP edits, sandbox isolation, call budgets,
-literal marker content, authored outcomes, recording, busy workbenches and revision conflicts.
-
-## Querying metadata and project constraints
-
-`get_session` includes `max_window_slots` and `slot_policy`. The slot budget is
-fixed during project initialization. All authoring paths reject a trajectory
-that declares too many distinct windows, including implicit tool windows.
-The immutable trajectory `uuid` seeds `uuid-hash-v1` allocation; `id` is an
-editable unique label. UUID changes are rejected; duplicates receive new UUIDs.
-
-`list_trajectories(query="python -(math complex) #coding")` uses the same search
-language as the dashboard. It searches readable source string values, including
-replay text, arguments and authored outcomes. Spaces mean AND, `|` means OR,
-`-` negates a term/group, parentheses nest, and `*` provides word wildcards.
-`#tag` filters complete metadata tags; properties are `@name`, `@uuid`,
-`@windows` (numeric comparisons), `@uses_tool` (actual visible/invisible calls),
-`@state` (validation stage), `@batch` (generation batch ID),
-`@generation:unfinished/complete` (automated generation independently of review), and
-`@errors:true/false` / `@warnings:true/false` (cached local compiler diagnostics).
-Use `@errors:false @warnings:false` for trajectories that compile without diagnostics.
-For example, `list_trajectories(query="@state:candidate", limit=5)` discovers
-five candidates for external review without calling a model API.
-`list_trajectories(query="@generation:unfinished", limit=50)` discovers the same
-unfinished automated drafts as the resume queue, including checkpoint problems
-needing attention and excluding known manual copies. Combine
-`@generation:complete @state:pending` for completed generation awaiting review.
-All matching is case-insensitive. Filtering precedes `offset`/`limit` pagination.
-Read [the full syntax guide](../trajectory_remix/guides/search.md) or retrieve it
-through MCP with `get_authoring_guide(topic="search")`.
-
-Before reviewing or repairing, read `get_authoring_guide(topic="review")`, the
-[semantic review checklist](../trajectory_remix/guides/review.md). It explains
-shared open-window attention, redundant file operations, evidence lifetimes
-throughout generation, and independent correctness checks. Zero compiler
-warnings do not establish these properties.
-
-After repairing a candidate, edits clear previous evaluations while preserving its state. To sign off
-your own review, reread the repaired source, inspect compiler diagnostics and
-semantic correctness, then call:
-
-```json
-{"name":"sign_off_trajectory","arguments":{"sample_id":"example-1","verdict":"validated","reviewer":"GPT-6.1 via Codex","summary":"Reviewed tool visibility, timing, answer correctness and chat delivery after repairs.","expected_revision":42}}
-```
-
-Replace `42` with the revision of the source you actually reviewed. A stale
-revision fails without changing the sample. `verdict: "rejected"` records -2 and
-can also record rejection of a sample that fails compilation. A passing review
-requires successful compilation; returned warnings remain the reviewer's
-responsibility. The tool records a self-reported reviewer label, summary,
-timestamp, reviewed revision, source hash and tokenizer/tool fingerprints in
-`metadata.evaluations`. It does not independently verify the agent's assessment
-or identity and does not invoke configured model endpoints. Subsequent content
-edits invalidate the sign-off record while preserving the trajectory's state;
-undo/redo includes it. It never marks Ready (3).
-
-`query_trajectories` accepts `filters: [{key, op, value}]`, `tags`, `tag_mode`
-(`all`/`any`), `offset`, and `limit`. Scalar filter operators are
-`eq/ne/lt/lte/gt/gte/exists`. Keys are literal top-level metadata keys, except
-reserved `counts.events`, `counts.windows`, `counts.tags`. Missing properties
-do not match comparisons; JSON null is distinct from an absent property and
-booleans are distinct from numbers. Results include UUID, content hash, metadata,
-tags and cached counts, with no replay payloads.
-
-`get_metadata_counts` takes the same filters/tags, plus `key` (default `tags`)
-and `limit`. It returns bounded value/count groups and total matching trajectories.
-Tag groups deduplicate repeated tags within each trajectory. Objects/arrays remain
-stored metadata but are not grouped as scalar values.
-
-
-## Generic tool protocol
-
-The sandbox is an opaque dictionary initialized with tick_rate (default 10 tokens/s). `get_sandbox_state`,
-`preview_snapshots`, and `/api/samples/{index}/sandbox/{tick}` keep `sandbox` and
-`tool_calls` separate. No store or clock key is guaranteed to exist. All tools
-use the same per-tick run protocol; unfinished tools can emit output and mutate
-state on multiple ticks. Built-in `duration_ticks` remains a compatibility delay.
-
-Any tool may be scheduled with `invisible: true`. Full author schemas may include
-properties marked `invisible`; these are allowed only in invisible trajectory
-calls. Visible event editing and `call_simulated_tool` reject such arguments.
-The old list of external mutation tools no longer restricts invisible calls.
-
-Insert selected public schemas using `create_event` with an event like
-`{"op":"show_tools","window":"tools","tools":["chat"],"randomly-add-additional-tools":true}`.
-Open the dedicated tools window first with `window-type: "tools"`; keep schemas
-out of the system prompt. This is a masked text append to that window. The checkbox editor
-supports the same fields. See [the tool contract](SANDBOX.md) for custom Python
-modules, state snapshots, and external schema/hash dependencies.
-
-Compiler diagnostics warn about `show_tools` in a system window
-(`tools_in_system`) and reply text generated directly into chat
-(`direct_chat_generation`). Send replies through the visible `chat` tool;
-EOS/NOOP control events in chat are allowed. These warnings do not fail local
-compilation, and include the source event path for targeted repairs.
-
-Tick expressions also accept `max({N_TICK:7}+1, {N_TICK:8}+1)` for branch joins, including nested maxima. Authoring move offsets shift every operand without detaching anchors. See the authoring guide for attachment windows, parallel reasoning, context lifetimes, and `show_tools`.
-
-## Dataset metrics
-
-Use `get_authoring_guide(topic="metrics")` for coverage analysis, numeric
-distributions, annotation repairs and the limitations of source measurements.
-The shared commands are `get_dataset_metrics`, `refresh_dataset_metrics`,
-`get_dataset_metric_distribution` and `query_dataset_metrics`; they work over both
-stdio and Streamable HTTP without starting generation. Prefer
-`population="accepted_train_originals"` for observer gap analysis.
-Use `population="all"` when finding legacy examples missing split/original metadata.
-`get_metric_annotation_context` bundles sample evidence, field/label definitions
-and dataset/scenario guidance for backfilling annotations. Cache rebuilds return
-immediately with a job ID: poll `get_dataset_metrics_status` and use
-`cancel_dataset_metrics_refresh` to stop after the current sample. Retrying joins
-the running job, including after the initiating MCP client disconnects.
-
-## Content-first generation evidence
-
-`get_generation_record(sample_id, request_index?, include_failures=false, recovery_id?)` exposes original generation requirements, bounded request summaries, selected raw responses, and retained construction failures without inference. `get_generation_analytics()` compares candidate retention, inference counters, explicit external repairs, and Ready approvals by generation mode. Use the existing scenario review and repair tools against the saved original checklist.
-
-The standard `user_scenario` and `idle_scenario` flows generate without validation.
-`validate_trajectory(semantic=true)` uses the same explicit service as **Edit →
-Validation → Validate Trajectory**, without recording a sign-off. Samples without
-a scenario snapshot use the shared standard checklist; older saved contracts remain
-authoritative. Old noval names are creation aliases, not additional scenario choices.
-
-
-Recovery IDs in generation provenance identify pre-recovery versions. Pass
-`recovery_id` to `get_generation_record` to inspect an archived source/checkpoint,
-including its original context, raw requests and failed proposals. The returned
-`archived_sample` is historical evidence; repair the current saved trajectory and
-review it against its current original checklist. Recovery archives are stored
-with the SQLite project. Force resume and restart never grant Ready approval.
+| `get_session` | Revision, generation status, tokenizer fingerprint, special tokens, slot limit. |
+| `get_authoring_guide` | A short guide, one lesson by `topic`, the full manual, or the example. |
+| `get_guidance` | The full guidance bundle (also in **View → Trajectory Guidelines**). Pass `scenario` before creating, or `sample_id` for a saved review contract. |
+
+### Finding trajectories
+
+| Tool | Purpose |
+| --- | --- |
+| `list_trajectories` | Search with the [dashboard query language](../trajectory_remix/guides/search.md). |
+| `query_trajectories` | Filter metadata, tags and counts. See [Storage](STORAGE.md#metadata-and-queries). |
+| `get_metadata_counts` | Group matches by metadata value, tag or count. |
+| `get_trajectory` | Complete source JSON, including invalid drafts. |
+| `get_trajectory_metadata` | Everything except `replay`. |
+
+### Creating and editing
+
+| Tool | Purpose |
+| --- | --- |
+| `create_trajectory` | From full JSON, an empty draft, or `template: "demo"`. |
+| `duplicate_trajectory`, `replace_trajectory`, `delete_trajectory` | Copy, fully replace, or remove. |
+| `update_trajectory_metadata` | JSON merge-patch of ID, defaults, metadata and other attributes. |
+| `list_events`, `get_event` | Read events with their current addresses. |
+| `create_event`, `update_event`, `move_event`, `duplicate_event`, `delete_event` | Edit individual events. |
+| `patch_event_content` | Replace text or segments, or patch character ranges. |
+| `rename_window` | Rename a window across all events. |
+| `create_tool_call` | Schedule a visible or invisible simulated tool call. |
+| `apply_batch` | Up to 100 edits applied atomically, with optional dry run. |
+| `diff_trajectories` | JSON Patch and optional text diff between two sources. |
+| `get_edit_history`, `undo_edits`, `redo_edits` | Shared source history. |
+| `save_dataset` | Report a checkpoint. Edits are already saved. |
+
+### Inspecting
+
+| Tool | Purpose |
+| --- | --- |
+| `validate_trajectory` | Compile, and optionally run semantic LLM review (`semantic: true`). |
+| `get_diagnostics` | Compiler errors and warnings. |
+| `get_anchors` | Resolved anchor ticks, phases and owners. |
+| `get_window_history` | One window's lifecycle, text and token rows. |
+| `preview_snapshots` | Window state at ticks across a range. |
+| `get_sandbox_state` | Sandbox state and call statuses at a tick. |
+
+### Review and repair
+
+| Tool | Purpose |
+| --- | --- |
+| `review_trajectory` | Checklist, guide, source and diagnostics in one call, with no model API. |
+| `get_review_checklist` | Just the checklist and results schema. |
+| `repair_trajectory` | Targeted atomic repairs, with dry run. |
+| `record_trajectory_review` | Record per-rule results; code derives Validated (2) or Rejected (-2). |
+| `sign_off_trajectory` | Unstructured sign-off for manual samples. |
+| `get_generation_record`, `get_generation_analytics` | Evidence about how a sample was generated. |
+
+### Simulated tool workbenches
+
+| Tool | Purpose |
+| --- | --- |
+| `list_simulated_tools` | Exact schemas and availability. |
+| `create_tool_session`, `list_tool_sessions`, `get_tool_session`, `reset_tool_session`, `delete_tool_session` | Manage isolated workbenches. |
+| `call_simulated_tool` | Run a tool, optionally recording it in a trajectory. |
+| `record_tool_interaction` | Record an earlier workbench call without re-running it. |
+
+### Dataset metrics
+
+`get_dataset_metrics`, `refresh_dataset_metrics`, `get_dataset_metrics_status`,
+`cancel_dataset_metrics_refresh`, `get_dataset_metric_distribution`,
+`query_dataset_metrics` and `get_metric_annotation_context`. See [Metrics](METRICS.md).
+
+## Next
+
+[MCP authoring reference](MCP-AUTHORING.md): editing rules, batches, review and
+repair, tool workbenches, and inspection limits.

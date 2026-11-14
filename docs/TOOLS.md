@@ -1,10 +1,14 @@
 # Synthetic tools reference
 
-This document describes the **40 built-in synthetic tools** shipped with Trajectory Remix: **34 model-visible tools** and **6 author-only tools**. It covers their argument contracts, results, persistent state, timing, and use in authored trajectories. These are **not** the MCP commands that edit datasets. The MCP authoring API is documented in [MCP.md](MCP.md); the low-level execution contract and custom-tool interface are in [SANDBOX.md](SANDBOX.md).
+Trajectory Remix ships **40 built-in simulated tools**: **34 the model can call** and **6 for authors only**. This page lists each tool's arguments, results, state and timing, and how to use it in a trajectory.
 
-The authoritative implementations are the Python modules in [`trajectory_remix/tools/`](../trajectory_remix/tools/). Call MCP `list_simulated_tools` to retrieve the actual schemas, including installed custom tools. In that listing, author-only tools are marked `invisible: true`. The table below summarizes the built-ins; the sections that follow explain every one.
+These are the tools *inside* a trajectory. They are different from the MCP commands that edit datasets ([MCP setup](MCP.md)). To write your own tool or learn how the sandbox executes calls, see [Sandbox and custom tools](SANDBOX.md).
+
+The source of truth is the Python modules in [`trajectory_remix/tools/`](../trajectory_remix/tools/). Call MCP `list_simulated_tools` for exact schemas, including custom tools. Author-only tools show `invisible: true` there.
 
 ## Index
+
+Not sure where to start? `file_write`, `file_read`, `chat` and `calculator` cover most simple trajectories. Add the rest as needed.
 
 | Area | Model-visible | Author-only |
 | --- | --- | --- |
@@ -268,7 +272,7 @@ Adds elapsed simulated seconds to the synthetic clock without sleeping; daylight
 {"op":"invisible-tool-call","tool":"time_advance","arguments":{"seconds":30}}
 ~~~
 
-This changes the time anchor and can wake pending alarms, timers, and simulated HTTP responses.
+This changes the time anchor and can wake pending alarms, timers and timed-out web requests.
 
 ### `timer`
 
@@ -387,8 +391,37 @@ Adds deterministic **execution latency**, not CPU load, to `file_read`, `file_wr
 
 ## Synthetic web research
 
-All web tools use authored readable text, never live network access. See the
-[complete setup and research walkthrough](SANDBOX.md#synthetic-web-research).
+All web tools use authored readable text, never live network access. They simulate a
+**search → read → find → follow links** loop.
+
+**Walkthrough.** First seed pages with an invisible `web_set` call (Markdown text is
+fine; it stands in for the output of a page-extraction pipeline):
+
+~~~json
+{"op":"invisible-tool-call", "tool":"web_set", "arguments":{
+  "pages":[
+    {"url":"https://docs.example.test/releases/4", "title":"Version 4 release notes",
+     "published_at":"2030-02-12", "text":"# Version 4\n\nVersion 4 requires Python 3.12 or later.",
+     "links":[{"id":"install", "text":"Installation", "url":"/install"}]},
+    {"url":"https://docs.example.test/install", "title":"Installation",
+     "text":"Install version 4 using pip."}
+  ],
+  "searches":[{"query":"version 4 Python", "urls":["https://docs.example.test/releases/4"]}]
+}}
+~~~
+
+Then schedule a visible `web_search` with `{"query":"version 4 Python"}`. Each result
+has a source `ref`; read it with `web_open({"ref":"<ref>"})`, locate passages with
+`web_find`, and follow link URLs with another `web_open`. If a result is truncated,
+continue with the returned `next_line` and `next_column` (or `next_offset` for search).
+Unseeded URLs and refs fail rather than inventing content.
+
+**Good to know.** `web_set` replaces the active pages atomically, but refs keep
+immutable snapshots, so earlier evidence stays readable after a page changes. Pages need
+unique HTTP(S) URLs without credentials. Authored 403/404/429/503 pages are readable
+results, while transport errors (`dns`, `connection_refused`, `connection_reset`, `tls`,
+`timeout`) fail. There are no redirects, retries or live-network fallbacks. Historical
+snapshots count against the sandbox byte quota.
 
 ### `web_set` — author-only
 
@@ -510,4 +543,4 @@ Replaces deterministic fault rules; `{"rules":[]}` clears them. The first matchi
 4. **Expect negative outcomes.** Simulate missing files, version conflicts, permission rejections, transient I/O faults, HTTP failures, timeouts, and cancelled calls as observable states rather than manually inventing mismatched tool results.
 5. **Treat schemas as authoritative.** This reference covers the checked-in built-ins, not an open-ended custom tool directory. For field types, max lengths, visibility, and validation, inspect `list_simulated_tools` or the relevant source module. The compiler rejects invalid visible/invisible usage.
 
-Related references: [SANDBOX.md](SANDBOX.md) (execution protocol, snapshotting, cancellation, extensions), [MCP.md](MCP.md) (authoring and tool sessions), [Skill.md](../trajectory_remix/Skill.md) (trajectory-author instructions).
+Related references: [Sandbox and custom tools](SANDBOX.md) (execution, snapshots, cancellation, writing tools), [MCP authoring](MCP-AUTHORING.md) (scheduling calls and workbenches), and [Skill.md](../trajectory_remix/Skill.md) (the complete agent manual).

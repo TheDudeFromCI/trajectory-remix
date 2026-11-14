@@ -1,106 +1,118 @@
 # Dataset metrics
 
-Open **View → Dataset Metrics**. Choose a source population and press **Calculate
-pending metrics** for a first pass. Compilation runs as a server-owned background
-job outside the server event loop. **Stop after current sample** pauses further work. Refreshing
-graphs reuses cached values; browsing and ordinary startup do not calculate them.
-The initiating request returns immediately, with pollable processed/total counts,
-elapsed time and current sample. Work survives a disconnected MCP client or closed
-panel; repeated starts join the same active job. After cancellation or server
-restart, another start resumes from completed per-source caches.
+Dataset metrics show what your dataset covers and how its trajectories are shaped, so
+you can spot gaps before training. Open **View → Dataset Metrics** in the dashboard,
+or use the MCP tools listed below.
 
-Graphs cover primary domains, terminal outcomes, same-tick model concurrency,
-external streaming activity, raw loss allocation, tool presence and window
-categories. The distribution selector adds token/control counts, supervised and
-masked targets, duration, window use, visible context, tool failures, pooled
-window lengths, idle runs and tool latency. Statistics include count/missing,
-mean, population standard deviation, min/max, p50/p90/p95/p99 and histograms.
-Bin edges are inclusive on the left and exclusive on the right; underflow and
-overflow remain visible. Pooled window/run/call statistics are labeled separately
-from per-source statistics. Zero denominators return null, never a zero fraction.
+## Using the metrics window
 
-**Alerts & repairs → Open metadata** selects the affected sample in replay and
-opens the structured coverage/provenance or observed-label editor. These controls
-preserve unrelated and nested properties, synchronize with Source JSON, and use
-the existing immediate-save, conflict and undo/redo behavior. Unknown labels stay
-unknown until independently reviewed. Source annotations are portable in existing
-JSON/JSONL imports and exports. No metadata is fabricated during database upgrade.
+1. Choose a **source population** (see [Populations](#populations)).
+2. Press **Calculate pending metrics**. Compilation runs as a background job on the
+   server, and browsing or normal startup never triggers it. Graphs reuse cached
+   values.
+3. Watch progress (processed and total, elapsed time, current sample). **Stop after
+   current sample** cancels cleanly.
 
-The [MCP metrics guide](../trajectory_remix/guides/metrics.md) documents the exact
-metadata contract, vocabulary and observer query workflow. Both stdio and
-Streamable HTTP expose `get_dataset_metrics`, `refresh_dataset_metrics`,
-`get_dataset_metric_distribution`, `query_dataset_metrics`,
-`get_dataset_metrics_status`, `cancel_dataset_metrics_refresh` and
-`get_metric_annotation_context`; the dashboard REST
-routes call the same validated command handlers. Agents can request the guide
-with `get_authoring_guide(topic="metrics")`.
+The job survives closing the panel or disconnecting an MCP client, and starting it
+again joins the running job. After a cancellation or restart, a new start resumes from
+the per-sample caches already completed.
 
-For old sources without coverage fields, query the **all** population first.
-`get_metric_annotation_context` prepares the definitions, existing annotations,
-paginated trace evidence and dataset/scenario guidance in one bounded response.
-It requires no numeric compilation. Explicitly marked excerpts provide complete
-source/guidance continuation commands. Trace review can support domain/outcome
-and behavior labels; absent historical provenance or family/split policy remains
-unresolved until supplied by the owner or recorded lineage. Alerts are not cleared
-by fabricated history or blanket train/original assignments.
+**Graphs** cover primary domains, terminal outcomes, same-tick model concurrency,
+external streaming activity, raw loss allocation, tool presence and window categories.
+The **distribution selector** adds token and control counts, supervised and masked
+targets, duration, window use, visible context, tool failures, pooled window lengths,
+idle runs and tool latency. Each distribution reports count and missing, mean,
+population standard deviation, min and max, p50/p90/p95/p99, and a histogram. Bin
+edges include the left value and exclude the right, with underflow and overflow
+shown. Pooled windows, runs and calls are labeled separately from per-sample
+numbers. A zero denominator gives null, never a zero fraction.
 
-## Interpretation and limits
+## Fixing alerts
 
-The default **All current source samples** inventory includes rejected and
-unfinished sources. **Accepted sources** means the existing Ready state (3).
-The PDF's coverage rules run only for **Accepted train originals**, requiring
-Ready, an explicit train split and an explicit original-source flag. Missing
-identity/split fields are alerts in the all-source inventory; they cannot be
-silently assigned to accepted training data. Unknown semantic labels stay in
-their eligible denominator, and requested tags never establish a correct example.
+**Alerts & repairs → Open metadata** selects the affected sample and opens the
+structured editor for coverage and provenance or observed labels. Unrelated and nested
+properties are preserved, edits sync with Source JSON, and they use the same
+immediate-save, conflict and undo behavior as other edits. Unknown labels stay unknown
+until independently reviewed, and the database upgrade invents no metadata. Annotations
+travel with normal JSON/JSONL import and export.
 
-The bundled [launch YAML](../trajectory_remix/coverage_launch.yaml) is copied from
-the supplied Project Kidra Dataset Metrics & Observer launch proposal v0.1.
-Its **source** rules are advisory diagnostics, with support gates, unknown-label
-counts, conditional denominators and distinct-family counts. The proposal's
-controller, automatic generation, admission gates and sampling adjustments are
-not activated by loading this file. The current implementation is a source
-measurement and annotation foundation, not the complete proposed observer system.
+The [metrics guide](../trajectory_remix/guides/metrics.md) (MCP
+`get_authoring_guide(topic="metrics")`) documents the metadata fields, vocabulary and
+the observer query workflow.
 
-All numerical targets remain launch hypotheses. Full-dataset family/split
-conflicts are flagged using family IDs and split names, without reading test
-replay/results. An exact normalized replay hash ignores identity and annotations
-and flags duplicate structure candidates; it is not a near-duplicate judgment.
+### Backfilling old datasets
 
-Content is counted from actual tokenizer IDs and compiler rows. BOS, EOS and NOOP
-are separate from ordinary content. Headers are external content. Open windows
-alone do not establish simultaneous generation. External-stream counts exclude
-instant insertions. Visible context uses the phase-D decision frontier, so
-same-tick generated tokens are not available to other same-tick decisions, old
-content disappears at replacement, and closed windows cease providing context.
-The compiler currently permits one open/close lifetime per logical window; repeat
-tool invocations are counted independently of those lifetimes.
+For sources without coverage fields, query the **All** population first, then call
+`get_metric_annotation_context`. It returns definitions, current annotations, paged
+trace evidence and dataset or scenario guidance in one bounded response, with no
+numeric compilation required. Excerpts are marked and come with commands to fetch the
+rest. Traces can support domain, outcome and behavior labels. Missing provenance or
+family/split policy stays unresolved until the owner supplies it or lineage records
+it. Alerts are never cleared by invented history or blanket train/original labels.
 
-Raw loss weights precede trainer normalization and are not measured gradient
-shares. No export concurrency/context quota is evaluated against source counts.
-Export manifests, trainer/hardware/exposure logs, historical generation cost,
-semantic reaction/dependency/closure annotations and near-duplicate judgments
-are explicitly marked unavailable. No response latency or last-needed-evidence
-tick is guessed from the last write.
+## MCP tools
 
-## Storage and compatibility
+`get_dataset_metrics`, `refresh_dataset_metrics`, `get_dataset_metrics_status`,
+`cancel_dataset_metrics_refresh`, `get_dataset_metric_distribution`,
+`query_dataset_metrics` and `get_metric_annotation_context`. They work over stdio and
+Streamable HTTP, and the dashboard's REST routes use the same handlers. A refresh
+returns a job ID immediately, so poll the status tool. Prefer
+`population="accepted_train_originals"` for observer gap analysis, and `population="all"`
+when finding legacy samples that lack split or original metadata.
 
-Opening an existing schema 3/4/5 SQLite project adds a disposable
-`trajectory_metrics` table, using the existing supported upgrades for schema 3/4.
-The project schema version, tokenizer, source trajectories, revisions and existing
-tables are preserved. Older schema-5 readers can ignore the additional cache.
-Each cache row belongs to a trajectory UUID with cascading deletion.
+## Populations
 
-The key includes the canonical source hash, tokenizer and control-token settings,
-window policy, tool definitions, implementation/metric definitions and launch
-configuration. Cached errors also expire on these changes. Reopening with the same
-implementation reuses metrics. Source edits/imports/undo/redo and tokenizer
-migration automatically hide stale values through hash matching. A background
-calculation only publishes its result if the source hash still matches; no project
-write lock is held during compilation, and metric reads never pin tool schemas.
-Read snapshots are released between samples. Coverage annotation and review-only
-edits can reuse numeric execution records; changes to executable source, speaker
-names, clock, defaults, tokenizer or tools cannot. Numeric projections and their
-sorted index are built once per query snapshot, avoiding repeated JSON decoding
-and sorting for every percentile and histogram.
-The cache is derived data and can be discarded without losing source information.
+| Population | Includes |
+| --- | --- |
+| **All current source samples** (default) | Every sample, including rejected and unfinished ones. Missing identity or split fields appear as alerts. |
+| **Accepted sources** | Samples in the Ready state (3). |
+| **Accepted train originals** | Ready samples with an explicit train split and an explicit original-source flag. The coverage rules run **only** here. |
+
+Missing identity or split fields are never silently assigned to accepted training
+data. Unknown semantic labels stay in their eligible denominator, and requested tags
+never establish a correct example.
+
+## How to read the numbers
+
+- Content is counted from real tokenizer IDs and compiler rows. BOS, EOS and NOOP are
+  counted apart from content, and headers count as external content.
+- Open windows alone do not prove simultaneous generation, so concurrency is counted
+  from actual decisions. External-stream counts exclude instant insertions.
+- Visible context uses the phase-D decision frontier: same-tick generated tokens are
+  not visible to other same-tick decisions, replaced content disappears, and closed
+  windows stop providing context.
+- The compiler allows one open/close lifetime per logical window. Repeated tool
+  invocations are counted independently.
+- Raw loss weights come before trainer normalization and are not measured gradient
+  shares.
+
+**Scope.** The bundled [launch YAML](../trajectory_remix/coverage_launch.yaml) comes from
+the Project Kidra Dataset Metrics & Observer launch proposal v0.1. Its **source** rules
+are advisory diagnostics: support gates, unknown-label counts, conditional denominators
+and distinct-family counts. Loading it does not activate the proposal's controller,
+automatic generation, admission gates or sampling changes, and all numeric targets are
+hypotheses. This is a measurement and annotation foundation, not the full observer
+system. Family and split conflicts are flagged from IDs and names alone, without
+reading test content, and an exact normalized replay hash flags duplicate structures
+(it is not a near-duplicate judge).
+
+**Not available:** export concurrency or context quotas, export manifests, trainer and
+hardware logs, historical generation cost, semantic reaction, dependency and closure
+annotations, and near-duplicate judgments. Response latency and last-needed-evidence
+ticks are not guessed from the last write.
+
+## Cache details
+
+Opening a schema 3, 4 or 5 project adds a disposable `trajectory_metrics` table using
+the usual upgrades. Existing data, tokenizer, revisions and tables are untouched, and
+older schema-5 readers can ignore the table.
+
+Each cached row belongs to a trajectory UUID (deleted with it). Its key includes the
+canonical source hash, tokenizer and control tokens, window policy, tool definitions,
+metric definitions and launch configuration, so edits, imports, undo, redo, tokenizer
+migration or code changes hide stale values automatically. A calculation publishes a
+result only if the source hash still matches. It holds no write lock while compiling
+and releases read snapshots between samples. Coverage and review-only annotation edits
+can reuse numeric results, while changes to executable source, speaker names, clock,
+defaults, tokenizer or tools cannot. The cache is derived data and can be discarded
+safely.

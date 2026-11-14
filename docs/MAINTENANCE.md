@@ -7,7 +7,7 @@ honest account of what was reviewed and what remains unverified.
 
 This is a reusable checklist, not a record that these checks have already passed.
 Confirm current behavior from code and tests; update this guide when contracts or
-entry points change. See [README](../README.md) for product behavior and
+entry points change. See the [README](../README.md) and the user docs it links ([GETTING-STARTED](GETTING-STARTED.md), [DASHBOARD](DASHBOARD.md)) for product behavior and
 [TESTING](TESTING.md) for detailed coverage.
 
 ## Start and scope the pass
@@ -65,7 +65,7 @@ Paths in this table are relative to `trajectory_remix/`; tests live in `tests/`.
   frames, bounded range reads, cache expiry/recovery, and seek/playback without
   downloading expanded replay prefixes into the browser.
 
-See [EXPORT](EXPORT.md), [SANDBOX](SANDBOX.md), and [TOOLS](TOOLS.md).
+See [EXPORT](EXPORT.md), [REPLAY-FORMAT](REPLAY-FORMAT.md), [SANDBOX](SANDBOX.md), and [TOOLS](TOOLS.md).
 
 ### Storage, APIs, and background work
 
@@ -100,7 +100,7 @@ See [EXPORT](EXPORT.md), [SANDBOX](SANDBOX.md), and [TOOLS](TOOLS.md).
 - [ ] Keep unknown metric labels/provenance unknown, preserve nullable
   denominators, and compare all/Ready/train/original populations explicitly.
 
-See [MCP](MCP.md), [SCENARIOS](SCENARIOS.md), [METRICS](METRICS.md), and the
+See [MCP](MCP.md), [MCP-AUTHORING](MCP-AUTHORING.md), [STORAGE](STORAGE.md), [SCENARIOS](SCENARIOS.md), [METRICS](METRICS.md), and the
 [search guide](../trajectory_remix/guides/search.md).
 
 ### UI, UX, and accessibility
