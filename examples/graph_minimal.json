@@ -1,0 +1,19 @@
+{
+  "format": "kidra-trajectory-graph/1",
+  "id": "6ca0a6d8-c7aa-46b8-b931-bfcdf29e1d3b",
+  "windows": {
+    "chat": {"purpose": "chatroom", "agent_writable": false},
+    "thought": {"purpose": "reasoning", "agent_writable": true, "reasoning_effort": "Medium"}
+  },
+  "events": {
+    "input": {
+      "kind": "chat_message", "window": "chat", "content": "Inspect the task.",
+      "chat": {"speaker": "Alice"},
+      "delivery": {"mode": "instant", "chain_immediately": true}
+    },
+    "think": {
+      "kind": "agent_text", "window": "thought", "after": ["input"],
+      "content": "I should inspect the current state first.", "close_window": true
+    }
+  }
+}
