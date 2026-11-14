@@ -17,9 +17,7 @@ import uuid
 import zlib
 
 SCRIPT = Path(__file__).resolve().parents[1] / "examples" / "ktremix_dataset.py"
-spec = importlib.util.spec_from_file_location("ktremix_reference", SCRIPT)
-k = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(k)
+from trajectory_remix.graph import ktremix as k
 
 
 @unittest.skipUnless(importlib.util.find_spec("numpy"), "reference writer tests require numpy")

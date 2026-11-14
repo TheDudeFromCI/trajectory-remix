@@ -6,11 +6,12 @@ compiled multi-window trajectories. Its public reference implementation is
 reader, multi-shard sampler, validator, and small fixture writer. Python 3.11+ is
 required; install `lz4` for the default compression and `numpy` for array views.
 
-**Status:** implementable public draft for review. This PR does not implement the
-new authoring compiler, wire the format into Remix's Export menu, or provide a
-Kidra model/trainer. The reference writer accepts already-compiled arrays. File
-layout and array semantics are specified here; the model execution contract is
-identified explicitly in each manifest.
+**Status:** public draft for review. The packaged codec is
+`trajectory_remix.graph.ktremix`; the examples script remains its CLI entry point.
+The [graph compiler and temporary artifact services](GRAPH-COMPILER.md) emit this
+format, and the small training demo consumes their output. The existing Export
+menu is not yet connected to the graph services. File layout and array semantics
+are specified here; each manifest identifies its model execution contract.
 
 ## 1. Design and access path
 
@@ -131,8 +132,8 @@ Special token IDs are u32 integers; BOS/EOS/NOOP must be distinct. Additional
 dedicated protocol IDs may be included.
 
 `execution_contract` is a nonempty, versioned model/compiler semantic identifier.
-The example identifies the intended progressive-assignment/sleep contract, not
-an implemented exporter in this PR. Fixture/demo contracts use distinct names
+The example identifies the graph compiler's progressive-assignment/sleep contract.
+Synthetic storage fixtures use distinct names
 so they cannot be silently mixed into actual training data. The storage frontier
 representation below carries visibility explicitly rather than guessing it from
 an execution-contract name.
@@ -267,8 +268,8 @@ varint/delta decoding step after record decompression.
 
 Row flags: bit 0=DURABLE, bit 1=MODEL emission, bit 2=NOOP, bit 3=EOS, bit 4=BOS.
 Other bits are zero. NOOP is MODEL and never DURABLE. BOS is durable, zero-loss
-conditioning. BOS/EOS/NOOP flags are mutually exclusive. Closed-window EOS need
-not become a visible key; the compiler encodes its actual interval/flags.
+conditioning. BOS/EOS/NOOP flags are mutually exclusive. EOS is never DURABLE
+and never becomes a context/KV key.
 
 Window flags: bit 0=READ_ONLY, bit 1=INITIALLY_AVAILABLE, other bits zero.
 INITIALLY_AVAILABLE describes the lifetime's initial state, not a claim that it
@@ -301,7 +302,11 @@ own/current parallel targets become keys only after that frontier.
 
 `query_frontiers` also applies to constructing memory representations, including
 masked model content. A final attention mask cannot repair a memory representation
-that was itself built with future information. For each durable row, its own
+that was itself built with future information. Likewise, surviving hidden states
+that incorporated closed/replaced keys must be invalidated or rebuilt against
+the current visible context at every layer. Original construction masks alone
+can retain indirect copies of removed text. The graph training demo recomputes
+query-specific memory with both masks intersected. For each durable row, its own
 construction frontier precedes visible_from. For every target, previous_rows must
 identify an earlier visible same-window prefix; **never feed its target token as
 its own query input**.
