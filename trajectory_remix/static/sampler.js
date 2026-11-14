@@ -1,0 +1,229 @@
+/* UI B: project draft editor over the shared sampler/registry REST API. */
+const $ = id => document.getElementById(id);
+const clone = value => structuredClone(value);
+const pretty = value => JSON.stringify(value, null, 2);
+const label = value => value.replaceAll('_', ' ').replaceAll('.', ' / ');
+const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+const action = (text, fn, cls) => { const n = el('button', text, cls); n.type = 'button'; n.onclick = fn; return n; };
+const input = (name, value, change, type = 'text') => {
+  const n = el('input'); n.type = type; n.value = value; n.setAttribute('aria-label', name);
+  n.addEventListener('input', () => change(n.value, n)); return n;
+};
+const field = (name, control) => { const n = el('label', name); n.append(control); return n; };
+async function request(path, method = 'GET', body) {
+  const r = await fetch('/api/v1' + path, {method, headers: {'Content-Type': 'application/json', 'X-Remix-Token': document.querySelector('meta[name=remix-token]').content}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
+  const data = await r.json(); if (!r.ok) throw new Error(data.message || pretty(data.detail || data)); return data;
+}
+export function groups(matrix, definitions) {
+  return [
+    {id: 'focus.family', section: 'Focus', title: 'Competency families', items: matrix.competencies},
+    ...matrix.competencies.map(f => ({id: 'behavior:' + f.id, metric: 'focus.behavior', section: 'Behaviors', title: label(f.id), items: f.behaviors})),
+    ...Object.entries(matrix.decision_axes).map(([id, a]) => ({id: 'axis:' + id, metric: 'decision.choice', section: 'Decisions', title: label(id), items: a.variants})),
+    {id: 'domain', section: 'Dimensions', title: 'Domain', items: matrix.domains},
+    ...Object.entries(matrix.dimensions).map(([id, items]) => ({id, section: 'Dimensions', title: label(id), items})),
+    {id: 'event_tags', section: 'Events', title: 'Event tags', items: Object.entries(matrix.event_tags).map(([id, v]) => ({...v, id})), probability: true},
+    {id: 'conditional_weights', section: 'Rules', title: 'Conditional multipliers', items: matrix.conditional_weights.map((v, i) => ({...v, id: 'Rule ' + (i + 1)})), raw: true},
+    {id: 'hard_implications', section: 'Rules', title: 'Hard implications', items: matrix.hard_implications.map((v, i) => ({...v, id: 'Rule ' + (i + 1)})), raw: true},
+    ...Object.entries(definitions).map(([id]) => ({id: 'metric:' + id, metric: id, section: 'Metrics', title: label(id), items: [], metricOnly: true})),
+    {id: 'sampler', section: 'Advanced', title: 'Sampler settings', items: [], raw: true}
+  ];
+}
+export class SamplerWorkbench {
+  constructor(root, transport = request) { this.root = root; this.api = transport; this.selectedRows = new Set(); this.selected = 'focus.family'; this.query = ''; this.filter = ''; this.choiceQuery = ''; this.invalid = new Map(); this.generation = 0; }
+  async open() {
+    if (this.record) return;
+    try { const record = await this.api('/sampler'); this.adopt(record); this.mount(); } catch (e) { this.root.replaceChildren(el('p', e.message), action('Retry loading matrix', () => this.open())); }
+  }
+  adopt(record) { this.record = record; this.config = clone(record.configuration); this.saved = pretty(this.config); this.selectedRows.clear(); this.invalid.clear(); }
+  dirty() { return this.invalid.size > 0 || pretty(this.config) !== this.saved; }
+  allGroups() { return groups(this.config.matrix, this.config.definitions); }
+  group() { return this.allGroups().find(g => g.id === this.selected) || this.allGroups()[0]; }
+  report(text, error = false) { $('sampler-message').textContent = text; $('sampler-message').classList.toggle('error', error); }
+  mount() {
+    this.root.innerHTML = `<header class="sw-heading"><div><div class="sw-eyebrow">PROJECT CONFIGURATION</div><h1>Sampler Matrix</h1><p>Inspect the distribution. Tune the next proposal.</p></div><div class="sw-save"><span id="sampler-dirty"></span><button id="sampler-reload">Reload saved</button><button id="sampler-reset">Discard draft</button><button id="sampler-save" class="sw-primary">Save project changes</button></div></header>
+    <div class="sw-notice">Changes apply to future runs. Existing runs retain their frozen matrix, targets and instructions.</div>
+    <div id="sampler-message" role="status" aria-live="polite"></div>
+    <div class="sw-layout"><aside class="sw-navigation"><div class="sw-nav-tools"><label>Find a dimension or entry<input id="sampler-search" type="search" placeholder="Search names, values, rules…"></label><label>Show<select id="sampler-filter"><option value="">All groups</option><option>Focus</option><option>Behaviors</option><option>Decisions</option><option>Dimensions</option><option>Events</option><option>Rules</option><option>Metrics</option><option>Advanced</option><option value="changed">Changed groups</option></select></label><span id="sampler-count"></span></div><nav id="sampler-nav" aria-label="Matrix groups"></nav></aside>
+    <div class="sw-main"><section id="sampler-detail"></section><details class="sw-preview"><summary>Proposal preview <span>Fixed seed · saved project · per-run pins</span></summary><p>One proposal through the shared sampler API. Pins do not edit weights. Save the project draft first. No model or compiler calls.</p><div class="sw-preview-controls"><label>Seed<input id="sampler-seed" type="number" step="1" value="137"></label><button id="sampler-preview">Sample one proposal</button></div><div id="sampler-pins" class="sw-pins"></div><p id="sampler-preview-status" role="status"></p><pre id="sampler-proposal"></pre></details></div></div>`;
+    $('sampler-search').oninput = e => { this.query = e.target.value.toLowerCase().trim(); this.renderNav(); };
+    $('sampler-filter').onchange = e => { this.filter = e.target.value; this.renderNav(); };
+    $('sampler-save').onclick = () => this.save();
+    $('sampler-reload').onclick = async () => { if (this.dirty() && !confirm('Discard your draft and load the latest saved configuration?')) return; try { this.adopt(await this.api('/sampler')); this.renderNav(); this.renderDetail(); this.update(); ++this.generation; this.report('Latest saved configuration loaded.'); } catch (e) { this.report(e.message, true); } };
+    $('sampler-reset').onclick = () => { if (!this.dirty() || confirm('Discard all unsaved matrix and metric changes?')) { this.adopt(this.record); this.renderNav(); this.renderDetail(); this.update(); this.report('Draft discarded.'); } };
+    $('sampler-preview').onclick = () => this.preview();
+    for (const [key, values] of Object.entries(this.record.overrides)) {
+      const select = el('select'); select.dataset.pin = key; select.setAttribute('aria-label', 'Pin ' + key);
+      for (const value of ['', ...values]) { const option = el('option', value || 'Unpinned — sample'); option.value = value; select.append(option); }
+      $('sampler-pins').append(field(label(key), select));
+    }
+    this.renderNav(); this.renderDetail(); this.update();
+  }
+  renderNav() {
+    const nav = $('sampler-nav'), scroll = nav.scrollTop;
+    const groups = this.allGroups().filter(g => (!this.filter || (this.filter === 'changed' ? this.groupChanged(g) : g.section === this.filter)) && (!this.query || (g.title + g.id + pretty(g.items)).toLowerCase().includes(this.query)));
+    nav.replaceChildren(); let section;
+    for (const g of groups) {
+      if (section !== g.section) { section = g.section; nav.append(el('h3', section)); }
+      const b = action('', () => { this.selected = g.id; this.choiceQuery = ''; this.selectedRows.clear(); this.renderNav(); this.renderDetail(); });
+      b.className = 'sw-nav-row' + (g.id === this.selected ? ' selected' : ''); b.setAttribute('aria-current', String(g.id === this.selected));
+      b.append(el('span', g.title), el('small', `${g.items.length || '—'}${this.groupChanged(g) ? ' · edited' : ''}`)); nav.append(b);
+    }
+    if (!groups.length) nav.append(el('p', 'No matching groups. Clear the search or filter.'));
+    $('sampler-count').textContent = `${groups.length} of ${this.allGroups().length} groups`; nav.scrollTop = scroll;
+  }
+  groupChanged(g) {
+    const before = groups(this.record.configuration.matrix, this.record.configuration.definitions).find(x => x.id === g.id);
+    return [...this.invalid.keys()].some(k => k.startsWith(g.id + ':') || k === 'tolerance:' + (g.metric || g.id)) || pretty(g.items) !== pretty(before?.items) || pretty(this.config.metric_options[g.metric || g.id]) !== pretty(this.record.configuration.metric_options[g.metric || g.id]) || (g.id === 'sampler' && pretty(this.config.matrix.sampler) !== pretty(this.record.configuration.matrix.sampler));
+  }
+  update() {
+    const dirty = this.dirty(); $('sampler-dirty').textContent = dirty ? 'Unsaved project draft' : `Saved · revision ${this.record.settings_revision}`;
+    $('sampler-save').disabled = !dirty || this.saving; $('sampler-reset').disabled = !dirty || this.saving;
+    $('sampler-preview').disabled = dirty || this.saving;
+    $('sampler-preview-status').textContent = dirty ? 'Save project changes to preview this matrix.' : 'Uses the saved project configuration at request time.';
+  }
+  mutate() { this.update(); this.renderNav(); const raw = this.root.querySelector('textarea[aria-label="Group JSON"]'); if (raw && !raw.dataset.edited) { const g = this.group(); raw.value = pretty(g.raw || ['event_tags', 'sampler'].includes(g.id) ? this.config.matrix[g.id] : g.items); } ++this.generation; if ($('sampler-proposal').textContent) $('sampler-preview-status').textContent = 'Previous preview retained below; configuration has changed.'; }
+  renderDetail() {
+    const g = this.group(), detail = $('sampler-detail'); const previousScroll = detail.querySelector('.sw-table-wrap')?.scrollTop || 0; this.selected = g.id;
+    detail.replaceChildren(el('div', g.section.toUpperCase() + ' / ' + g.id, 'sw-eyebrow'), el('h2', g.title));
+    detail.append(el('p', g.probability ? 'Per-tag base probability before eligibility, forced tags and the extra-tag cap.' : g.raw ? 'Shared sampler rules. Edit the full group below; validation happens on save.' : 'Compare base weights within this group. Constraints and conditional multipliers can change sampled outcomes.', 'sw-help'));
+    if (!g.raw && !g.metricOnly) {
+      const choices = input('Filter choices in group', this.choiceQuery, v => { this.choiceQuery = v; tableArea.replaceChildren(); this.renderTable(tableArea, this.group()); }, 'search');
+      choices.placeholder = 'Filter choices, descriptions or constraints…';
+      const tableArea = el('div'); detail.append(field('Filter choices in this group', choices), tableArea); this.renderTable(tableArea, g);
+    }
+    if (g.raw && g.items.length) {
+      const rules = el('div', undefined, 'sw-rule-cards');
+      for (const item of g.items) rules.append(action(`${item.id} · When ${Object.entries(item.when || {}).map(([k,v]) => `${label(k)} = ${Array.isArray(v) ? v.join(' or ') : v}`).join('; ')} → ${item.target ? `${item.target} × ${item.factor}` : 'force ' + Object.entries(item.force || {}).map(([k,v]) => `${label(k)} = ${v}`).join('; ')}`, () => this.inspect(item, g)));
+      detail.append(rules);
+    }
+    this.renderMetric(detail, g.metric || g.id);
+    const advanced = el('details', undefined, 'sw-advanced'); advanced.append(el('summary', 'Advanced JSON · rules, constraints & custom fields'));
+    advanced.append(el('p', 'Apply replaces only this group. Other groups and unknown fields are preserved. Invalid configurations are rejected by the shared backend.'));
+    const value = g.id === 'sampler' ? this.config.matrix.sampler : g.id === 'event_tags' ? this.config.matrix.event_tags : g.raw ? this.config.matrix[g.id] : g.items;
+    if (!g.metricOnly) {
+      const raw = el('textarea'); raw.value = pretty(value); raw.spellcheck = false; raw.setAttribute('aria-label', 'Group JSON'); raw.oninput = () => { raw.dataset.edited = 'true'; };
+      advanced.append(raw, action('Apply JSON to project draft', () => { try { const v = JSON.parse(raw.value); this.replaceGroup(g, v); this.mutate(); this.renderDetail(); this.report('Group JSON applied to draft. Save to validate.'); } catch (e) { this.report(e.message, true); } })); detail.append(advanced);
+    }
+    const inspect = el('section', undefined, 'sw-inspector'); inspect.id = 'sampler-inspector'; detail.append(inspect);
+    if (g.items.length) this.inspect(g.items[0], g);
+    const table = detail.querySelector('.sw-table-wrap'); if (table) table.scrollTop = previousScroll;
+  }
+  replaceGroup(g, value) {
+    if (['sampler', 'event_tags'].includes(g.id) || g.raw) {
+      if (!value || typeof value !== 'object' || Array.isArray(value) !== Array.isArray(this.config.matrix[g.id])) throw new Error('Keep the original group object/array structure.');
+      this.config.matrix[g.id] = value;
+    } else {
+      if (!Array.isArray(value) || !value.length || value.some(x => !x || typeof x !== 'object' || typeof x.id !== 'string')) throw new Error('Expected a nonempty array of entries with string IDs.');
+      if (g.id === 'focus.family') this.config.matrix.competencies = value;
+      else if (g.id === 'domain') this.config.matrix.domains = value;
+      else if (g.id.startsWith('behavior:')) this.config.matrix.competencies.find(f => 'behavior:' + f.id === g.id).behaviors = value;
+      else if (g.id.startsWith('axis:')) this.config.matrix.decision_axes[g.id.slice(5)].variants = value;
+      else this.config.matrix.dimensions[g.id] = value;
+    }
+  }
+  renderTable(detail, g) {
+    const visible = g.items.filter(i => !this.choiceQuery || pretty(i).toLowerCase().includes(this.choiceQuery.toLowerCase()));
+    const tools = el('div', undefined, 'sw-bulk'); const count = el('span', '0 selected');
+    const amount = input('Repeated edit value', '1', () => {}, 'number'); amount.min = '0'; amount.step = 'any'; if (g.probability) amount.max = '1';
+    const set = action('Set selected', () => {
+      if (!this.selectedRows.size) return this.report('Select entries before applying a repeated edit.', true);
+      if (!amount.checkValidity() || amount.value === '') return this.report('Enter a finite nonnegative value' + (g.probability ? ' from 0 to 1.' : '.'), true);
+      for (const item of g.items) if (this.selectedRows.has(item.id)) this.writeWeight(g, item, Number(amount.value));
+      this.mutate(); this.renderDetail(); this.report('Selected entries updated in draft.');
+    });
+    tools.append(count, amount, set); detail.append(tools);
+    const wrap = el('div', undefined, 'sw-table-wrap'), table = el('table', undefined, 'sw-table');
+    const head = el('thead'), hr = el('tr'), allCell = el('th'), all = el('input'); all.type = 'checkbox'; all.setAttribute('aria-label', 'Select all choices');
+    all.checked = visible.length > 0 && visible.every(i => this.selectedRows.has(i.id));
+    all.onchange = () => { for (const i of visible) all.checked ? this.selectedRows.add(i.id) : this.selectedRows.delete(i.id); this.renderDetail(); }; allCell.append(all); hr.append(allCell);
+    for (const text of ['Choice / description', g.probability ? 'Base p' : 'Base weight', g.probability ? 'Probability' : 'Base share¹', 'Rules']) hr.append(el('th', text)); head.append(hr); table.append(head);
+    const body = el('tbody'); this.weightCells = [];
+    for (const item of visible) {
+      const row = el('tr'), checkCell = el('td'), check = el('input'); check.type = 'checkbox'; check.checked = this.selectedRows.has(item.id); check.setAttribute('aria-label', 'Select ' + item.id);
+      check.onchange = () => { check.checked ? this.selectedRows.add(item.id) : this.selectedRows.delete(item.id); count.textContent = `${this.selectedRows.size} selected`; all.checked = visible.length > 0 && visible.every(i => this.selectedRows.has(i.id)); }; checkCell.append(check);
+      const name = el('td'); name.append(action(label(item.id), () => this.inspect(item, g), 'sw-choice'), el('small', item.description || item.objective || item.scenario_condition || 'Inspect entry for details'));
+      const numeric = el('td'), weight = input((g.probability ? 'Probability ' : 'Weight ') + item.id, item[g.probability ? 'p' : 'weight'] ?? 0, (v, control) => {
+        if (v === '' || !control.checkValidity()) { control.setAttribute('aria-invalid', 'true'); this.invalid.set(g.id + ':' + item.id, v); this.update(); this.renderNav(); this.report('Enter a finite nonnegative value' + (g.probability ? ' from 0 to 1.' : '.'), true); return; }
+        control.removeAttribute('aria-invalid'); this.invalid.delete(g.id + ':' + item.id); this.writeWeight(g, item, Number(v)); this.refreshShares(g); this.mutate(); this.report('Weight updated in project draft.');
+      }, 'number'); weight.min = '0'; weight.step = 'any'; if (g.probability) weight.max = '1'; if (this.invalid.has(g.id + ':' + item.id)) { weight.value = this.invalid.get(g.id + ':' + item.id); weight.setAttribute('aria-invalid', 'true'); } numeric.append(weight);
+      const share = el('td', '', 'sw-share'); this.weightCells.push([item, share]);
+      const rules = Object.keys(item).filter(k => !['id', 'weight', 'p', 'description', 'objective', 'behaviors', 'scenario_condition', 'target_behavior'].includes(k));
+      row.append(checkCell, name, numeric, share, el('td', rules.length ? `${rules.length} fields` : '—')); body.append(row);
+    }
+    count.textContent = `${this.selectedRows.size} selected`; table.append(body); wrap.append(table); detail.append(wrap);
+    detail.append(el('p', g.probability ? 'Base p is an independent input, not a normalized share or an observed frequency.' : '¹ Base share = weight ÷ group total. This comparison is arithmetic only; it is not an output frequency or an exact joint probability.', 'sw-footnote'));
+    this.refreshShares(g);
+  }
+  writeWeight(g, item, value) { const key = g.probability ? 'p' : 'weight'; this.invalid.delete(g.id + ':' + item.id); item[key] = value; if (g.probability) this.config.matrix.event_tags[item.id][key] = value; }
+  refreshShares(g) {
+    const total = g.items.reduce((n, i) => n + Number(i.weight || 0), 0);
+    for (const [i, cell] of this.weightCells) { const fraction = g.probability ? i.p : total > 0 ? i.weight / total : null; cell.textContent = fraction === null ? 'Unavailable' : (fraction * 100).toFixed(2) + '%'; cell.style.setProperty('--share', (fraction || 0) * 100 + '%'); }
+  }
+  inspect(item, g) {
+    const box = $('sampler-inspector'); box.replaceChildren(el('h3', label(item.id)), el('p', item.description || item.objective || item.target_behavior || 'Entry configuration'));
+    const constraints = el('dl', undefined, 'sw-properties');
+    for (const [key, value] of Object.entries(item)) {
+      if (['id', 'weight', 'p', 'description', 'objective', 'target_behavior', 'behaviors'].includes(key)) continue;
+      constraints.append(el('dt', label(key)), el('dd', typeof value === 'object' ? pretty(value) : String(value)));
+    }
+    if (constraints.children.length) box.append(constraints); else box.append(el('p', 'No entry-specific constraints. Global sampler rules still apply.'));
+    const rules = [...this.config.matrix.conditional_weights, ...this.config.matrix.hard_implications].filter(r => pretty(r).includes(item.id));
+    if (rules.length) {
+      const list = el('ul', undefined, 'sw-rule-list');
+      for (const rule of rules) list.append(el('li', `When ${Object.entries(rule.when || {}).map(([k, v]) => `${label(k)} = ${Array.isArray(v) ? v.join(' or ') : v}`).join('; ')} → ${rule.target ? `${rule.target} × ${rule.factor}` : 'force ' + Object.entries(rule.force || {}).map(([k,v]) => `${label(k)} = ${v}`).join('; ')}`));
+      box.append(el('h4', 'Referencing conditions / implications'), list);
+    }
+    box.append(el('small', g.raw ? 'Shared sampler rule. Eligibility and forced propagation are evaluated by the shared sampler.' : `Linked definition: ${g.metric || g.id}. Eligibility and forced propagation are evaluated by the shared sampler.`));
+  }
+  renderMetric(detail, key) {
+    const definition = this.config.definitions[key]; if (!definition) return;
+    const panel = el('details', undefined, 'sw-metric'); panel.append(el('summary', `Linked metric · ${key} · ${definition.scope}`));
+    panel.append(el('p', `Kind: ${definition.kind}. Actual values remain in Dataset Metrics. Unmeasured values stay unavailable. Tolerances are specific to this definition.`));
+    const values = this.config.metric_options[key] || {};
+    const edit = (k, value) => { this.config.metric_options[key] ||= {}; if (value === '') delete this.config.metric_options[key][k]; else this.config.metric_options[key][k] = value; if (!Object.keys(this.config.metric_options[key]).length) delete this.config.metric_options[key]; this.mutate(); };
+    for (const k of ['label', 'unit', 'target']) panel.append(field(k, input(`${key} ${k}`, values[k] ?? '', v => edit(k, v))));
+    const tolerance = values.tolerance; const pendingTolerance = this.invalid.get('tolerance:' + key);
+    const absolute = input(`${key} absolute tolerance`, pendingTolerance?.absolute ?? tolerance?.absolute ?? '', () => {}, 'number'), relative = input(`${key} relative tolerance`, pendingTolerance?.relative ?? tolerance?.relative ?? '', () => {}, 'number');
+    for (const control of [absolute, relative]) { control.min = '0'; control.step = 'any'; control.oninput = () => {
+      if (absolute.value === '' && relative.value === '') { absolute.removeAttribute('aria-invalid'); relative.removeAttribute('aria-invalid'); this.invalid.delete('tolerance:' + key); edit('tolerance', ''); return; }
+      for (const c of [absolute, relative]) c.removeAttribute('aria-invalid');
+      if ([absolute, relative].some(c => c.value === '' || !c.checkValidity())) { this.invalid.set('tolerance:' + key, {absolute:absolute.value, relative:relative.value}); this.update(); absolute.setAttribute('aria-invalid', 'true'); relative.setAttribute('aria-invalid', 'true'); return this.report('Set both nonnegative tolerance bands, or clear both to leave tolerance unspecified.', true); }
+      this.invalid.delete('tolerance:' + key); edit('tolerance', {absolute: Number(absolute.value), relative: Number(relative.value)});
+    }; }
+    if (pendingTolerance) for (const control of [absolute, relative]) control.setAttribute('aria-invalid', 'true');
+    panel.append(field('Absolute band (metric units)', absolute), field('Relative band (fraction; 0.1 = 10%)', relative)); detail.append(panel);
+  }
+  async save() {
+    if (this.saving) return;
+    if (this.invalid.size) return this.report('Resolve invalid numeric fields before saving: ' + [...this.invalid.keys()].join(', '), true);
+    this.saving = true; this.update();
+    // Freeze the submitted draft; edits made while the request is pending are retained.
+    const submitted = clone(this.config);
+    try {
+      const result = await this.api('/sampler', 'PUT', {matrix: submitted.matrix, metric_options: submitted.metric_options, expected_revision: this.record.settings_revision});
+      const newer = this.invalid.size > 0 || pretty(this.config) !== pretty(submitted), retained = this.config, retainedInvalid = new Map(this.invalid);
+      const rowSelection = new Set(this.selectedRows); this.adopt(result); this.selectedRows = rowSelection; if (newer) { this.config.matrix = retained.matrix; this.config.metric_options = retained.metric_options; this.invalid = retainedInvalid; }
+      this.renderNav(); if (!newer) this.renderDetail(); this.report(newer ? 'Submitted changes saved. Newer edits remain in your draft.' : 'Project configuration saved. Existing runs are unchanged.'); ++this.generation;
+    } catch (e) { this.report('Save rejected; your draft is retained. ' + e.message + ' If another editor changed settings, copy your group JSON before discarding and reloading.', true); }
+    finally { this.saving = false; this.update(); }
+  }
+  async preview() {
+    if (this.dirty()) return this.report('Save project changes before previewing.', true);
+    const seed = Number($('sampler-seed').value); if ($('sampler-seed').value === '' || !Number.isSafeInteger(seed)) return this.report('Seed must be a safe integer.', true);
+    const overrides = Object.fromEntries([...$('sampler-pins').querySelectorAll('select')].filter(n => n.value).map(n => [n.dataset.pin, n.value]));
+    const generation = ++this.generation; $('sampler-preview').disabled = true;
+    try {
+      const result = await this.api('/sampler/proposals', 'POST', {seed, overrides});
+      if (generation !== this.generation) return;
+      $('sampler-proposal').textContent = pretty({proposal: result.proposal, payload_digest: result.payload_digest, matrix_digest: result.frozen.configuration.matrix_digest, settings_revision: result.frozen.settings_revision});
+      this.report('Saved proposal snapshot created. Pins apply only to this request.');
+    } catch (e) { this.report('Preview rejected: ' + e.message, true); }
+    finally { this.update(); }
+  }
+}
+if (typeof document !== 'undefined' && $('sampler-workbench')) {
+  const ui = globalThis.samplerWorkbench = new SamplerWorkbench($('sampler-workbench'));
+  $('sampler-tab').onclick = () => { $('workspace').hidden = true; $('sampler-workbench').hidden = false; $('sampler-tab').setAttribute('aria-selected', 'true'); $('trajectory-tab').setAttribute('aria-selected', 'false'); ui.open(); };
+  $('trajectory-tab').onclick = () => { $('workspace').hidden = false; $('sampler-workbench').hidden = true; $('trajectory-tab').setAttribute('aria-selected', 'true'); $('sampler-tab').setAttribute('aria-selected', 'false'); };
+  window.addEventListener('beforeunload', e => { if (ui.record && ui.dirty()) { e.preventDefault(); e.returnValue = ''; } });
+}

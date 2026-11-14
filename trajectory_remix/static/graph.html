@@ -3,7 +3,9 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="remix-token" content="__REMIX_TOKEN__"><title>Trajectory Remix</title>
 <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/graph.css">
-<script type="module" src="/static/graph.js"></script></head>
+<script type="module" src="/static/graph.js"></script>
+<link rel="stylesheet" href="/static/sampler.css">
+<script type="module" src="/static/sampler.js"></script></head>
 <body class="graph-studio">
 <header class="toolbar"><nav class="menu-bar" aria-label="Application menu">
 <button id="import-button">Import</button><button id="export-button">Export</button>
@@ -12,6 +14,8 @@
 <button id="metrics-button">Dataset Metrics</button><span class="menu-label">Trajectory Remix</span>
 </nav><input id="file-input" type="file" accept=".json,.jsonl" hidden></header>
 <div id="status" role="status" aria-live="polite"></div>
+<nav class="studio-tabs" aria-label="Studio views"><button id="trajectory-tab" aria-selected="true">Trajectory editor</button><button id="sampler-tab" aria-selected="false">Sampler Matrix</button></nav>
+<section id="sampler-workbench" hidden aria-label="Sampler Matrix workbench"></section>
 <div class="workspace" id="workspace">
 <aside class="sidebar"><div class="side-heading">DATASET <span id="sample-count" class="badge">0</span><button id="new-sample">+</button></div>
 <input id="sample-search" class="search" placeholder="Search source text" aria-label="Search source text">
