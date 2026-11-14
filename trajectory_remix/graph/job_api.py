@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
 from .bulk import BulkService
-from .jobs import Fenced, JobService, OwnershipConflict
+from .jobs import Fenced, JobService, OwnershipConflict, TERMINAL
 from .models import DTO, JsonValue
 from .storage import GraphStore, RevisionConflict
 
@@ -99,7 +99,12 @@ class JobWorker:
     async def close(self):
         for job, task in list(self.tasks.items()):
             if not task.done() and self.jobs.inspect(job)['state'] == 'running':
-                self.jobs.control(job, 'pause')
+                try:
+                    self.jobs.control(job, 'pause')
+                except OwnershipConflict:
+                    # A bulk thread may commit terminal completion after inspect.
+                    if self.jobs.inspect(job)['state'] not in TERMINAL:
+                        raise
         await asyncio.gather(*self.tasks.values(), return_exceptions=True)
 
 

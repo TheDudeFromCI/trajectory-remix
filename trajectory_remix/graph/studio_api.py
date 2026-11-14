@@ -60,6 +60,34 @@ class ImportInput(DTO):
     text: str
 
 
+class SamplerEdit(Delete):
+    matrix: dict[str, JsonValue]
+    metric_options: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class ProposalInput(DTO):
+    seed: int | None = None
+    world_group_id: str | None = None
+    overrides: dict[str, str] = Field(default_factory=dict)
+
+
+class SamplerRun(DTO):
+    requests: list[ProposalInput] = Field(min_length=1, max_length=1000)
+    instructions: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class MetricAnnotation(Delete):
+    value: JsonValue
+    origin: Literal['manual_annotation', 'export'] = 'manual_annotation'
+    profile_fingerprint: str | None = None
+    compiler_version: str | None = None
+
+
+class MetricQuery(DTO):
+    query: dict[str, JsonValue] = Field(default_factory=dict)
+    population: Literal['all', 'accepted'] = 'all'
+
+
 class AgentCall(DTO):
     name: str
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
@@ -69,6 +97,11 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
     app = create_job_app(path, artifact_root=artifact_root)
     app.title = 'Trajectory Remix — Graph Studio'
     studio = Studio(app.state.jobs, app.state.bulk, app.state.artifacts, app.state.worker)
+    from .sampling import SamplerService
+    from .metrics import MetricService
+    sampler = app.state.sampler = SamplerService(app.state.jobs)
+    metrics = app.state.metrics = MetricService(sampler)
+    app.state.worker.bulk_handlers['metrics'] = metrics.calculate
     app.state.studio = studio
     app.state.worker.handlers['import'] = studio.import_job
     token = app.state.csrf = secrets.token_urlsafe(32)
@@ -122,6 +155,49 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
 
     app.mount('/static', StaticFiles(directory=static), name='static')
     router = APIRouter(prefix='/api/v1')
+
+    @router.get('/sampler')
+    def sampler_editor():
+        return sampler.editor()
+
+    @router.put('/sampler')
+    def sampler_edit(body: SamplerEdit):
+        return sampler.update(body.matrix, body.metric_options, body.expected_revision)
+
+    @router.post('/sampler/proposals', status_code=201)
+    def sample(body: ProposalInput):
+        return sampler.propose(**body.model_dump())
+
+    @router.get('/sampler/proposals/{ident}')
+    def proposal(ident: str):
+        return sampler.read(ident)
+
+    @router.post('/sampler/runs', status_code=202)
+    async def sampler_run(body: SamplerRun):
+        job = sampler.run([r.model_dump() for r in body.requests], body.instructions)
+        studio.worker.kick(job)
+        return dict(job_id=job, status_url=f'/api/v1/jobs/{job}')
+
+    @router.put('/metrics/trajectories/{ident}/{key}')
+    def annotate_metric(ident: str, key: str, body: MetricAnnotation):
+        return metrics.annotate(ident, key=key, **body.model_dump())
+
+    @router.post('/metrics/population')
+    def population(body: MetricQuery):
+        return metrics.population(body.query, body.population)
+
+    @router.get('/metrics/trajectories/{ident}')
+    def metric_values(ident: str):
+        return metrics.view(studio.store.read(ident), sampler.editor()['configuration']['definitions'])
+
+    @router.post('/metrics/calculate-missing', status_code=202)
+    async def calculate_missing(body: MetricQuery):
+        query = dict(body.query)
+        if body.population == 'accepted':
+            raise ValueError('Use the explicit stage query for a calculation job')
+        job = studio.bulk.start(query, 'metrics', sampler.editor()['configuration'])
+        studio.worker.kick(job)
+        return dict(job_id=job, status_url=f'/api/v1/jobs/{job}')
 
     @router.get('/project')
     def project():

@@ -27,8 +27,9 @@ locks. A conflict leaves browser text intact; Reload saved source is explicit.
 Metadata is separate from intrinsic event/window data. Missing split warns;
 explicit Auto is intentional. The sidebar's JSON editor preserves arbitrary
 nested annotations. Stage/split changes do not alter intrinsic source identity.
-Dataset Metrics is a single panel showing saved values/unavailable state; graph
-metric calculation and population views await the metric service integration.
+Dataset Metrics uses the shared [sampler and metrics service](GRAPH-SAMPLER-METRICS.md)
+for saved observations, unavailable/stale reporting, proposal coverage and explicit
+Calculate Missing Metrics jobs.
 Generation, automatic review and repair drivers are not installed in this
 manual milestone. The UI does not expose the old generation path for graph data.
 

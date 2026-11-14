@@ -87,8 +87,15 @@ const j1=await module.api('/exports','POST',{options:{compiled:false,minimum_sta
 const j2=await module.api('/exports','POST',{options:{compiled:false,minimum_stage:null}});
 await ui.inspectJob(j1.job_id); await ui.inspectJob(j2.job_id); await ui.pollJobs();
 assert.equal(ui.dialogs.size,2); assert.equal(ui.id,selected); assert.equal(ui.event,selectedEvent); assert.equal($('event-content').value,'unsaved');
+// Reuse the existing metrics panel and frozen-search calculation job.
+$('metrics-button').click(); await until(()=>$('metrics-dialog').open);
+assert.ok($('metrics-values').textContent.includes('proposal_coverage'));
+assert.ok($('metrics-values').textContent.includes('unavailable'));
+$('metrics-calculate').click(); await until(()=>ui.dialogs.size===3);
+await until(async ()=>(await module.api('/job-summaries')).some(j=>j.kind==='bulk'&&j.state==='completed'));
+assert.equal($('event-content').value,'unsaved'); assert.equal(ui.id,selected);
 // CAS conflict leaves the browser draft intact.
-await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{metadata:{test:true}}});
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:(await module.api('/trajectories/'+ui.id)).revision,patch:{metadata:{test:true}}});
 await assert.rejects(()=>ui.save(),/Revision conflict/); assert.equal(ui.draft.events.first.content,'unsaved');
 clearTimeout(ui.pollTimer);clearTimeout(ui.validationTimer);ui.preview.invalidate();if(ui.playing)clearInterval(ui.playing);
 assert.ok(paths.every(path => path.startsWith('/api/v1/')));

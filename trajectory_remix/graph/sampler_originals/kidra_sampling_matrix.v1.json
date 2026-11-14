@@ -1,0 +1,3007 @@
+{
+  "schema_version": "1.0.0",
+  "matrix_id": "kidra-practical-sft-v1",
+  "status": "provisional; adjust weights based on accepted data and held-out evaluation",
+  "description": "One proposal per call; behavioral objectives and compatibility constraints are separate from accepted outcome metrics.",
+  "sampler": {
+    "max_extra_event_tags": 3,
+    "max_secondary_competencies": 2,
+    "secondary_competency_probability": 0.42,
+    "max_rejection_attempts": 0,
+    "default_seed_bits": 64,
+    "weight_policy": "relative, nonnegative; probabilities 0..1",
+    "selection_order": [
+      "focus",
+      "decision",
+      "lifecycle",
+      "complexity",
+      "domain",
+      "entry_state",
+      "recurrence",
+      "resource_posture",
+      "dependency_pattern",
+      "tool_access",
+      "agent_reliability",
+      "user_competence",
+      "user_patience",
+      "user_involvement",
+      "user_tone",
+      "team_posture",
+      "incident",
+      "information_state",
+      "decision_difficulty",
+      "stakes",
+      "project_timescale",
+      "observation_source",
+      "window_role_profile",
+      "phase_transition",
+      "episode_horizon",
+      "episode_goal",
+      "execution_pattern",
+      "event_tags",
+      "secondary_competencies",
+      "numeric_targets"
+    ],
+    "constraint_policy": "Use hard implications + forced dimension propagation. Raise on unsatisfiable config, never silently relax.",
+    "joint_balancing": {
+      "axes": [
+        "focus.family",
+        "lifecycle",
+        "complexity"
+      ],
+      "method": "iterative_proportional_fitting",
+      "max_iterations": 1500,
+      "tolerance": 1e-07,
+      "interpretation": "targets exact in expectation for sampled proposals where constraints permit; accepted distribution may differ"
+    }
+  },
+  "competencies": [
+    {
+      "id": "strategic_planning",
+      "weight": 0.18,
+      "behaviors": [
+        {
+          "id": "scope_and_acceptance",
+          "weight": 1.0,
+          "objective": "Clarify goal boundaries, deliverables, and measurable acceptance criteria",
+          "decision_axis": "clarification",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": [
+            "ambiguous_requirements"
+          ]
+        },
+        {
+          "id": "risk_and_assumptions",
+          "weight": 1.0,
+          "objective": "Identify uncertain premises and prioritize risks using evidence",
+          "decision_axis": "risk_response",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "milestone_prioritization",
+          "weight": 1.0,
+          "objective": "Choose actionable milestones and order them around constraints",
+          "decision_axis": "prioritization",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "plan_granularity",
+          "weight": 1.0,
+          "objective": "Select appropriately sized planning effort relative to urgency and project scale",
+          "decision_axis": "planning_depth",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "scope_tradeoffs",
+          "weight": 1.0,
+          "objective": "Negotiate scope, deadlines, quality and constraints rather than hiding conflicts",
+          "decision_axis": "tradeoff",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "strategy_revision",
+          "weight": 1.0,
+          "objective": "Distinguish new evidence that warrants a change of course from minor noise",
+          "decision_axis": "replan",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "risk_bounded_experiment",
+          "weight": 1.0,
+          "objective": "Choose low-cost experiments when uncertainty blocks commitment",
+          "decision_axis": "experiment",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        }
+      ]
+    },
+    {
+      "id": "task_decomposition",
+      "weight": 0.18,
+      "behaviors": [
+        {
+          "id": "bounded_deliverables",
+          "weight": 1.0,
+          "objective": "Split a broad objective into independently verifiable deliverables",
+          "decision_axis": "decomposition",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "dependency_mapping",
+          "weight": 1.0,
+          "objective": "Identify prerequisites, critical path and blocked branches",
+          "decision_axis": "parallelism",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "parallelism_decision",
+          "weight": 1.0,
+          "objective": "Recognize independent work versus necessary sequencing",
+          "decision_axis": "parallelism",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "task_ownership",
+          "weight": 1.0,
+          "objective": "Assign unambiguous responsibility and avoid duplicate ownership",
+          "decision_axis": "ownership",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "min_agents": 2
+        },
+        {
+          "id": "task_scope_repair",
+          "weight": 1.0,
+          "objective": "Refine too-big or ambiguous tasks while preserving progress",
+          "decision_axis": "replan",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "integration_contracts",
+          "weight": 1.0,
+          "objective": "Design handoff/acceptance contracts between dependent tasks",
+          "decision_axis": "handoff",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": [],
+          "forced_dimensions": {
+            "dependency_pattern": "chain"
+          }
+        }
+      ]
+    },
+    {
+      "id": "agent_orchestration",
+      "weight": 0.22,
+      "behaviors": [
+        {
+          "id": "select_agent_by_capability",
+          "weight": 1.0,
+          "objective": "Choose agents by strengths, tools, cost and risk",
+          "decision_axis": "agent_tier",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "proportional_delegation",
+          "weight": 1.0,
+          "objective": "Avoid both excessive delegation and unnecessary coordinator implementation",
+          "decision_axis": "delegation",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "multi_agent_dispatch",
+          "weight": 1.0,
+          "objective": "Dispatch independent tasks without conflicting assignments",
+          "decision_axis": "parallelism",
+          "min_complexity": 2,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active"
+          ],
+          "required_event_tags": [
+            "parallel_assignments"
+          ],
+          "min_agents": 2,
+          "allowed_decision_choices": [
+            "parallelize"
+          ],
+          "forced_dimensions": {
+            "dependency_pattern": "independent"
+          }
+        },
+        {
+          "id": "asynchronous_monitoring",
+          "weight": 1.0,
+          "objective": "Track staggered results without losing outstanding work",
+          "decision_axis": "wait_or_act",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [
+            "asynchronous_result"
+          ],
+          "min_agents": 1,
+          "forced_dimensions": {
+            "information_state": "unobserved"
+          }
+        },
+        {
+          "id": "synchronization",
+          "weight": 1.0,
+          "objective": "Merge results only after required dependencies are observed",
+          "decision_axis": "wait_or_act",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "wait_for_dependency",
+            "follow_up_timeout"
+          ],
+          "forced_dimensions": {
+            "dependency_pattern": "chain"
+          }
+        },
+        {
+          "id": "owner_escalation",
+          "weight": 1.0,
+          "objective": "Intervene when owners stall, conflict or cannot meet requirements",
+          "decision_axis": "escalation",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "agent_communication",
+          "weight": 1.0,
+          "objective": "Send concise actionable requests and status communications",
+          "decision_axis": "communication",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "min_agents": 1
+        },
+        {
+          "id": "avoid_unneeded_intervention",
+          "weight": 1.0,
+          "objective": "Allow valid work to continue without churn, duplicate dispatch or spam",
+          "decision_axis": "wait_or_act",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "wait_for_dependency",
+            "execute_independent_work"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "context_continuity",
+      "weight": 0.16,
+      "behaviors": [
+        {
+          "id": "task_specific_context",
+          "weight": 1.0,
+          "objective": "Assemble bounded, relevant context packets for each specialist",
+          "decision_axis": "handoff",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "min_agents": 1
+        },
+        {
+          "id": "inherited_state_reconstruction",
+          "weight": 1.0,
+          "objective": "Resume from partial project history without resetting progress",
+          "decision_axis": "state_recovery",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery",
+            "closure"
+          ],
+          "required_event_tags": [
+            "partial_history"
+          ],
+          "allowed_decision_choices": [
+            "reconstruct"
+          ],
+          "forced_dimensions": {
+            "entry_state": "partial_handoff"
+          }
+        },
+        {
+          "id": "decision_provenance",
+          "weight": 1.0,
+          "objective": "Retain reasons and evidence for decisions and changed constraints",
+          "decision_axis": "evidence",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery",
+            "closure"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "stale_context_detection",
+          "weight": 1.0,
+          "objective": "Detect and quarantine stale or superseded information",
+          "decision_axis": "evidence",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [
+            "stale_context"
+          ],
+          "allowed_decision_choices": [
+            "verify_stale"
+          ],
+          "forced_dimensions": {
+            "information_state": "stale"
+          }
+        },
+        {
+          "id": "conflicting_reports",
+          "weight": 1.0,
+          "objective": "Reconcile incompatible agent reports without unsupported certainty",
+          "decision_axis": "evidence",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [
+            "conflicting_reports"
+          ],
+          "allowed_decision_choices": [
+            "verify_conflict"
+          ],
+          "forced_dimensions": {
+            "information_state": "conflicting",
+            "incident": "conflicting_reports"
+          }
+        },
+        {
+          "id": "selective_updates",
+          "weight": 1.0,
+          "objective": "Notify only affected agents with relevant state changes",
+          "decision_axis": "communication",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "context_budgeting",
+          "weight": 1.0,
+          "objective": "Preserve essential project state under short context limits",
+          "decision_axis": "handoff",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "min_agents": 1
+        }
+      ]
+    },
+    {
+      "id": "quality_and_adaptation",
+      "weight": 0.16,
+      "behaviors": [
+        {
+          "id": "verification_plan",
+          "weight": 1.0,
+          "objective": "Set appropriate tests, criteria and verification owners",
+          "decision_axis": "verification",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "closure"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "evaluate_claimed_results",
+          "weight": 1.0,
+          "objective": "Differentiate agent claims from verified observations",
+          "decision_axis": "evidence",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "closure"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "targeted_repair",
+          "weight": 1.0,
+          "objective": "Localize defects, request bounded repair and retest",
+          "decision_axis": "repair",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "recovery",
+            "active"
+          ],
+          "required_event_tags": [
+            "failed_acceptance"
+          ],
+          "allowed_decision_choices": [
+            "repair_in_place"
+          ],
+          "forced_dimensions": {
+            "incident": "failed_acceptance"
+          }
+        },
+        {
+          "id": "reassignment_or_replan",
+          "weight": 1.0,
+          "objective": "Determine whether repair, reassignment or full replanning is warranted",
+          "decision_axis": "repair",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "reassign",
+            "redesign_plan"
+          ]
+        },
+        {
+          "id": "failure_triage",
+          "weight": 1.0,
+          "objective": "Diagnose ambiguous failures and prioritize consequential ones",
+          "decision_axis": "risk_response",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "recovery",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "completion_accounting",
+          "weight": 1.0,
+          "objective": "Confirm all outstanding obligations before answering or closing",
+          "decision_axis": "completion",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "closure",
+            "active"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "close_verified",
+            "continue_outstanding"
+          ]
+        },
+        {
+          "id": "responsible_termination",
+          "weight": 1.0,
+          "objective": "Close verified work; stop or escalate when further progress is unjustified",
+          "decision_axis": "completion",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "closure",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "close_verified",
+            "pause_or_escalate"
+          ]
+        },
+        {
+          "id": "scope_change_recovery",
+          "weight": 1.0,
+          "objective": "Update plans and dependents when the user changes the goal",
+          "decision_axis": "replan",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "recovery",
+            "active"
+          ],
+          "required_event_tags": [
+            "changed_constraints"
+          ],
+          "forced_dimensions": {
+            "incident": "scope_change"
+          }
+        }
+      ]
+    },
+    {
+      "id": "resource_optimization",
+      "weight": 0.1,
+      "behaviors": [
+        {
+          "id": "model_cost_routing",
+          "weight": 1.0,
+          "objective": "Use the cheapest adequate agent without jeopardizing quality",
+          "decision_axis": "agent_tier",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "automation_roi",
+          "weight": 1.0,
+          "objective": "Invest in reusable automation only when its expected value is positive",
+          "decision_axis": "automation",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "budget_reallocation",
+          "weight": 1.0,
+          "objective": "Shift limited time, tokens or money toward highest-value obligations",
+          "decision_axis": "tradeoff",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "deadline_scheduling",
+          "weight": 1.0,
+          "objective": "Allocate scarce execution capacity across critical-path tasks",
+          "decision_axis": "prioritization",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "optimization_stop_rule",
+          "weight": 1.0,
+          "objective": "Stop sunk-cost optimization when expected benefit no longer justifies it",
+          "decision_axis": "automation",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "perform_manually",
+            "defer_investment"
+          ]
+        },
+        {
+          "id": "quality_cost_tradeoff",
+          "weight": 1.0,
+          "objective": "Pay for quality where error costs dominate, economize elsewhere",
+          "decision_axis": "agent_tier",
+          "min_complexity": 1,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active",
+            "recovery"
+          ],
+          "required_event_tags": []
+        },
+        {
+          "id": "recurrent_work_strategy",
+          "weight": 1.0,
+          "objective": "Select reusable infrastructure based on uncertain recurrence",
+          "decision_axis": "automation",
+          "min_complexity": 0,
+          "max_complexity": 3,
+          "allowed_lifecycle": [
+            "initiation",
+            "active"
+          ],
+          "required_event_tags": [],
+          "allowed_decision_choices": [
+            "invest_in_automation",
+            "perform_manually",
+            "defer_investment"
+          ]
+        }
+      ]
+    }
+  ],
+  "decision_axes": {
+    "clarification": {
+      "variants": [
+        {
+          "id": "ask_targeted_question",
+          "weight": 1,
+          "scenario_condition": "A critical requirement is unknown and taking action could irreversibly waste work.",
+          "target_behavior": "Ask a focused clarifying question and do not invent approval or requirements."
+        },
+        {
+          "id": "proceed_with_assumption",
+          "weight": 1,
+          "scenario_condition": "The uncertainty is low impact and a reversible default is available.",
+          "target_behavior": "State a bounded assumption and make useful progress."
+        }
+      ]
+    },
+    "risk_response": {
+      "variants": [
+        {
+          "id": "investigate",
+          "weight": 1,
+          "scenario_condition": "A credible unverified issue would materially change the plan.",
+          "target_behavior": "Collect discriminating evidence before committing."
+        },
+        {
+          "id": "accept_residual_risk",
+          "weight": 0.8,
+          "scenario_condition": "The remaining risk is minor and further investigation costs more than likely impact.",
+          "target_behavior": "Record the risk and continue without excessive investigation."
+        },
+        {
+          "id": "mitigate_now",
+          "weight": 1,
+          "scenario_condition": "A high-impact, feasible precaution is justified by available evidence.",
+          "target_behavior": "Prioritize a proportionate mitigation."
+        }
+      ]
+    },
+    "prioritization": {
+      "variants": [
+        {
+          "id": "critical_path_first",
+          "weight": 1,
+          "scenario_condition": "An identified prerequisite gates several valuable dependent tasks.",
+          "target_behavior": "Prioritize the gating task and preserve useful parallel work."
+        },
+        {
+          "id": "deadline_first",
+          "weight": 1,
+          "scenario_condition": "A firm deadline makes a narrow deliverable more urgent than optional improvements.",
+          "target_behavior": "Prioritize the deliverable due soon."
+        },
+        {
+          "id": "high_value_first",
+          "weight": 0.8,
+          "scenario_condition": "No hard deadline or blocker dominates, but tasks differ sharply in expected benefit.",
+          "target_behavior": "Prioritize expected project value."
+        }
+      ]
+    },
+    "planning_depth": {
+      "variants": [
+        {
+          "id": "minimal_plan",
+          "weight": 1,
+          "scenario_condition": "The task is narrow, reversible, and already sufficiently specified.",
+          "target_behavior": "Create only the coordination structure needed.",
+          "max_complexity": 1
+        },
+        {
+          "id": "structured_plan",
+          "weight": 1,
+          "scenario_condition": "Several interdependent deliverables require explicit owners and milestones.",
+          "target_behavior": "Produce a bounded plan before dispatch.",
+          "min_complexity": 1
+        },
+        {
+          "id": "revise_during_execution",
+          "weight": 0.7,
+          "scenario_condition": "A valid plan exists but newly observed constraints require localized updates.",
+          "target_behavior": "Revise only the affected plan components.",
+          "allowed_lifecycle": [
+            "active",
+            "recovery"
+          ]
+        }
+      ]
+    },
+    "tradeoff": {
+      "variants": [
+        {
+          "id": "protect_quality",
+          "weight": 1,
+          "scenario_condition": "Reducing verification would create disproportionate downstream risk.",
+          "target_behavior": "Protect the quality-critical work and adjust less important scope."
+        },
+        {
+          "id": "protect_deadline",
+          "weight": 1,
+          "scenario_condition": "A clear scope reduction can preserve the highest-value deliverable before a hard deadline.",
+          "target_behavior": "Negotiate or reduce optional scope without false completion."
+        },
+        {
+          "id": "seek_authorization",
+          "weight": 0.8,
+          "scenario_condition": "A meaningful budget or scope change exceeds existing permission.",
+          "target_behavior": "Explain options and request the required approval.",
+          "required_event_tags": [
+            "external_approval"
+          ]
+        }
+      ]
+    },
+    "replan": {
+      "variants": [
+        {
+          "id": "localized_revision",
+          "weight": 1,
+          "scenario_condition": "A changed constraint affects only a bounded subset of tasks.",
+          "target_behavior": "Repair affected tasks and notify dependent owners; preserve valid work."
+        },
+        {
+          "id": "full_replan",
+          "weight": 0.8,
+          "scenario_condition": "A foundational assumption is invalid and most milestones no longer serve the objective.",
+          "target_behavior": "Rebuild the plan with explicit migration of reusable work.",
+          "min_complexity": 2
+        },
+        {
+          "id": "retain_plan",
+          "weight": 1,
+          "scenario_condition": "New information is noisy or immaterial and the original approach remains valid.",
+          "target_behavior": "Avoid disruptive replanning."
+        }
+      ]
+    },
+    "experiment": {
+      "variants": [
+        {
+          "id": "cheap_probe",
+          "weight": 1,
+          "scenario_condition": "A cheap test can resolve a consequential uncertainty before costly commitment.",
+          "target_behavior": "Commission a small decisive experiment."
+        },
+        {
+          "id": "direct_execution",
+          "weight": 1,
+          "scenario_condition": "The uncertainty is too small to justify experiment overhead.",
+          "target_behavior": "Proceed with the main task while recording assumptions."
+        }
+      ]
+    },
+    "decomposition": {
+      "variants": [
+        {
+          "id": "split_work",
+          "weight": 1,
+          "scenario_condition": "The objective spans genuinely separable deliverables with different completion criteria.",
+          "target_behavior": "Decompose into bounded outputs and owners."
+        },
+        {
+          "id": "keep_compact",
+          "weight": 0.8,
+          "scenario_condition": "The objective is small enough that fragmentation would add overhead.",
+          "target_behavior": "Keep the work compact and avoid artificial subtasks.",
+          "max_complexity": 1
+        }
+      ]
+    },
+    "parallelism": {
+      "variants": [
+        {
+          "id": "parallelize",
+          "weight": 1,
+          "scenario_condition": "Multiple tasks have no unsatisfied data dependencies and enough capacity exists.",
+          "target_behavior": "Dispatch independent tasks concurrently.",
+          "min_complexity": 1,
+          "min_agents": 2,
+          "forced_dimensions": {
+            "dependency_pattern": "independent"
+          }
+        },
+        {
+          "id": "serialize",
+          "weight": 1,
+          "scenario_condition": "Later tasks require observations or artifacts from earlier tasks.",
+          "target_behavior": "Sequence dependent work and wait for prerequisite evidence.",
+          "min_complexity": 1,
+          "forced_dimensions": {
+            "dependency_pattern": "chain"
+          }
+        },
+        {
+          "id": "partial_parallelism",
+          "weight": 1,
+          "scenario_condition": "Some tasks are independent while others form a critical path.",
+          "target_behavior": "Run only independent branches concurrently.",
+          "min_complexity": 2,
+          "min_agents": 2,
+          "forced_dimensions": {
+            "dependency_pattern": "critical_path_with_sidework"
+          }
+        }
+      ]
+    },
+    "ownership": {
+      "variants": [
+        {
+          "id": "assign_unique_owners",
+          "weight": 1,
+          "scenario_condition": "Multiple eligible agents and overlapping task interests create duplicate-work risk.",
+          "target_behavior": "Assign one accountable owner per task with clear handoff rules.",
+          "min_agents": 2
+        },
+        {
+          "id": "transfer_ownership",
+          "weight": 0.9,
+          "scenario_condition": "The original owner is unavailable or demonstrably incapable of finishing a required task.",
+          "target_behavior": "Record a visible ownership transfer rather than silently duplicating the task.",
+          "min_agents": 2,
+          "forced_dimensions": {
+            "incident": "agent_dropout"
+          }
+        }
+      ]
+    },
+    "handoff": {
+      "variants": [
+        {
+          "id": "minimal_context",
+          "weight": 1,
+          "scenario_condition": "The specialist needs a narrow, well-specified output and most historical notes are irrelevant.",
+          "target_behavior": "Pass concise task-specific constraints and acceptance conditions.",
+          "forbidden_entry_states": [
+            "conflicted_handoff"
+          ]
+        },
+        {
+          "id": "rich_context",
+          "weight": 1,
+          "scenario_condition": "A specialist decision depends on prior findings, constraints, and dependency artifacts.",
+          "target_behavior": "Include relevant state and provenance without dumping unrelated history."
+        },
+        {
+          "id": "reconstruct_context",
+          "weight": 0.8,
+          "scenario_condition": "The original handoff is incomplete or stale but recoverable evidence exists.",
+          "target_behavior": "Rebuild the missing context before dependent execution.",
+          "forced_dimensions": {
+            "entry_state": "partial_handoff"
+          },
+          "allowed_lifecycle": [
+            "active",
+            "recovery",
+            "closure"
+          ]
+        }
+      ]
+    },
+    "agent_tier": {
+      "variants": [
+        {
+          "id": "economy_agent",
+          "weight": 1,
+          "scenario_condition": "A routine verifiable task fits a cheaper specialist with adequate tools.",
+          "target_behavior": "Select the economical agent and set appropriate verification.",
+          "min_agents": 1
+        },
+        {
+          "id": "expert_agent",
+          "weight": 1,
+          "scenario_condition": "Errors are expensive or the task requires rare expertise unavailable to cheap agents.",
+          "target_behavior": "Use a capable specialist and justify additional cost.",
+          "min_agents": 1
+        },
+        {
+          "id": "no_suitable_agent",
+          "weight": 0.5,
+          "scenario_condition": "No available specialist meets the task constraints and inventing a capability would be unsafe.",
+          "target_behavior": "Explain the limitation and escalate, defer, or seek authorization.",
+          "min_agents": 1
+        }
+      ]
+    },
+    "delegation": {
+      "variants": [
+        {
+          "id": "delegate",
+          "weight": 1,
+          "scenario_condition": "The work requires substantial specialist execution that a suitable available agent can perform.",
+          "target_behavior": "Delegate with defined scope, owner and acceptance criteria.",
+          "min_complexity": 1,
+          "min_agents": 1
+        },
+        {
+          "id": "handle_small_coordination",
+          "weight": 1,
+          "scenario_condition": "The request is a trivial coordination decision; delegation costs more than it saves.",
+          "target_behavior": "Handle the small coordination step directly, not specialist implementation.",
+          "max_complexity": 1
+        },
+        {
+          "id": "decline_unnecessary_team",
+          "weight": 0.8,
+          "scenario_condition": "A large team would create communication overhead without increasing useful throughput.",
+          "target_behavior": "Use only the minimum justified resources.",
+          "max_complexity": 2
+        }
+      ]
+    },
+    "wait_or_act": {
+      "variants": [
+        {
+          "id": "wait_for_dependency",
+          "weight": 1,
+          "scenario_condition": "A required observation is pending and no useful independent work can proceed.",
+          "target_behavior": "Wait without fabricating a result or spinning on duplicate calls.",
+          "forced_dimensions": {
+            "dependency_pattern": "chain",
+            "information_state": "unobserved"
+          },
+          "required_event_tags": [
+            "no_useful_work"
+          ],
+          "min_complexity": 1
+        },
+        {
+          "id": "execute_independent_work",
+          "weight": 1,
+          "scenario_condition": "A dependency is pending but a separate useful task is unblocked.",
+          "target_behavior": "Continue the independent work while tracking the pending result.",
+          "min_complexity": 2,
+          "forced_dimensions": {
+            "dependency_pattern": "critical_path_with_sidework",
+            "information_state": "unobserved"
+          }
+        },
+        {
+          "id": "follow_up_timeout",
+          "weight": 0.8,
+          "scenario_condition": "A genuine service-level deadline has elapsed and escalation is permitted.",
+          "target_behavior": "Request status or escalate without inventing completion.",
+          "forced_dimensions": {
+            "incident": "agent_dropout"
+          }
+        }
+      ]
+    },
+    "escalation": {
+      "variants": [
+        {
+          "id": "resolve_locally",
+          "weight": 1,
+          "scenario_condition": "The issue has a bounded owner and can be repaired within delegated authority.",
+          "target_behavior": "Repair or reassign locally and update relevant state."
+        },
+        {
+          "id": "escalate_to_user",
+          "weight": 1,
+          "scenario_condition": "The decision exceeds granted authority or changes a material project commitment.",
+          "target_behavior": "Present options with evidence and request permission.",
+          "required_event_tags": [
+            "external_approval"
+          ]
+        }
+      ]
+    },
+    "communication": {
+      "variants": [
+        {
+          "id": "targeted_update",
+          "weight": 1,
+          "scenario_condition": "A change materially affects some but not all participants.",
+          "target_behavior": "Notify affected owners with an actionable, concise update."
+        },
+        {
+          "id": "quiet_progress",
+          "weight": 1,
+          "scenario_condition": "Internal progress is routine and no participant needs another message.",
+          "target_behavior": "Avoid noisy updates and continue useful work.",
+          "forbidden_event_tags": [
+            "external_approval"
+          ]
+        },
+        {
+          "id": "milestone_report",
+          "weight": 0.8,
+          "scenario_condition": "A milestone or significant risk requires a user-facing status summary.",
+          "target_behavior": "Give an accurate progress report with uncertainty and next actions."
+        }
+      ]
+    },
+    "state_recovery": {
+      "variants": [
+        {
+          "id": "reconstruct",
+          "weight": 1,
+          "scenario_condition": "A partially completed project has an incomplete, potentially inconsistent handoff.",
+          "target_behavior": "Identify completed, pending, blocked and unknown obligations before continuing.",
+          "forced_dimensions": {
+            "entry_state": "partial_handoff"
+          }
+        },
+        {
+          "id": "continue_from_verified_state",
+          "weight": 0.9,
+          "scenario_condition": "A reliable checkpoint/ledger already establishes current state.",
+          "target_behavior": "Continue without repeating completed work.",
+          "forced_dimensions": {
+            "entry_state": "clean_checkpoint"
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "variants": [
+        {
+          "id": "verify_conflict",
+          "weight": 1,
+          "scenario_condition": "Available claims disagree or are stale on a consequential matter.",
+          "target_behavior": "Request discriminating observations and preserve provenance.",
+          "forced_dimensions": {
+            "information_state": "conflicting"
+          }
+        },
+        {
+          "id": "use_verified_evidence",
+          "weight": 1,
+          "scenario_condition": "Evidence is current, trustworthy and sufficient for the decision.",
+          "target_behavior": "Proceed without repeating unnecessary validation.",
+          "forced_dimensions": {
+            "information_state": "clear"
+          }
+        },
+        {
+          "id": "flag_unknown",
+          "weight": 0.8,
+          "scenario_condition": "The needed result has not been observed or cannot be verified.",
+          "target_behavior": "Explicitly mark unknown; do not assert that external work occurred.",
+          "forced_dimensions": {
+            "information_state": "unobserved"
+          }
+        },
+        {
+          "id": "verify_stale",
+          "weight": 0.8,
+          "scenario_condition": "A significant decision depends on a superseded record with a newer authoritative version.",
+          "target_behavior": "Check the updated source and reconcile the decision with the current record.",
+          "forced_dimensions": {
+            "information_state": "stale"
+          }
+        }
+      ]
+    },
+    "verification": {
+      "variants": [
+        {
+          "id": "independent_review",
+          "weight": 1,
+          "scenario_condition": "A consequential deliverable has a high impact error mode and no sufficient independent evidence.",
+          "target_behavior": "Arrange appropriate independent verification.",
+          "required_event_tags": [
+            "high_stakes_verification"
+          ]
+        },
+        {
+          "id": "existing_checks_sufficient",
+          "weight": 1,
+          "scenario_condition": "Relevant automated acceptance checks already give adequate assurance for the risk.",
+          "target_behavior": "Use existing verified evidence, avoiding redundant reviews."
+        },
+        {
+          "id": "targeted_check",
+          "weight": 1,
+          "scenario_condition": "Only a narrow interface or changed component requires fresh tests.",
+          "target_behavior": "Verify the affected boundary and preserve valid prior results.",
+          "min_complexity": 1
+        }
+      ]
+    },
+    "repair": {
+      "variants": [
+        {
+          "id": "repair_in_place",
+          "weight": 1,
+          "scenario_condition": "A localized defect is understood and the original owner remains capable.",
+          "target_behavior": "Request bounded repair with retest criteria.",
+          "forced_dimensions": {
+            "incident": "failed_acceptance"
+          }
+        },
+        {
+          "id": "reassign",
+          "weight": 0.9,
+          "scenario_condition": "The owner is unavailable, unqualified, or repeated repair attempts failed.",
+          "target_behavior": "Transfer a bounded assignment with complete context.",
+          "forced_dimensions": {
+            "incident": "agent_dropout"
+          }
+        },
+        {
+          "id": "redesign_plan",
+          "weight": 0.8,
+          "scenario_condition": "A basic assumption or integration design is invalid.",
+          "target_behavior": "Revise the affected work plan rather than repeating failed attempts.",
+          "forced_dimensions": {
+            "incident": "stale_decision"
+          }
+        }
+      ]
+    },
+    "completion": {
+      "variants": [
+        {
+          "id": "close_verified",
+          "weight": 1,
+          "scenario_condition": "Every required deliverable is observed, accepted, and has no unresolved gating obligation.",
+          "target_behavior": "Close with a concise verified handoff.",
+          "forced_dimensions": {
+            "episode_goal": "verified_completion"
+          }
+        },
+        {
+          "id": "continue_outstanding",
+          "weight": 1,
+          "scenario_condition": "At least one required deliverable is missing, unobserved, or fails acceptance.",
+          "target_behavior": "Do not claim completion; pursue remaining work.",
+          "forced_dimensions": {
+            "episode_goal": "meaningful_progress",
+            "information_state": "unobserved"
+          }
+        },
+        {
+          "id": "pause_or_escalate",
+          "weight": 0.7,
+          "scenario_condition": "No authorized useful progress remains while an external dependency or decision is outstanding.",
+          "target_behavior": "Explain the blocker and pause or escalate accurately.",
+          "forced_dimensions": {
+            "episode_goal": "blocked_escalation",
+            "information_state": "unobserved",
+            "dependency_pattern": "chain"
+          },
+          "required_event_tags": [
+            "no_useful_work"
+          ],
+          "min_complexity": 1
+        }
+      ]
+    },
+    "automation": {
+      "variants": [
+        {
+          "id": "invest_in_automation",
+          "weight": 1,
+          "scenario_condition": "Repeated work and reliable reuse create positive expected net value after build and maintenance costs.",
+          "target_behavior": "Commission proportional reusable tooling.",
+          "forced_dimensions": {
+            "recurrence": "recurring"
+          }
+        },
+        {
+          "id": "perform_manually",
+          "weight": 1,
+          "scenario_condition": "A one-off or low-volume task makes automation overhead unjustified.",
+          "target_behavior": "Use an existing tool or bounded manual delegation.",
+          "forced_dimensions": {
+            "recurrence": "one_off"
+          }
+        },
+        {
+          "id": "defer_investment",
+          "weight": 1,
+          "scenario_condition": "Future demand and savings are too uncertain to justify an irreversible investment.",
+          "target_behavior": "Use reversible execution and revisit if volume appears.",
+          "forced_dimensions": {
+            "recurrence": "uncertain"
+          }
+        }
+      ]
+    }
+  },
+  "domains": [
+    {
+      "id": "software_engineering",
+      "weight": 0.23,
+      "description": "Software or open-source implementation and maintenance",
+      "agent_roles": [
+        "code_agent",
+        "test_agent",
+        "review_agent",
+        "architecture_agent"
+      ],
+      "project_archetypes": [
+        "release a plugin",
+        "migrate an API",
+        "repair a broken build",
+        "design a multi-component service"
+      ]
+    },
+    {
+      "id": "scientific_research",
+      "weight": 0.14,
+      "description": "Research coordination and literature-supported experiments",
+      "agent_roles": [
+        "researcher",
+        "data_analyst",
+        "methodologist",
+        "reviewer"
+      ],
+      "project_archetypes": [
+        "compare competing hypotheses",
+        "plan a small experiment",
+        "synthesize a disputed result",
+        "prepare a reproducible research report"
+      ]
+    },
+    {
+      "id": "writing_publishing",
+      "weight": 0.12,
+      "description": "Fiction, editing, and publication workflows",
+      "agent_roles": [
+        "writer",
+        "editor",
+        "fact_checker",
+        "layout_agent"
+      ],
+      "project_archetypes": [
+        "coordinate novel revisions",
+        "prepare a launch checklist",
+        "revise an anthology",
+        "manage chapter deadlines"
+      ]
+    },
+    {
+      "id": "data_analytics",
+      "weight": 0.13,
+      "description": "Data pipelines, analysis and reporting",
+      "agent_roles": [
+        "data_engineer",
+        "analyst",
+        "statistician",
+        "qa_reviewer"
+      ],
+      "project_archetypes": [
+        "produce a KPI review",
+        "reconcile two reports",
+        "clean a multi-source dataset",
+        "verify a dashboard"
+      ]
+    },
+    {
+      "id": "product_design",
+      "weight": 0.12,
+      "description": "Product, design and user research",
+      "agent_roles": [
+        "designer",
+        "ux_researcher",
+        "engineer",
+        "qa_reviewer"
+      ],
+      "project_archetypes": [
+        "design an onboarding flow",
+        "evaluate competing prototypes",
+        "prepare a product launch",
+        "coordinate accessibility fixes"
+      ]
+    },
+    {
+      "id": "business_operations",
+      "weight": 0.13,
+      "description": "Administrative, process and business coordination",
+      "agent_roles": [
+        "operations_agent",
+        "analyst",
+        "communications_agent",
+        "auditor"
+      ],
+      "project_archetypes": [
+        "reorganize a fulfillment process",
+        "execute a customer support improvement",
+        "coordinate a compliance checklist",
+        "reduce recurring overhead"
+      ]
+    },
+    {
+      "id": "creative_production",
+      "weight": 0.08,
+      "description": "Visual, game and media projects",
+      "agent_roles": [
+        "artist",
+        "game_designer",
+        "audio_agent",
+        "qa_reviewer"
+      ],
+      "project_archetypes": [
+        "create a small game update",
+        "coordinate a trailer",
+        "plan an art asset pipeline",
+        "release a creator toolkit"
+      ]
+    },
+    {
+      "id": "infrastructure_operations",
+      "weight": 0.05,
+      "description": "Operations, maintenance and tooling",
+      "agent_roles": [
+        "systems_agent",
+        "security_reviewer",
+        "support_agent",
+        "monitoring_agent"
+      ],
+      "project_archetypes": [
+        "migrate hosted infrastructure",
+        "respond to a degraded service",
+        "simplify a CI pipeline",
+        "audit deployment readiness"
+      ]
+    }
+  ],
+  "dimensions": {
+    "lifecycle": [
+      {
+        "id": "initiation",
+        "weight": 0.15,
+        "description": "A new or freshly authorized project needs an initial direction"
+      },
+      {
+        "id": "active",
+        "weight": 0.5,
+        "description": "Execution is already underway"
+      },
+      {
+        "id": "recovery",
+        "weight": 0.2,
+        "description": "A significant deviation, failure, or change requires attention"
+      },
+      {
+        "id": "closure",
+        "weight": 0.15,
+        "description": "The project is approaching acceptance, handoff, or stopping decision"
+      }
+    ],
+    "complexity": [
+      {
+        "id": "trivial",
+        "weight": 0.08,
+        "level": 0,
+        "description": "Very small coordination task",
+        "task_count": [
+          1,
+          2
+        ],
+        "dependency_depth": [
+          0,
+          0
+        ],
+        "max_agents": 1,
+        "window_budget": [
+          1,
+          2
+        ],
+        "expected_tool_calls": [
+          0,
+          1
+        ]
+      },
+      {
+        "id": "small",
+        "weight": 0.26,
+        "level": 1,
+        "description": "Small project with limited dependencies",
+        "task_count": [
+          2,
+          5
+        ],
+        "dependency_depth": [
+          0,
+          2
+        ],
+        "max_agents": 3,
+        "window_budget": [
+          1,
+          4
+        ],
+        "expected_tool_calls": [
+          1,
+          5
+        ]
+      },
+      {
+        "id": "medium",
+        "weight": 0.42,
+        "level": 2,
+        "description": "Several deliverables and meaningful coordination",
+        "task_count": [
+          5,
+          12
+        ],
+        "dependency_depth": [
+          1,
+          4
+        ],
+        "max_agents": 5,
+        "window_budget": [
+          2,
+          6
+        ],
+        "expected_tool_calls": [
+          3,
+          12
+        ]
+      },
+      {
+        "id": "large",
+        "weight": 0.24,
+        "level": 3,
+        "description": "Multiple teams, complex dependencies and longer state",
+        "task_count": [
+          12,
+          28
+        ],
+        "dependency_depth": [
+          2,
+          7
+        ],
+        "max_agents": 8,
+        "window_budget": [
+          3,
+          10
+        ],
+        "expected_tool_calls": [
+          6,
+          25
+        ]
+      }
+    ],
+    "entry_state": [
+      {
+        "id": "fresh",
+        "weight": 0.33,
+        "description": "No previous work; all obligations are new",
+        "requires": {
+          "lifecycle": [
+            "initiation"
+          ]
+        }
+      },
+      {
+        "id": "clean_checkpoint",
+        "weight": 0.27,
+        "description": "Existing progress has a reliable checkpoint",
+        "requires": {
+          "lifecycle": [
+            "active",
+            "recovery",
+            "closure"
+          ]
+        }
+      },
+      {
+        "id": "partial_handoff",
+        "weight": 0.25,
+        "description": "Project starts mid-execution with only partial documented history",
+        "requires": {
+          "lifecycle": [
+            "active",
+            "recovery",
+            "closure"
+          ]
+        }
+      },
+      {
+        "id": "conflicted_handoff",
+        "weight": 0.15,
+        "description": "Inherited records contradict one another",
+        "requires": {
+          "lifecycle": [
+            "active",
+            "recovery",
+            "closure"
+          ]
+        }
+      }
+    ],
+    "recurrence": [
+      {
+        "id": "one_off",
+        "weight": 0.52,
+        "description": "Work is unlikely to be repeated"
+      },
+      {
+        "id": "recurring",
+        "weight": 0.3,
+        "description": "Similar work is expected repeatedly"
+      },
+      {
+        "id": "uncertain",
+        "weight": 0.18,
+        "description": "Future demand is materially uncertain"
+      }
+    ],
+    "resource_posture": [
+      {
+        "id": "comfortable",
+        "weight": 0.3,
+        "description": "Resources are adequate for reasonable execution"
+      },
+      {
+        "id": "time_pressure",
+        "weight": 0.24,
+        "description": "Deadline and throughput are binding constraints"
+      },
+      {
+        "id": "budget_pressure",
+        "weight": 0.21,
+        "description": "Compute or monetary budget is binding"
+      },
+      {
+        "id": "scarce_specialists",
+        "weight": 0.15,
+        "description": "Qualified agents have limited availability"
+      },
+      {
+        "id": "conflicting_priorities",
+        "weight": 0.1,
+        "description": "Two valuable objectives compete for the same resources"
+      }
+    ],
+    "dependency_pattern": [
+      {
+        "id": "independent",
+        "weight": 0.22,
+        "description": "Tasks can progress largely independently"
+      },
+      {
+        "id": "chain",
+        "weight": 0.24,
+        "description": "Key tasks require sequential evidence or artifacts",
+        "min_complexity": 1
+      },
+      {
+        "id": "branch_merge",
+        "weight": 0.24,
+        "description": "Independent branches eventually converge on an integration",
+        "min_complexity": 2
+      },
+      {
+        "id": "critical_path_with_sidework",
+        "weight": 0.2,
+        "description": "One gating path coexists with independent useful work",
+        "min_complexity": 2
+      },
+      {
+        "id": "dynamic_discovery",
+        "weight": 0.1,
+        "description": "Observations reveal previously unknown dependencies",
+        "min_complexity": 2
+      }
+    ],
+    "information_state": [
+      {
+        "id": "clear",
+        "weight": 0.3,
+        "description": "Required information is reliable and available"
+      },
+      {
+        "id": "ambiguous",
+        "weight": 0.2,
+        "description": "Some requirements or observations are incomplete"
+      },
+      {
+        "id": "stale",
+        "weight": 0.15,
+        "description": "A document or decision has been superseded"
+      },
+      {
+        "id": "conflicting",
+        "weight": 0.15,
+        "description": "Two sources disagree on an important fact"
+      },
+      {
+        "id": "unobserved",
+        "weight": 0.2,
+        "description": "A needed external result has not arrived"
+      }
+    ],
+    "tool_access": [
+      {
+        "id": "complete",
+        "weight": 0.45,
+        "description": "Required tools are available"
+      },
+      {
+        "id": "partial",
+        "weight": 0.35,
+        "description": "Some useful tools are unavailable or limited"
+      },
+      {
+        "id": "readonly",
+        "weight": 0.15,
+        "description": "Tools allow inspection but consequential mutation is restricted"
+      },
+      {
+        "id": "offline",
+        "weight": 0.05,
+        "description": "External tools cannot currently be reached"
+      }
+    ],
+    "agent_reliability": [
+      {
+        "id": "reliable",
+        "weight": 0.45,
+        "description": "Available specialists are generally competent and truthful"
+      },
+      {
+        "id": "mixed",
+        "weight": 0.35,
+        "description": "Capabilities and reporting quality vary"
+      },
+      {
+        "id": "uncertain",
+        "weight": 0.2,
+        "description": "Agent competence is not established and needs verification"
+      }
+    ],
+    "user_competence": [
+      {
+        "id": "novice",
+        "weight": 0.25,
+        "description": "User needs jargon-free explanations and has uncertain technical assumptions"
+      },
+      {
+        "id": "competent",
+        "weight": 0.45,
+        "description": "User understands common terminology and tradeoffs"
+      },
+      {
+        "id": "expert",
+        "weight": 0.3,
+        "description": "User is knowledgeable and may challenge assumptions"
+      }
+    ],
+    "user_patience": [
+      {
+        "id": "impatient",
+        "weight": 0.32,
+        "description": "User values concise, fast progress and dislikes unnecessary ceremony"
+      },
+      {
+        "id": "neutral",
+        "weight": 0.42,
+        "description": "User expects reasonable coordination effort"
+      },
+      {
+        "id": "patient",
+        "weight": 0.26,
+        "description": "User accepts more planning when demonstrably worthwhile"
+      }
+    ],
+    "user_involvement": [
+      {
+        "id": "hands_off",
+        "weight": 0.37,
+        "description": "User delegates routine decisions but requires consent on consequential changes"
+      },
+      {
+        "id": "collaborative",
+        "weight": 0.38,
+        "description": "User can answer focused questions and review milestones"
+      },
+      {
+        "id": "sporadically_available",
+        "weight": 0.25,
+        "description": "User replies intermittently, so reversible autonomous progress matters"
+      }
+    ],
+    "user_tone": [
+      {
+        "id": "matter_of_fact",
+        "weight": 0.5,
+        "description": "User writes directly and concisely"
+      },
+      {
+        "id": "friendly",
+        "weight": 0.18,
+        "description": "User communicates informally"
+      },
+      {
+        "id": "skeptical",
+        "weight": 0.16,
+        "description": "User challenges recommendations and wants explicit justifications"
+      },
+      {
+        "id": "stressed",
+        "weight": 0.16,
+        "description": "User is concerned about pressure, failure, or looming deadlines"
+      }
+    ],
+    "team_posture": [
+      {
+        "id": "solo_or_none",
+        "weight": 0.13,
+        "description": "Zero or one available specialist",
+        "agent_range": [
+          0,
+          1
+        ]
+      },
+      {
+        "id": "small_team",
+        "weight": 0.42,
+        "description": "Two or three available specialist agents",
+        "min_complexity": 1,
+        "agent_range": [
+          2,
+          3
+        ]
+      },
+      {
+        "id": "multi_team",
+        "weight": 0.3,
+        "description": "Four to five agents with different strengths",
+        "min_complexity": 2,
+        "agent_range": [
+          4,
+          5
+        ]
+      },
+      {
+        "id": "large_pool",
+        "weight": 0.15,
+        "description": "Six to eight agents with limited attention and coordination cost",
+        "min_complexity": 3,
+        "agent_range": [
+          6,
+          8
+        ]
+      }
+    ],
+    "incident": [
+      {
+        "id": "none",
+        "weight": 0.4,
+        "description": "No material failure is currently known",
+        "forbids": {
+          "lifecycle": [
+            "recovery"
+          ]
+        }
+      },
+      {
+        "id": "failed_acceptance",
+        "weight": 0.11,
+        "description": "A delivered artifact fails a documented acceptance test"
+      },
+      {
+        "id": "agent_dropout",
+        "weight": 0.08,
+        "description": "A specialist becomes unavailable or times out",
+        "min_agents": 1
+      },
+      {
+        "id": "conflicting_reports",
+        "weight": 0.1,
+        "description": "Different agents report incompatible observations",
+        "min_agents": 2
+      },
+      {
+        "id": "stale_decision",
+        "weight": 0.07,
+        "description": "A decision was based on obsolete assumptions"
+      },
+      {
+        "id": "scope_change",
+        "weight": 0.08,
+        "description": "The user changes an important requirement"
+      },
+      {
+        "id": "budget_overrun",
+        "weight": 0.06,
+        "description": "Resource consumption exceeds the current allowance"
+      },
+      {
+        "id": "duplicate_or_missing_work",
+        "weight": 0.06,
+        "description": "Some tasks have duplicate owners or no completed observation",
+        "min_agents": 2,
+        "min_complexity": 1
+      },
+      {
+        "id": "blocked_dependency",
+        "weight": 0.04,
+        "description": "Required input is indefinitely delayed or unavailable",
+        "min_complexity": 1
+      }
+    ],
+    "episode_goal": [
+      {
+        "id": "meaningful_progress",
+        "weight": 0.46,
+        "description": "Advance the project faithfully without requiring complete delivery"
+      },
+      {
+        "id": "verified_completion",
+        "weight": 0.25,
+        "description": "Complete all required work and verify it before closure",
+        "forbids": {
+          "lifecycle": [
+            "initiation"
+          ]
+        }
+      },
+      {
+        "id": "safe_handoff",
+        "weight": 0.14,
+        "description": "Transfer work with an accurate ledger and next actions"
+      },
+      {
+        "id": "blocked_escalation",
+        "weight": 0.1,
+        "description": "Stop and seek help when no authorized useful progress exists",
+        "requires": {
+          "decision.choice": [
+            "wait_for_dependency",
+            "pause_or_escalate",
+            "seek_authorization",
+            "escalate_to_user",
+            "follow_up_timeout",
+            "no_suitable_agent",
+            "flag_unknown",
+            "ask_targeted_question"
+          ]
+        }
+      },
+      {
+        "id": "justified_no_action",
+        "weight": 0.05,
+        "description": "Preserve resources when acting now would be harmful",
+        "requires": {
+          "decision.choice": [
+            "wait_for_dependency",
+            "pause_or_escalate"
+          ]
+        }
+      }
+    ],
+    "execution_pattern": [
+      {
+        "id": "mostly_sequential",
+        "weight": 0.29,
+        "description": "Window and tool events progress mostly sequentially",
+        "min_windows": 1
+      },
+      {
+        "id": "interleaved",
+        "weight": 0.34,
+        "description": "Several windows make useful interleaved progress",
+        "min_complexity": 1,
+        "min_windows": 2
+      },
+      {
+        "id": "staggered_results",
+        "weight": 0.23,
+        "description": "Agent responses arrive in different orders and require result-task binding",
+        "min_complexity": 1,
+        "min_windows": 2
+      },
+      {
+        "id": "paused_and_resumed",
+        "weight": 0.14,
+        "description": "Some windows or agents wait while independent work continues",
+        "min_complexity": 1,
+        "min_windows": 2
+      }
+    ],
+    "decision_difficulty": [
+      {
+        "id": "routine",
+        "weight": 0.16,
+        "description": "A familiar decision with clear evidence and few competing values"
+      },
+      {
+        "id": "moderate",
+        "weight": 0.44,
+        "description": "Several reasonable alternatives require comparing their implications"
+      },
+      {
+        "id": "difficult",
+        "weight": 0.3,
+        "description": "Important objectives conflict, evidence is incomplete or wrong actions compound"
+      },
+      {
+        "id": "edge_case",
+        "weight": 0.1,
+        "description": "An unusual but realistic combination challenges default heuristics"
+      }
+    ],
+    "stakes": [
+      {
+        "id": "low",
+        "weight": 0.38,
+        "description": "Local and reversible mistakes have limited consequences"
+      },
+      {
+        "id": "moderate",
+        "weight": 0.43,
+        "description": "Errors consume meaningful time, money or quality"
+      },
+      {
+        "id": "high",
+        "weight": 0.19,
+        "description": "Errors could seriously damage project quality, cost or continuity"
+      }
+    ],
+    "project_timescale": [
+      {
+        "id": "single_session",
+        "weight": 0.27,
+        "description": "Work can largely be coordinated within one session"
+      },
+      {
+        "id": "several_days",
+        "weight": 0.37,
+        "description": "The project spans several working days"
+      },
+      {
+        "id": "several_weeks",
+        "weight": 0.27,
+        "description": "Multiple milestones span weeks"
+      },
+      {
+        "id": "long_running",
+        "weight": 0.09,
+        "description": "The project spans many milestones and handoffs"
+      }
+    ],
+    "observation_source": [
+      {
+        "id": "agent_reports",
+        "weight": 0.3,
+        "description": "External agent messages are the primary evidence stream",
+        "min_agents": 1
+      },
+      {
+        "id": "tool_calls",
+        "weight": 0.2,
+        "description": "Tool call responses are the primary evidence stream",
+        "forbids": {
+          "tool_access": [
+            "offline"
+          ]
+        }
+      },
+      {
+        "id": "documents",
+        "weight": 0.18,
+        "description": "Persistent files, reports and records provide evidence"
+      },
+      {
+        "id": "mixed_sources",
+        "weight": 0.32,
+        "description": "Agent messages, tool calls and project records must be reconciled",
+        "min_agents": 1,
+        "forbids": {
+          "tool_access": [
+            "offline"
+          ]
+        }
+      }
+    ],
+    "window_role_profile": [
+      {
+        "id": "minimal",
+        "weight": 0.15,
+        "description": "Minimize distinct concurrent roles when extra windows add no value",
+        "roles": [
+          "response",
+          "reasoning"
+        ]
+      },
+      {
+        "id": "planning",
+        "weight": 0.2,
+        "description": "Planning and decision reasoning are prominent",
+        "roles": [
+          "planning",
+          "reasoning",
+          "response"
+        ]
+      },
+      {
+        "id": "parallel_coordination",
+        "weight": 0.27,
+        "description": "Concurrent task assignment, tool interactions and summaries matter",
+        "roles": [
+          "planning",
+          "tool",
+          "documentation",
+          "response"
+        ]
+      },
+      {
+        "id": "evidence_reconciliation",
+        "weight": 0.22,
+        "description": "Maintain records and assess conflicting observations",
+        "roles": [
+          "reasoning",
+          "documentation",
+          "tool",
+          "response"
+        ]
+      },
+      {
+        "id": "delivery_and_verification",
+        "weight": 0.16,
+        "description": "Verification records and final deliverables dominate",
+        "roles": [
+          "documentation",
+          "reasoning",
+          "response"
+        ]
+      }
+    ],
+    "phase_transition": [
+      {
+        "id": "remain_in_phase",
+        "weight": 0.43,
+        "description": "Episode stays mainly within its starting lifecycle phase"
+      },
+      {
+        "id": "initiation_to_execution",
+        "weight": 0.17,
+        "description": "A proposal turns into authorized delegation and execution",
+        "requires": {
+          "lifecycle": [
+            "initiation"
+          ]
+        }
+      },
+      {
+        "id": "execution_to_recovery",
+        "weight": 0.12,
+        "description": "An observed setback forces a recovery episode",
+        "requires": {
+          "lifecycle": [
+            "active"
+          ]
+        },
+        "forbids": {
+          "incident": [
+            "none"
+          ]
+        }
+      },
+      {
+        "id": "execution_to_closure",
+        "weight": 0.1,
+        "description": "Active work transitions to verified delivery and closeout",
+        "requires": {
+          "lifecycle": [
+            "active"
+          ]
+        }
+      },
+      {
+        "id": "recovery_to_execution",
+        "weight": 0.1,
+        "description": "A failure is contained and useful execution resumes",
+        "requires": {
+          "lifecycle": [
+            "recovery"
+          ]
+        }
+      },
+      {
+        "id": "recovery_to_closure",
+        "weight": 0.04,
+        "description": "A late failure is corrected and the work is verified",
+        "requires": {
+          "lifecycle": [
+            "recovery"
+          ]
+        }
+      },
+      {
+        "id": "closure_to_recovery",
+        "weight": 0.04,
+        "description": "A final check reveals an unresolved obligation and reopens work",
+        "requires": {
+          "lifecycle": [
+            "closure"
+          ]
+        },
+        "forbids": {
+          "incident": [
+            "none"
+          ]
+        }
+      }
+    ],
+    "episode_horizon": [
+      {
+        "id": "decision_snapshot",
+        "weight": 0.18,
+        "description": "A compact decision with limited surrounding events",
+        "coordination_events": [
+          3,
+          8
+        ]
+      },
+      {
+        "id": "short_segment",
+        "weight": 0.39,
+        "description": "A focused coordination sequence with evidence and follow-ups",
+        "coordination_events": [
+          8,
+          20
+        ]
+      },
+      {
+        "id": "extended_segment",
+        "weight": 0.32,
+        "description": "Multiple tasks, observations and decisions unfold",
+        "coordination_events": [
+          18,
+          45
+        ],
+        "min_complexity": 1
+      },
+      {
+        "id": "long_resume",
+        "weight": 0.11,
+        "description": "A lengthy stateful continuation with interrupted context",
+        "coordination_events": [
+          30,
+          70
+        ],
+        "min_complexity": 2,
+        "requires": {
+          "entry_state": [
+            "partial_handoff",
+            "conflicted_handoff"
+          ]
+        }
+      }
+    ]
+  },
+  "event_tags": {
+    "ambiguous_requirements": {
+      "p": 0.1,
+      "description": "Requirements admit multiple materially different interpretations"
+    },
+    "parallel_assignments": {
+      "p": 0.2,
+      "description": "Two or more independent tasks should be delegated concurrently",
+      "min_complexity": 2,
+      "requires": {
+        "dependency_pattern": [
+          "independent",
+          "critical_path_with_sidework"
+        ]
+      },
+      "min_agents": 2
+    },
+    "asynchronous_result": {
+      "p": 0.24,
+      "description": "At least one result arrives after an intervening decision",
+      "min_complexity": 1
+    },
+    "partial_history": {
+      "p": 0.15,
+      "description": "Historical state must be reconstructed",
+      "requires": {
+        "entry_state": [
+          "partial_handoff",
+          "conflicted_handoff"
+        ]
+      }
+    },
+    "stale_context": {
+      "p": 0.12,
+      "description": "An important prior statement is out of date",
+      "requires": {
+        "information_state": [
+          "stale"
+        ]
+      }
+    },
+    "conflicting_reports": {
+      "p": 0.12,
+      "description": "Two independent reports disagree",
+      "requires": {
+        "information_state": [
+          "conflicting"
+        ]
+      }
+    },
+    "failed_acceptance": {
+      "p": 0.12,
+      "description": "An output is observed failing a check",
+      "requires": {
+        "incident": [
+          "failed_acceptance"
+        ]
+      }
+    },
+    "changed_constraints": {
+      "p": 0.14,
+      "description": "A user or resource constraint changes after work starts",
+      "requires": {
+        "incident": [
+          "scope_change"
+        ]
+      }
+    },
+    "external_approval": {
+      "p": 0.12,
+      "description": "Progress is gated by consequential user authorization"
+    },
+    "expensive_model_tradeoff": {
+      "p": 0.17,
+      "description": "Cheaper and expert agent options have materially different cost",
+      "min_agents": 2
+    },
+    "automation_candidate": {
+      "p": 0.13,
+      "description": "Recurring work makes an automation investment plausible",
+      "requires": {
+        "recurrence": [
+          "recurring",
+          "uncertain"
+        ]
+      }
+    },
+    "handoff_information_loss": {
+      "p": 0.14,
+      "description": "A dependent agent lacks a needed result or rationale"
+    },
+    "deadline_shift": {
+      "p": 0.1,
+      "description": "Priority ordering must account for an altered due date"
+    },
+    "redundant_work_risk": {
+      "p": 0.16,
+      "description": "Duplicate task ownership is possible",
+      "min_agents": 2
+    },
+    "resource_exhaustion": {
+      "p": 0.1,
+      "description": "A budget or capacity limit is close to binding"
+    },
+    "untrusted_tool_output": {
+      "p": 0.12,
+      "description": "An observation contains questionable or incomplete claims"
+    },
+    "out_of_order_completion": {
+      "p": 0.18,
+      "description": "Tasks complete in a different order than dispatched",
+      "min_complexity": 2,
+      "min_agents": 2
+    },
+    "decision_requires_pushback": {
+      "p": 0.1,
+      "description": "The user proposes a flawed plan and would benefit from concise critique"
+    },
+    "insufficient_evidence": {
+      "p": 0.15,
+      "description": "One result is missing and must not be hallucinated",
+      "requires": {
+        "information_state": [
+          "unobserved",
+          "ambiguous"
+        ]
+      }
+    },
+    "task_cancelled": {
+      "p": 0.06,
+      "description": "A changed objective makes a previously valid task unnecessary"
+    },
+    "high_stakes_verification": {
+      "p": 0.08,
+      "description": "Failure consequences justify stronger checks"
+    },
+    "tool_call_failure": {
+      "p": 0.12,
+      "description": "A real attempted tool interaction visibly fails",
+      "forbids": {
+        "tool_access": [
+          "offline"
+        ]
+      }
+    },
+    "no_useful_work": {
+      "p": 0.06,
+      "description": "Waiting or justified stopping is the appropriate next action",
+      "requires": {
+        "information_state": [
+          "unobserved",
+          "ambiguous"
+        ],
+        "dependency_pattern": [
+          "chain"
+        ]
+      }
+    }
+  },
+  "conditional_weights": [
+    {
+      "when": {
+        "focus.family": [
+          "resource_optimization"
+        ]
+      },
+      "target": "recurrence.recurring",
+      "factor": 2.3
+    },
+    {
+      "when": {
+        "focus.family": [
+          "resource_optimization"
+        ]
+      },
+      "target": "resource_posture.budget_pressure",
+      "factor": 1.6
+    },
+    {
+      "when": {
+        "focus.id": [
+          "inherited_state_reconstruction"
+        ]
+      },
+      "target": "entry_state.partial_handoff",
+      "factor": 5
+    },
+    {
+      "when": {
+        "focus.id": [
+          "inherited_state_reconstruction"
+        ]
+      },
+      "target": "entry_state.conflicted_handoff",
+      "factor": 3
+    },
+    {
+      "when": {
+        "focus.family": [
+          "quality_and_adaptation"
+        ]
+      },
+      "target": "lifecycle.recovery",
+      "factor": 1.8
+    },
+    {
+      "when": {
+        "focus.family": [
+          "agent_orchestration"
+        ]
+      },
+      "target": "execution_pattern.interleaved",
+      "factor": 1.5
+    },
+    {
+      "when": {
+        "focus.id": [
+          "multi_agent_dispatch",
+          "synchronization",
+          "parallelism_decision"
+        ]
+      },
+      "target": "dependency_pattern.critical_path_with_sidework",
+      "factor": 2.0
+    },
+    {
+      "when": {
+        "focus.id": [
+          "multi_agent_dispatch",
+          "parallelism_decision"
+        ]
+      },
+      "target": "dependency_pattern.independent",
+      "factor": 1.7
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "parallelize"
+        ]
+      },
+      "target": "dependency_pattern.independent",
+      "factor": 5.0
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "serialize"
+        ]
+      },
+      "target": "dependency_pattern.chain",
+      "factor": 5.0
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "partial_parallelism"
+        ]
+      },
+      "target": "dependency_pattern.critical_path_with_sidework",
+      "factor": 5.0
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "invest_in_automation"
+        ]
+      },
+      "target": "recurrence.recurring",
+      "factor": 8.0
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "perform_manually"
+        ]
+      },
+      "target": "recurrence.one_off",
+      "factor": 8.0
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "defer_investment"
+        ]
+      },
+      "target": "recurrence.uncertain",
+      "factor": 8.0
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "economy_agent"
+        ]
+      },
+      "target": "resource_posture.budget_pressure",
+      "factor": 1.8
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "request_approval",
+          "seek_authorization",
+          "escalate_to_user"
+        ]
+      },
+      "target": "user_involvement.collaborative",
+      "factor": 1.7
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "recovery"
+        ]
+      },
+      "target": "incident.failed_acceptance",
+      "factor": 2.0
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "closure"
+        ]
+      },
+      "target": "episode_goal.verified_completion",
+      "factor": 3.2
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "initiation"
+        ]
+      },
+      "target": "episode_goal.meaningful_progress",
+      "factor": 2.0
+    },
+    {
+      "when": {
+        "entry_state": [
+          "partial_handoff",
+          "conflicted_handoff"
+        ]
+      },
+      "target": "information_state.ambiguous",
+      "factor": 2.0
+    },
+    {
+      "when": {
+        "entry_state": [
+          "conflicted_handoff"
+        ]
+      },
+      "target": "information_state.conflicting",
+      "factor": 3.0
+    },
+    {
+      "when": {
+        "incident": [
+          "conflicting_reports"
+        ]
+      },
+      "target": "information_state.conflicting",
+      "factor": 4.0
+    },
+    {
+      "when": {
+        "incident": [
+          "stale_decision"
+        ]
+      },
+      "target": "information_state.stale",
+      "factor": 5.0
+    },
+    {
+      "when": {
+        "incident": [
+          "blocked_dependency"
+        ]
+      },
+      "target": "information_state.unobserved",
+      "factor": 4.0
+    },
+    {
+      "when": {
+        "complexity": [
+          "large"
+        ]
+      },
+      "target": "team_posture.large_pool",
+      "factor": 2.5
+    },
+    {
+      "when": {
+        "complexity": [
+          "trivial"
+        ]
+      },
+      "target": "team_posture.solo_or_none",
+      "factor": 10.0
+    },
+    {
+      "when": {
+        "resource_posture": [
+          "scarce_specialists"
+        ]
+      },
+      "target": "team_posture.solo_or_none",
+      "factor": 2.0
+    },
+    {
+      "when": {
+        "focus.family": [
+          "agent_orchestration"
+        ]
+      },
+      "target": "observation_source.agent_reports",
+      "factor": 1.8
+    },
+    {
+      "when": {
+        "focus.family": [
+          "context_continuity"
+        ]
+      },
+      "target": "observation_source.documents",
+      "factor": 2
+    },
+    {
+      "when": {
+        "focus.family": [
+          "quality_and_adaptation"
+        ]
+      },
+      "target": "observation_source.mixed_sources",
+      "factor": 1.8
+    },
+    {
+      "when": {
+        "focus.id": [
+          "asynchronous_monitoring"
+        ]
+      },
+      "target": "episode_horizon.extended_segment",
+      "factor": 2.0
+    },
+    {
+      "when": {
+        "focus.family": [
+          "resource_optimization"
+        ]
+      },
+      "target": "project_timescale.several_weeks",
+      "factor": 1.7
+    },
+    {
+      "when": {
+        "decision.choice": [
+          "independent_review"
+        ]
+      },
+      "target": "stakes.high",
+      "factor": 3
+    },
+    {
+      "when": {
+        "complexity": [
+          "large"
+        ]
+      },
+      "target": "episode_horizon.extended_segment",
+      "factor": 2
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "closure"
+        ]
+      },
+      "target": "window_role_profile.delivery_and_verification",
+      "factor": 2
+    },
+    {
+      "when": {
+        "focus.family": [
+          "agent_orchestration"
+        ]
+      },
+      "target": "window_role_profile.parallel_coordination",
+      "factor": 2
+    },
+    {
+      "when": {
+        "focus.family": [
+          "context_continuity"
+        ]
+      },
+      "target": "window_role_profile.evidence_reconciliation",
+      "factor": 2
+    }
+  ],
+  "requirements": {
+    "never_fabricate_actions": true,
+    "tool_results_must_be_observed": true,
+    "do_not_reward_unnecessary_delegation": true,
+    "evaluate_using_available_at_time_evidence": true,
+    "one_primary_behavior_per_proposal": true,
+    "conditional_variants_are_targets_not_asserted_realized_actions": true
+  },
+  "metrics_schema": {
+    "unit": "one generated definition; accepted trajectories reported only after explicit downstream acceptance",
+    "tracked_one_of": [
+      "focus.family",
+      "focus.behavior",
+      "decision.axis",
+      "decision.choice",
+      "lifecycle",
+      "complexity",
+      "domain",
+      "entry_state",
+      "recurrence",
+      "resource_posture",
+      "dependency_pattern",
+      "information_state",
+      "tool_access",
+      "agent_reliability",
+      "team_posture",
+      "user_competence",
+      "user_patience",
+      "user_involvement",
+      "user_tone",
+      "incident",
+      "episode_goal",
+      "execution_pattern",
+      "decision_difficulty",
+      "stakes",
+      "project_timescale",
+      "observation_source",
+      "window_role_profile",
+      "phase_transition",
+      "episode_horizon"
+    ],
+    "tracked_multi_label": [
+      "event_tags",
+      "secondary_competencies",
+      "secondary_behaviors"
+    ],
+    "cross_tabs": [
+      [
+        "focus.family",
+        "lifecycle"
+      ],
+      [
+        "complexity",
+        "execution_pattern"
+      ],
+      [
+        "incident",
+        "lifecycle"
+      ],
+      [
+        "decision.axis",
+        "decision.choice"
+      ],
+      [
+        "focus.behavior",
+        "complexity"
+      ],
+      [
+        "recurrence",
+        "decision.choice"
+      ],
+      [
+        "decision_difficulty",
+        "focus.family"
+      ],
+      [
+        "observation_source",
+        "focus.family"
+      ],
+      [
+        "phase_transition",
+        "lifecycle"
+      ],
+      [
+        "episode_horizon",
+        "complexity"
+      ],
+      [
+        "stakes",
+        "decision.choice"
+      ]
+    ],
+    "post_generation_actual_fields": [
+      "accepted",
+      "observed_context_tokens",
+      "observed_supervised_tokens",
+      "observed_idle_tokens",
+      "actual_window_roles",
+      "actual_tool_calls",
+      "actual_outcome",
+      "validator_failures",
+      "repair_attempts"
+    ],
+    "sampling_status_values": [
+      "proposed",
+      "accepted",
+      "rejected",
+      "retired"
+    ]
+  },
+  "hard_implications": [
+    {
+      "when": {
+        "entry_state": [
+          "conflicted_handoff"
+        ]
+      },
+      "force": {
+        "information_state": "conflicting"
+      }
+    },
+    {
+      "when": {
+        "incident": [
+          "conflicting_reports"
+        ]
+      },
+      "force": {
+        "information_state": "conflicting"
+      }
+    },
+    {
+      "when": {
+        "incident": [
+          "stale_decision"
+        ]
+      },
+      "force": {
+        "information_state": "stale"
+      }
+    },
+    {
+      "when": {
+        "incident": [
+          "blocked_dependency"
+        ]
+      },
+      "force": {
+        "information_state": "unobserved"
+      }
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "active"
+        ],
+        "episode_goal": [
+          "verified_completion"
+        ]
+      },
+      "force": {
+        "phase_transition": "execution_to_closure"
+      }
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "recovery"
+        ],
+        "episode_goal": [
+          "verified_completion"
+        ]
+      },
+      "force": {
+        "phase_transition": "recovery_to_closure"
+      }
+    },
+    {
+      "when": {
+        "lifecycle": [
+          "closure"
+        ],
+        "episode_goal": [
+          "verified_completion"
+        ]
+      },
+      "force": {
+        "phase_transition": "remain_in_phase"
+      }
+    },
+    {
+      "when": {
+        "phase_transition": [
+          "execution_to_closure",
+          "recovery_to_closure"
+        ]
+      },
+      "force": {
+        "episode_goal": "verified_completion"
+      }
+    }
+  ]
+}

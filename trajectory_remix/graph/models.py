@@ -240,11 +240,23 @@ class ProjectSettings(DTO):
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
     matrix: VersionedReference | None = None
     metric_registry: VersionedReference | None = None
+    sampler_configuration: dict[str, JsonValue] | None = None
     split_ratios: SplitRatios = Field(default_factory=SplitRatios)
     log_cache_mib: Annotated[int, Field(ge=0)] | None = 1024
 
     @model_validator(mode="after")
     def references(self):
+        if self.sampler_configuration is not None:
+            from .sampling import configuration
+            c = self.sampler_configuration
+            if 'matrix' not in c:
+                raise ValueError('Sampler configuration requires matrix')
+            c = configuration(c['matrix'], c.get('metric_options'))
+            self.sampler_configuration = c
+            self.matrix = VersionedReference(id=c['matrix']['matrix_id'], version=c['matrix']['schema_version'],
+                digest=c['matrix_digest'], uri='settings:sampler_configuration.matrix')
+            self.metric_registry = VersionedReference(id='sampler-metrics', version='1',
+                digest=c['registry_digest'], uri='settings:sampler_configuration.definitions')
         if len(self.reasoning_levels) != len(set(self.reasoning_levels)):
             raise ValueError("Reasoning levels must be unique")
         for role, endpoint in self.endpoint_roles.items():

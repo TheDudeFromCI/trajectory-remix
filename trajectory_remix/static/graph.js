@@ -418,7 +418,16 @@ export class StudioUI {
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
-    on('metrics-button', 'click', () => { $('metrics-values').textContent = json(this.draft?.metadata?.metrics || {status: 'unavailable'}); $('metrics-dialog').showModal(); });
+    on('metrics-button', 'click', async () => {
+      const population = await api('/metrics/population', 'POST', {query: this.query()});
+      const selected = this.id ? await api(`/metrics/trajectories/${this.id}`) : null;
+      $('metrics-values').textContent = json({population, selected, note: 'Saved records only; unsaved drafts excluded.'});
+      $('metrics-dialog').showModal();
+    });
+    on('metrics-calculate', 'click', async () => {
+      const r = await api('/metrics/calculate-missing', 'POST', {query: this.query()});
+      this.ownedBulk.add(r.job_id); $('metrics-dialog').close(); await this.inspectJob(r.job_id);
+    });
     document.querySelectorAll('[data-close]').forEach(n => n.onclick = () => n.closest('dialog').close());
     await this.listing(); if (this.lastItems?.length) await this.select(this.lastItems[0].id); await this.pollJobs();
     const poll = async () => { try { await this.pollJobs(); const changes = await api(`/changes?after=${this.cursor || 0}`); if (changes.items.length || changes.resync) { this.cursor = changes.items.at(-1)?.cursor || changes.latest; if (changes.resync || changes.items.some(x => x.kind === 'settings')) { await this.loadSettings(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); } await this.listing(); if (this.id && changes.items.some(x => x.entity_id === this.id)) message('Saved source changed. Your draft is retained; reload to reconcile.'); } } catch (e) { message(e); } this.pollTimer = setTimeout(poll, 1500); }; this.pollTimer = setTimeout(poll, 1500);

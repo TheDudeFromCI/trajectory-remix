@@ -1,0 +1,155 @@
+{
+  "definition_id": "kd-00cc95e5bc27fc6db7fb",
+  "schema_version": "1.0.0",
+  "status": "proposed",
+  "sampling_provenance": {
+    "matrix_id": "kidra-practical-sft-v1",
+    "matrix_sha256": "5e41e190ff9349f57411461ba5626126ff9466a9b27da3c4fea8449c5ed28ff7",
+    "sampler_version": "1.0.0",
+    "seed": 137,
+    "world_group_id": "provisional-world-137",
+    "dataset_split": null,
+    "requested_overrides": {
+      "complexity": "medium",
+      "domain": "software_engineering",
+      "user_competence": "expert",
+      "user_patience": "impatient"
+    }
+  },
+  "learning_objective": {
+    "primary_family": "strategic_planning",
+    "primary_behavior": "milestone_prioritization",
+    "description": "Choose actionable milestones and order them around constraints",
+    "secondary": [],
+    "decision_axis": "prioritization",
+    "target_decision": "high_value_first",
+    "condition_making_decision_valid": "No hard deadline or blocker dominates, but tasks differ sharply in expected benefit.",
+    "correct_coordination_behavior": "Prioritize expected project value."
+  },
+  "scenario": {
+    "domain": {
+      "id": "software_engineering",
+      "description": "Software or open-source implementation and maintenance",
+      "suggested_project": "repair a broken build"
+    },
+    "project_state": {
+      "lifecycle": "active",
+      "entry_state": "clean_checkpoint",
+      "complexity": "medium",
+      "recurrence": "uncertain",
+      "dependency_pattern": "branch_merge",
+      "information_state": "conflicting",
+      "incident": "failed_acceptance",
+      "episode_goal": "meaningful_progress",
+      "decision_difficulty": "moderate",
+      "stakes": "low",
+      "project_timescale": "several_days",
+      "phase_transition": "remain_in_phase"
+    },
+    "resources": {
+      "posture": "scarce_specialists",
+      "tool_access": "offline",
+      "agent_reliability": "uncertain",
+      "agents": []
+    },
+    "user": {
+      "competence": "expert",
+      "patience": "impatient",
+      "involvement": "collaborative",
+      "tone": "friendly"
+    },
+    "execution": {
+      "pattern": "staggered_results",
+      "observation_source": "documents",
+      "window_role_profile": "parallel_coordination",
+      "roles_to_exercise": [
+        "planning",
+        "tool",
+        "documentation",
+        "response"
+      ],
+      "episode_horizon": "short_segment",
+      "suggested_coordination_events": 10,
+      "suggested_task_count": 5,
+      "suggested_dependency_depth": 4,
+      "available_agent_count": 0,
+      "target_active_window_capacity": 3,
+      "suggested_tool_observations_or_calls": 0
+    },
+    "extension_dimensions": {},
+    "additional_event_tags": [
+      {
+        "id": "external_approval",
+        "description": "Progress is gated by consequential user authorization"
+      },
+      {
+        "id": "failed_acceptance",
+        "description": "An output is observed failing a check"
+      }
+    ]
+  },
+  "generation_directive": {
+    "task": "Create a concrete project world and exactly one training trajectory for the specified decision.",
+    "requirements": [
+      "Use the selected scenario attributes and add realistic, consistent details (goal, constraints, budgets, tools, acceptance criteria).",
+      "Make the condition making the target decision correct actually true in the scenario; avoid contradictory extra facts.",
+      "Demonstrate the specified coordination behavior using evidence that Kidra could observe at each decision.",
+      "Kidra coordinates specialists rather than doing substantial specialist work itself; avoid overdelegating trivial decisions.",
+      "Show real tool-call/result and agent-call/result events for any execution; do not narrate imagined external actions as completed.",
+      "Preserve task IDs, ownership, dependencies, window lifetimes, asynchronous ordering and truthful completion status.",
+      "The episode goal need not mean total project completion; do not claim it without observed acceptance evidence.",
+      "Prefer a coherent purposeful trajectory over forcing every secondary label into the episode.",
+      "Provide observable validation evidence and explicit uncertainty; never use hidden future outcomes as model knowledge."
+    ]
+  },
+  "metrics": {
+    "sampling": {
+      "focus.family": "strategic_planning",
+      "focus.behavior": "milestone_prioritization",
+      "decision.axis": "prioritization",
+      "decision.choice": "high_value_first",
+      "domain": "software_engineering",
+      "lifecycle": "active",
+      "complexity": "medium",
+      "entry_state": "clean_checkpoint",
+      "recurrence": "uncertain",
+      "resource_posture": "scarce_specialists",
+      "dependency_pattern": "branch_merge",
+      "tool_access": "offline",
+      "agent_reliability": "uncertain",
+      "user_competence": "expert",
+      "user_patience": "impatient",
+      "user_involvement": "collaborative",
+      "user_tone": "friendly",
+      "team_posture": "solo_or_none",
+      "incident": "failed_acceptance",
+      "information_state": "conflicting",
+      "decision_difficulty": "moderate",
+      "stakes": "low",
+      "project_timescale": "several_days",
+      "observation_source": "documents",
+      "window_role_profile": "parallel_coordination",
+      "phase_transition": "remain_in_phase",
+      "episode_horizon": "short_segment",
+      "episode_goal": "meaningful_progress",
+      "execution_pattern": "staggered_results"
+    },
+    "multi_labels": {
+      "event_tags": [
+        "external_approval",
+        "failed_acceptance"
+      ],
+      "secondary_competencies": [],
+      "secondary_behaviors": []
+    },
+    "numeric_targets": {
+      "suggested_coordination_events": 10,
+      "suggested_task_count": 5,
+      "suggested_dependency_depth": 4,
+      "available_agent_count": 0,
+      "target_active_window_capacity": 3,
+      "suggested_tool_observations_or_calls": 0
+    },
+    "actual": {}
+  }
+}
