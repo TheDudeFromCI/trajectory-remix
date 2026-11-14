@@ -5,7 +5,8 @@ validation, SQLite persistence and application commands. It is a separate new
 path: the existing dashboard, CLI, MCP and replay database are unchanged. There
 is no old-project reader or migrator. Explicit scheduling/preview and temporary
 compiled export are available through the separate [compiler services](GRAPH-COMPILER.md).
-REST/studio integration, durable workers, sampling and model calls are subsequent work.
+The [durable job service](GRAPH-JOBS.md) supplies ownership, workers and bulk
+operations. Full studio integration, sampling and model calls are separate work.
 
 ## Source and schema
 

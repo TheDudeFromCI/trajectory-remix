@@ -207,7 +207,7 @@ class GraphStore:
         provenance = PROVENANCE.validate_python({} if provenance is None else provenance, strict=True)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if db.execute("SELECT 1 FROM graph_trajectories WHERE id=?", (source.id,)).fetchone():
+            if db.execute("SELECT 1 FROM graph_trajectory_revisions WHERE trajectory_id=?", (source.id,)).fetchone():
                 raise ValueError("Trajectory already exists")
             return self._commit(db, source, None, provenance)
 
@@ -221,7 +221,17 @@ class GraphStore:
             db.execute("BEGIN IMMEDIATE")
             old = self._read(db, trajectory_id)
             self._check_revision(trajectory_id, expected_revision, old)
+            self._check_owner(db, trajectory_id)
             return self._commit(db, source, old, provenance)
+
+    @staticmethod
+    def _check_owner(db, trajectory_id):
+        # Jobs are an additive service on the new graph store. Foundation-only
+        # projects need no runtime tables, but all edit transports honor owners.
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_owners'").fetchone():
+            if db.execute("SELECT 1 FROM graph_owners WHERE trajectory_id=?", (trajectory_id,)).fetchone():
+                from .jobs import OwnershipConflict
+                raise OwnershipConflict("Trajectory is owned by an active operation")
 
     def _commit(self, db, source, old, provenance):
         revision, commit = (old.revision + 1 if old else 1), str(uuid4())

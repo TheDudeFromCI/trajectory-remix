@@ -125,6 +125,52 @@ class ArtifactService:
         self.clock = clock
         self.expire()
 
+    def publish_files(self, files, *, metadata=None):
+        """Publish a job's retained log snapshot using the same lease/expiry rules."""
+        if not files or any(Path(name).name != name or name.startswith('.') or
+                            name in {'manifest.json', 'download.zip'} for name in files):
+            raise ValueError('Invalid artifact filenames')
+        with (self.root / '.registry.lock').open('a') as registry:
+            fcntl.flock(registry, fcntl.LOCK_EX)
+            directory = Path(tempfile.mkdtemp(prefix='export-', dir=self.root))
+            lock = (directory / '.lease').open('w')
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            entries = []
+            for name, body in files.items():
+                path = directory / name
+                with path.open('xb') as stream:
+                    for chunk in ([body] if isinstance(body, bytes) else body):
+                        stream.write(chunk)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                entries.append(dict(name=name, bytes=path.stat().st_size, sha256=_sha256(path)))
+            completed = self.clock()
+            _publish_json(directory / 'manifest.json', dict(files=entries, assets=[],
+                completed_at=completed, expires_at=completed + 86400, metadata=metadata or {}))
+            with zipfile.ZipFile(directory / 'download.zip', 'x') as archive:
+                for name in [*files, 'manifest.json']:
+                    archive.write(directory / name, name)
+            _publish_json(directory / '.complete.json', dict(expires_at=completed + 86400))
+            return directory.name
+        except BaseException:
+            shutil.rmtree(directory)
+            raise
+        finally:
+            lock.close()
+
+    def discard(self, artifact):
+        """Remove an unaccepted job artifact; active download leases defer cleanup."""
+        if Path(artifact).name != artifact or not artifact.startswith('export-'):
+            raise ValueError('Invalid artifact path')
+        directory = self.root / artifact
+        try:
+            with (directory / '.lease').open('r') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                shutil.rmtree(directory)
+        except FileNotFoundError:
+            pass
+
     def build(self, records, settings: ProjectSettings, *, options=ExportOptions(),
               compiler: GraphCompiler | None = None, cancelled=lambda: False):
         # Freeze the caller's sources/revisions before selection or projection.
