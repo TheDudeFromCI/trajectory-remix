@@ -119,7 +119,8 @@ def test_population_and_missing_bulk_retains_annotations(services):
     from trajectory_remix.graph.bulk import BulkService
     bulk = BulkService(s.jobs)
     frozen = s.editor()
-    assert frozen['configuration']['sampler_sha256'] == 'e00a66f5be1131f83f390ff8784edc6d2207202262cea5a1a51b833b582b175a'['configuration']
+    assert frozen['configuration']['sampler_sha256'] == 'e00a66f5be1131f83f390ff8784edc6d2207202262cea5a1a51b833b582b175a'
+    frozen = frozen['configuration']
     job = bulk.start({}, 'metrics', frozen)
     bulk.advance(job, {'metrics': metrics.calculate})
     assert s.jobs.inspect(job)['state'] == 'completed'
