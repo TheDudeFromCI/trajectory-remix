@@ -1,0 +1,40 @@
+name: Dependabot auto-merge
+
+# Enables auto-merge on Dependabot PRs for patch and minor bumps. GitHub then
+# merges the PR only after every required status check (see branch protection)
+# passes. Major bumps are left for a human to review.
+#
+# Uses pull_request_target so the token can write to Dependabot PRs. This is
+# safe because the workflow never checks out or runs code from the PR.
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Auto-merge patch/minor
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable auto-merge for patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Flag major updates for manual review
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: >
+          gh pr comment "$PR_URL" --body
+          "Major version bump: not auto-merged. Review the changelog for breaking changes."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
