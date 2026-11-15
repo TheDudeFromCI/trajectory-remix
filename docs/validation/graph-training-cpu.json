@@ -1,0 +1,526 @@
+{
+  "parameters": 50208,
+  "layers": 2,
+  "vocabulary": 88,
+  "non_special_tokens": 36,
+  "device": "cpu",
+  "torch": "2.15.0+cpu",
+  "threads": 1,
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "steps": 3000,
+  "batch_size": 16,
+  "seed": 17,
+  "learning_rate": 0.002,
+  "initial_validation": {
+    "loss": 4.462217569351196,
+    "token_accuracy": 0.014798677884615384,
+    "exact_trajectory_accuracy": 0.0,
+    "letters_accuracy": 0.0265625,
+    "header_letters_accuracy": 0.0,
+    "noop_accuracy": 0.0,
+    "eos_accuracy": 0.0
+  },
+  "history": [
+    {
+      "step": 500,
+      "train_loss": 0.791408360004425,
+      "validation": {
+        "loss": 0.7766374535858631,
+        "token_accuracy": 0.9382512019230769,
+        "exact_trajectory_accuracy": 0.0234375,
+        "letters_accuracy": 0.75703125,
+        "header_letters_accuracy": 0.0,
+        "noop_accuracy": 1.0,
+        "eos_accuracy": 1.0
+      }
+    },
+    {
+      "step": 1000,
+      "train_loss": 0.2678026854991913,
+      "validation": {
+        "loss": 0.2648804681375623,
+        "token_accuracy": 0.9814453125,
+        "exact_trajectory_accuracy": 0.30078125,
+        "letters_accuracy": 0.971875,
+        "header_letters_accuracy": 0.0,
+        "noop_accuracy": 1.0,
+        "eos_accuracy": 1.0
+      }
+    },
+    {
+      "step": 1500,
+      "train_loss": 0.04451785236597061,
+      "validation": {
+        "loss": 0.04777197982184589,
+        "token_accuracy": 0.9877554086538461,
+        "exact_trajectory_accuracy": 0.44921875,
+        "letters_accuracy": 1.0,
+        "header_letters_accuracy": 0.0,
+        "noop_accuracy": 1.0,
+        "eos_accuracy": 1.0
+      }
+    },
+    {
+      "step": 2000,
+      "train_loss": 0.01742500811815262,
+      "validation": {
+        "loss": 0.02930636878591031,
+        "token_accuracy": 0.9972956730769231,
+        "exact_trajectory_accuracy": 0.875,
+        "letters_accuracy": 0.996875,
+        "header_letters_accuracy": 0.0,
+        "noop_accuracy": 1.0,
+        "eos_accuracy": 1.0
+      }
+    },
+    {
+      "step": 2500,
+      "train_loss": 0.014682142995297909,
+      "validation": {
+        "loss": 0.019132353889290243,
+        "token_accuracy": 0.9991736778846154,
+        "exact_trajectory_accuracy": 0.95703125,
+        "letters_accuracy": 0.995703125,
+        "header_letters_accuracy": 0.0,
+        "noop_accuracy": 1.0,
+        "eos_accuracy": 1.0
+      }
+    },
+    {
+      "step": 3000,
+      "train_loss": 0.007734877523034811,
+      "validation": {
+        "loss": 0.01071111488272436,
+        "token_accuracy": 0.9997746394230769,
+        "exact_trajectory_accuracy": 0.98828125,
+        "letters_accuracy": 0.998828125,
+        "header_letters_accuracy": 0.0,
+        "noop_accuracy": 1.0,
+        "eos_accuracy": 1.0
+      }
+    }
+  ],
+  "rollout": {
+    "trajectories": 64,
+    "exact_timing_and_closure_accuracy": 1.0,
+    "letters_at_correct_tick_accuracy": 1.0,
+    "malformed_trajectories": 0,
+    "examples": [
+      {
+        "id": "a1d7d6ba-58f8-5666-b6ce-0c1f35840a2a",
+        "expected": {
+          "0": 37,
+          "1": 76,
+          "2": 82,
+          "3": 63,
+          "4": 28,
+          "5": 59,
+          "6": 83,
+          "7": 63,
+          "8": 86,
+          "9": 59,
+          "10": 84,
+          "11": 63,
+          "12": 87,
+          "13": 78,
+          "14": 38,
+          "15": 18,
+          "16": 14,
+          "17": 15,
+          "18": 0,
+          "19": 6,
+          "20": 7,
+          "21": 1,
+          "22": 25,
+          "23": 6,
+          "24": 3,
+          "25": 39
+        },
+        "observed": {
+          "0": 37,
+          "1": 76,
+          "2": 82,
+          "3": 63,
+          "4": 28,
+          "5": 59,
+          "6": 83,
+          "7": 63,
+          "8": 86,
+          "9": 59,
+          "10": 84,
+          "11": 63,
+          "12": 87,
+          "13": 78,
+          "14": 38,
+          "15": 18,
+          "16": 14,
+          "17": 15,
+          "18": 0,
+          "19": 6,
+          "20": 7,
+          "21": 1,
+          "22": 25,
+          "23": 6,
+          "24": 3,
+          "25": 39
+        },
+        "exact": true,
+        "malformed": false,
+        "timing": {
+          "requirement": "earliest-legal-after-streamed-header-and-prior-output",
+          "external_inputs_independent": true,
+          "input_ready_timing_satisfied": false,
+          "header_start_tick": 0,
+          "header_finish_tick": 14,
+          "sums": [
+            {
+              "event": "sum-0",
+              "input_ready_tick": 1,
+              "earliest_legal_tick": 15,
+              "compiled_letter_tick": 15
+            },
+            {
+              "event": "sum-1",
+              "input_ready_tick": 3,
+              "earliest_legal_tick": 16,
+              "compiled_letter_tick": 16
+            },
+            {
+              "event": "sum-2",
+              "input_ready_tick": 4,
+              "earliest_legal_tick": 17,
+              "compiled_letter_tick": 17
+            },
+            {
+              "event": "sum-3",
+              "input_ready_tick": 5,
+              "earliest_legal_tick": 18,
+              "compiled_letter_tick": 18
+            },
+            {
+              "event": "sum-4",
+              "input_ready_tick": 6,
+              "earliest_legal_tick": 19,
+              "compiled_letter_tick": 19
+            },
+            {
+              "event": "sum-5",
+              "input_ready_tick": 7,
+              "earliest_legal_tick": 20,
+              "compiled_letter_tick": 20
+            },
+            {
+              "event": "sum-6",
+              "input_ready_tick": 8,
+              "earliest_legal_tick": 21,
+              "compiled_letter_tick": 21
+            },
+            {
+              "event": "sum-7",
+              "input_ready_tick": 9,
+              "earliest_legal_tick": 22,
+              "compiled_letter_tick": 22
+            },
+            {
+              "event": "sum-8",
+              "input_ready_tick": 10,
+              "earliest_legal_tick": 23,
+              "compiled_letter_tick": 23
+            },
+            {
+              "event": "sum-9",
+              "input_ready_tick": 12,
+              "earliest_legal_tick": 24,
+              "compiled_letter_tick": 24
+            }
+          ]
+        }
+      },
+      {
+        "id": "76a3852f-3f31-53c5-b682-18a0992a615c",
+        "expected": {
+          "0": 37,
+          "1": 76,
+          "2": 82,
+          "3": 63,
+          "4": 28,
+          "5": 59,
+          "6": 83,
+          "7": 63,
+          "8": 86,
+          "9": 59,
+          "10": 84,
+          "11": 63,
+          "12": 87,
+          "13": 78,
+          "14": 38,
+          "15": 11,
+          "16": 20,
+          "17": 8,
+          "18": 25,
+          "19": 14,
+          "20": 22,
+          "21": 13,
+          "22": 15,
+          "23": 2,
+          "24": 0,
+          "25": 39
+        },
+        "observed": {
+          "0": 37,
+          "1": 76,
+          "2": 82,
+          "3": 63,
+          "4": 28,
+          "5": 59,
+          "6": 83,
+          "7": 63,
+          "8": 86,
+          "9": 59,
+          "10": 84,
+          "11": 63,
+          "12": 87,
+          "13": 78,
+          "14": 38,
+          "15": 11,
+          "16": 20,
+          "17": 8,
+          "18": 25,
+          "19": 14,
+          "20": 22,
+          "21": 13,
+          "22": 15,
+          "23": 2,
+          "24": 0,
+          "25": 39
+        },
+        "exact": true,
+        "malformed": false,
+        "timing": {
+          "requirement": "earliest-legal-after-streamed-header-and-prior-output",
+          "external_inputs_independent": true,
+          "input_ready_timing_satisfied": false,
+          "header_start_tick": 0,
+          "header_finish_tick": 14,
+          "sums": [
+            {
+              "event": "sum-0",
+              "input_ready_tick": 1,
+              "earliest_legal_tick": 15,
+              "compiled_letter_tick": 15
+            },
+            {
+              "event": "sum-1",
+              "input_ready_tick": 2,
+              "earliest_legal_tick": 16,
+              "compiled_letter_tick": 16
+            },
+            {
+              "event": "sum-2",
+              "input_ready_tick": 4,
+              "earliest_legal_tick": 17,
+              "compiled_letter_tick": 17
+            },
+            {
+              "event": "sum-3",
+              "input_ready_tick": 5,
+              "earliest_legal_tick": 18,
+              "compiled_letter_tick": 18
+            },
+            {
+              "event": "sum-4",
+              "input_ready_tick": 6,
+              "earliest_legal_tick": 19,
+              "compiled_letter_tick": 19
+            },
+            {
+              "event": "sum-5",
+              "input_ready_tick": 8,
+              "earliest_legal_tick": 20,
+              "compiled_letter_tick": 20
+            },
+            {
+              "event": "sum-6",
+              "input_ready_tick": 9,
+              "earliest_legal_tick": 21,
+              "compiled_letter_tick": 21
+            },
+            {
+              "event": "sum-7",
+              "input_ready_tick": 11,
+              "earliest_legal_tick": 22,
+              "compiled_letter_tick": 22
+            },
+            {
+              "event": "sum-8",
+              "input_ready_tick": 13,
+              "earliest_legal_tick": 23,
+              "compiled_letter_tick": 23
+            },
+            {
+              "event": "sum-9",
+              "input_ready_tick": 15,
+              "earliest_legal_tick": 24,
+              "compiled_letter_tick": 24
+            }
+          ]
+        }
+      },
+      {
+        "id": "dcffc749-e45a-543e-99fa-8c30f9e47430",
+        "expected": {
+          "0": 37,
+          "1": 76,
+          "2": 82,
+          "3": 63,
+          "4": 29,
+          "5": 59,
+          "6": 83,
+          "7": 63,
+          "8": 86,
+          "9": 59,
+          "10": 84,
+          "11": 63,
+          "12": 87,
+          "13": 78,
+          "14": 38,
+          "15": 8,
+          "16": 23,
+          "17": 18,
+          "18": 25,
+          "19": 6,
+          "20": 17,
+          "21": 2,
+          "22": 5,
+          "23": 2,
+          "24": 21,
+          "25": 39
+        },
+        "observed": {
+          "0": 37,
+          "1": 76,
+          "2": 82,
+          "3": 63,
+          "4": 29,
+          "5": 59,
+          "6": 83,
+          "7": 63,
+          "8": 86,
+          "9": 59,
+          "10": 84,
+          "11": 63,
+          "12": 87,
+          "13": 78,
+          "14": 38,
+          "15": 8,
+          "16": 23,
+          "17": 18,
+          "18": 25,
+          "19": 6,
+          "20": 17,
+          "21": 2,
+          "22": 5,
+          "23": 2,
+          "24": 21,
+          "25": 39
+        },
+        "exact": true,
+        "malformed": false,
+        "timing": {
+          "requirement": "earliest-legal-after-streamed-header-and-prior-output",
+          "external_inputs_independent": true,
+          "input_ready_timing_satisfied": false,
+          "header_start_tick": 0,
+          "header_finish_tick": 14,
+          "sums": [
+            {
+              "event": "sum-0",
+              "input_ready_tick": 0,
+              "earliest_legal_tick": 15,
+              "compiled_letter_tick": 15
+            },
+            {
+              "event": "sum-1",
+              "input_ready_tick": 2,
+              "earliest_legal_tick": 16,
+              "compiled_letter_tick": 16
+            },
+            {
+              "event": "sum-2",
+              "input_ready_tick": 4,
+              "earliest_legal_tick": 17,
+              "compiled_letter_tick": 17
+            },
+            {
+              "event": "sum-3",
+              "input_ready_tick": 5,
+              "earliest_legal_tick": 18,
+              "compiled_letter_tick": 18
+            },
+            {
+              "event": "sum-4",
+              "input_ready_tick": 6,
+              "earliest_legal_tick": 19,
+              "compiled_letter_tick": 19
+            },
+            {
+              "event": "sum-5",
+              "input_ready_tick": 8,
+              "earliest_legal_tick": 20,
+              "compiled_letter_tick": 20
+            },
+            {
+              "event": "sum-6",
+              "input_ready_tick": 10,
+              "earliest_legal_tick": 21,
+              "compiled_letter_tick": 21
+            },
+            {
+              "event": "sum-7",
+              "input_ready_tick": 12,
+              "earliest_legal_tick": 22,
+              "compiled_letter_tick": 22
+            },
+            {
+              "event": "sum-8",
+              "input_ready_tick": 13,
+              "earliest_legal_tick": 23,
+              "compiled_letter_tick": 23
+            },
+            {
+              "event": "sum-9",
+              "input_ready_tick": 14,
+              "earliest_legal_tick": 24,
+              "compiled_letter_tick": 24
+            }
+          ]
+        }
+      }
+    ],
+    "scored_timing_policy": "earliest-legal-after-streamed-header-and-prior-output",
+    "external_inputs_independent": true,
+    "input_ready_timing_satisfied": false
+  },
+  "timing": {
+    "sample_seconds": 1.1417999420031038,
+    "collate_and_transfer_seconds": 4.404658743000596,
+    "forward_backward_optimizer_seconds": 97.00505993499507,
+    "evaluation_seconds": 3.611503518000177
+  },
+  "train_wall_seconds_including_periodic_validation": 104.69564835699998,
+  "training_trajectories_per_second": 468.05742758293417,
+  "training_rows_per_second": 49614.08732379102,
+  "supervised_targets_per_second": 24338.986234312575,
+  "validation_scope": "One seeded CPU training run of the real graph compiler/shard/sampler demo; no stress workload or live LLM quality claim.",
+  "source_commit": "c5de558",
+  "dataset_build": {
+    "trajectories": 2304,
+    "rows": 244224,
+    "targets": 119808,
+    "compiler": "kidra.graph-compiler/1",
+    "compressed_bytes": 5673984,
+    "raw_source_bytes": 17643711
+  },
+  "check_passed": true
+}
