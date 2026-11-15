@@ -24,8 +24,12 @@ missing default chat schemas, and strict-provider response-schema compatibility.
 
 Real OpenAI and Hugging Face connectivity attempts were blocked by the execution
 network proxy with tunnel HTTP 403 before a model response. No live external-model
-quality claim is made. Full demo convergence is being investigated; the original
-header-contaminated accuracy metric is corrected to score only actual sums.
+quality claim is made. The full 3,000-step demo check passed with the corrected arithmetic-only metric:
+99.8828125% held-out sum accuracy and 64/64 exact free-running trajectories.
+The 50,208-parameter two-layer shared-KV model uses compact framing tokens and
+an ordinary positional attention prior; compiler masks are unchanged. The original
+header-contaminated metric is fixed. See [training demo](KTREMIX-TRAINING-DEMO.md) and
+[validation results](VALIDATION-RESULTS.md) for the command, evidence and limitations.
 Scale/stress workloads were not run and are no longer a release gate under the
 current user instruction. The manual workload harness remains available for later
 use. Historical evidence and previously prepared commands follow below.

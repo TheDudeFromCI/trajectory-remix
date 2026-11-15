@@ -39,6 +39,10 @@ class GlobalSharedKV(nn.Module):
         self.k = nn.Linear(48, 12, bias=False)
         self.v = nn.Linear(48, 12, bias=False)
         self.out = nn.Linear(48, 48, bias=False)
+        # Generic local-position prior, not a task-specific retrieval mask.
+        # Each head uses a different scale; content projections learn freely.
+        offsets = torch.arange(-64, 65).abs().float()
+        self.register_buffer("relative_bias", -torch.tensor([.25, .5, 1., 2.])[:, None] * offsets)
         self.ff_norm = nn.LayerNorm(48)
         self.ff = nn.Sequential(
             nn.Linear(48, 144, bias=False),
@@ -46,15 +50,18 @@ class GlobalSharedKV(nn.Module):
             nn.Linear(144, 48, bias=False),
         )
 
-    def attend(self, values, key, value, allowed):
+    def attend(self, values, key, value, allowed, query_positions, memory_positions):
         batch_size, sequence_length, _ = values.shape
         query = self.q(self.norm(values))
         query = query.view(batch_size, sequence_length, 4, 12).transpose(1, 2)
+        relative = (memory_positions[:, None, :] - query_positions[:, :, None]).clamp(-64, 64) + 64
+        bias = self.relative_bias[:, relative].permute(1, 0, 2, 3)
+        bias = bias.masked_fill(~allowed[:, None], float('-inf'))
         attended = F.scaled_dot_product_attention(
             query,
             key.expand(-1, 4, -1, -1),
             value.expand(-1, 4, -1, -1),
-            attn_mask=allowed[:, None],
+            attn_mask=bias,
             dropout_p=0.0,
         )
         values = values + self.out(
@@ -62,14 +69,14 @@ class GlobalSharedKV(nn.Module):
         )
         return values + self.ff(self.ff_norm(values))
 
-    def forward(self, memory, queries, memory_allowed, query_allowed):
+    def forward(self, memory, queries, memory_allowed, query_allowed, memory_positions, query_positions):
         normed = self.norm(memory)
         key = self.k(normed)[:, None]
         value = self.v(normed)[:, None]
         # Both paths read the same pre-layer bank: queries cannot see memory
         # updates from this layer, which keeps the layer's depth well-defined.
-        return (self.attend(memory, key, value, memory_allowed),
-                self.attend(queries, key, value, query_allowed))
+        return (self.attend(memory, key, value, memory_allowed, memory_positions, memory_positions),
+                self.attend(queries, key, value, query_allowed, query_positions, memory_positions))
 
 
 class TinyKidra(nn.Module):
@@ -116,7 +123,8 @@ class TinyKidra(nn.Module):
             query = queries[:, start:end]
             construction = batch["memory_allowed"] & live[:, None, :]
             for layer in self.layers:
-                live_memory, query = layer(live_memory, query, construction, current)
+                live_memory, query = layer(live_memory, query, construction, current,
+                    batch["memory_positions"], batch["query_positions"][:, start:end])
             outputs.append(F.linear(self.norm(query), self.tokens.weight))
             start = end
         return torch.cat(outputs, dim=1)
@@ -176,6 +184,8 @@ def collate(samples, device="cpu", *, inference_queries=None):
                 "memory_positions": arrays["position_ids"][memory_rows],
                 "query_previous": query_previous,
                 "query_windows": query_windows,
+                # Prediction queries occupy the target slot; their content seed
+                # is the preceding token, never the target token itself.
                 "query_positions": query_positions,
                 "labels": labels,
                 "task_letters": task_letters,
@@ -252,7 +262,8 @@ def evaluate(model, dataset, batch_size, device):
             groups[name][1] += int(selected.sum())
     return {"loss": total_loss / total, "token_accuracy": correct / total,
             "exact_trajectory_accuracy": exact / len(dataset),
-            **{name + "_accuracy": a / b if b else 0. for name, (a, b) in groups.items()}}
+            **{name + "_accuracy": a / b if b else 0. for name, (a, b) in groups.items()},
+            **{name + "_targets": b for name, (a, b) in groups.items()}}
 
 
 @torch.no_grad()

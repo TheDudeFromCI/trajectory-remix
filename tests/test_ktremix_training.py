@@ -152,7 +152,8 @@ class TrainingDemoTests(unittest.TestCase):
             current = batch['query_allowed'][:, index:index + 1]
             mem, query = memory, queries[:, index:index + 1]
             for layer in model.layers:
-                mem, query = layer(mem, query, batch['memory_allowed'] & current, current)
+                mem, query = layer(mem, query, batch['memory_allowed'] & current, current,
+                    batch['memory_positions'], batch['query_positions'][:, index:index + 1])
             rows.append(t.F.linear(model.norm(query), model.tokens.weight))
         return torch.cat(rows, dim=1)
 
@@ -172,8 +173,16 @@ class TrainingDemoTests(unittest.TestCase):
         self.assert_reference_equivalent(t.TinyKidra(), t.collate([sample]))
 
     def test_task_letter_accuracy_excludes_header_letters(self):
-        _, _, _, sample = self.fixture()
+        # Use a character-level framing profile to ensure there ARE header
+        # letters; compact framing macros have no ordinary-letter header rows.
+        profile = d.profile()
+        profile.definition['pre_tokenizer'] = json.loads(d.pre_tokenizers.Split('', behavior='isolated').__getstate__())
+        source = GraphSource.model_validate(d.make_source(5))
+        arrays, metadata = GraphCompiler(profile).compile(source)
+        payload, entry = k.encode_sample(source.id, arrays, metadata)
+        sample = k.Sample(payload, entry)
         batch = t.collate([sample])
+        self.assertGreater(int(((batch['labels'] < 26) & ~batch['task_letters'].bool()).sum()), 0)
         self.assertEqual(int(batch["task_letters"].sum()), 10)
         class WrongHeaders(torch.nn.Module):
             def forward(self, b):

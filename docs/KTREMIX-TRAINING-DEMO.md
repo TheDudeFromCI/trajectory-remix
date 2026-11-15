@@ -7,9 +7,10 @@ fixture-specific lowering adapter have been removed from this path.
 
 ## User-machine commands
 
-Full training and throughput measurements are user-machine acceptance, never CI
-or assistant validation. No provider endpoints or pretrained weights are needed.
-The updated model's convergence has not been measured.
+Full training is explicitly invoked and refused in CI. No provider endpoints or
+pretrained weights are needed. Following user authorization, one complete CPU
+run passed both convergence gates; see [observed results](VALIDATION-RESULTS.md).
+No stress workload was run, and these observations are not performance guarantees.
 
 ```bash
 python -m pip install -e '.[export]'
@@ -24,8 +25,9 @@ thread, evaluation every 500 steps and 64 free-running evaluation samples.
 `--check` requires held-out ordinary-letter accuracy of 99% and exact free-running
 timing/closure accuracy of 95% under the approved earliest-legal policy below.
 It also requires external inputs independent of agent outputs; old result-gated
-datasets must be regenerated. These are unverified user-machine convergence
-gates, not results already obtained.
+datasets must be regenerated. These are the enforced convergence gates; the
+recorded seed-17 CPU run achieved 99.8828125% held-out sum accuracy and 64/64
+exact teacher-free rollouts. Other devices/seeds require their own validation.
 
 Separate generation, conformance and training:
 
@@ -49,7 +51,7 @@ adds model/runtime parity checks and exactly one optimizer update.
 ## Task, framing and timing
 
 The task has 36 ordinary symbols (`a`–`z`, `0`–`9`), twelve logical controls and
-34 dedicated framing symbols (punctuation/whitespace), for 82 vocabulary entries.
+40 dedicated framing symbols (punctuation/whitespace), for 88 vocabulary entries.
 The tokenizer never silently drops required CTX headers. Its exact serialization
 and special map are pinned in each dataset.
 
@@ -57,6 +59,11 @@ Two read-only document windows receive ten letters and ten digits. Result i is
 `(letter_index[i] + digit[i]) % 26`: `b + 2 = d`, `z + 1 = a`. External windows,
 including their headers, are masked. There are three peak Active windows plus
 one Available reserve, with seeded randomized physical slots.
+
+The demo tokenizer encodes fixed JSON field names, purpose values and `null` as
+framing wordpieces; ordinary task symbols remain one token each. This keeps the
+required header at 15 streamed ticks instead of 58 character ticks without
+changing the compiler/header protocol or hiding headers.
 
 A root empty-content agent event generates the result window's required CTX
 header one token per tick, concurrently with the first external inputs at tick
@@ -70,7 +77,7 @@ create tick delays.
 
 The original task had a conflict: emit each sum on the first
 tick both inputs are ready, while streaming the agent-created result header.
-With this tokenizer, the header occupies ticks 0–57; the first pair is ready at
+With the former character-only tokenizer, the header occupied ticks 0–57; the first pair is ready at
 tick 0 or 1. A sum cannot occupy a tick already used by its header. Later sums
 also require a separate tick after the previous agent output. After this conflict
 was explained, the user explicitly selected streamed headers, independent
@@ -105,7 +112,7 @@ and resume only on external input. No EOS token is ever a KV key.
 
 ## Model and causal context
 
-The model has **49,920 parameters**, two layers, width 48, four query heads, one
+The model has **50,208 parameters**, two layers, width 48, four query heads, one
 shared K/V head of width 12, feed-forward width 144, tied output embeddings, four
 physical-slot embeddings and 128 position embeddings. Framing expanded the
 vocabulary/positions; reducing feed-forward width preserves the approximately
@@ -144,8 +151,17 @@ Historical replay/fixture-adapter measurements predate this graph integration
 and have been removed from the public result path. They do not validate new
 header timing, convergence or recomputed-memory behavior.
 
-Outstanding user-machine checks: full `run --user-machine --check`, local-device
-memory/throughput measurements, [local-LLM acceptance](GRAPH-LOCAL-LLM.md) and
-[25k stored/20 active acceptance](ACCEPTANCE.md). CLI performance commands require
-explicit opt-in and refuse CI. Small array, visibility, mock-runtime and
-one-update correctness checks are separate from these gates.
+The complete `run --user-machine --check` has now passed on CPU as recorded in
+[validation results](VALIDATION-RESULTS.md). Live-model quality remains unvalidated
+because external model/API connections were blocked by the execution proxy.
+The user waived scale/stress acceptance; the manual harness remains opt-in for
+future use. CLI training commands still require explicit invocation and refuse CI.
+Small array, visibility, mock-runtime and optimizer fixtures remain separate.
+
+The tiny model uses fixed per-head relative-position biases (offsets clipped to
+64 positions) in both memory construction and prediction attention. This supplies
+a general positional inductive bias for retrieving aligned data across windows;
+it contains no arithmetic rule, target-dependent mask, or forced input lookup.
+Causal and lifetime masks are applied after the bias and remain authoritative.
+The grouped implementation is checked against per-query logits and gradients,
+including closed/replaced-memory cases.

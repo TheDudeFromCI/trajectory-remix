@@ -10,7 +10,7 @@ import sys
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tokenizers import Tokenizer, models, pre_tokenizers
+from tokenizers import Tokenizer, Regex, models, pre_tokenizers
 from trajectory_remix.graph.models import GraphSource, TokenizerProfile, REQUIRED_CONTROLS
 from trajectory_remix.graph.compiler import GraphCompiler, CONTRACT, Runtime, Frame, Emission, Token
 from trajectory_remix.graph import ktremix as k
@@ -20,7 +20,7 @@ CONTROL_NAMES = sorted(REQUIRED_CONTROLS)
 # Structural punctuation gets dedicated framing vocabulary entries. The ordinary
 # task alphabet remains the requested 36 letters/digits; controls are never typed
 # into source content. No unknown token can silently discard required headers.
-FRAMING = list(string.punctuation + " \n")
+FRAMING = list(string.punctuation + " \n") + ['"slot"', '"purpose"', '"reasoning_effort"', '"document"', '"reasoning"', 'null']
 VOCAB = {text: i for i, text in enumerate(
     SYMBOLS + [f"<|{name}|>" for name in CONTROL_NAMES] + FRAMING)}
 CONTROLS = {name: VOCAB[f"<|{name}|>"] for name in CONTROL_NAMES}
@@ -29,7 +29,10 @@ BOS, EOS, NOOP = (CONTROLS[n] for n in ("bos", "eos", "noop"))
 
 def tokenizer():
     result = Tokenizer(models.WordLevel(VOCAB))
-    result.pre_tokenizer = pre_tokenizers.Split("", behavior="isolated")
+    # Ordinary task symbols stay one token each. Fixed protocol text is
+    # encoded like BPE wordpieces rather than dozens of character tokens.
+    macros = '|'.join(__import__('re').escape(value) for value in FRAMING if len(value) > 1)
+    result.pre_tokenizer = pre_tokenizers.Split(Regex(macros + '|[\\s\\S]'), behavior="isolated")
     result.add_special_tokens([f"<|{name}|>" for name in CONTROL_NAMES] + FRAMING)
     return result
 
