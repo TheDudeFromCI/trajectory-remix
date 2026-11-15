@@ -1,17 +1,38 @@
-# KTREMIX binary dataset format — 1.0 draft
+# KTREMIX binary dataset format
 
-This document defines a seekable, lightly compressed training-data format for
-compiled multi-window trajectories. Its public reference implementation is
-[`examples/ktremix_dataset.py`](../examples/ktremix_dataset.py). It includes a
-reader, multi-shard sampler, validator, and small fixture writer. Python 3.11+ is
-required; install `lz4` for the default compression and `numpy` for array views.
+KTREMIX (`.ktremix`) is the file format Remix uses for **compiled training data**. If you just
+want to export and train, you mostly need this overview and section 1. The rest is a byte-level
+specification for people writing readers, writers or trainers.
 
-**Status:** public draft for review. The packaged codec is
-`trajectory_remix.graph.ktremix`; the examples script remains its CLI entry point.
-The [graph compiler and temporary artifact services](GRAPH-COMPILER.md) emit this
-format, and the small training demo consumes their output. The existing Export
-menu is not yet connected to the graph services. File layout and array semantics
-are specified here; each manifest identifies its model execution contract.
+## In plain terms
+
+- A **shard** is one immutable file holding many trajectories. Each trajectory is stored and
+  compressed on its own, so a trainer can jump straight to one without reading the others.
+- Inside a trajectory, the data is a set of typed columns (token IDs, loss weights, visibility
+  ranges and so on), ready to be viewed as NumPy arrays.
+- Nothing in the file is a dense attention matrix. Visibility is stored as compact intervals, so
+  a trainer builds whatever sparse masks its model needs.
+- The default compression is LZ4, falling back to uncompressed when it doesn't help.
+
+**Make and read one.** Export from the studio ([Export](EXPORT.md)), or try the demo tools:
+
+```bash
+python -m pip install numpy lz4
+python examples/ktremix_dataset.py demo /tmp/ktremix-demo
+python examples/ktremix_dataset.py verify '/tmp/ktremix-demo/*.ktremix'
+python examples/ktremix_dataset.py sample '/tmp/ktremix-demo/*.ktremix' --seed 42 --count 5
+```
+
+Python 3.11+ is required, plus `lz4` for the default codec and `numpy` for array views. The reference
+reader, multi-shard sampler, validator and fixture writer are in
+[`examples/ktremix_dataset.py`](../examples/ktremix_dataset.py), and the packaged codec is
+`trajectory_remix.graph.ktremix`.
+
+**Status:** a public 1.0 draft. The [compiler and export services](GRAPH-COMPILER.md) emit this
+format, and the [training demo](KTREMIX-TRAINING-DEMO.md) consumes it. File layout and array semantics
+are specified below, and each manifest names its model execution contract.
+
+---
 
 ## 1. Design and access path
 
@@ -408,11 +429,9 @@ command checks index CRC, requested record CRCs, core array invariants, metadata
 JSON and duplicate trajectory UUIDs across shards. Startup does not globally scan
 every sample UUID or parse every optional metadata block.
 
-The planned Export menu includes an **Include stale trajectories** option,
-enabled by default. This is separate from the minimum-stage filter: stale
-signoffs do not change a trajectory's stage or trigger a new review. Record the
-selection in the optional export manifest. This draft does not wire the new
-options into the production exporter.
+Stage filtering and the **Include stale trajectories** option (on by default) are applied
+when exporting, and are separate from each other: stale sign-offs don't change a stage or trigger a
+new review. The selection is recorded in the manifest's `export` object.
 
 For a runnable two-layer, approximately 50k-parameter model that generates raw
 sources, compiles, samples and trains against these shards, see the

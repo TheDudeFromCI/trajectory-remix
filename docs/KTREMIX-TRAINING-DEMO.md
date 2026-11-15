@@ -1,16 +1,17 @@
-# KTREMIX graph-compiler training demo
+# KTREMIX training demo
 
-The letter-addition harness generates `kidra-trajectory-graph/1` sources, uses the
-real [graph compiler](GRAPH-COMPILER.md), writes compressed KTREMIX shards and
-samples them for a two-layer global shared-KV model. The old replay compiler and
-fixture-specific lowering adapter have been removed from this path.
+The demo is a small end-to-end check that real compiled data can actually train a model. It
+generates tiny letter-addition trajectories, compiles them with the real
+[graph compiler](GRAPH-COMPILER.md), writes compressed [KTREMIX](KTREMIX.md) shards, samples
+them, and trains a two-layer, ~50k-parameter model with a global shared key/value memory.
 
-## User-machine commands
+It's for validating the pipeline, not for producing a useful model. One complete CPU run has
+passed its gates, and the numbers are in [Validation results](VALIDATION-RESULTS.md). They are one
+run's observations, not guarantees.
 
-Full training is explicitly invoked and refused in CI. No provider endpoints or
-pretrained weights are needed. Following user authorization, one complete CPU
-run passed both convergence gates; see [observed results](VALIDATION-RESULTS.md).
-No stress workload was run, and these observations are not performance guarantees.
+## Run it
+
+Training is explicit and refuses to run in CI. It needs no endpoints or pretrained weights.
 
 ```bash
 python -m pip install -e '.[export]'
@@ -18,18 +19,16 @@ python -m pip install 'torch>=2.5,<3' --index-url https://download.pytorch.org/w
 python examples/train_ktremix.py run /tmp/ktremix-graph-addition --user-machine --check
 ```
 
-Use an appropriate PyTorch install and `--device cuda` for GPU work. The generated
-directory must be new and under `/tmp`. Defaults remain 2,048 training samples,
-256 held-out samples, 256 samples/shard, 3,000 steps, batch 16, seed 17, one CPU
-thread, evaluation every 500 steps and 64 free-running evaluation samples.
-`--check` requires held-out ordinary-letter accuracy of 99% and exact free-running
-timing/closure accuracy of 95% under the approved earliest-legal policy below.
-It also requires external inputs independent of agent outputs; old result-gated
-datasets must be regenerated. These are the enforced convergence gates; the
-recorded seed-17 CPU run achieved 99.8828125% held-out sum accuracy and 64/64
-exact teacher-free rollouts. Other devices/seeds require their own validation.
+- The output directory must be new and under `/tmp`.
+- For a GPU, install a matching PyTorch and add `--device cuda`.
+- Defaults: 2,048 training and 256 held-out samples, 256 per shard, 3,000 steps, batch 16, seed 17,
+  one CPU thread, evaluation every 500 steps on 64 free-running samples.
+- `--check` enforces the convergence gates: **99%** held-out ordinary-letter accuracy and **95%**
+  exact free-running timing and closure accuracy. It also requires external inputs that don't depend on
+  agent outputs, so older result-gated datasets must be regenerated. Other devices and seeds need their
+  own validation.
 
-Separate generation, conformance and training:
+To run the stages separately:
 
 ```bash
 python examples/train_ktremix.py generate /tmp/ktremix-graph-data --user-machine
@@ -37,131 +36,78 @@ python examples/ktremix_dataset.py verify '/tmp/ktremix-graph-data/*.ktremix'
 python examples/train_ktremix.py train /tmp/ktremix-graph-data --user-machine --check
 ```
 
-For ordinary local correctness, run only the tiny fixture suite:
+For ordinary correctness checks, run only the tiny fixtures, which need no PyTorch, training or live
+model:
 
 ```bash
 python -m pytest -q tests/test_graph_compiler.py tests/test_graph_export.py \
   tests/test_ktremix_format.py tests/test_graph_demo.py
 ```
 
-These checks need no PyTorch, optimizer update, training campaign, live LLM call
-or throughput measurement. The optional `tests/test_ktremix_training.py` suite
-adds model/runtime parity checks and exactly one optimizer update.
+`tests/test_ktremix_training.py` adds model parity checks and exactly **one** optimizer update.
 
-## Task, framing and timing
+## The task
 
-The task has 36 ordinary symbols (`a`–`z`, `0`–`9`), twelve logical controls and
-40 dedicated framing symbols (punctuation/whitespace), for 88 vocabulary entries.
-The tokenizer never silently drops required CTX headers. Its exact serialization
-and special map are pinned in each dataset.
+Two read-only document windows receive ten letters and ten digits. The agent must produce, for each
+position, the letter shifted by that digit (mod 26): `b + 2 = d`, `z + 1 = a`.
 
-Two read-only document windows receive ten letters and ten digits. Result i is
-`(letter_index[i] + digit[i]) % 26`: `b + 2 = d`, `z + 1 = a`. External windows,
-including their headers, are masked. There are three peak Active windows plus
-one Available reserve, with seeded randomized physical slots.
+- The vocabulary has 88 entries: 36 ordinary symbols (`a`–`z`, `0`–`9`), twelve logical controls and
+  40 framing symbols. The tokenizer never silently drops required CTX headers, and its exact
+  serialization is pinned in each dataset.
+- External windows and their headers are masked. There are three peak Active windows plus one
+  Available reserve, with seeded random physical slots.
+- Framing uses compact wordpieces, so a header takes 15 streamed ticks instead of 58 character ticks,
+  without changing the compiler or header protocol.
 
-The demo tokenizer encodes fixed JSON field names, purpose values and `null` as
-framing wordpieces; ordinary task symbols remain one token each. This keeps the
-required header at 15 streamed ticks instead of 58 character ticks without
-changing the compiler/header protocol or hiding headers.
+### Timing
 
-A root empty-content agent event generates the result window's required CTX
-header one token per tick, concurrently with the first external inputs at tick
-zero. This activates Available and creates its replacement. External headers are
-atomic. Each input depends only on its stream's preceding input, with an optional
-dependency on its same-index peer. `chain_immediately=false` staggers arrivals
-through external dependencies. No input depends on a header or sum: deleting or
-delaying every agent event leaves the external schedule unchanged. The retained
-`--max-gap` option controls how often the peer dependency is chosen; it does not
-create tick delays.
+The result window's CTX header is generated one token per tick, concurrently with the first external
+inputs at tick zero. Each input depends only on the previous input in its own stream, and optionally on
+its same-index peer (`--max-gap` controls how often). No input depends on a header or a sum, so delaying or
+deleting every agent event leaves the external schedule unchanged.
 
-The original task had a conflict: emit each sum on the first
-tick both inputs are ready, while streaming the agent-created result header.
-With the former character-only tokenizer, the header occupied ticks 0–57; the first pair is ready at
-tick 0 or 1. A sum cannot occupy a tick already used by its header. Later sums
-also require a separate tick after the previous agent output. After this conflict
-was explained, the user explicitly selected streamed headers, independent
-arrivals and earliest-legal result timing on November 14, 2026. The compiler and
-header protocol stay unchanged.
+A sum can't land on a tick its header or the previous sum already uses, so results are scored at the
+**earliest legal tick**: `max(input_ready_tick, header_or_previous_sum_finish_tick + 1)`. The project owner chose this policy on November 14, 2026, after the original
+rule turned out to conflict with streaming headers.
+Reports show the scored policy and expose the older "input-ready" check as a separate diagnostic. A dataset
+that gates results on the sums can't pass `--check`.
 
-The executable fixture emits at the earliest **legal** tick:
-`max(input_ready_tick, header_or_previous_sum_finish_tick + 1)`. Its single
-letter is generated then; the last event's EOS follows one tick later. A pure
-`timing_report` exposes input-ready, earliest-legal and compiled letter ticks.
-Training rollout reports identify this scored policy and separately expose
-`input_ready_timing_satisfied` as a diagnostic of the prior literal criterion.
-That diagnostic is not the newly agreed timing gate. A result-gated dataset
-cannot pass `--check` even if nominal schedule accuracy is perfect.
+Because all inputs usually arrive before the header finishes, the demo doesn't test learned waiting over
+long delays.
 
-For these short streams, inputs may all arrive before the header completes; the
-fixture therefore does not establish learned waiting across later arrivals.
-Generic wait events, replay tick anchors and disabled-header paths remain absent.
+### Loss balance
 
-The fixture balances loss so the ten arithmetic outputs are not drowned out by
-fixed framing: result-header weight is 0.1, implicit NOOP weight is 0.1, and each
-sum event (including its closing EOS) has weight 5. External events remain masked.
-These are whole-event weights, not token-level exceptions. Dataset identities are
-versioned as `graph-addition/3` so regenerated shards identify the changed objective.
-Held-out `letters_accuracy` counts only the ten sums after CTX_END;
-`header_letters_accuracy` is reported separately. Header prediction cannot inflate
-the task accuracy gate.
+Fixed framing would otherwise swamp the ten answers, so the loss is weighted per whole event: result
+header 0.1, implicit NOOP 0.1, each sum event (including its closing EOS) 5, external events masked. Dataset
+identities are versioned `graph-addition/3`. Reported `letters_accuracy` counts only the ten sums after
+CTX_END, and `header_letters_accuracy` is separate so header prediction can't inflate the gate.
 
-Writable windows and Available predict supervised NOOP when idle; read-only
-windows count as NOOP without predictions. All-NOOP sleeps retain one decision
-and resume only on external input. No EOS token is ever a KV key.
+## The model
 
-## Model and causal context
+A dense, inspectable reference, not an optimized runtime: 50,208 parameters, two layers of width 48, four
+query heads, one shared K/V head of width 12, feed-forward width 144, tied output embeddings, four
+physical-slot embeddings and 128 position embeddings, plus fixed per-head relative-position biases
+(clipped at 64). The bias is a general positional prior, with no arithmetic rule or target-dependent mask.
 
-The model has **50,208 parameters**, two layers, width 48, four query heads, one
-shared K/V head of width 12, feed-forward width 144, tied output embeddings, four
-physical-slot embeddings and 128 position embeddings. Framing expanded the
-vocabulary/positions; reducing feed-forward width preserves the approximately
-50k-parameter target without bypassing protocol rules.
+- Every layer reads a shared global K/V bank across visible windows. Queries start from the previous visible
+  token in their own window, never the label.
+- For each query, keys that have since been **closed or replaced** are excluded in every layer, and memory
+  is rebuilt without them. Erased text therefore can't survive in another window's hidden state. Queries
+  sharing a state share a memory bank, and tiny tests compare logits and gradients with a per-query reference.
+- Don't compare its speed with older adapters, or detach prefixes to make it faster.
 
-Every layer uses a shared global K/V bank across visible windows. Queries start
-from the previous visible own-window token, never the label being predicted.
-Memory construction obeys original causal frontiers; queries cannot see their
-own targets, future inputs or simultaneous outputs. For each query, every layer
-also excludes keys that have since been closed or replaced. Rebuilding that
-query's memory prevents erased content from surviving indirectly in another
-window's hidden state. Padded samples never attend across trajectories.
+Training samples shards uniformly with CRC checks. Evaluation feeds the model's own outputs back in for headers
+and results, using the source only to score afterwards. Early or late outputs, malformed tokens, missing or wrong
+EOS, and reserve mistakes all fail exact scoring, with a bounded horizon to catch missing closure.
 
-This is a dense, inspectable reference model, not an optimized KV cache/runtime.
-It rebuilds memory for each distinct expiry state and backpropagates through complete samples. Queries sharing that state reuse a memory bank; the original construction frontier still excludes future keys at every layer. Closed/replaced keys are removed before rebuilding, preventing indirect resurrection. Tiny tests compare both logits and parameter gradients against the per-query reference.
-Do not compare its throughput with the old adapter's historical numbers or
-silently detach prefixes to make it faster.
+## What it produces
 
-Training uniformly samples compressed shards, with CRC checks. Teacher-forced
-metrics include required header tokens, ordinary task letters, NOOP and EOS.
-Free-running evaluation feeds back model emissions for headers and result text;
-source agent content is used only for scoring afterwards. External fixture
-stimuli follow their nominal compiled schedule. Reserve activation, early/late
-outputs, malformed tokens and missing/wrong EOS fail exact scoring. A bounded
-horizon catches missing closure.
+`tokenizer.json`, raw `train.jsonl` and `validation.jsonl`, split-specific shards, and `build.json` come from
+generation. `training.json`, `last-command.json` and `model.pt` come from training. The demo's held-out split is
+called `validation`, while general project export uses Train, Development and Test and keeps families together.
 
-## Outputs and outstanding acceptance
+## What remains unproven
 
-`tokenizer.json`, raw `train.jsonl`/`validation.jsonl`, split-specific compressed
-shards and `build.json` identify the graph dataset and compilation counts.
-`training.json`, `last-command.json` and `model.pt` are produced by user-run
-training. The demo's held-out split is named `validation`; general project export
-uses Train/Development/Test and preserves family grouping before sharding.
-
-Historical replay/fixture-adapter measurements predate this graph integration
-and have been removed from the public result path. They do not validate new
-header timing, convergence or recomputed-memory behavior.
-
-The complete `run --user-machine --check` has now passed on CPU as recorded in
-[validation results](VALIDATION-RESULTS.md). Live-model quality remains unvalidated
-because external model/API connections were blocked by the execution proxy.
-The user waived scale/stress acceptance; the manual harness remains opt-in for
-future use. CLI training commands still require explicit invocation and refuse CI.
-Small array, visibility, mock-runtime and optimizer fixtures remain separate.
-
-The tiny model uses fixed per-head relative-position biases (offsets clipped to
-64 positions) in both memory construction and prediction attention. This supplies
-a general positional inductive bias for retrieving aligned data across windows;
-it contains no arithmetic rule, target-dependent mask, or forced input lookup.
-Causal and lifetime masks are applied after the bias and remain authoritative.
-The grouped implementation is checked against per-query logits and gradients,
-including closed/replaced-memory cases.
+Live-model quality hasn't been validated, because external model connections were blocked in the test
+environment. The scale and stress acceptance was waived by the project owner. The harness stays available for
+later use. See [Acceptance](ACCEPTANCE.md).

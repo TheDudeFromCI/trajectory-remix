@@ -1,8 +1,25 @@
 # Trajectory Remix
 
-A local studio for authoring, generating, reviewing and exporting dependency-graph
-training trajectories. Python 3.11+, a loopback web UI, and no frontend build step.
-Tools and observations are synthetic authored content; Remix never executes them.
+Trajectory Remix is a local studio for authoring, generating, reviewing and
+exporting **dependency-graph training trajectories**: records of what an agent
+sees, does and says across several windows at once, used to train Project Kidra
+models.
+
+With it you can:
+
+- **Author** trajectories by hand in a browser studio, or through an AI agent over
+  MCP.
+- **Generate** new ones from a tunable sampler, using your own model endpoints, then
+  have a fast and a critical reviewer check and repair them.
+- **Track** every job, review and stage, and recover cleanly from pauses and restarts.
+- **Export** approved trajectories as raw JSONL, or compiled into compressed
+  **KTREMIX** shards for training.
+
+It runs entirely on your machine: Python 3.11+, a web UI on `127.0.0.1`, and no
+frontend build step. Tools and their results in a trajectory are **authored
+content**. Remix never executes them.
+
+## Quick start
 
 ```bash
 python -m pip install -e '.[mcp,export]'
@@ -10,53 +27,57 @@ python -m trajectory_remix graph-init --dataset project.sqlite
 python -m trajectory_remix graph-studio --dataset project.sqlite
 ```
 
-Open `http://127.0.0.1:8765`. Use **Import** to load
-[graph_minimal.json](examples/graph_minimal.json). Edit events/windows and their
-predecessors, inspect diagnostics, and scrub the dependency timeline. Saving
-structural errors keeps them editable; they block compilation. Revisions and
-locks protect against overwriting another editor or an attached pipeline.
+Open **http://127.0.0.1:8765**, choose **File → Import**, and load
+[`examples/graph_minimal.json`](examples/graph_minimal.json). Select an event to edit
+its window and dependencies, and scrub the timeline to see the trajectory build up.
+New projects need no tokenizer.
 
-Graph mode, generation, reviews and metrics need no tokenizer. For opt-in **Tick
-history**, first define a compatible tokenizer profile in Project Settings, then
-select it in client Preferences. The default refresh is a 500 ms trailing debounce.
-Compiled export selects its own profile. Profiles never add or renumber tokens.
+Next steps are in [Getting started](docs/GETTING-STARTED.md).
 
-**Sampler Matrix uses the selected Workbench B UI.** Tune weights, copy/remove
-entries, add/remove rules, inspect constraints and linked metrics, then save the
-project draft. Pins affect proposal/generation requests independently of weights.
-Runs freeze inputs before admission. Unknown actual metrics remain unavailable;
-**Calculate Missing Metrics** is an explicit action.
+## How it fits together
 
-Configure your own endpoints and roles in Project Settings to generate or run
-Fast/Critical Review & Repair. These actions call the configured models. Generated
-sources are not automatically Ready; Ready is a manual stage. Independent jobs
-continue when dialogs close, with explicit pause/resume/cancel and per-job logs.
-Restart and exhausted endpoints require manual Resume.
+1. **Source.** A trajectory is a graph of *events* (agent text, external text, tool
+   calls and responses, chat messages) living in *windows*. Events say which earlier
+   events they depend on, rather than being placed on a clock. See
+   [Source format](docs/GRAPH-SOURCE.md).
+2. **Studio.** Edit sources, run jobs and review work in the browser
+   ([Dashboard](docs/DASHBOARD.md), [Studio reference](docs/GRAPH-STUDIO.md)).
+3. **Generate and review.** The sampler proposes a scenario, your generator model
+   writes the events one at a time, and optional reviewers sign off or repair
+   ([Event generation](docs/GRAPH-GENERATION.md)).
+4. **Stage.** Each trajectory has a stage from Unfinished (-3) up to **Ready (3)**.
+   Ready is always a manual decision.
+5. **Export.** Ready trajectories are written as source JSONL or compiled KTREMIX
+   shards with a tokenizer profile ([Export](docs/EXPORT.md)).
 
-Export source JSONL or compiled KTREMIX through **Export**. Ready is the default
-minimum stage; stale reviews are included by default. Families stay together in
-separate split shards. Downloads live in `/tmp`, expire after 24 hours and can
-also disappear through operating-system cleanup. Clearing logs does not clear
-sources, checkpoints, evaluations or ownership.
+## Documentation
 
-For dashboard setup and job controls, see [Dashboard](docs/DASHBOARD.md) and
-[Project settings](docs/PROJECT-SETTINGS.md).
-
-| Task | Guide |
+| I want to… | Read |
 | --- | --- |
-| Author source and synthetic tools | [Source format](docs/GRAPH-SOURCE.md), [Studio](docs/GRAPH-STUDIO.md), [Tools/chat](docs/TOOLS.md) |
-| Tune matrix and metrics | [Workbench B](docs/SAMPLER-WORKBENCH.md), [Metrics](docs/GRAPH-SAMPLER-METRICS.md) |
-| Generate/review/repair | [Event Flow](docs/GRAPH-GENERATION.md) |
-| Compile and export | [Compiler/export](docs/GRAPH-COMPILER.md), [KTREMIX](docs/KTREMIX.md) |
-| Connect an agent | [MCP setup/examples](docs/MCP.md), [bundled Skill](trajectory_remix/Skill.md) |
-| Inspect jobs and recovery | [Jobs](docs/GRAPH-JOBS.md) |
-| Validate the release | [Small checks](docs/TESTING.md), [user-machine acceptance](docs/ACCEPTANCE.md) |
+| Install and make a first project | [Getting started](docs/GETTING-STARTED.md) |
+| Use the studio day to day | [Dashboard](docs/DASHBOARD.md), [Studio reference](docs/GRAPH-STUDIO.md) |
+| Connect models and tokenizers | [Project settings](docs/PROJECT-SETTINGS.md) |
+| Understand the source format | [Source format](docs/GRAPH-SOURCE.md), [Synthetic tools and chat](docs/TOOLS.md) |
+| Tune what gets generated | [Sampler Matrix](docs/SAMPLER-WORKBENCH.md), [Metrics](docs/METRICS.md) |
+| Generate, review and repair | [Event generation](docs/GRAPH-GENERATION.md) |
+| Watch, pause and recover jobs | [Jobs](docs/GRAPH-JOBS.md) |
+| Export for training | [Export](docs/EXPORT.md), [Compiler](docs/GRAPH-COMPILER.md), [KTREMIX format](docs/KTREMIX.md) |
+| Try training on exported data | [Training demo](docs/KTREMIX-TRAINING-DEMO.md) |
+| Let an AI agent drive Remix | [MCP setup](docs/MCP.md), [Authoring with an agent](docs/MCP-AUTHORING.md) |
+| Check a local model | [Local-model validation](docs/GRAPH-LOCAL-LLM.md) |
+| Know where data lives | [Storage](docs/STORAGE.md) |
+| Run or review the checks | [Testing](docs/TESTING.md), [Acceptance](docs/ACCEPTANCE.md), [Maintenance](docs/MAINTENANCE.md) |
 
-Old replay/tick-anchor projects and executable sandbox formats are unsupported.
-There is no compatibility reader or migration. Startup and imports reject them;
-retain old datasets separately if you need historical source material.
+## Good to know
 
-User-machine 25k-stored/20-active, local-model quality and full training acceptance
-remain pending until actual results are supplied. Historical replay demo timings
-are not evidence about this graph implementation. No performance or quality
-claim follows from the deterministic checks.
+- **Old projects are not supported.** The previous replay/tick-anchor format and the
+  executable sandbox are gone, with no reader or migration. Imports reject them, so
+  keep old datasets separately if you need the history. See
+  [From the old replay format](docs/REPLAY-FORMAT.md).
+- **Model calls only happen when you ask.** Generation and review use the endpoints
+  you configure. Credentials come from environment variables and are never saved in
+  projects.
+- **Verification status.** The deterministic tests pass, and the demo training run
+  met its gates on one CPU run ([results](docs/VALIDATION-RESULTS.md)). Full-scale
+  (25k stored / 20 active) and local-model quality acceptance are still pending, and
+  nothing here is a performance or quality guarantee.

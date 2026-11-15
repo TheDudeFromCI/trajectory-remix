@@ -1,17 +1,17 @@
-# Graph compilation, preview and export
+# Compiler and preview
 
-The [manual graph studio](GRAPH-STUDIO.md) supplies authenticated REST, manual
-authoring, read-only previews, import/export jobs and focused agent tasks.
+The compiler turns a dependency graph into the row-by-row training form: which tokens appear
+when, what each token may see, and what it is trained to predict. You only need this page to
+understand **Tick history** previews, export behavior and compile errors. Authoring never calls
+it.
 
-The opt-in `trajectory_remix.graph.compiler` and `.export` services consume the
-[graph source contracts](GRAPH-SOURCE.md). They do not read replay sources,
-execute tools, call models, mutate source/settings, or calculate stored metrics.
-Graph reads/edits remain tokenizer-free. The [durable job service](GRAPH-JOBS.md) pins export snapshots,
-calls these services and supplies asynchronous graph REST jobs/downloads.
+The compiler reads the [source format](GRAPH-SOURCE.md). It doesn't execute tools, call models,
+change sources or settings, or calculate stored metrics. Its output feeds [Export](EXPORT.md) and
+the [KTREMIX](KTREMIX.md) format. Install its dependencies with `pip install -e '.[export]'`.
 
-Install the exporter dependencies with `pip install -e '.[export]'`.
+## Using it
 
-## Explicit compilation and preview
+Compilation is always explicit: a **Tick history** preview in the studio, an export job, or code:
 
 ```python
 from trajectory_remix.graph import GraphSource
@@ -25,166 +25,99 @@ arrays, identity = compiler.compile(source)
 preview = compiler.preview(source, max_frames=500)
 ```
 
-`compile` returns the required [KTREMIX frontier columns](KTREMIX.md) and a small
-identity/debug map. The compiler consumes intrinsic fields only. Metadata-free
-sources produce identical arrays with the same profile, capacity and seed.
-Structural errors and incompatible tokenizers block compilation; warnings do not.
-Settings, when supplied, enable current tool-catalog/effort diagnostics.
+- `compile` returns the arrays [KTREMIX](KTREMIX.md) stores, plus a small identity/debug map.
+- `preview` returns a bounded list of frames (`tick`, `inputs`, `outputs`), a `truncated` flag
+  and a cache key covering compiler version, source hash, profile fingerprint, capacity and seed.
+- Both accept a `cancelled()` callback. Compilation has a `max_rows` guard (default one million)
+  and preview also limits frames. Cancellation raises `Cancelled`, and failures raise
+  `CompileError`.
+- Only the intrinsic source matters, so sources that differ only in metadata compile identically
+  for the same profile, capacity and seed.
+- **Errors block compilation, warnings don't.** An incompatible tokenizer also blocks it.
 
-`preview` returns a bounded list of `Frame(tick, inputs, outputs)` dataclasses,
-a `truncated` flag and a cache key covering compiler version, intrinsic hash,
-profile fingerprint, capacity and seed. Each emission identifies its event,
-logical window, token/control pieces, supervision, opening and replacement.
-References retain typed `(logical_window, hex_digit_index)` annotations in the
-visual schedule, avoiding unbounded lookahead for a future allocation. Only
-compiled arrays resolve them to physical token IDs. The token ID in such an annotated preview piece is `None` until compilation
-resolves it; it is not a generated token or a slot.
+In previews, a window reference shows as a typed annotation, and its token ID is `None` until a
+real compile resolves it. It is not a generated token.
 
-Preview shares the scheduling core with export and writes no artifacts. A caller
-should apply its client-local trailing debounce (default 500 ms), cache by this
-key, and reject responses whose source hash/profile no longer matches selection.
-The compiler holds no global preview/export selection or mutable run state.
-`frames(source)` offers the same incremental visual schedule for explicit callers.
-Graph mode, generation, review and source metrics must not call these APIs.
+## The tokenizer
 
-Both methods accept a `cancelled()` callback. `compile` has a configurable
-`max_rows` guard (default one million); preview additionally limits frames.
-Cancellation raises `Cancelled`, and compilation failures raise `CompileError`.
+A tokenizer profile is validated only when you use it. Control spellings and IDs must match the
+serialized tokenizer, and the vocabulary is never extended. Literal text is encoded with
+added-token matching turned off, and text that would produce a control token or lose content is
+rejected. A byte-covering tokenizer can therefore carry control-looking strings as plain data.
 
-## Tokenization and wire grammar
+Events never merge tokens or masks with each other. BOS is zero-loss context, an implicit NOOP uses
+the source's `noop_loss_weight`, and all other framing inherits its event's supervision.
 
-The profile is validated by the tokenizer runtime when explicitly selected.
-Dedicated control spellings/IDs must agree with the serialized tokenizer.
-Vocabulary is never extended. Literal text is encoded with added-token matching
-and postprocessing disabled; literal encoding that produces a lifecycle/control
-ID or discards nonempty content is rejected. A byte-covering tokenizer supports
-literal control-looking strings. Independent events never merge tokens or masks.
-BOS is always zero-loss conditioning; implicit NOOP uses the source default loss.
-All other framing inherits the originating event's whole-event supervision.
+### Wire layout (`kidra.graph-compiler/1`)
 
-Compiler version `kidra.graph-compiler/1` uses:
+| Piece | Tokens |
+| --- | --- |
+| Window header | CTX begin, compact JSON `{slot, purpose, reasoning_effort}`, CTX end |
+| Tool call | tool-begin control, a JSON string tool ID, a literal colon (and tool-end / response-begin / response-end as the flags request) |
+| Chat | MSG begin, JSON string speaker, colon, content, MSG end |
+| Window reference | the window-ref control followed by **eight lowercase hex digits** of a u32, one ordinary token per digit |
+| Close window | the EOS label, which is never a context key |
 
-- Header: CTX begin, compact JSON `{slot,purpose,reasoning_effort}`, CTX end.
-- Tool begin: tool-begin control, JSON string tool ID, literal colon. Independent
-  end flags emit tool-end/response-end; responses use response-begin.
-- Chat: MSG begin, JSON string speaker, colon, literal content, MSG end.
-- Typed reference: window-ref control followed by eight lowercase u32 hex digits,
-  encoded one ordinary token per digit. A reference therefore needs a tokenizer
-  that encodes each hex digit independently as one ordinary token. Its fixed
-  length permits references to future/closed windows despite reusable slots.
-  Referencing a window that never opens is a compilation error.
-- Close window: EOS label, never a durable context key. No text scanning controls
-  submission or closure.
+The fixed-length reference lets you refer to windows that open later or have closed, even though
+physical slots are reused. It needs a tokenizer that encodes each hex digit as one ordinary token.
+Referencing a window that never opens is an error.
 
-Headers on agent-created windows stream one token per generation tick. External
-headers populate atomically before the first body fragment. Agent events stream
-one token per tick; external text/responses deliver all tokens instantly or one
-body token per tick according to the actual source `delivery.mode` contract.
-Chat is atomic. There is no authored timing offset or sandbox latency.
+## Timing
 
-External completion can enable generation in the same tick. A receiving external
-event's `chain_immediately=false` moves it to the next input phase. Agent
-completion always enables dependents no earlier than the next tick. Input chains
-follow dependencies, including dependency-ordered same-window appends.
+Timing exists only in compiled output. The compiler assigns ticks like this:
 
-## Allocation, visibility and sleep
+- **Agent events** stream one token per tick, and agent-created window headers stream the same
+  way. **External events** deliver instantly or one token per tick, per their `delivery` mode.
+  External headers appear atomically before the first body fragment. Chat is atomic.
+- **External completion** can enable generation in the same tick. `chain_immediately: false` moves
+  the next external event to the next input phase. **Agent completion** enables dependents no earlier
+  than the next tick.
+- There are no authored offsets or sandbox latency, and a dependency-only source cannot express
+  an arbitrary wall-clock delay.
 
-One BOS-only Available instance exists. A first agent header token activates it
-and creates a new reserve after the shared generation commit. Concurrent first
-agent writes are staggered by stable event-ID order. External populated openings
-bypass the reserve. Allocation uses a reproducible RNG derived from export seed
-and trajectory UUID; it varies across trajectories and may reuse vacant slots.
-The configured capacity is peak Active windows; one extra physical slot is kept
-for Available. Logical IDs never reopen. Unordered writers remain errors.
+## Windows, visibility and sleep
 
-Every input insertion has a construction/commit frontier. All predictions in a
-frame share a pre-commit frontier, so simultaneous targets cannot see one another.
-EOS closes after that shared pass: peers can see the closing window's full prior
-content, and no next-pass query can see it. EOS and NOOP never become KV keys.
+- **Available windows.** There is always one BOS-only *Available* instance. A first agent header
+  token activates it, and a new reserve appears after the shared commit. Simultaneous first writes
+  are ordered by event ID, and external openings skip the reserve. Physical slots come from a
+  reproducible RNG seeded by the export seed and trajectory UUID, so they vary across trajectories
+  and can be reused. `active_limit` is the peak number of Active windows, with one extra slot for
+  the reserve.
+- **What each prediction sees.** Every insertion has a causal frontier. All predictions in a frame
+  share a pre-commit frontier, so simultaneous targets can't see each other.
 
-Replacement retains BOS/header and window identity. The old body expires at the
-same frontier where the first replacement token becomes visible; the replacement
-row's direct own-window prefix is the retained header. There is no observable
-empty-body model pass. Subsequent streamed tokens accumulate normally.
+### Replacement and closing
 
-Visibility intervals alone do not authorize retaining hidden-state copies of
-removed content. Consumers must rebuild/invalidate surviving representations
-that incorporated removed keys. The tiny demo intersects every memory layer's
-construction mask with each query's current visible context and rebuilds it;
-this checks closure/replacement isolation without a detached prefix cache.
+- **Closing:** EOS closes a window after the shared pass. Peers still see its full prior content,
+  and no later pass can see it. EOS and NOOP never become context keys.
+- **Replacement:** the BOS and header and the window's identity stay. The old body expires at the
+  same frontier where the first replacement token becomes visible, so there is no model pass over
+  an empty body. Later streamed tokens accumulate normally.
 
-Writable Active windows and Available predict NOOP when idle. Read-only windows
-count as NOOP without model rows. One all-NOOP decision puts execution to sleep;
-only an external context change wakes it. The scheduler emits no repeated idle
-passes or authored wait intervals. Dependency-only sources cannot express
-arbitrary wall-clock delays. End-of-sample open windows are allowed.
+Visibility intervals alone don't make it safe to keep hidden-state copies of removed text.
+Anything that built on removed content must be rebuilt, which the training demo does.
 
-## Split-aware temporary artifacts
+### Idle windows and sleep
 
-```python
-from trajectory_remix.graph.export import ArtifactService, ExportOptions
+Writable Active windows and Available predict NOOP when idle, and read-only windows count as NOOP
+without model rows. When **every** window predicts NOOP in one decision, execution **sleeps** until
+external context changes, with no repeated idle passes. Open windows at the end of a sample are
+allowed.
 
-artifacts = ArtifactService()  # expires old/abandoned exports on startup
-artifact_id, manifest = artifacts.build(
-    records,
-    settings,
-    compiler=compiler,
-    options=ExportOptions(trajectories_per_file=100, metadata="remove_all"),
-)
-with artifacts.lease(artifact_id, "download.zip") as stream:
-    # Stream to the requesting client's download response while holding the lease.
-    consume(stream)
-```
+## Developers
 
-`records` accepts `GraphSource` objects/dicts or `SourceRecord` snapshots. Sources
-and settings are copied before selection. Provided revision/commit identities,
-intrinsic hashes, settings hash, profile, compiler, capacity and allocation seed
-are pinned in manifests. The caller must obtain a consistent snapshot through
-the real job/store service; this API does not acquire production job ownership.
-
-Defaults: compiled KTREMIX, minimum stage Ready (3), include stale, include missing
-splits, 256 whole trajectories/file, and keep targets plus measured metrics.
-`minimum_stage=None` explicitly includes metadata-free sources. This service
-recognizes optional metadata `stage`, `stale`, `split` and `family_id`. Split
-values are Train/Development/Test or lowercase equivalents; Auto is intentional.
-Missing split warns. Families are indivisible; conflicting explicit family splits
-block export. Automatic families are assigned against remaining ratio deficits,
-accounting for explicit counts. Ratios may be approximate. Snapshot assignments
-never rewrite source splits. The split seed is recorded separately from allocation.
-
-Projection policies: `full`, `remove_all`, `measured_metrics` (keep `metrics`),
-`all_metrics` (keep `metrics` and `targets`). Resolve split/grouping before
-projection. Intrinsic data is always retained in raw JSONL; compiled arrays are
-unchanged by projection. Each shard contains only one resolved split.
-
-All outputs live in unique, mode-0700 export directories under `/tmp`, including
-raw JSONL, KTREMIX, exact tokenizer/profile, manifest and ZIP. Downloads become
-available only after the complete marker is atomically published. Each shard has
-its own CRC/bounds checks; the bundle manifest includes file lengths/SHA-256.
-Failed/cancelled writers remove their directory, including finished partial shards.
-The service never exposes partial results as successful exports.
-
-Completed artifacts expire 24 hours after completion. `expire()` is suitable for
-the durable service's periodic sweep; initialization also sweeps overdue and
-abandoned exports. Writer/download locks protect active files from cleanup.
-OS removal may happen earlier. A durable job must keep its compact status and
-artifact reference outside this temporary tree. No scheduling or REST workers
-are started by constructing this service.
-
-## Correctness and integration gates
+Export services are described in [Export](EXPORT.md). The
+job service pins snapshots, calls these services and runs them asynchronously ([Jobs](GRAPH-JOBS.md)).
+Caller-side preview behavior (debounce, caching, stale-response fencing) lives in the
+[studio](GRAPH-STUDIO.md#preview-modes), and the compiler holds no global preview or run state.
 
 ```bash
 python -m pytest -q tests/test_graph_foundation.py tests/test_graph_compiler.py \
   tests/test_graph_export.py tests/test_ktremix_format.py tests/test_ktremix_training.py
 ```
 
-These are small deterministic fixtures, including format CRC/bounds, phase and
-allocation rules, framing/masks, event boundaries, typed references, metadata
-independence, split families, fake-clock expiry/cancellation, two-layer context
-isolation and one optimizer update. The legacy attention predicate is used only
-as a test oracle, without reintroducing replay sources into the graph path.
-
-The durable job service and studio integrate these APIs. Full model
-training/convergence, local-LLM acceptance and the 25k-stored/20-active performance
-gates remain user-machine checks. No benchmarks or live model acceptance belong
-in this correctness suite. See the [updated training harness](KTREMIX-TRAINING-DEMO.md).
+The tests use small deterministic fixtures covering CRC and bounds, phases and allocation, framing
+and masks, typed references, metadata independence, split families, expiry and cancellation,
+two-layer context isolation and a single optimizer update. The old attention predicate is used only
+as a test oracle. Training convergence, local-model quality and 25k-stored / 20-active performance
+are user-machine checks ([Acceptance](ACCEPTANCE.md)).
