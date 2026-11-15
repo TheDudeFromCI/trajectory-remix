@@ -29,7 +29,7 @@ export function groups(matrix, definitions) {
   ];
 }
 export class SamplerWorkbench {
-  constructor(root, transport = request) { this.root = root; this.api = transport; this.selectedRows = new Set(); this.selected = 'focus.family'; this.query = ''; this.filter = ''; this.choiceQuery = ''; this.invalid = new Map(); this.generation = 0; }
+  constructor(root, transport = request) { this.root = root; this.api = transport; this.pins = {}; this.selectedRows = new Set(); this.selected = 'focus.family'; this.query = ''; this.filter = ''; this.choiceQuery = ''; this.invalid = new Map(); this.generation = 0; }
   async open() {
     if (this.record) return;
     try { const record = await this.api('/sampler'); this.adopt(record); this.mount(); } catch (e) { this.root.replaceChildren(el('p', e.message), action('Retry loading matrix', () => this.open())); }
@@ -48,15 +48,38 @@ export class SamplerWorkbench {
     $('sampler-search').oninput = e => { this.query = e.target.value.toLowerCase().trim(); this.renderNav(); };
     $('sampler-filter').onchange = e => { this.filter = e.target.value; this.renderNav(); };
     $('sampler-save').onclick = () => this.save();
-    $('sampler-reload').onclick = async () => { if (this.dirty() && !confirm('Discard your draft and load the latest saved configuration?')) return; try { this.adopt(await this.api('/sampler')); this.renderNav(); this.renderDetail(); this.update(); ++this.generation; this.report('Latest saved configuration loaded.'); } catch (e) { this.report(e.message, true); } };
-    $('sampler-reset').onclick = () => { if (!this.dirty() || confirm('Discard all unsaved matrix and metric changes?')) { this.adopt(this.record); this.renderNav(); this.renderDetail(); this.update(); this.report('Draft discarded.'); } };
+    $('sampler-reload').onclick = async () => { if (this.dirty() && !confirm('Discard your draft and load the latest saved configuration?')) return; try { this.adopt(await this.api('/sampler')); this.renderPins(); this.renderNav(); this.renderDetail(); this.update(); ++this.generation; this.report('Latest saved configuration loaded.'); } catch (e) { this.report(e.message, true); } };
+    $('sampler-reset').onclick = () => { if (!this.dirty() || confirm('Discard all unsaved matrix and metric changes?')) { this.adopt(this.record); this.renderPins(); this.renderNav(); this.renderDetail(); this.update(); this.report('Draft discarded.'); } };
     $('sampler-preview').onclick = () => this.preview();
+    this.renderPins();
+    this.renderNav(); this.renderDetail(); this.update();
+  }
+  renderPins() {
+    $('sampler-pins').replaceChildren();
     for (const [key, values] of Object.entries(this.record.overrides)) {
       const select = el('select'); select.dataset.pin = key; select.setAttribute('aria-label', 'Pin ' + key);
       for (const value of ['', ...values]) { const option = el('option', value || 'Unpinned — sample'); option.value = value; select.append(option); }
+      // Retain a removed choice explicitly until the author unpins or changes it.
+      if (this.pins[key] && !values.includes(this.pins[key])) { const option = el('option', 'Unavailable — ' + label(this.pins[key])); option.value = this.pins[key]; select.append(option); }
+      select.value = this.pins[key] || '';
+      select.onchange = () => this.setPin(key, select.value);
       $('sampler-pins').append(field(label(key), select));
     }
-    this.renderNav(); this.renderDetail(); this.update();
+    this.refreshPins();
+  }
+  setPin(key, value) {
+    if (value) this.pins[key] = value; else delete this.pins[key];
+    this.refreshPins(); ++this.generation;
+    this.report(value ? `${label(key)} pinned to ${label(value)} for proposal previews. Project weights are unchanged.` : `${label(key)} unpinned; the sampler will choose it. Project weights are unchanged.`);
+    if ($('sampler-proposal').textContent) $('sampler-preview-status').textContent = 'Pins changed; sample again to update the previous preview.';
+  }
+  refreshPins() {
+    for (const select of $('sampler-pins').querySelectorAll('select')) select.value = this.pins[select.dataset.pin] || '';
+    for (const button of this.root.querySelectorAll('.sw-pin')) {
+      const pinned = this.pins[button.dataset.pinKey] === button.dataset.pinValue;
+      button.setAttribute('aria-pressed', String(pinned));
+      button.title = `${pinned ? 'Unpin' : 'Pin'} ${label(button.dataset.pinValue)} for ${label(button.dataset.pinKey)} · proposal previews only`;
+    }
   }
   renderNav() {
     const nav = $('sampler-nav'), scroll = nav.scrollTop;
@@ -136,23 +159,31 @@ export class SamplerWorkbench {
     const head = el('thead'), hr = el('tr'), allCell = el('th'), all = el('input'); all.type = 'checkbox'; all.setAttribute('aria-label', 'Select all choices');
     all.checked = visible.length > 0 && visible.every(i => this.selectedRows.has(i.id));
     all.onchange = () => { for (const i of visible) all.checked ? this.selectedRows.add(i.id) : this.selectedRows.delete(i.id); this.renderDetail(); }; allCell.append(all); hr.append(allCell);
-    for (const text of ['Choice / description', g.probability ? 'Base p' : 'Base weight', g.probability ? 'Probability' : 'Base share¹', 'Rules']) hr.append(el('th', text)); head.append(hr); table.append(head);
+    for (const text of ['Choice / description', 'Pin', g.probability ? 'Base p' : 'Base weight', g.probability ? 'Probability' : 'Base share¹', 'Rules']) hr.append(el('th', text)); head.append(hr); table.append(head);
     const body = el('tbody'); this.weightCells = [];
     for (const item of visible) {
       const row = el('tr'), checkCell = el('td'), check = el('input'); check.type = 'checkbox'; check.checked = this.selectedRows.has(item.id); check.setAttribute('aria-label', 'Select ' + item.id);
       check.onchange = () => { check.checked ? this.selectedRows.add(item.id) : this.selectedRows.delete(item.id); count.textContent = `${this.selectedRows.size} selected`; all.checked = visible.length > 0 && visible.every(i => this.selectedRows.has(i.id)); }; checkCell.append(check);
       const name = el('td'); name.append(action(label(item.id), () => this.inspect(item, g), 'sw-choice'), el('small', item.description || item.objective || item.scenario_condition || 'Inspect entry for details'));
+      const pinCell = el('td', undefined, 'sw-pin-cell');
+      if (this.record.overrides[g.id]?.includes(item.id)) {
+        const pin = action('', () => this.setPin(g.id, this.pins[g.id] === item.id ? '' : item.id), 'sw-pin');
+        pin.dataset.pinKey = g.id; pin.dataset.pinValue = item.id;
+        pin.setAttribute('aria-label', `Pin ${label(item.id)} for ${label(g.id)}`);
+        pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4z"/><path d="M7 17l-4 4"/></svg>';
+        pinCell.append(pin);
+      } else { pinCell.textContent = '—'; pinCell.title = 'This field is not supported as a sampler pin.'; }
       const numeric = el('td'), weight = input((g.probability ? 'Probability ' : 'Weight ') + item.id, item[g.probability ? 'p' : 'weight'] ?? 0, (v, control) => {
         if (v === '' || !control.checkValidity()) { control.setAttribute('aria-invalid', 'true'); this.invalid.set(g.id + ':' + item.id, v); this.update(); this.renderNav(); this.report('Enter a finite nonnegative value' + (g.probability ? ' from 0 to 1.' : '.'), true); return; }
         control.removeAttribute('aria-invalid'); this.invalid.delete(g.id + ':' + item.id); this.writeWeight(g, item, Number(v)); this.refreshShares(g); this.mutate(); this.report('Weight updated in project draft.');
       }, 'number'); weight.min = '0'; weight.step = 'any'; if (g.probability) weight.max = '1'; if (this.invalid.has(g.id + ':' + item.id)) { weight.value = this.invalid.get(g.id + ':' + item.id); weight.setAttribute('aria-invalid', 'true'); } numeric.append(weight);
       const share = el('td', '', 'sw-share'); this.weightCells.push([item, share]);
       const rules = Object.keys(item).filter(k => !['id', 'weight', 'p', 'description', 'objective', 'behaviors', 'scenario_condition', 'target_behavior'].includes(k));
-      row.append(checkCell, name, numeric, share, el('td', rules.length ? `${rules.length} fields` : '—')); body.append(row);
+      row.append(checkCell, name, pinCell, numeric, share, el('td', rules.length ? `${rules.length} fields` : '—')); body.append(row);
     }
     count.textContent = `${this.selectedRows.size} selected`; table.append(body); wrap.append(table); detail.append(wrap);
     detail.append(el('p', g.probability ? 'Base p is an independent input, not a normalized share or an observed frequency.' : '¹ Base share = weight ÷ group total. This comparison is arithmetic only; it is not an output frequency or an exact joint probability.', 'sw-footnote'));
-    this.refreshShares(g);
+    this.refreshShares(g); this.refreshPins();
   }
   writeWeight(g, item, value) { const key = g.probability ? 'p' : 'weight'; this.invalid.delete(g.id + ':' + item.id); item[key] = value; if (g.probability) this.config.matrix.event_tags[item.id][key] = value; }
   refreshShares(g) {
@@ -203,14 +234,14 @@ export class SamplerWorkbench {
       const result = await this.api('/sampler', 'PUT', {matrix: submitted.matrix, metric_options: submitted.metric_options, expected_revision: this.record.settings_revision});
       const newer = this.invalid.size > 0 || pretty(this.config) !== pretty(submitted), retained = this.config, retainedInvalid = new Map(this.invalid);
       const rowSelection = new Set(this.selectedRows); this.adopt(result); this.selectedRows = rowSelection; if (newer) { this.config.matrix = retained.matrix; this.config.metric_options = retained.metric_options; this.invalid = retainedInvalid; }
-      this.renderNav(); if (!newer) this.renderDetail(); this.report(newer ? 'Submitted changes saved. Newer edits remain in your draft.' : 'Project configuration saved. Existing runs are unchanged.'); ++this.generation;
+      this.renderPins(); this.renderNav(); if (!newer) this.renderDetail(); this.report(newer ? 'Submitted changes saved. Newer edits remain in your draft.' : 'Project configuration saved. Existing runs are unchanged.'); ++this.generation;
     } catch (e) { this.report('Save rejected; your draft is retained. ' + e.message + ' If another editor changed settings, copy your group JSON before discarding and reloading.', true); }
     finally { this.saving = false; this.update(); }
   }
   async preview() {
     if (this.dirty()) return this.report('Save project changes before previewing.', true);
     const seed = Number($('sampler-seed').value); if ($('sampler-seed').value === '' || !Number.isSafeInteger(seed)) return this.report('Seed must be a safe integer.', true);
-    const overrides = Object.fromEntries([...$('sampler-pins').querySelectorAll('select')].filter(n => n.value).map(n => [n.dataset.pin, n.value]));
+    const overrides = {...this.pins};
     const generation = ++this.generation; $('sampler-preview').disabled = true;
     try {
       const result = await this.api('/sampler/proposals', 'POST', {seed, overrides});

@@ -13,6 +13,13 @@ semantics change. This is one design alternative for review.
    shares, and edit with the keyboard. Select multiple choices and **Set selected**
    for repeated changes. This action affects only checked entries in that group;
    checks remain selected even when a choice filter hides them.
+   The **Pin** column, between the description and base weight, has a small pin
+   button for each supported choice. Muted means unpinned; a highlighted, filled
+   pin means selected. Click again to unpin; picking a sibling moves the pin.
+   Pins stay synchronized with the preview dropdowns and survive group/filter
+   navigation. They apply to proposal previews only, without editing weights or
+   saving project changes. Fields the shared sampler cannot pin show a dash.
+   Each button supports keyboard activation and exposes its pressed state.
 3. Click a choice to inspect constraints and referencing conditions. Expand its
    linked metric to edit label, units, target description and per-metric absolute
    and relative tolerance bands. Both bands are required together; clearing both
@@ -79,7 +86,8 @@ Graph Studio DOM suite needs the optional dependencies in `tests/package.json`.
 
 The real-browser check uses one temporary SQLite project and a handful of seeded
 proposals. It checks navigation/search/filtering, keyboard focus, repeated edits,
-custom-field and metric-tolerance persistence, invalid constraints and numeric
+inline pin toggles/exclusivity/keyboard/navigation, dropdown synchronization and
+actual preview overrides, custom-field and metric-tolerance persistence, invalid constraints and numeric
 edits, revision conflicts, fixed seed/pins, run snapshot isolation, page reload and
 narrow layout. Screenshots are refreshed by that check. The existing sampler suite
 covers exact originals, deterministic overrides and frozen target behavior.
