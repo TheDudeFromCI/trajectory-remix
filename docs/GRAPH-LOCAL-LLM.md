@@ -1,7 +1,8 @@
 # Local-LLM validation (user machine)
 
 These checks are prepared for you to run. They have **not** been run against a
-live model by the implementation agent. No benchmark or training is needed.
+live model by the implementation agent. No benchmark or training is needed. The script refuses CI and requires explicit
+`--user-machine` opt-in.
 
 1. Install the project and use your own running OpenAI-compatible local server
    with structured JSON-schema output. Copy `examples/graph_local_llm.json` to a
@@ -13,7 +14,7 @@ live model by the implementation agent. No benchmark or training is needed.
 2. Start with one small case and a fresh output directory:
 
    ```bash
-   python scripts/graph_local_llm_smoke.py --config /path/to/local-config.json \
+   python scripts/graph_local_llm_smoke.py --user-machine --config /path/to/local-config.json \
      --output /tmp/remix-local-smoke-01 --cases ordinary
    python -m trajectory_remix graph-studio \
      --dataset /tmp/remix-local-smoke-01/project.sqlite --port 8765
@@ -28,7 +29,7 @@ live model by the implementation agent. No benchmark or training is needed.
    smoke check (seven attempts total, no parallel/load experiment):
 
    ```bash
-   python scripts/graph_local_llm_smoke.py --config /path/to/local-config.json \
+   python scripts/graph_local_llm_smoke.py --user-machine --config /path/to/local-config.json \
      --output /tmp/remix-local-smoke-02 --cases multi-user-wakeup \
      partial-instant partial-streamed document-replacement filtered-chat rejected-chat
    ```

@@ -2,7 +2,7 @@
 """Train an approximately 50k-parameter, two-layer global shared-KV model on KTREMIX.
 
 See docs/KTREMIX-TRAINING-DEMO.md. Run from a source checkout:
-  python examples/train_ktremix.py run /tmp/letter-addition
+  python examples/train_ktremix.py run /tmp/letter-addition --user-machine
 No provider endpoints, downloads of model weights, or teacher model are used.
 """
 from __future__ import annotations
@@ -413,7 +413,13 @@ def main():
         action="store_true",
         help="fail unless held-out letters >=99%% and exact free rollouts >=95%%",
     )
+    parser.add_argument("--user-machine", action="store_true")
     args = parser.parse_args()
+    from trajectory_remix.graph.user_validation import require_user_machine
+    try:
+        require_user_machine(args.user_machine)
+    except ValueError as error:
+        parser.exit(2, str(error) + "\n")
     for name in ("train_samples", "validation_samples", "shard_size", "max_gap", "steps", "batch_size",
                  "eval_every", "rollout_count", "threads"):
         if getattr(args, name) < 1:

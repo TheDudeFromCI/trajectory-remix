@@ -14,7 +14,7 @@ The updated model's convergence has not been measured.
 ```bash
 python -m pip install -e '.[export]'
 python -m pip install 'torch>=2.5,<3' --index-url https://download.pytorch.org/whl/cpu
-python examples/train_ktremix.py run /tmp/ktremix-graph-addition --check
+python examples/train_ktremix.py run /tmp/ktremix-graph-addition --user-machine --check
 ```
 
 Use an appropriate PyTorch install and `--device cuda` for GPU work. The generated
@@ -28,9 +28,9 @@ new framed task, not results already obtained.
 Separate generation, conformance and training:
 
 ```bash
-python examples/train_ktremix.py generate /tmp/ktremix-graph-data
+python examples/train_ktremix.py generate /tmp/ktremix-graph-data --user-machine
 python examples/ktremix_dataset.py verify '/tmp/ktremix-graph-data/*.ktremix'
-python examples/train_ktremix.py train /tmp/ktremix-graph-data --check
+python examples/train_ktremix.py train /tmp/ktremix-graph-data --user-machine --check
 ```
 
 For ordinary local correctness, run only the tiny fixture suite:
@@ -111,14 +111,12 @@ shards and `build.json` identify the graph dataset and compilation counts.
 training. The demo's held-out split is named `validation`; general project export
 uses Train/Development/Test and preserves family grouping before sharding.
 
-[The historical CPU report](benchmarks/ktremix-training-cpu.json) measured the
-removed replay/fixture-adapter path, vocabulary 39 and model size 49,968. Those
-measurements predate the graph integration and do not validate this compiler,
-new header timing, model convergence or recomputed memory behavior. They were
-not rerun for this implementation.
+Historical replay/fixture-adapter measurements predate this graph integration
+and have been removed from the public result path. They do not validate new
+header timing, convergence or recomputed-memory behavior.
 
-Outstanding user-machine checks: full `run --check`, local-device memory and
-throughput measurements, broader local-LLM integration after generation workers
-land, and 25k stored/20 active acceptance after studio/jobs integration. Small
-array, visibility, mock-runtime and one-update correctness checks are separate
-from those gates.
+Outstanding user-machine checks: full `run --user-machine --check`, local-device
+memory/throughput measurements, [local-LLM acceptance](GRAPH-LOCAL-LLM.md) and
+[25k stored/20 active acceptance](ACCEPTANCE.md). CLI performance commands require
+explicit opt-in and refuse CI. Small array, visibility, mock-runtime and
+one-update correctness checks are separate from these gates.

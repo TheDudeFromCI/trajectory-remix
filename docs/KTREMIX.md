@@ -442,39 +442,10 @@ loses its prefix; detaching cached activations changes a full-gradient objective
 Any later independently seekable subtrajectory format must explicitly describe
 prefix state/recomputation, rather than silently change that training objective.
 
-## 9. Reference performance experiment
+## 9. Validation boundary
 
-Reproduce with [`scripts/benchmark_ktremix.py`](../scripts/benchmark_ktremix.py):
-
-```bash
-python scripts/benchmark_ktremix.py --rows 4096 --trajectories 256 --draws 1000 \
-  --directory /tmp --output ktremix-benchmark.json
-```
-
-One run on Linux x86-64, Python 3.12.14, NumPy 2.3.5: 256 synthetic trajectories
-in unequal shards, 4,096 rows each, 1,000 random selections, warm local OS page
-cache. Binary reads include record CRC, decompression and all NumPy column views;
-only the first token is consumed after view creation. This is loader readiness,
-**not GPU transfer, full-array consumption, cold/remote I/O or training throughput**.
-The JSON baseline also has direct record offsets and zlib-1 compression, so it
-does not pay for a sequential scan. It parses equivalent row fields without
-building training arrays, giving JSON a favorable lower-bound comparison.
-
-| Layout | Total bytes | Samples/s | Median load ms | p95 ms |
-|---|---:|---:|---:|---:|
-| Raw binary/mmap | 59,704,576 | 17,960.8 | 0.0534 | 0.0676 |
-| **LZ4 binary (default)** | **25,503,040** | **6,524.6** | **0.1410** | **0.1945** |
-| zlib-1 binary | 13,245,312 | 2,852.9 | 0.3391 | 0.3921 |
-| Indexed row JSON + zlib-1 | 21,956,992 | 233.7 | 4.2402 | 4.4442 |
-
-LZ4 is the proposed default balance: this run used about 43% of raw-binary bytes
-and loaded about 2.3x as many samples/s as zlib binary. Uncompressed mmap remains
-available when decompression costs more than extra I/O/storage. These are one
-synthetic local run's observations, not a claim of universally fastest storage.
-Choose codecs, shard sizes, record sizes and worker counts against real hardware.
-
-Run the conformance/reference tests with:
-
-```bash
-python tests/test_ktremix_format.py
-```
+Run small conformance checks with `python tests/test_ktremix_format.py`.
+[The training demo](KTREMIX-TRAINING-DEMO.md) uses real graph compiler output.
+[User-machine acceptance](ACCEPTANCE.md) separates app performance, model quality
+and training gates. Historical synthetic loader/replay measurements do not
+validate the current integrated graph path; no speed guarantee is made here.

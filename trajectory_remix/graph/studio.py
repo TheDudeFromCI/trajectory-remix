@@ -67,7 +67,16 @@ class Studio:
         with self.store.connect() as db:
             owner = db.execute('SELECT job_id FROM graph_owners WHERE trajectory_id=?', (ident,)).fetchone()
         from .reviews import stale
-        review = stale(GraphSource.model_validate(value['source']), self.store.settings().settings)
+        settings = self.store.settings().settings
+        source = GraphSource.model_validate(value['source'])
+        if revision is None:
+            # Current-schema warnings are not pinned to an old source commit.
+            # Explicit historical revisions retain their original diagnostics.
+            from .validation import diagnose
+            diagnostics = diagnose(source, settings)
+            value['diagnostics'] = jsonable_encoder(diagnostics)
+            value['has_errors'] = any(d.severity == 'error' for d in diagnostics)
+        review = stale(source, settings)
         return value | dict(owner=owner[0] if owner else None, review_status=review)
 
     def graph(self, ident):

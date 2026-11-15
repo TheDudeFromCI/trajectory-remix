@@ -508,9 +508,15 @@ class JobService:
             result[key] = json.loads(result[key])
         return result
 
-    def inspect(self, job):
+    def inspect(self, job, *, include_config=True):
         with self.store.connect() as db:
-            result = self._decode_job(self._job(db, job))
+            if include_config:
+                result = self._decode_job(self._job(db, job))
+            else:
+                row = db.execute('SELECT id,kind,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?', (job,)).fetchone()
+                if row is None:
+                    raise KeyError(job)
+                result = dict(row)
             result['requests'] = [dict(r) for r in db.execute('SELECT state,count(*) AS count FROM graph_requests WHERE job_id=? GROUP BY state', (job,))]
             result['paused_endpoints'] = [r[0] for r in db.execute('''SELECT DISTINCT e.id FROM graph_endpoints e JOIN graph_requests r
                 ON r.endpoint=e.id WHERE r.job_id=? AND e.paused=1 AND r.state='queued' ''', (job,))]

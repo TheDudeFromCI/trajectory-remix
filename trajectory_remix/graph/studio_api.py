@@ -84,8 +84,8 @@ class AgentCall(DTO):
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mcp_allowed_origins=(), provider=None):
-    app = create_job_app(path, artifact_root=artifact_root)
+def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mcp_allowed_origins=(), provider=None, active_limit=20):
+    app = create_job_app(path, artifact_root=artifact_root, active_limit=active_limit)
     app.title = 'Trajectory Remix — Graph Studio'
     studio = Studio(app.state.jobs, app.state.bulk, app.state.artifacts, app.state.worker)
     from .sampling import SamplerService

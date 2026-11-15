@@ -186,3 +186,18 @@ async def test_metric_worker_shutdown_completion_race():
     worker = JobWorker(CompletingJobs(), None, None)
     worker.tasks['metrics'] = task
     await worker.close()
+
+
+def test_structural_editor_rejects_removed_refs_duplicates_and_disabled_groups(services):
+    _, sampler, _ = services
+    for mutate in (
+        lambda m: m['competencies'].append(copy.deepcopy(m['competencies'][0])),
+        lambda m: m['hard_implications'].append({'when': {'lifecycle':['removed']}, 'force':{'incident':'none'}}),
+        lambda m: m['hard_implications'].append({'when': {'lifecycle':['active']}, 'force':{'incident':'removed'}}),
+        lambda m: [x.update(weight=0) for x in m['dimensions']['user_tone']],
+        lambda m: [x.update(weight=0) for x in m['competencies'][0]['behaviors']],
+    ):
+        r = sampler.editor(); matrix = copy.deepcopy(r['configuration']['matrix']); mutate(matrix)
+        with pytest.raises(ValueError):
+            sampler.update(matrix, {}, r['settings_revision'])
+        assert sampler.editor()['settings_revision'] == r['settings_revision']

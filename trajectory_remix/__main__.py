@@ -1,147 +1,32 @@
+"""Graph-only public CLI. Old tick/replay projects are intentionally unsupported."""
 import argparse
-import json
 import sqlite3
 import sys
 from pathlib import Path
 
-from tokenizers import Tokenizer
-
-from .compiler import CONTEXT_TOKENS, Compiler, chunks
-from .storage import DatasetStore
-from .dataset import training_eligible
-
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if argv and argv[0] in ('graph-init', 'graph-studio'):
-        graph_parser = argparse.ArgumentParser(prog='trajectory-remix ' + argv[0])
-        graph_parser.add_argument('--dataset', type=Path, required=True)
-        if argv[0] == 'graph-studio':
-            graph_parser.add_argument('--port', type=int, default=8765)
-        graph_args = graph_parser.parse_args(argv[1:])
-        try:
-            if argv[0] == 'graph-init':
-                from .graph.storage import GraphStore
-                GraphStore.initialize(graph_args.dataset)
-                print(f'Initialized graph project {graph_args.dataset}')
-            else:
-                import uvicorn
-                from .graph.studio_api import create_studio_app
-                uvicorn.run(create_studio_app(graph_args.dataset), host='127.0.0.1', port=graph_args.port)
-        except (ValueError, OSError, sqlite3.Error) as error:
-            graph_parser.exit(1, f'Trajectory Remix: {error}\n')
-        return
-    parser = argparse.ArgumentParser(
-        description="Trajectory Remix — local Kidra dataset studio"
-    )
-    parser.epilog = "Initialize once: trajectory-remix init --dataset project.sqlite --tokenizer tokenizer.json"
-    initializing = bool(argv) and argv[0] == "init"
-    if initializing:
-        parser.prog += " init"
-        parser.add_argument("--tokenizer", type=Path, required=True, help="Hugging Face tokenizer.json to embed in the new project")
-        for name in ("bos", "eos", "noop"):
-            parser.add_argument(
-                f"--{name}-token", f"--{name}", dest=name,
-                help=f"{name.upper()} spelling; defaults to the compiler's built-in value",
-            )
-        for name, spelling in CONTEXT_TOKENS.items():
-            option = name.lstrip("/").replace("_", "-")
-            if name.startswith("/"):
-                option += "-end"
-            parser.add_argument(
-                f"--{option}-token", dest=name, metavar="TOKEN",
-                help=f"{name} context delimiter (default: {spelling!r})",
-            )
-        parser.add_argument("--max-window-slots", type=int, help="Maximum distinct windows per trajectory; unlimited if omitted")
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        required=True,
-        help="New SQLite project file" if initializing else "Existing initialized SQLite project file",
-    )
-    if not initializing:
-        from .mcp_server import browser_origin
-
-        parser.add_argument("--scenarios-dir", type=Path, help="Optional custom scenario root replacing the bundled user, idle and Kidra project flows")
-        parser.add_argument("--tools-dir", type=Path, help="Folder of custom Python tool modules")
-        parser.add_argument("--port", type=int, default=8765)
-        parser.add_argument(
-            "--mcp-allow-origin",
-            action="append",
-            type=browser_origin,
-            default=[],
-            help="Allow an exact browser origin to use /mcp; repeat for multiple UIs",
-        )
-        parser.add_argument(
-            "--export",
-            type=Path,
-            help="Compile --dataset to chunked JSONL without starting the dashboard",
-        )
-        parser.add_argument("--chunk-ticks", type=int, default=64)
-    args = parser.parse_args(argv[1:] if initializing else argv)
+    parser = argparse.ArgumentParser(description='Trajectory Remix graph studio')
+    parser.add_argument('command', nargs='?', choices=['graph-init', 'graph-studio'], default='graph-studio')
+    parser.add_argument('--dataset', type=Path, required=True)
+    parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--mcp-allow-origin', action='append', default=[])
+    args = parser.parse_args(argv)
     try:
-        if initializing:
-            try:
-                tokenizer = Tokenizer.from_file(str(args.tokenizer))
-            except Exception as error:
-                raise ValueError(f"Could not load tokenizer: {error}") from error
-            controls = {name: getattr(args, name) for name in ("bos", "eos", "noop")
-                        if getattr(args, name) is not None}
-            context_tokens = {name: getattr(args, name) for name in CONTEXT_TOKENS
-                              if getattr(args, name) is not None}
-            compiler = Compiler(tokenizer, **controls, context_tokens=context_tokens,
-                                max_window_slots=args.max_window_slots)
-            DatasetStore.initialize(args.dataset, compiler)
-            print(f"Initialized {args.dataset} with tokenizer {compiler.fingerprint}")
-            return
-        if args.chunk_ticks < 1:
-            parser.error("--chunk-ticks must be positive")
-        store = DatasetStore(args.dataset)
-        if args.export:
-            from .tools import ToolRegistry
-            compiler, _ = store.configure_tools(ToolRegistry(args.tools_dir))
-
-            import os
-            from tempfile import NamedTemporaryFile
-
-            args.export.parent.mkdir(parents=True, exist_ok=True)
-            temp = None
-            try:
-                with NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=args.export.parent, delete=False
-                ) as stream:
-                    temp = stream.name
-                    count = 0
-                    with store.read_samples() as samples:
-                        for sample in samples:
-                            if not training_eligible(sample):
-                                continue
-                            for chunk in chunks(compiler.compile(sample), args.chunk_ticks):
-                                stream.write(json.dumps(chunk, ensure_ascii=False) + "\n")
-                            count += 1
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temp, args.export)
-            finally:
-                if temp and os.path.exists(temp):
-                    os.unlink(temp)
-            print(f"Exported {count} samples to {args.export}")
-            return
-
-        import uvicorn
-
-        from .server import create_app
-
-        print(f"Trajectory Remix: http://127.0.0.1:{args.port}")
-        uvicorn.run(
-            create_app(args.dataset, mcp_allowed_origins=args.mcp_allow_origin, tools_dir=args.tools_dir, scenarios_dir=args.scenarios_dir),
-            host="127.0.0.1",
-            port=args.port,
-            log_level="warning",
-        )
-    except (ValueError, OSError, sqlite3.Error) as e:
-        parser.exit(1, f"Trajectory Remix: {e}\n")
+        if args.command == 'graph-init':
+            from .graph.storage import GraphStore
+            GraphStore.initialize(args.dataset)
+            print(f'Initialized graph project {args.dataset}')
+        else:
+            import uvicorn
+            from .mcp_server import browser_origin
+            from .graph.studio_api import create_studio_app
+            origins = [browser_origin(origin) for origin in args.mcp_allow_origin]
+            uvicorn.run(create_studio_app(args.dataset, mcp_allowed_origins=origins), host='127.0.0.1', port=args.port)
+    except (ValueError, OSError, sqlite3.Error, argparse.ArgumentTypeError) as error:
+        parser.exit(1, f'Trajectory Remix: {error}\n')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -121,6 +121,7 @@ export class SamplerWorkbench {
       for (const item of g.items) rules.append(action(`${item.id} · When ${Object.entries(item.when || {}).map(([k,v]) => `${label(k)} = ${Array.isArray(v) ? v.join(' or ') : v}`).join('; ')} → ${item.target ? `${item.target} × ${item.factor}` : 'force ' + Object.entries(item.force || {}).map(([k,v]) => `${label(k)} = ${v}`).join('; ')}`, () => this.inspect(item, g)));
       detail.append(rules);
     }
+    if (!g.metricOnly && g.id !== 'sampler') this.renderStructure(detail, g);
     this.renderMetric(detail, g.metric || g.id);
     const advanced = el('details', undefined, 'sw-advanced'); advanced.append(el('summary', 'Advanced JSON · rules, constraints & custom fields'));
     advanced.append(el('p', 'Apply replaces only this group. Other groups and unknown fields are preserved. Invalid configurations are rejected by the shared backend.'));
@@ -132,6 +133,61 @@ export class SamplerWorkbench {
     const inspect = el('section', undefined, 'sw-inspector'); inspect.id = 'sampler-inspector'; detail.append(inspect);
     if (g.items.length) this.inspect(g.items[0], g);
     const table = detail.querySelector('.sw-table-wrap'); if (table) table.scrollTop = previousScroll;
+  }
+  renderStructure(detail, g) {
+    const panel = el('details', undefined, 'sw-structure');
+    panel.append(el('summary', g.raw ? 'Add or remove rules' : 'Add or remove entries'));
+    panel.append(el('p', 'Changes stay in this project draft until Save. Removal does not rewrite references; inspect warnings and fix referring constraints explicitly.'));
+    const choices = el('select'); choices.setAttribute('aria-label', 'Entry to copy or remove');
+    for (const item of g.items) { const opt = el('option', item.id); opt.value = item.id; choices.append(opt); }
+    const ident = input('New entry ID', '', () => {});
+    panel.append(field('Entry to copy or remove', choices));
+    if (!g.raw) panel.append(field('New entry ID', ident));
+    if (g.raw) {
+      const conditions = {'focus.family': this.config.matrix.competencies.map(x => x.id), 'focus.id': this.config.matrix.competencies.flatMap(x => x.behaviors.map(b => b.id)), ...Object.fromEntries(Object.entries(this.config.matrix.dimensions).map(([key, items]) => [key, items.map(x => x.id)]))};
+      const select = (name, values) => { const n = el('select'); n.setAttribute('aria-label', name); for (const v of values) { const o = el('option', v); o.value = v; n.append(o); } return n; };
+      const condition = select('Condition field', Object.keys(conditions)), value = select('Condition value', conditions[condition.value]);
+      condition.onchange = () => { value.replaceChildren(...conditions[condition.value].map(v => { const o = el('option', v); o.value = v; return o; })); };
+      const targets = Object.entries(this.config.matrix.dimensions).flatMap(([key, items]) => items.map(x => key + '.' + x.id));
+      const target = select('Rule target', targets), factor = input('Rule multiplier', '1', () => {}, 'number'); factor.min = '0'; factor.step = 'any';
+      panel.append(field('When field', condition), field('Equals', value), field(g.id === 'conditional_weights' ? 'Multiply option' : 'Force option', target));
+      if (g.id === 'conditional_weights') panel.append(field('Multiplier', factor));
+      panel.append(action('Add rule to draft', () => {
+        if (g.id === 'conditional_weights' && (factor.value === '' || !factor.checkValidity())) return this.report('Enter a finite nonnegative multiplier.', true);
+        const rule = {when: {[condition.value]: [value.value]}};
+        if (g.id === 'conditional_weights') Object.assign(rule, {target: target.value, factor: Number(factor.value)});
+        else { const dot = target.value.indexOf('.'); rule.force = {[target.value.slice(0, dot)]: target.value.slice(dot + 1)}; }
+        this.config.matrix[g.id].push(rule); this.mutate(); this.renderDetail(); this.report('Rule added to project draft. Save to validate.');
+      }));
+    }
+    // Copying keeps required behavior/domain fields and custom constraints intact.
+    panel.append(action(g.raw ? 'Copy rule to draft' : 'Copy entry to draft', () => {
+      try {
+        const index = g.items.findIndex(x => x.id === choices.value);
+        if (index < 0) throw new Error('Select an existing entry to copy. Use Advanced JSON for the first rule.');
+        const id = ident.value.trim();
+        if (!g.raw && (!/^[a-z][a-z0-9_]*$/.test(id) || g.items.some(x => x.id === id))) throw new Error('Use a unique lowercase ID with letters, digits and underscores.');
+        if (g.raw) this.config.matrix[g.id].push(clone(this.config.matrix[g.id][index]));
+        else if (g.probability) this.config.matrix.event_tags[id] = clone(this.config.matrix.event_tags[choices.value]);
+        else {
+          const entry = {...clone(g.items[index]), id};
+          if (g.id === 'focus.family') entry.behaviors = entry.behaviors.map(b => ({...b, id: id + '_' + b.id}));
+          g.items.push(entry);
+        }
+        this.mutate(); this.renderDetail(); this.report('Copy added to draft. Inspect inherited constraints before saving.');
+      } catch (e) { this.report(e.message, true); }
+    }));
+    panel.append(action(g.raw ? 'Remove rule from draft' : 'Remove entry from draft', () => {
+      const index = g.items.findIndex(x => x.id === choices.value); if (index < 0) return;
+      if (!g.raw && !g.probability && g.items.length === 1) return this.report('Keep at least one entry in this group.', true);
+      if (!confirm(`Remove ${choices.value} from this draft? References and pins are retained for explicit correction.`)) return;
+      if (g.probability) delete this.config.matrix.event_tags[choices.value];
+      else if (g.raw) this.config.matrix[g.id].splice(index, 1);
+      else g.items.splice(index, 1);
+      this.invalid.delete(g.id + ':' + choices.value); this.selectedRows.delete(choices.value);
+      this.mutate(); this.renderDetail(); this.report('Removed from draft. Inspect referring rules before Save; invalid saves retain your draft.');
+    }));
+    detail.append(panel);
   }
   replaceGroup(g, value) {
     if (['sampler', 'event_tags'].includes(g.id) || g.raw) {

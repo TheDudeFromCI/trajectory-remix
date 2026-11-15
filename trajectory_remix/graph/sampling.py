@@ -33,11 +33,69 @@ def options(matrix):
             'domain': matrix['domains'], **matrix['dimensions']}
 
 
+def validate_editor_matrix(matrix):
+    """Additional editor integrity checks without changing the supplied sampler.
+
+    Deletions retain references in drafts, but cannot publish dangling rules or
+    silently duplicate globally addressed behaviors. Custom fields still survive.
+    """
+    grouped = options(matrix)
+    for key in ('focus.family', 'focus.behavior', 'domain', *matrix['dimensions']):
+        items = grouped[key]
+        ids = [x['id'] for x in items]
+        if not ids or any(not isinstance(i, str) or not i for i in ids) or len(ids) != len(set(ids)):
+            raise ValueError(f'Empty or duplicate IDs in {key}')
+        if not any(x['weight'] > 0 for x in items):
+            raise ValueError(f'At least one positive weight is required in {key}')
+    for family in matrix['competencies']:
+        if not any(x['weight'] > 0 for x in family['behaviors']):
+            raise ValueError(f"At least one positive behavior is required in {family['id']}")
+    for axis, data in matrix['decision_axes'].items():
+        for choice in data['variants']:
+            original._check_weight(choice['weight'], f'decision axis {axis}')
+        ids = [x['id'] for x in data['variants']]
+        if not ids or len(ids) != len(set(ids)) or not any(x['weight'] > 0 for x in data['variants']):
+            raise ValueError(f'Empty, duplicate or disabled choices in decision axis {axis}')
+    known = {key: {x['id'] for x in items} for key, items in grouped.items()}
+    known['focus.id'] = known['focus.behavior']
+    # The exact supplied matrix mentions this unmatched choice.
+    # Preserve its original rule rather than modifying the reference artifacts.
+    known['decision.choice'].add('request_approval')
+    def condition(values):
+        if not isinstance(values, dict):
+            raise ValueError('Rule conditions must be a field-to-values object')
+        for key, allowed in values.items():
+            if not isinstance(allowed, list) or not allowed:
+                raise ValueError(f'Rule condition {key} requires a nonempty list')
+            if key in known and any(v not in known[key] for v in allowed):
+                raise ValueError(f'Unknown rule condition choice in {key}')
+    for rule in [*matrix['conditional_weights'], *matrix.get('hard_implications', [])]:
+        condition(rule['when'])
+        for key, value in rule.get('force', {}).items():
+            if key not in matrix['dimensions'] or value not in known[key]:
+                raise ValueError(f'Unknown forced dimension choice: {key}.{value}')
+    for family in matrix['competencies']:
+        for behavior in family['behaviors']:
+            if set(behavior.get('required_event_tags', [])) - set(matrix['event_tags']):
+                raise ValueError(f"Behavior {behavior['id']} references a removed event tag")
+            if set(behavior.get('allowed_lifecycle', [])) - known['lifecycle']:
+                raise ValueError(f"Behavior {behavior['id']} references a removed lifecycle")
+    for items in grouped.values():
+        for item in items:
+            for key in ('requires', 'forbids'):
+                if item.get(key):
+                    condition(item[key])
+            for key, value in item.get('forced_dimensions', {}).items():
+                if key not in matrix['dimensions'] or value not in known[key]:
+                    raise ValueError(f'Unknown forced dimension choice: {key}.{value}')
+
+
 def definitions(matrix, custom=None):
     """Derive definitions from the matrix; customizations cannot fork categories."""
     original.validate_matrix(matrix)
     if matrix.get('schema_version') != '1.0.0':
         raise ValueError('Expected matrix schema_version 1.0.0')
+    validate_editor_matrix(matrix)
     opts = options(matrix)
     result = {}
     for key in matrix['metrics_schema']['tracked_one_of']:

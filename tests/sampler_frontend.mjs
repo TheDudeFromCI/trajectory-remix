@@ -49,6 +49,29 @@ try {
   const after=(await api('/jobs/'+run.body.job_id,undefined,'GET')).body;
   assert.ok(before.config.config.sampler.configuration.matrix_digest); assert.deepEqual(after.config,before.config);
   assert.notEqual((await state()).matrix_digest,before.config.config.sampler.configuration.matrix_digest);
+  // Friendly structural controls persist new entries and rules via shared CAS.
+  await page.getByText('Add or remove entries',{exact:true}).click();
+  await page.getByLabel('New entry ID',{exact:true}).fill('workbench_fixture');
+  await page.getByRole('button',{name:'Copy entry to draft',exact:true}).click();
+  assert.ok((await state()).matrix.dimensions.user_tone.some(x=>x.id==='workbench_fixture'));
+  await page.locator('#sampler-save').click(); await page.waitForFunction(()=>!samplerWorkbench.dirty()&&!samplerWorkbench.saving);
+  assert.ok((await state()).definitions.user_tone.choices.includes('workbench_fixture'));
+  await page.getByText('Add or remove entries',{exact:true}).click();
+  await page.getByLabel('Entry to copy or remove',{exact:true}).selectOption('workbench_fixture');
+  page.once('dialog',d=>d.accept()); await page.getByRole('button',{name:'Remove entry from draft',exact:true}).click();
+  await page.locator('#sampler-save').click(); await page.waitForFunction(()=>!samplerWorkbench.dirty()&&!samplerWorkbench.saving);
+  await page.locator('.sw-nav-row').filter({hasText:'Conditional multipliers'}).click();
+  const ruleCount=(await state()).matrix.conditional_weights.length;
+  await page.getByText('Add or remove rules',{exact:true}).click();
+  await page.getByRole('button',{name:'Add rule to draft',exact:true}).click();
+  await page.locator('#sampler-save').click(); await page.waitForFunction(()=>!samplerWorkbench.dirty()&&!samplerWorkbench.saving);
+  assert.equal((await state()).matrix.conditional_weights.length,ruleCount+1);
+  await page.getByText('Add or remove rules',{exact:true}).click();
+  await page.getByLabel('Entry to copy or remove',{exact:true}).selectOption('Rule '+(ruleCount+1));
+  page.once('dialog',d=>d.accept()); await page.getByRole('button',{name:'Remove rule from draft',exact:true}).click();
+  await page.locator('#sampler-save').click(); await page.waitForFunction(()=>!samplerWorkbench.dirty()&&!samplerWorkbench.saving);
+  assert.equal((await state()).matrix.conditional_weights.length,ruleCount);
+  await page.locator('.sw-nav-row').filter({hasText:'user tone'}).first().click();
   // Invalid group constraints are rejected and the entire project draft survives.
   await page.getByText('Advanced JSON · rules, constraints & custom fields',{exact:true}).click();
   const invalid=(await state()).matrix.dimensions.user_tone; invalid[1].id=invalid[0].id;
@@ -91,7 +114,7 @@ try {
   await page.locator('.sw-nav-row').filter({hasText:'complexity'}).first().click();
   await page.getByLabel('Find a dimension or entry').fill('');
   // Inline pins force one choice per field without editing weights or calling APIs.
-  const savedBeforePins = await state(), requestsBeforePins = paths.length;
+  const savedBeforePins = await state(), requestsBeforePins = paths.filter(p=>p.includes('/sampler')).length;
   const pin = value => page.getByRole('button',{name:`Pin ${value} for complexity`,exact:true});
   assert.equal(await page.locator('.sw-pin[aria-pressed=true]').count(),0);
   await pin('medium').click(); assert.equal(await pin('medium').getAttribute('aria-pressed'),'true');
@@ -108,7 +131,7 @@ try {
   await page.locator('.sw-nav-row').filter({hasText:'complexity'}).first().click();
   await page.getByLabel('Find a dimension or entry').fill('');
   assert.equal(await pin('medium').getAttribute('aria-pressed'),'true');
-  assert.equal(paths.length,requestsBeforePins);
+  assert.equal(paths.filter(p=>p.includes('/sampler')).length,requestsBeforePins);
   assert.deepEqual(await state(),savedBeforePins); assert.equal(await page.locator('#sampler-save').isDisabled(),true);
   await page.locator('.sw-preview > summary').click();
   await page.getByLabel('Pin complexity',{exact:true}).selectOption('large');
@@ -120,13 +143,13 @@ try {
   await page.waitForFunction(()=>document.getElementById('sampler-proposal').textContent.length>10);
   assert.equal(JSON.parse(await page.locator('#sampler-proposal').textContent()).proposal.metrics.sampling.complexity,'large');
   await pin('medium').click(); await page.locator('.sw-preview > summary').click();
-  await fs.mkdir(new URL('../docs/images/sampler-workbench/',import.meta.url),{recursive:true});
+  if (process.env.UPDATE_SCREENSHOTS) await fs.mkdir(new URL('../docs/images/sampler-workbench/',import.meta.url),{recursive:true});
   await page.locator('#sampler-workbench').evaluate(n=>n.scrollTop=0); await page.locator('#sampler-nav').evaluate(n=>n.scrollTop=0);
-  await page.screenshot({path:new URL('../docs/images/sampler-workbench/desktop.png',import.meta.url).pathname,fullPage:true});
+  if (process.env.UPDATE_SCREENSHOTS) await page.screenshot({path:new URL('../docs/images/sampler-workbench/desktop.png',import.meta.url).pathname,fullPage:true});
   await page.locator('#sampler-filter').selectOption('Rules'); await page.locator('.sw-nav-row').filter({hasText:'Hard implications'}).click();
   await page.getByText('Advanced JSON · rules, constraints & custom fields',{exact:true}).click();
   await page.locator('#sampler-workbench').evaluate(n=>n.scrollTop=0); await page.locator('#sampler-nav').evaluate(n=>n.scrollTop=0);
-  await page.screenshot({path:new URL('../docs/images/sampler-workbench/rules.png',import.meta.url).pathname,fullPage:true});
+  if (process.env.UPDATE_SCREENSHOTS) await page.screenshot({path:new URL('../docs/images/sampler-workbench/rules.png',import.meta.url).pathname,fullPage:true});
   await page.setViewportSize({width:600,height:900});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.deepEqual(errors,[]); assert.equal(paths.some(p=>/compile|tokeniz|preview$/.test(p)),false);

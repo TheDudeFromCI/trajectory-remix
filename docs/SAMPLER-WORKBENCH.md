@@ -1,8 +1,8 @@
 # Sampler Matrix workbench (UI B)
 
-UI B adds a dedicated **Sampler Matrix** tab to Graph Studio. It uses the shared
-sampler and linked metric registry from #75, based on
-`2e91fff48a177355d8b52f6877c9c0f7e017ca64`. The original UI-only baseline remains one design alternative for review.
+Workbench B is the selected **Sampler Matrix** UI in Graph Studio. It uses the
+shared sampler and linked metric registry. Alternative UI A/C branches remain
+separate and are not integrated.
 The event-generation integration now connects these pins to frozen run requests;
 see the event Flow guide below.
 
@@ -26,7 +26,14 @@ see the event Flow guide below.
    and relative tolerance bands. Both bands are required together; clearing both
    leaves tolerance unspecified. Unknown actuals remain unavailable in the existing
    **Dataset Metrics** panel.
-4. Use **Advanced JSON** for arbitrary constraints, rules and custom fields.
+4. **Add or remove entries** copies a selected entry to a new ID or removes it
+   after confirmation. Copies preserve required/custom fields for inspection;
+   copying a family prefixes child behavior IDs. **Add or remove rules** provides
+   condition/value/target controls for a single-condition multiplier or forced
+   dimension, plus copy/remove. Save validates the entire project; dangling
+   references block save and retain the draft. Pins and references are never
+   silently rewritten. Inspect inherited constraints and referencing rules.
+   Use **Advanced JSON** for arbitrary constraints, multi-condition rules and custom fields.
    **Apply JSON to project draft** affects only the current group. It does not save.
    Unapplied JSON text is a local buffer; apply it before leaving the group.
 5. **Save project changes** persists the full matrix and metric customizations via
@@ -95,12 +102,14 @@ covers exact originals, deterministic overrides and frozen target behavior.
 No benchmarks, training, live LLM calls or compiler/tokenizer operations run in
 the new browser check.
 
-## Review points
+## Remaining advanced scope
 
-Compare the speed of finding a dimension, inspecting a constraint and repeating
-weight edits with UI A/C. Assess table density, navigation grouping, visibility of
-saved versus draft state, JSON-only rule editing and the save-before-preview step.
-This prototype does not select a winning design or replace the metrics panel.
+Adding/removing choices, behaviors, families, event tags and simple rules has
+friendly controls. Creating new top-level dimension groups or decision axes,
+editing arbitrary nested eligibility rules, and cross-group spreadsheet paste
+remain advanced JSON/manual work. There is no visual arbitrary-rule language
+or automatic reference repair. Empty rule groups can add a first simple rule.
+Workbench B remains the selected UI and reuses the existing metrics panel.
 
 Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
 See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.

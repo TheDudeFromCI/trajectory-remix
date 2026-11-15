@@ -130,6 +130,7 @@ export class StudioUI {
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split: export assigns automatically and warns.';
     $('source-json').value = json(this.draft);
     this.renderDiagnostics();
+    for (const id of ['save-source', 'delete-sample']) $(id).disabled = !!this.record.owner;
     $('dirty-indicator').textContent = this.record.owner ? `Locked by job ${this.record.owner}` : this.isDirty() ? 'Unsaved draft' : `Revision ${this.record.revision}`;
     this.renderTimeline();
   }
@@ -333,10 +334,15 @@ export class StudioUI {
   async pollJobs() {
     const jobs = await api('/job-summaries');
     $('job-status-bar').replaceChildren(...jobs.map(job => button(`${job.kind} · ${job.state} · ${job.progress}/${job.total}`, () => this.inspectJob(job.id))));
+    const visible = new Set(jobs.map(j => j.id));
+    const tracked = new Set([...this.ownedBulk].filter(id => !this.recorded.has(id)));
+    if (this.reviewJob) tracked.add(this.reviewJob);
+    for (const [id, view] of this.dialogs) if (view.dialog.open) tracked.add(id);
+    for (const id of tracked) if (!visible.has(id)) jobs.push(await api(`/jobs/${id}?include_config=false`));
     for (const job of jobs) {
       this.jobs.set(job.id, job);
       if (this.reviewJob === job.id) {
-        const fullJob = await api(`/jobs/${job.id}`);
+        const fullJob = await api(`/jobs/${job.id}?include_config=false`);
         const skipped = (fullJob.result_states || []).find(r => r.state === 'skipped')?.count || 0;
         $('review-progress').textContent = `${job.state} · ${job.progress}/${job.total} complete · ${skipped} skipped`;
         if (['completed', 'cancelled'].includes(job.state)) { $('review-dialog').close(); this.reviewJob = null; message($('review-progress').textContent); }
@@ -361,7 +367,7 @@ export class StudioUI {
     const view = this.dialogs.get(id); if (!view.dialog.open) view.dialog.showModal(); await this.refreshJob(id);
   }
   async refreshJob(id) {
-    const view = this.dialogs.get(id), j = await api(`/jobs/${id}`);
+    const view = this.dialogs.get(id), j = await api(`/jobs/${id}?include_config=false`);
     view.state.textContent = `${j.kind} · ${j.state}\n${j.progress} / ${j.total}\nPaused endpoints: ${(j.paused_endpoints || []).join(', ') || 'none'}\n` + (j.attempt_states || []).map(r => `${r.state} ${r.outcome || ''}: ${r.count}`).join(' · ');
     const controls = view.controls.querySelectorAll('button');
     controls[0].disabled = j.state !== 'running'; controls[1].disabled = j.state !== 'paused'; controls[2].disabled = !['running', 'paused'].includes(j.state);
@@ -385,7 +391,44 @@ export class StudioUI {
       } catch { view.files.append(node('p', 'Artifacts expired or removed. Job record retained.')); }
     }
   }
+  renderToolSettings(selected = '') {
+    const box = $('tool-schema-editor'); box.replaceChildren(node('h3', 'Synthetic tool inputs'));
+    const data = JSON.parse($('settings-json').value); data.tools ||= {};
+    const write = () => { $('settings-json').value = json(data); };
+    const select = node('select'); select.setAttribute('aria-label', 'Project tool');
+    for (const [id, tool] of Object.entries(data.tools)) { const opt = node('option', tool.name + ' · ' + id); opt.value = id; select.append(opt); }
+    if (selected && data.tools[selected]) select.value = selected;
+    select.onchange = () => this.renderToolSettings(select.value);
+    const control = (label, value = '') => { const wrap = node('label', label), n = node('input'); n.value = value; n.setAttribute('aria-label', label); wrap.append(n); return [wrap, n]; };
+    const [idLabel, ident] = control('New tool ID'); box.append(select, idLabel, button('Add tool to settings draft', () => {
+      const id = ident.value.trim(); if (!/^[a-z][a-z0-9_-]*$/.test(id) || data.tools[id]) throw new Error('Supply a unique tool ID with letters, digits, underscores or hyphens.');
+      data.tools[id] = {name: id, input_schema: {type:'object',properties:{}}}; write(); this.renderToolSettings(id);
+    }));
+    const tool = data.tools[select.value]; if (!tool) return;
+    const [nameLabel, name] = control('Tool display name', tool.name); name.oninput = () => { tool.name = name.value; write(); }; box.append(nameLabel);
+    const schema = tool.input_schema;
+    if (schema.type !== 'object') { box.append(node('p', 'This input schema uses advanced JSON. Object schemas support the field editor.')); return; }
+    schema.properties ||= {};
+    for (const [key, spec] of Object.entries(schema.properties)) {
+      const row = node('div'), required = node('input'); required.type = 'checkbox'; required.checked = (schema.required || []).includes(key); required.setAttribute('aria-label', 'Required tool field ' + key);
+      required.onchange = () => { schema.required = (schema.required || []).filter(x => x !== key); if (required.checked) schema.required.push(key); if (!schema.required.length) delete schema.required; write(); };
+      row.append(node('span', key + ' · ' + (spec.type || 'advanced schema') + ' '), required, button('Remove tool field ' + key, () => {
+        delete schema.properties[key]; if (schema.required) schema.required = schema.required.filter(x => x !== key); write(); this.renderToolSettings(select.value);
+      })); box.append(row);
+    }
+    const [fieldLabel, fieldId] = control('New tool field ID'), type = node('select'); type.setAttribute('aria-label', 'New tool field type');
+    for (const value of ['string','number','integer','boolean','object','array']) { const opt = node('option', value); opt.value = value; type.append(opt); }
+    box.append(fieldLabel, type, button('Add tool field', () => {
+      const key = fieldId.value.trim(); if (!key || Object.hasOwn(schema.properties, key)) throw new Error('Supply a unique field ID.');
+      schema.properties[key] = type.value === 'array' ? {type:'array',items:{type:'string'}} : {type:type.value};
+      write(); this.renderToolSettings(select.value);
+    }), node('p', 'Forms edit this settings draft only. Save settings to validate. Nested constraints, custom schema fields and non-object schemas remain in Advanced project JSON.'), button('Remove tool from settings draft', () => {
+      if (!confirm('Remove this tool definition? Existing source calls are retained and will show diagnostics.')) return;
+      delete data.tools[select.value]; write(); this.renderToolSettings();
+    }));
+  }
   async init() {
+    window.addEventListener?.('pagehide', () => { this.stopped = true; clearTimeout(this.pollTimer); clearTimeout(this.validationTimer); this.preview.invalidate(); if (this.playing) clearInterval(this.playing); });
     document.addEventListener('graph-job-started', e => this.inspectJob(e.detail));
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('preview-debounce').value = this.prefs.debounce;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
@@ -419,7 +462,8 @@ export class StudioUI {
     on('scrubber', 'input', e => scrub(e.target.value)); on('tick-number', 'change', e => scrub(e.target.value));
     on('first-tick', 'click', () => scrub(0)); on('prev-tick', 'click', () => scrub(this.position - 1)); on('next-tick', 'click', () => scrub(this.position + 1)); on('last-tick', 'click', () => scrub($('scrubber').max));
     on('play', 'click', () => { if (this.playing) { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; } else { $('play').textContent = 'Pause'; this.playing = setInterval(() => scrub(this.position >= Number($('scrubber').max) ? 0 : this.position + 1), 500); } });
-    on('settings-button', 'click', async () => { await this.loadSettings(); $('settings-json').value = json(this.settings); const usage = await api('/logs/usage'); $('log-usage').textContent = json(usage); $('settings-dialog').showModal(); });
+    on('settings-button', 'click', async () => { await this.loadSettings(); $('settings-json').value = json(this.settings); this.renderToolSettings(); const usage = await api('/logs/usage'); $('log-usage').textContent = json(usage); $('settings-dialog').showModal(); });
+    on('settings-json', 'change', () => this.renderToolSettings());
     on('settings-save', 'click', async () => { await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsRecord.revision}); await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); $('settings-dialog').close(); });
     on('logs-clear', 'click', () => api('/logs', 'DELETE'));
     on('import-button', 'click', () => $('file-input').click()); on('file-input', 'change', async () => { const file = $('file-input').files[0]; if (!file) return; const r = await api('/imports', 'POST', {text: await file.text()}); await this.inspectJob(r.job_id); $('file-input').value = ''; });
@@ -448,7 +492,7 @@ export class StudioUI {
     });
     document.querySelectorAll('[data-close]').forEach(n => n.onclick = () => n.closest('dialog').close());
     await this.listing(); if (this.lastItems?.length) await this.select(this.lastItems[0].id); await this.pollJobs();
-    const poll = async () => { try { await this.pollJobs(); const changes = await api(`/changes?after=${this.cursor || 0}`); if (changes.items.length || changes.resync) { this.cursor = changes.items.at(-1)?.cursor || changes.latest; if (changes.resync || changes.items.some(x => x.kind === 'settings')) { await this.loadSettings(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); } await this.listing(); if (this.id && changes.items.some(x => x.entity_id === this.id)) message('Saved source changed. Your draft is retained; reload to reconcile.'); } } catch (e) { message(e); } this.pollTimer = setTimeout(poll, 1500); }; this.pollTimer = setTimeout(poll, 1500);
+    const poll = async () => { if (this.stopped) return; try { await this.pollJobs(); const changes = await api(`/changes?after=${this.cursor || 0}`); if (changes.items.length || changes.resync) { this.cursor = changes.items.at(-1)?.cursor || changes.latest; if (changes.resync || changes.items.some(x => x.kind === 'settings')) { await this.loadSettings(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); } await this.listing(); if (this.id && changes.items.some(x => x.entity_id === this.id)) message('Saved source changed. Your draft is retained; reload to reconcile.'); } } catch (e) { message(e); } if (!this.stopped) this.pollTimer = setTimeout(poll, 1500); }; this.pollTimer = setTimeout(poll, 1500);
   }
   savePreferences() { localStorage.setItem('graph-preferences', JSON.stringify(this.prefs)); }
 }

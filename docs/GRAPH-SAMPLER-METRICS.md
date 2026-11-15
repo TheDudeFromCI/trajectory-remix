@@ -86,7 +86,7 @@ Source calculators distinguish raw event fragments, authored windows, and unique
 logical tool-call IDs. None measures semantic coordination behavior, task count,
 peak Active capacity or token exposure. Semantic categories/outcomes require
 explicit manual annotation. Peak Active and token measures require explicit
-export observations with profile fingerprint and compiler version; this handoff
+export observations with profile fingerprint and compiler version; the application
 does not automatically publish compiler measurements or perform semantic tagging.
 Source observations record origin, intrinsic source revision/hash, and definition
 revision. Changes to source or definition mark the saved observation stale;
@@ -114,3 +114,9 @@ No benchmarks, full training, scale tests or live LLM calls are run. User-machin
 
 Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
 See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.
+
+Editor validation additionally rejects duplicate identities, all-zero choice
+groups and dangling known rule/forced/tag/lifecycle references. The exact supplied
+originals remain byte-for-byte unchanged, including their pre-existing unmatched
+`request_approval` condition. This preserves sampler provenance and is not a
+proof that every arbitrary custom constraint combination is satisfiable.

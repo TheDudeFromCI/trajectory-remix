@@ -6,8 +6,11 @@ Invoke explicitly; merely importing/listing cases never calls a model.
 import argparse
 import asyncio
 import json
+import platform
+import subprocess
 from pathlib import Path
 
+from trajectory_remix.graph.user_validation import require_user_machine
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import JobService
@@ -69,6 +72,7 @@ CASES = ['ordinary', 'multi-user-wakeup', 'partial-instant', 'partial-streamed',
 
 
 async def run(args):
+    require_user_machine(args.user_machine)
     settings = ProjectSettings.model_validate_json(args.config.read_text())
     if not args.output.is_dir():
         args.output.mkdir(parents=True)
@@ -78,6 +82,14 @@ async def run(args):
     jobs = JobService(store, active_limit=2)
     gen = GenerationService(jobs, SamplerService(jobs), BulkService(jobs), OpenAITransport())
     results = []
+    report = dict(acceptance_passed=False, quality='requires human inspection', performance='not measured',
+        python=platform.python_version(), seed=args.seed, cases=args.cases,
+        models={key: dict(model=e.model, concurrency=e.concurrency, retries=e.retries) for key,e in settings.endpoints.items()},
+        endpoint_roles=settings.endpoint_roles, generation=settings.generation.model_dump(), results=results)
+    try:
+        report['commit'] = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        report['commit'] = 'unknown (installed package)'
     for case in args.cases:
         job = gen.start([{'seed': args.seed}], {'plan': smoke_plan(case)})
         task = asyncio.create_task(gen.run(jobs, job))
@@ -100,7 +112,7 @@ async def run(args):
                 state=jobs.inspect(job)['state'], outcome=attempt['outcome'],
                 stage=source.metadata.get('stage') if source else None,
                 evaluations=source.metadata.get('evaluations', []) if source else []))
-        (args.output / 'report.json').write_text(json.dumps(results, indent=2))
+        (args.output / 'report.json').write_text(json.dumps(report, indent=2))
         if jobs.inspect(job)['state'] != 'completed':
             break
     print(f'Inspect {path} and {args.output / "report.json"}. Quality needs human sample inspection; no benchmark was performed.')
@@ -108,12 +120,16 @@ async def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--user-machine', action='store_true')
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--cases', nargs='+', choices=CASES, default=['ordinary'])
     parser.add_argument('--seed', type=int, default=137)
     args = parser.parse_args()
-    asyncio.run(run(args))
+    try:
+        asyncio.run(run(args))
+    except ValueError as error:
+        parser.exit(2, str(error) + '\n')
 
 
 if __name__ == '__main__':

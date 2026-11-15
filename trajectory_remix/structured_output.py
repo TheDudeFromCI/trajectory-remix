@@ -1,12 +1,9 @@
-"""One native output contract for SDK streaming and Pydantic AI requests."""
+"""Native schema projection for graph provider decoding; original validation is authoritative."""
 
 from __future__ import annotations
 
 import copy
-import re
 from urllib.parse import unquote
-
-from pydantic_ai.output import OutputObjectDefinition
 
 
 def decoding_schema(schema, local_constraints=None):
@@ -118,29 +115,3 @@ def decoding_schema(schema, local_constraints=None):
 
     visit(result, '')
     return result
-
-
-def native_output(endpoint, schema, name='trajectory_content', *, local_constraints=None):
-    """Preserve structure; check uniqueness/conditionals against the full schema.
-
-    OpenAI's strict-schema transformer closes arbitrary dictionaries and makes
-    optional fields required. Local JSON-schema/grammar servers can enforce the
-    decoding schema; never rewrite training decisions to fit that subset.
-    ModelSession validates every result against the original complete schema.
-    """
-    if not schema or endpoint.get('structured_output', 'native') != 'native':
-        return None
-    return OutputObjectDefinition(
-        json_schema=decoding_schema(schema, local_constraints),
-        name=re.sub(r'[^a-zA-Z0-9_-]', '_', name or 'trajectory_content')[:64],
-        strict=True,
-    )
-
-
-def response_format(output):
-    """The Chat Completions representation of Pydantic AI's native output."""
-    if output is None:
-        return None
-    return {'type': 'json_schema', 'json_schema': {
-        'name': output.name, 'schema': output.json_schema, 'strict': output.strict,
-    }}

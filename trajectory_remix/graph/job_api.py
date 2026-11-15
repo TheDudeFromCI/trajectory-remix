@@ -49,8 +49,8 @@ class ExportInput(DTO):
 class JobWorker:
     """Host-owned tasks survive HTTP disconnects. No built-in model driver.
 
-    Handoff 06 registers async job handlers and schedules through JobService's
-    endpoint claims; it must not call a provider directly from an HTTP handler.
+    Event Flow registers async handlers and schedules through endpoint claims;
+    providers never run directly from an HTTP handler.
     """
     def __init__(self, jobs, bulk, artifacts, *, handlers=None, bulk_handlers=None):
         self.jobs, self.bulk, self.artifacts = jobs, bulk, artifacts
@@ -124,8 +124,8 @@ def job_router(jobs, bulk, artifacts, worker):
         return jobs.listing(limit=limit, offset=offset)
 
     @router.get('/jobs/{job}')
-    def inspect(job: str):
-        return jobs.inspect(job)
+    def inspect(job: str, include_config: bool = True):
+        return jobs.inspect(job, include_config=include_config)
 
     @router.post('/jobs/{job}/{action}')
     async def control(job: str, action: Literal['pause', 'resume', 'cancel']):
@@ -229,16 +229,16 @@ def job_router(jobs, bulk, artifacts, worker):
     return router
 
 
-def create_job_app(path, *, artifact_root='/tmp/trajectory-remix-exports', handlers=None, bulk_handlers=None):
+def create_job_app(path, *, artifact_root='/tmp/trajectory-remix-exports', handlers=None, bulk_handlers=None, active_limit=20):
     """Headless graph service factory, separate from the old replay dashboard.
 
     Localhost host/auth policy belongs to the mounting studio transport. This
     factory supplies no credentials or provider access. Mount job_router in the
-    studio's authenticated app when handoff 03 supplies that transport.
+    studio's authenticated app.
     """
     from .export import ArtifactService
     from .job_artifacts import JobArtifacts
-    jobs = JobService(GraphStore(path))
+    jobs = JobService(GraphStore(path), active_limit=active_limit)
     bulk = BulkService(jobs)
     artifacts = JobArtifacts(jobs, ArtifactService(artifact_root))
     worker = JobWorker(jobs, bulk, artifacts, handlers=handlers, bulk_handlers=bulk_handlers)

@@ -5,12 +5,11 @@ authoring, read-only previews, import/export jobs and focused agent tasks.
 
 `trajectory_remix.graph` provides a tokenizer-free source model, structural
 validation, SQLite persistence and application commands. It is a separate new
-format with its own manual studio, REST and focused MCP tasks. The replay
-database and its old dashboard remain separate; there is no old-project reader
-or migrator. Explicit scheduling/preview and temporary
+format with its own studio, REST and focused MCP tasks. The replay
+implementation has been removed; there is no old-project reader or migrator. Explicit scheduling/preview and temporary
 compiled export are available through the separate [compiler services](GRAPH-COMPILER.md).
 The [durable job service](GRAPH-JOBS.md) supplies ownership, workers and bulk
-operations. Sampling and model calls are separate work.
+operations. [Sampling](GRAPH-SAMPLER-METRICS.md) and [model calls](GRAPH-GENERATION.md) use these contracts.
 
 ## Source and schema
 
@@ -70,7 +69,7 @@ explicitly overridden. `delivery.mode` is `instant` (default) or `streamed` for
 external text/responses; chat permits only `instant`. On external events,
 `delivery.chain_immediately` defaults to `true`; `false` requests the next input
 phase. These are intrinsic source choices, not arbitrary delays. The scheduler
-will enforce external-completion versus agent-completion phase boundaries.
+enforces external-completion versus agent-completion phase boundaries.
 
 `content` is a literal string or a list of typed pieces:
 
@@ -191,7 +190,8 @@ is overwritten by a conflict.
 `settings_revision`. Intrinsic hashes use canonical, default-resolved primary
 fields only. Metadata-only edits create commits but retain intrinsic revision/hash.
 `read(id, revision)` retrieves old snapshots. Command diagnostics use the settings
-snapshot pinned to that commit, ensuring old reads are stable; explicitly call
+snapshot pinned to that commit, ensuring explicit historical reads are stable. Studio current reads diagnose
+against current settings; lower-level callers explicitly call
 `diagnose(source, store.settings().settings)` to assess against current settings.
 Project settings have their own CAS and immutable history via `settings(revision)`
 and `update_settings(settings, expected_revision)`.
@@ -200,13 +200,13 @@ SQL tables are prefixed `graph_`: `project`, `settings_revisions`,
 `trajectory_revisions`, `trajectories`, `tool_usage`, and `project_changes`.
 `using_tool(tool_id, limit=100, offset=0)` reads the indexed current tool usage
 without parsing sources. Invalidation history retains the latest 1,000 entries;
-future clients must refresh on a cursor gap. Runtime ownership/worker tables,
-review revisions and job transactions can extend this store subsequently.
+clients refresh on a cursor gap. Runtime ownership/worker tables, reviews and
+job transactions extend this store through the shared graph services.
 
 Downstream compiler and studio code should import these DTOs, stable diagnostic
 codes and application commands rather than introduce parallel source grammars.
-The foundation does not certify token budgets, compile arrays, provide network
-adapters, or implement operational locks; those belong to their respective layers.
+Token budgets/arrays, network adapters and operational locks belong to the
+compiler, studio and job service layers respectively.
 
 ## Small checks
 

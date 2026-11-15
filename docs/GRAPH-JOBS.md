@@ -3,11 +3,10 @@
 The [manual graph studio](GRAPH-STUDIO.md) supplies authenticated REST, manual
 authoring, read-only previews, import/export jobs and focused agent tasks.
 
-The graph runtime extends the [source/CAS service](GRAPH-SOURCE.md) from PR #71
-and uses the [temporary artifact service](GRAPH-COMPILER.md) from PR #72.
-It is independent of the replay dashboard, generation checkpoints and its
-single-current-job globals. It neither imports a model implementation nor
-executes tools. Real Flow, review and repair drivers are supplied separately.
+The graph runtime extends the [source/CAS service](GRAPH-SOURCE.md) and uses the
+[temporary artifact service](GRAPH-COMPILER.md). It never executes synthetic tools.
+The [event Flow](GRAPH-GENERATION.md) registers queued generation, review and
+continuing repair drivers.
 
 ## Service and process boundary
 
@@ -188,7 +187,7 @@ snapshot of retained text/cursor, streamed without building one large string.
 Clear/append cannot change that snapshot. Manifest metadata reports truncation.
 
 Use `lease(job, filename)` for downloads. Writer/download locks, complete-only
-publication, partial cleanup and 24-hour expiry remain the PR #72 contract.
+publication, partial cleanup and 24-hour expiry use the shared artifact contract.
 Completed compact job records survive file expiry/OS cleanup; missing artifacts
 return 404. Startup and the host's periodic sweep call `ArtifactService.expire()`.
 
@@ -202,7 +201,7 @@ Do not expose the headless factory as an authenticated public deployment.
 
 | Route | Result |
 |---|---|
-| `GET /jobs?limit=&offset=`; `GET /jobs/{id}` | Independent snapshots/progress/paused endpoints |
+| `GET /jobs?limit=&offset=`; `GET /jobs/{id}?include_config=false` | Independent snapshots/progress/paused endpoints |
 | `POST /runs` `{config,proposals}` | 202, job ID and status URL |
 | `GET /jobs/{id}/attempts?limit=&offset=` | Frozen attempts/outcomes |
 | `POST /jobs/{id}/pause`, `/resume`, `/cancel` | Per-job control |
@@ -244,8 +243,8 @@ concurrent claims/bulk workers, pause/cancel/restart fencing, ignored provider
 cancellation, endpoint claim leases, search-wide snapshots, partial results,
 changed-only Undo/Redo, log eviction/clear/export, real raw artifact jobs and
 HTTP controls/downloads. No benchmarks, scale tests, full training or live model
-calls are part of this validation. Real Flow/review/repair and graph metric
-population views remain downstream integrations; the manual studio uses these services today.
+calls are part of this validation. Event Flow/review/repair and metric population
+views use these same services.
 
 Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
 See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.

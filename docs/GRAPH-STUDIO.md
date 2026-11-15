@@ -7,7 +7,7 @@ There is no sandbox, authored tick marker or executable tool runtime in this UI.
 
 [Graph view](images/graph-studio.png) · [Tick history](images/graph-studio-ticks.png)
 show the same tiny source inspected in Chromium.
-The replay dashboard remains available for old projects; it does not migrate them.
+Replay projects and their former dashboard are unsupported; no migration is provided.
 
 ## Start without a tokenizer
 
@@ -30,8 +30,12 @@ nested annotations. Stage/split changes do not alter intrinsic source identity.
 Dataset Metrics uses the shared [sampler and metrics service](GRAPH-SAMPLER-METRICS.md)
 for saved observations, unavailable/stale reporting, proposal coverage and explicit
 Calculate Missing Metrics jobs.
-Generation, automatic review and repair drivers are not installed in this
-manual milestone. The UI does not expose the old generation path for graph data.
+Generation and automatic/manual review and repair use the shared [event Flow](GRAPH-GENERATION.md). Workbench B is the selected sampler UI.
+
+Project Settings includes object tool-schema creation, field addition/removal and
+required-field controls. Advanced JSON preserves nested/custom schemas and configures
+endpoints, profiles, checklists, split ratios and log caps. Save validates the draft
+with settings CAS. Existing calls are retained when a tool is removed.
 
 ## Forms and timeline
 
@@ -134,8 +138,9 @@ records/artifacts return 404. The event Flow supplies model access through the a
 
 MCP offers `get_graph_session`, `get_authoring_guide`, `list_graphs`, `read_graph`,
 `create_graph`, `patch_graph`, `patch_graph_event`, `export_graphs`, and
-`inspect_graph_job`. These use Studio/GraphCommands, not parallel edit logic.
-Read focused guides `start`, `dependencies`, `tools-chat`, `export`; they are also
+`inspect_graph_job`, generation/review and bounded lifecycle/result/log/artifact tasks.
+See the [MCP examples](MCP.md). These use Studio/GraphCommands, not parallel edit logic.
+Read focused guides `start`, `dependencies`, `tools-chat`, `generation`, `export`; they are also
 packaged under `trajectory_remix/guides/graph-*.md`. Discovery returns schemas
 and short descriptions, not every source or the full manual.
 

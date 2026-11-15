@@ -10,8 +10,10 @@ independent of the browser's preview preference. Raw export needs no tokenizer.
 Use `inspect_graph_job` to follow that ID; other jobs are independent. REST
 provides per-job pause/resume/cancel and cursor logs. Cancellation is terminal,
 retains committed work, and fences late publication. Restart requires manual
-Resume. Generation/review drivers may be unavailable; do not imply they work.
+Resume. Model work uses configured roles through the shared event Flow.
 
+Use `graph_job_items`, `graph_job_logs`, and explicit `control_graph_job` for
+bounded inspection and lifecycle controls. `graph_job_artifacts` lists paths.
 Once completed, read `/api/v1/jobs/{id}/manifest` and download listed files,
 `manifest.json`, or `download.zip` from `/api/v1/jobs/{id}/artifacts/{filename}`
 with the local session token. Files expire after 24 hours and may disappear

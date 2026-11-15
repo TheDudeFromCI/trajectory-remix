@@ -260,7 +260,7 @@ def test_preview_and_export_have_identical_schedule_and_no_side_effects():
 
 def test_frontier_visibility_matches_legacy_predicate_on_shared_phase_semantics():
     # The old predicate is a regression oracle only; no replay source is compiled.
-    from trajectory_remix.compiler import visible_to
+    from visibility_oracle import visible_to
     s = source({"i": event("external_text", "a", "P"),
                 "a": event("agent_text", "a", "xy", ["i"], close_window=True),
                 "j": event("external_text", "b", "Q"),

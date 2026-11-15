@@ -272,3 +272,49 @@ def test_export_diagnostic_is_actionable_and_has_no_partial_download(client):
     logs = client.get(f'/api/v1/jobs/{job}/logs').json()['items']
     assert any('Export blocked:' in line['text'] and 'missing' in line['text'] for line in logs)
     assert client.get(f'/api/v1/jobs/{job}/artifacts/download.zip').status_code == 404
+
+
+def test_current_tool_diagnostics_follow_settings_but_history_stays_pinned(client):
+    s = source()
+    s['events'] = {'call': dict(kind='tool_call', window='doc', tool='echo', call_id='one', content='{}')}
+    r = client.post('/api/v1/trajectories', json=s).json()
+    ident = r['source']['id']
+    settings = client.get('/api/v1/settings').json()
+    settings['settings']['tools']['echo'] = dict(name='Echo', input_schema={
+        'type':'object', 'properties':{'needed':{'type':'string'}}, 'required':['needed']})
+    assert client.put('/api/v1/settings', json={'settings':settings['settings'], 'expected_revision':settings['revision']}).status_code == 200
+    current = client.get(f'/api/v1/trajectories/{ident}').json()
+    historical = client.get(f'/api/v1/trajectories/{ident}?revision=1').json()
+    assert current['source'] == historical['source']
+    assert current['diagnostics'] != historical['diagnostics']
+    assert any(d['severity'] == 'warning' and 'schema' in d['code'] for d in current['diagnostics'])
+
+
+def test_bounded_agent_jobs_controls_logs_results_and_downloads(client):
+    def call(name, **arguments):
+        r = client.post('/api/mcp/call', json=dict(name=name, arguments=arguments))
+        assert r.status_code == 200, r.text
+        return r.json()
+    session = call('get_graph_session')
+    assert 'settings' not in session and session['source_format'] == 'kidra-trajectory-graph/1'
+    jobs = client.app.state.jobs
+    job = jobs.create_run({'large': 'frozen'}, [{'large': 'proposal'} for _ in range(3)])
+    summary = call('inspect_graph_job', id=job)
+    assert not {'config','checkpoint'} & summary.keys()
+    rows = call('graph_job_items', id=job, limit=2)
+    assert len(rows['items']) == 2 and rows['next_offset'] == 2
+    assert all('proposal' not in r for r in rows['items'])
+    assert len(call('graph_job_items', id=job, offset=2)['items']) == 1
+    jobs.append_log(job, 'x'*3000)
+    logs = call('graph_job_logs', id=job)
+    assert logs['items'][0]['line_truncated'] and len(logs['items'][0]['text']) == 2000
+    assert call('control_graph_job', id=job, action='pause')['state'] == 'paused'
+    assert call('control_graph_job', id=job, action='cancel')['state'] == 'cancelled'
+    assert client.get(f'/api/v1/jobs/{job}?include_config=false').json() == call('inspect_graph_job', id=job)
+    create(client)
+    exported = call('export_graphs', options={'compiled': False})['job_id']
+    assert settled(client, exported)['state'] == 'completed'
+    files = call('graph_job_artifacts', id=exported)['files']
+    assert any(f['name'] == 'download.zip' for f in files)
+    for entry in files:
+        assert client.get(entry['path']).status_code == 200

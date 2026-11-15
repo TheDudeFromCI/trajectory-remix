@@ -13,5 +13,5 @@ Metadata is optional and cannot change compilation. Stage Ready is a manual
 choice, never proof of quality from saving a graph.
 
 Read one next topic: `dependencies`, `tools-chat`, or `export`. Definitions and
-JSON schemas are in Project Settings and `/api/v1/schema/source`. These tasks
-never execute tools or call a model. Generation/review drivers are separate.
+JSON schemas are in Project Settings and `/api/v1/schema/source`. Manual editing never executes tools or calls a model. The `generation` guide
+describes explicitly authorized model work and its independent jobs.

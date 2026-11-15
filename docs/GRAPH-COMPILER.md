@@ -6,8 +6,7 @@ authoring, read-only previews, import/export jobs and focused agent tasks.
 The opt-in `trajectory_remix.graph.compiler` and `.export` services consume the
 [graph source contracts](GRAPH-SOURCE.md). They do not read replay sources,
 execute tools, call models, mutate source/settings, or calculate stored metrics.
-Graph reads/edits remain tokenizer-free. The existing dashboard's legacy export
-route is unchanged. The [durable job service](GRAPH-JOBS.md) pins export snapshots,
+Graph reads/edits remain tokenizer-free. The [durable job service](GRAPH-JOBS.md) pins export snapshots,
 calls these services and supplies asynchronous graph REST jobs/downloads.
 
 Install the exporter dependencies with `pip install -e '.[export]'`.
@@ -181,8 +180,7 @@ independence, split families, fake-clock expiry/cancellation, two-layer context
 isolation and one optimizer update. The legacy attention predicate is used only
 as a test oracle, without reintroducing replay sources into the graph path.
 
-The durable job service integrates these APIs; the complete studio remains a
-separate integration. Full model
+The durable job service and studio integrate these APIs. Full model
 training/convergence, local-LLM acceptance and the 25k-stored/20-active performance
 gates remain user-machine checks. No benchmarks or live model acceptance belong
 in this correctness suite. See the [updated training harness](KTREMIX-TRAINING-DEMO.md).
