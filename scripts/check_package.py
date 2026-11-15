@@ -9,8 +9,10 @@ import subprocess
 import sys
 
 REQUIRED = [
-    "static/index.html",
-    "static/app.js",
+    "static/graph.html",
+    "static/graph.js",
+    "static/graph.css",
+    "static/shell.js",
     "static/style.css",
     "Skill.md",
 ]
@@ -19,7 +21,7 @@ REQUIRED = [
 def main() -> int:
     root = resources.files("trajectory_remix")
     missing = [name for name in REQUIRED if not root.joinpath(name).is_file()]
-    for pattern_dir in ("guides", "scenario_templates", "review_templates"):
+    for pattern_dir in ("guides", "graph/sampler_originals"):
         if not root.joinpath(pattern_dir).is_dir() or not any(root.joinpath(pattern_dir).iterdir()):
             missing.append(pattern_dir + "/")
     if missing:

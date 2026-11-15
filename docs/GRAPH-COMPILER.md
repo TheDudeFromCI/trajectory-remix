@@ -18,8 +18,9 @@ from trajectory_remix.graph import GraphSource
 from trajectory_remix.graph.compiler import GraphCompiler
 
 source = GraphSource.model_validate(source_json)
-compiler = GraphCompiler(settings.tokenizer_profiles[profile_id],
-                         settings=settings, active_limit=8, seed=17)
+compiler = GraphCompiler(
+    settings.tokenizer_profiles[profile_id], settings=settings, active_limit=8, seed=17
+)
 arrays, identity = compiler.compile(source)
 preview = compiler.preview(source, max_frames=500)
 ```
@@ -125,8 +126,11 @@ from trajectory_remix.graph.export import ArtifactService, ExportOptions
 
 artifacts = ArtifactService()  # expires old/abandoned exports on startup
 artifact_id, manifest = artifacts.build(
-    records, settings, compiler=compiler,
-    options=ExportOptions(trajectories_per_file=100, metadata="remove_all"))
+    records,
+    settings,
+    compiler=compiler,
+    options=ExportOptions(trajectories_per_file=100, metadata="remove_all"),
+)
 with artifacts.lease(artifact_id, "download.zip") as stream:
     # Stream to the requesting client's download response while holding the lease.
     consume(stream)

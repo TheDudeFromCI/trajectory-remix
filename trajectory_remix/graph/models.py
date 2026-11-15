@@ -1,4 +1,5 @@
 """Versioned intrinsic source and project DTOs. No runtime/tokenizer imports."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,14 +8,24 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import jsonschema
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator, model_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 Identifier = Annotated[str, Field(min_length=1)]
 Weight = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
 def canonical(value) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
 
 
 def digest(value) -> str:
@@ -22,8 +33,13 @@ def digest(value) -> str:
 
 
 class DTO(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, validate_default=True,
-                              revalidate_instances="always", allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        validate_default=True,
+        revalidate_instances="always",
+        allow_inf_nan=False,
+    )
 
 
 class TextPiece(DTO):
@@ -64,12 +80,12 @@ class Window(DTO):
     reasoning_effort: Identifier | None = None
     intentionally_left_open: bool = False
 
-    @model_serializer(mode='wrap')
+    @model_serializer(mode="wrap")
     def serialize(self, handler):
         result = handler(self)
         # Preserve pre-acknowledgment source hashes/review identities by default.
         if not self.intentionally_left_open:
-            result.pop('intentionally_left_open', None)
+            result.pop("intentionally_left_open", None)
         return result
 
 
@@ -125,8 +141,9 @@ class ChatMessage(Event):
     call_id: Identifier | None = None
 
 
-GraphEvent = Annotated[AgentText | ExternalText | ToolCall | ToolResponse | ChatMessage,
-                       Field(discriminator="kind")]
+GraphEvent = Annotated[
+    AgentText | ExternalText | ToolCall | ToolResponse | ChatMessage, Field(discriminator="kind")
+]
 
 
 class Defaults(DTO):
@@ -181,9 +198,22 @@ class ToolDefinition(DTO):
 
 # Logical names, never tokenizer-native spellings in source. A profile is usable
 # only with dedicated IDs for all controls; creating a project needs no profile.
-REQUIRED_CONTROLS = frozenset({"bos", "eos", "noop", "ctx_begin", "ctx_end",
-                               "tool_begin", "tool_end", "response_begin",
-                               "response_end", "msg_begin", "msg_end", "window_ref"})
+REQUIRED_CONTROLS = frozenset(
+    {
+        "bos",
+        "eos",
+        "noop",
+        "ctx_begin",
+        "ctx_end",
+        "tool_begin",
+        "tool_end",
+        "response_begin",
+        "response_end",
+        "msg_begin",
+        "msg_end",
+        "window_ref",
+    }
+)
 
 
 class TokenizerProfile(DTO):
@@ -206,9 +236,13 @@ class TokenizerProfile(DTO):
             raise ValueError("Tokenizer definition requires an added_tokens array")
         dedicated = set()
         for token in tokens:
-            if (isinstance(token, dict) and type(token.get("id")) is int
-                    and token.get("special") is True and isinstance(token.get("content"), str)
-                    and token["content"]):
+            if (
+                isinstance(token, dict)
+                and type(token.get("id")) is int
+                and token.get("special") is True
+                and isinstance(token.get("content"), str)
+                and token["content"]
+            ):
                 dedicated.add(token["id"])
         absent = set(self.special_tokens.values()) - dedicated
         if absent:
@@ -246,18 +280,27 @@ class Criterion(DTO):
 
 def default_checklists():
     return {
-        'core': {key: Criterion(text=text) for key, text in {
-            'objective_alignment': 'The episode meaningfully exercises its objective; numeric targets are advisory.',
-            'causal_evidence': 'Every decision uses only evidence visible at its causal frontier.',
-            'actor_and_supervision': 'Sources, masks, chat delivery and tool framing match actor ownership.',
-            'world_consistency': 'Observations, identities and authored tool outcomes are consistent.',
-            'coherent_reasoning': 'Supervised reasoning follows evidence; distinguish intentional masked mistakes.',
-            'truthful_episode_outcome': 'Progress, blocking and completion claims match observed evidence.'}.items()},
-        'critical': {key: Criterion(text=text) for key, text in {
-            'decision_quality': 'Decisions consider relevant constraints, alternatives and proportional delegation.',
-            'long_horizon_continuity': 'Ownership and retained context remain coherent across interruptions and participants.',
-            'exploration_and_recovery': 'Critique and recovery respond to actual evidence without hindsight.',
-            'training_value': 'The episode teaches useful behavior without padded boilerplate.'}.items()}}
+        "core": {
+            key: Criterion(text=text)
+            for key, text in {
+                "objective_alignment": "The episode meaningfully exercises its objective; numeric targets are advisory.",
+                "causal_evidence": "Every decision uses only evidence visible at its causal frontier.",
+                "actor_and_supervision": "Sources, masks, chat delivery and tool framing match actor ownership.",
+                "world_consistency": "Observations, identities and authored tool outcomes are consistent.",
+                "coherent_reasoning": "Supervised reasoning follows evidence; distinguish intentional masked mistakes.",
+                "truthful_episode_outcome": "Progress, blocking and completion claims match observed evidence.",
+            }.items()
+        },
+        "critical": {
+            key: Criterion(text=text)
+            for key, text in {
+                "decision_quality": "Decisions consider relevant constraints, alternatives and proportional delegation.",
+                "long_horizon_continuity": "Ownership and retained context remain coherent across interruptions and participants.",
+                "exploration_and_recovery": "Critique and recovery respond to actual evidence without hindsight.",
+                "training_value": "The episode teaches useful behavior without padded boilerplate.",
+            }.items()
+        },
+    }
 
 
 class GenerationOptions(DTO):
@@ -272,16 +315,29 @@ class GenerationOptions(DTO):
 
 class ProjectSettings(DTO):
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
-    tools: dict[Identifier, ToolDefinition] = Field(default_factory=lambda: {
-        "chat": ToolDefinition(name="Chat", input_schema={"type": "object",
-            "properties": {"content": {"type": "string"}}, "required": ["content"],
-            "additionalProperties": False})})
+    tools: dict[Identifier, ToolDefinition] = Field(
+        default_factory=lambda: {
+            "chat": ToolDefinition(
+                name="Chat",
+                input_schema={
+                    "type": "object",
+                    "properties": {"content": {"type": "string"}},
+                    "required": ["content"],
+                    "additionalProperties": False,
+                },
+            )
+        }
+    )
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
-    endpoint_roles: dict[Literal["generator", "fast", "critical"], Identifier] = Field(default_factory=dict)
+    endpoint_roles: dict[Literal["generator", "fast", "critical"], Identifier] = Field(
+        default_factory=dict
+    )
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
-    review_checklists: dict[Literal['core', 'critical'], dict[Identifier, Criterion]] = Field(default_factory=default_checklists)
+    review_checklists: dict[Literal["core", "critical"], dict[Identifier, Criterion]] = Field(
+        default_factory=default_checklists
+    )
     generation: GenerationOptions = Field(default_factory=GenerationOptions)
     matrix: VersionedReference | None = None
     metric_registry: VersionedReference | None = None
@@ -293,15 +349,24 @@ class ProjectSettings(DTO):
     def references(self):
         if self.sampler_configuration is not None:
             from .sampling import configuration
+
             c = self.sampler_configuration
-            if 'matrix' not in c:
-                raise ValueError('Sampler configuration requires matrix')
-            c = configuration(c['matrix'], c.get('metric_options'))
+            if "matrix" not in c:
+                raise ValueError("Sampler configuration requires matrix")
+            c = configuration(c["matrix"], c.get("metric_options"))
             self.sampler_configuration = c
-            self.matrix = VersionedReference(id=c['matrix']['matrix_id'], version=c['matrix']['schema_version'],
-                digest=c['matrix_digest'], uri='settings:sampler_configuration.matrix')
-            self.metric_registry = VersionedReference(id='sampler-metrics', version='1',
-                digest=c['registry_digest'], uri='settings:sampler_configuration.definitions')
+            self.matrix = VersionedReference(
+                id=c["matrix"]["matrix_id"],
+                version=c["matrix"]["schema_version"],
+                digest=c["matrix_digest"],
+                uri="settings:sampler_configuration.matrix",
+            )
+            self.metric_registry = VersionedReference(
+                id="sampler-metrics",
+                version="1",
+                digest=c["registry_digest"],
+                uri="settings:sampler_configuration.definitions",
+            )
         if len(self.reasoning_levels) != len(set(self.reasoning_levels)):
             raise ValueError("Reasoning levels must be unique")
         for role, endpoint in self.endpoint_roles.items():

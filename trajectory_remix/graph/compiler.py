@@ -3,12 +3,13 @@
 No source, settings, metrics or files are changed. The same scheduler drives
 bounded visual previews and export. Ordinary graph operations do not import it.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import random
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from tokenizers import Tokenizer
 
@@ -69,6 +70,7 @@ class Instance:
 
 class Runtime:
     """Frontier state shared by compiler lowering and the tiny inference demo."""
+
     def __init__(self, active_limit: int, controls: dict[str, int], seed=0):
         if type(active_limit) is not int or active_limit < 1:
             raise CompileError("active_limit must be positive")
@@ -91,10 +93,16 @@ class Runtime:
         if not free:
             raise CompileError("Active window capacity exceeded (Available is excluded)")
         index = len(self.instances)
-        self.instances.append(Instance(logical, self.rng.choice(free), writable, self.frontier,
-                                       initially_available=logical is None))
-        self.insert(index, Token(self.controls["bos"], "bos", True),
-                    False, 0.)
+        self.instances.append(
+            Instance(
+                logical,
+                self.rng.choice(free),
+                writable,
+                self.frontier,
+                initially_available=logical is None,
+            )
+        )
+        self.insert(index, Token(self.controls["bos"], "bos", True), False, 0.0)
         return index
 
     def open(self, logical, model):
@@ -127,12 +135,17 @@ class Runtime:
         flags |= {"bos": k.BOS, "eos": k.EOS, "noop": k.NOOP}.get(token.control, 0)
         boundary = self.frontier + 1 if commit is None else commit
         row = len(a["token_ids"])
-        for name, value in dict(token_ids=token.id if token.id is not None else 0, window_ids=index, position_ids=position,
-                                query_frontiers=self.frontier,
-                                visible_from=boundary if durable else 0,
-                                visible_until=k.FOREVER if durable else 0,
-                                previous_rows=previous, loss_weights=weight,
-                                row_flags=flags).items():
+        for name, value in dict(
+            token_ids=token.id if token.id is not None else 0,
+            window_ids=index,
+            position_ids=position,
+            query_frontiers=self.frontier,
+            visible_from=boundary if durable else 0,
+            visible_until=k.FOREVER if durable else 0,
+            previous_rows=previous,
+            loss_weights=weight,
+            row_flags=flags,
+        ).items():
             a[name].append(value)
         if token.reference is not None:
             self.references.append((row, token.reference))
@@ -168,7 +181,9 @@ class Runtime:
             if emission.replace:
                 self.clear_body(index)
             for offset, token in enumerate(emission.tokens):
-                previous = self.instances[index].header[-1] if emission.replace and offset == 0 else None
+                previous = (
+                    self.instances[index].header[-1] if emission.replace and offset == 0 else None
+                )
                 self.insert(index, token, False, emission.weight, previous=previous)
                 if token.control == "eos":
                     self.close(index, self.frontier)
@@ -186,7 +201,9 @@ class Runtime:
         boundary = self.frontier + 1
         activate = None
         for emission in frame.outputs:
-            index = self.available if emission.window == "@available" else self.live[emission.window]
+            index = (
+                self.available if emission.window == "@available" else self.live[emission.window]
+            )
             for token in emission.tokens:
                 self.insert(index, token, True, emission.weight, commit=boundary)
                 if token.control == "eos":
@@ -221,17 +238,26 @@ class Runtime:
             window_open_frontiers=[w.opened for w in self.instances],
             window_close_frontiers=[w.closed for w in self.instances],
             window_activation_frontiers=[w.active for w in self.instances],
-            window_flags=[(0 if w.writable else k.READ_ONLY) |
-                          (k.INITIALLY_AVAILABLE if w.initially_available else 0)
-                          for w in self.instances],
+            window_flags=[
+                (0 if w.writable else k.READ_ONLY)
+                | (k.INITIALLY_AVAILABLE if w.initially_available else 0)
+                for w in self.instances
+            ],
         ).items():
             self.a[name] = values
         return self.a
 
 
 class GraphCompiler:
-    def __init__(self, profile: TokenizerProfile, *, active_limit=32, seed=0,
-                 settings: ProjectSettings | None = None, max_rows=1_000_000):
+    def __init__(
+        self,
+        profile: TokenizerProfile,
+        *,
+        active_limit=32,
+        seed=0,
+        settings: ProjectSettings | None = None,
+        max_rows=1_000_000,
+    ):
         self.profile = TokenizerProfile.model_validate(profile.model_dump())
         self.controls = self.profile.special_tokens
         try:
@@ -244,12 +270,18 @@ class GraphCompiler:
             self.literal = Tokenizer.from_str(json.dumps(definition))
         except Exception as error:
             raise CompileError(f"Invalid tokenizer profile: {error}") from error
-        dedicated = {entry["id"]: entry["content"] for entry in self.profile.definition["added_tokens"]
-                     if entry.get("special") is True}
+        dedicated = {
+            entry["id"]: entry["content"]
+            for entry in self.profile.definition["added_tokens"]
+            if entry.get("special") is True
+        }
         for name, token in self.controls.items():
             spelling = dedicated[token]
-            if (self.tokenizer.id_to_token(token) != spelling or self.tokenizer.token_to_id(spelling) != token
-                    or self.tokenizer.encode(spelling, add_special_tokens=False).ids != [token]):
+            if (
+                self.tokenizer.id_to_token(token) != spelling
+                or self.tokenizer.token_to_id(spelling) != token
+                or self.tokenizer.encode(spelling, add_special_tokens=False).ids != [token]
+            ):
                 raise CompileError(f"Incompatible dedicated control: {name}")
         self.active_limit, self.seed, self.settings = active_limit, seed, settings
         if type(max_rows) is not int or max_rows < 1:
@@ -264,7 +296,9 @@ class GraphCompiler:
         except Exception as error:
             raise CompileError(f"Literal text cannot be encoded: {error}") from error
         if set(ids) & set(self.controls.values()):
-            raise CompileError("Literal text encodes as a control; use a tokenizer with literal coverage")
+            raise CompileError(
+                "Literal text encodes as a control; use a tokenizer with literal coverage"
+            )
         if value and not ids:
             raise CompileError("Tokenizer discards nonempty literal content")
         return [Token(i) for i in ids]
@@ -275,12 +309,16 @@ class GraphCompiler:
     def header(self, source, window, slot):
         w = source.windows[window]
         # Versioned grammar: JSON fields use ordinary tokens, bounded by CTX.
-        payload = json.dumps({"slot": slot, "purpose": w.purpose,
-                              "reasoning_effort": w.reasoning_effort},
-                             separators=(",", ":"), ensure_ascii=False)
-        return [self.control("ctx_begin", header=True),
-                *[Token(t.id, header=True) for t in self.text(payload)],
-                self.control("ctx_end", header=True)]
+        payload = json.dumps(
+            {"slot": slot, "purpose": w.purpose, "reasoning_effort": w.reasoning_effort},
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return [
+            self.control("ctx_begin", header=True),
+            *[Token(t.id, header=True) for t in self.text(payload)],
+            self.control("ctx_end", header=True),
+        ]
 
     def reference_alphabet(self):
         result = {}
@@ -294,11 +332,19 @@ class GraphCompiler:
     def event_tokens(self, event, runtime):
         tokens = []
         if event.kind == "tool_call" and event.insert_tool_begin:
-            tokens += [self.control("tool_begin"), *self.text(json.dumps(event.tool)), *self.text(":")]
+            tokens += [
+                self.control("tool_begin"),
+                *self.text(json.dumps(event.tool)),
+                *self.text(":"),
+            ]
         if event.kind == "tool_response" and event.insert_response_begin:
             tokens.append(self.control("response_begin"))
         if event.kind == "chat_message":
-            tokens += [self.control("msg_begin"), *self.text(json.dumps(event.chat.speaker)), *self.text(":")]
+            tokens += [
+                self.control("msg_begin"),
+                *self.text(json.dumps(event.chat.speaker)),
+                *self.text(":"),
+            ]
         pieces = event.content if isinstance(event.content, list) else [event.content]
         for piece in pieces:
             if isinstance(piece, WindowReference):
@@ -306,8 +352,10 @@ class GraphCompiler:
                 # can be resolved after scheduling even for a future/closed
                 # logical window, without a token-length/allocation cycle.
                 self.reference_alphabet()
-                tokens += [self.control("window_ref"), *[
-                    Token(None, reference=(piece.window, digit)) for digit in range(8)]]
+                tokens += [
+                    self.control("window_ref"),
+                    *[Token(None, reference=(piece.window, digit)) for digit in range(8)],
+                ]
             else:
                 tokens += self.text(piece if isinstance(piece, str) else piece.text)
         if event.kind == "tool_call" and event.insert_tool_end:
@@ -347,9 +395,11 @@ class GraphCompiler:
             e = source.events[ident]
             if not all(dep in done for dep in e.after):
                 return False
-            return all(t < tick or (t == tick and not was_model and
-                       (model(e) or e.delivery.chain_immediately))
-                       for t, was_model in (done[dep] for dep in e.after))
+            return all(
+                t < tick
+                or (t == tick and not was_model and (model(e) or e.delivery.chain_immediately))
+                for t, was_model in (done[dep] for dep in e.after)
+            )
 
         def begin(ident):
             e = source.events[ident]
@@ -383,9 +433,15 @@ class GraphCompiler:
                     tokens, opening, header = running[ident]
                     count = len(tokens) if e.delivery.mode == "instant" else min(1, len(tokens))
                     fragment = tuple(header + tokens[:count])
-                    emission = Emission(ident, e.window, fragment, False,
-                                        0. if e.supervision.masked else e.supervision.weight,
-                                        getattr(e, "replace_body", False) and ident not in started, opening)
+                    emission = Emission(
+                        ident,
+                        e.window,
+                        fragment,
+                        False,
+                        0.0 if e.supervision.masked else e.supervision.weight,
+                        getattr(e, "replace_body", False) and ident not in started,
+                        opening,
+                    )
                     # Apply input immediately so later same-phase events resolve references/state.
                     # Frame lowering below must not insert these rows a second time.
                     runtime.apply_inputs([emission])
@@ -421,21 +477,42 @@ class GraphCompiler:
                 # Empty non-opening events complete without inventing a text token.
                 if fragment:
                     busy.add(e.window)
-                    outputs.append(Emission(ident, e.window, fragment, True,
-                                            0. if e.supervision.masked else e.supervision.weight,
-                                            opening=opening))
+                    outputs.append(
+                        Emission(
+                            ident,
+                            e.window,
+                            fragment,
+                            True,
+                            0.0 if e.supervision.masked else e.supervision.weight,
+                            opening=opening,
+                        )
+                    )
                 running[ident] = [tokens[1:], False, []]
                 if len(tokens) <= 1:
                     done[ident] = (tick, True)
                     del running[ident]
             for window, index in sorted(runtime.live.items()):
                 if runtime.instances[index].writable and window not in busy:
-                    outputs.append(Emission(None, window, (self.control("noop"),), True,
-                                            source.defaults.noop_loss_weight))
+                    outputs.append(
+                        Emission(
+                            None,
+                            window,
+                            (self.control("noop"),),
+                            True,
+                            source.defaults.noop_loss_weight,
+                        )
+                    )
             # When Available is being activated it already has an output this pass.
             if not any(e.opening for e in outputs):
-                outputs.append(Emission(None, "@available", (self.control("noop"),), True,
-                                        source.defaults.noop_loss_weight))
+                outputs.append(
+                    Emission(
+                        None,
+                        "@available",
+                        (self.control("noop"),),
+                        True,
+                        source.defaults.noop_loss_weight,
+                    )
+                )
             frame = Frame(tick, tuple(inputs), tuple(outputs))
             # Inputs have already advanced the runtime; preserve frame's full row span.
             runtime.apply(Frame(tick, (), tuple(outputs)))
@@ -446,10 +523,20 @@ class GraphCompiler:
             tick += 1
         # Keep one final all-NOOP decision when writable windows remain open.
         if not last_was_noop:
-            outputs = [Emission(None, w, (self.control("noop"),), True, source.defaults.noop_loss_weight)
-                       for w, i in sorted(runtime.live.items()) if runtime.instances[i].writable]
-            outputs.append(Emission(None, "@available", (self.control("noop"),), True,
-                                    source.defaults.noop_loss_weight))
+            outputs = [
+                Emission(None, w, (self.control("noop"),), True, source.defaults.noop_loss_weight)
+                for w, i in sorted(runtime.live.items())
+                if runtime.instances[i].writable
+            ]
+            outputs.append(
+                Emission(
+                    None,
+                    "@available",
+                    (self.control("noop"),),
+                    True,
+                    source.defaults.noop_loss_weight,
+                )
+            )
             frame = Frame(tick, (), tuple(outputs))
             if cancelled():
                 raise Cancelled("Compilation cancelled")
@@ -459,15 +546,20 @@ class GraphCompiler:
             yield frame
 
     def compile(self, source, *, cancelled=lambda: False):
-        source = GraphSource.model_validate(source.to_dict() if isinstance(source, GraphSource) else source)
+        source = GraphSource.model_validate(
+            source.to_dict() if isinstance(source, GraphSource) else source
+        )
         runtime = self._runtime_for(source)
         frames = list(self._frames(source, runtime, cancelled=cancelled))
         if runtime.references:
             runtime.resolve_references(self.reference_alphabet())
         return runtime.columns(), {
-            "compiler": VERSION, "execution_contract": CONTRACT,
-            "source_hash": source.intrinsic_hash, "profile": self.profile.fingerprint,
-            "seed": self.seed, "peak_active_windows": runtime.peak,
+            "compiler": VERSION,
+            "execution_contract": CONTRACT,
+            "source_hash": source.intrinsic_hash,
+            "profile": self.profile.fingerprint,
+            "seed": self.seed,
+            "peak_active_windows": runtime.peak,
             "model_ticks": [f.tick for f in frames],
             "logical_windows": [w.logical for w in runtime.instances],
         }
@@ -475,7 +567,9 @@ class GraphCompiler:
     def preview(self, source, *, max_frames=1000, cancelled=lambda: False):
         if type(max_frames) is not int or max_frames < 1:
             raise ValueError("max_frames must be positive")
-        source = GraphSource.model_validate(source.to_dict() if isinstance(source, GraphSource) else source)
+        source = GraphSource.model_validate(
+            source.to_dict() if isinstance(source, GraphSource) else source
+        )
         frames = []
         truncated = False
         for frame in self.frames(source, cancelled=cancelled):
@@ -483,6 +577,17 @@ class GraphCompiler:
                 truncated = True
                 break
             frames.append(frame)
-        return {"cache_key": digest([VERSION, source.intrinsic_hash, self.profile.fingerprint,
-                                     self.seed, self.active_limit]),
-                "source_hash": source.intrinsic_hash, "frames": frames, "truncated": truncated}
+        return {
+            "cache_key": digest(
+                [
+                    VERSION,
+                    source.intrinsic_hash,
+                    self.profile.fingerprint,
+                    self.seed,
+                    self.active_limit,
+                ]
+            ),
+            "source_hash": source.intrinsic_hash,
+            "frames": frames,
+            "truncated": truncated,
+        }
