@@ -7,7 +7,6 @@ import pytest
 
 from trajectory_remix import metrics
 from trajectory_remix.compiler import Compiler, visible_to
-from trajectory_remix.server import create_app
 from trajectory_remix.storage import DatasetStore, SQLiteSamples
 
 

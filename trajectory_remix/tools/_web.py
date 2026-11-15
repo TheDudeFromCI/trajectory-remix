@@ -55,7 +55,7 @@ def url_key(value, base=None):
                 or parts.username is not None or parts.password is not None
                 or any(char.isspace() or ord(char) < 32 for char in value)):
             raise ValueError()
-        parts.port
+        _ = parts.port  # accessing .port validates it (raises ValueError)
     except ValueError:
         raise ToolError("URL must use http/https, with a host, valid port and no credentials or whitespace") from None
     value = urldefrag(value)[0]

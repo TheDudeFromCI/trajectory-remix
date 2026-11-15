@@ -8,3 +8,5 @@ tests/node_modules/
 .env
 work/
 /experiments/
+build/
+.ruff_cache/

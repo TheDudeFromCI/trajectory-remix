@@ -143,7 +143,8 @@ class ValidationRunner(ModelSession):
         if not resume and _batch is None:
             self.logs.clear()
         self.started = time.monotonic()
-        self.resume_event = asyncio.Event(); self.resume_event.set()
+        self.resume_event = asyncio.Event()
+        self.resume_event.set()
         self.limit = asyncio.Semaphore(1)
         self.first_prompts, self.first_prompt_paths = {}, {}
         self.builder = SampleBuilder(self.compiler, self.config)
@@ -202,7 +203,8 @@ class ValidationRunner(ModelSession):
                            endpoint=endpoint, auto_repair=True, record=True)
         if not resume:
             self.status['sample_id'] = None
-        self.resume_event = asyncio.Event(); self.resume_event.set()
+        self.resume_event = asyncio.Event()
+        self.resume_event.set()
         self.persist()
         self.job = asyncio.create_task(self.run_all(batch, resume))
         self.job.add_done_callback(lambda task: None if task.cancelled() else task.exception())
@@ -481,12 +483,14 @@ class ValidationRunner(ModelSession):
         view = ReviewView(
             draft, plan, definition, self.compiler.tokenizer, tools=self.compiler.tools
         )
-        fits = lambda payload: (
-            budget is None or self.prompt_tokens(
-                step, payload, context, schema, definition.prompt, definition.rules
+        def fits(payload):
+            return (
+                budget is None or self.prompt_tokens(
+                    step, payload, context, schema, definition.prompt, definition.rules
+                )
+                <= budget - (min(128, budget // 4) if step.review_retries else 0)
             )
-            <= budget - (min(128, budget // 4) if step.review_retries else 0)
-        )
+
         try:
             groups = list(view.groups(inputs, fits))
         except ValueError:

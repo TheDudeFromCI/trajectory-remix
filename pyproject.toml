@@ -13,6 +13,7 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "tokenizers>=0.20,<1", 
 inference = ["transformers>=4.45,<6", "jinja2>=3.1,<4"]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
 mcp = ["mcp>=1.26,<2"]
+lint = ["ruff>=0.15,<1"]
 
 [project.scripts]
 trajectory-remix = "trajectory_remix.__main__:main"
@@ -26,3 +27,23 @@ asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]
 include = ["trajectory_remix*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["tests/node_modules"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "UP"]
+# Zipped sequences here are intentionally length-tolerant; revisit with the formatting cleanup.
+ignore = ["B905"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package-level re-exports.
+"trajectory_remix/tools/__init__.py" = ["F401"]
+# Closures defined in loops; not yet audited for late-binding. Review during the cleanup pass.
+"trajectory_remix/sandbox_replay.py" = ["B023"]
+"trajectory_remix/trajectory_review.py" = ["B023"]
+"trajectory_remix/tools/_web.py" = ["B023"]
+# Imports follow a deliberate setup block; shared default is read-only by convention.
+"trajectory_remix/tools/runtime.py" = ["E402", "B039"]

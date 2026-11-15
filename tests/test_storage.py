@@ -3,7 +3,6 @@ import subprocess
 import sys
 import tracemalloc
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import httpx
 import pytest

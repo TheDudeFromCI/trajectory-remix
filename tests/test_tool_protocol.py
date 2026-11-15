@@ -2,7 +2,6 @@
 
 import copy
 import json
-from pathlib import Path
 from types import ModuleType
 
 import pytest

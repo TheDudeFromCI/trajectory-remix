@@ -45,9 +45,9 @@ with tempfile.TemporaryDirectory(prefix="remix-ui-") as temp:
             try:
                 urllib.request.urlopen(base, timeout=1).close()
                 break
-            except OSError:
+            except OSError as error:
                 if server.poll() is not None:
-                    raise RuntimeError("Dashboard process exited before serving")
+                    raise RuntimeError("Dashboard process exited before serving") from error
                 time.sleep(0.1)
         else:
             raise RuntimeError("Dashboard did not become available")

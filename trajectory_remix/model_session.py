@@ -35,7 +35,7 @@ from .dataset import reject_constant
 from .generation_stats import RequestStats
 from .review import checklist_instructions, compact, count, unique_json_object
 
-from .llm import EndpointHTTPError, selected_windows
+from .llm import EndpointHTTPError
 from .structured_output import native_output, response_format
 
 

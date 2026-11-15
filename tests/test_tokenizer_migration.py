@@ -9,7 +9,6 @@ from trajectory_remix.authoring import CommandError
 from trajectory_remix.compiler import Compiler
 from trajectory_remix.dataset import new_sample
 from trajectory_remix.server import create_app
-from trajectory_remix.storage import DatasetStore
 from trajectory_remix.tools import ToolRegistry
 
 

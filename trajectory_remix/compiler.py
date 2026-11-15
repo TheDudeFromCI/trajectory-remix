@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from tokenizers import Tokenizer
 
 from .dataset import trajectory_uuid
-from .tools import ToolError, default_registry, tool_message, tool_request, tool_text
+from .tools import ToolError, default_registry, tool_request, tool_text
 
 ANCHOR = re.compile(r"\{N_TICK:(\d+)\}")
 WINDOW = re.compile(r"\{WINDOW:([^{}\r\n]+)\}")

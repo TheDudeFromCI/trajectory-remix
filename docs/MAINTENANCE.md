@@ -148,7 +148,8 @@ See [MCP](MCP.md), [MCP-AUTHORING](MCP-AUTHORING.md), [STORAGE](STORAGE.md), [SC
 
 Run commands from the repository root. `bash scripts/install.sh` creates `.venv`
 and installs the application with test and MCP extras; use an existing working
-environment when available. Python 3.11+ is required; DOM checks need Node 22+.
+environment when available. Python 3.11+ is required; DOM checks need Node 22+. CI (`.github/workflows/ci.yml`)
+runs the same lint, test, frontend and packaging checks on every pull request.
 
 ```bash
 # Run a focused regression first; choose the files relevant to the change.
@@ -162,7 +163,8 @@ npm ci --prefix tests
 .venv/bin/python tests/run_frontend.py
 .venv/bin/python tests/run_frontend.py editor-state.test.mjs
 
-# Check modified JavaScript and patch whitespace.
+# Lint Python (pip install -e ".[lint]"), then check modified JavaScript and patch whitespace.
+ruff check .
 node --check trajectory_remix/static/app.js
 git diff --check
 ```

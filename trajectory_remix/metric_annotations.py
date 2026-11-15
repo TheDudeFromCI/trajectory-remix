@@ -2,7 +2,7 @@
 
 import json
 
-from .metrics import DOMAINS, OUTCOMES, REQUIRED, annotation_issues
+from .metrics import DOMAINS, OUTCOMES, annotation_issues
 
 FIELD_DEFINITIONS = {
     "primary_domain": {"basis": "review_trace", "values": DOMAINS,

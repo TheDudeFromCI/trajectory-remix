@@ -20,8 +20,8 @@ def test_adapter_never_exposes_own_or_same_tick_target(compiler, sample):
             assert not (allowed and k["tick"] == q["tick"] and k["phase"] == "D")
             assert not (allowed and k["tick"] > q["tick"])
     assert all(
-        p != l
-        for p, l in zip(batch["query_previous_token_ids"][:2], batch["labels"][:2])
+        p != label
+        for p, label in zip(batch["query_previous_token_ids"][:2], batch["labels"][:2])
     )
 
 

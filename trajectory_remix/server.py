@@ -28,7 +28,7 @@ from .dataset import (
     reject_constant,
     training_eligible,
 )
-from .llm import TAGS, SampleBuilder, validate_config
+from .llm import TAGS, validate_config
 from .runner import Runner
 from .scenarios import ScenarioRegistry, check_scenario_endpoints
 from .scenario_runner import ScenarioRunner
@@ -184,8 +184,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 raise HTTPException(413, "Request exceeds 40 MB")
         try:
             data = json.loads(raw, parse_constant=reject_constant)
-        except (ValueError, UnicodeDecodeError):
-            raise HTTPException(422, "Invalid JSON body")
+        except (ValueError, UnicodeDecodeError) as error:
+            raise HTTPException(422, "Invalid JSON body") from error
         if not isinstance(data, dict):
             raise HTTPException(422, "Request must be a JSON object")
         return data
@@ -745,7 +745,8 @@ def create_app(dataset: Path, client=None, mcp_allowed_origins=(), tools_dir=Non
                 with store.connect() as db:
                     row = db.execute("SELECT snapshot FROM generation_jobs WHERE id=?", (job_id,)).fetchone()
                     if row:
-                        saved = json.loads(row[0]); saved["checkpoint"]["expected_draft"] = sample
+                        saved = json.loads(row[0])
+                        saved["checkpoint"]["expected_draft"] = sample
                         saved["checkpoint"]["state_override"] = level
                         db.execute("UPDATE generation_jobs SET snapshot=? WHERE id=?", (json.dumps(saved), job_id))
         return {"ok": True}

@@ -1362,7 +1362,7 @@ class TrajectoryCommands:
         }
         if semantic:
             self._editable(None, sample_id)
-            sample = copy.deepcopy(self._find(sample_id)[1])
+            self._find(sample_id)  # raises if the sample is missing
             validator = getattr(self.runner, 'validation_runner', None)
             if validator is None:
                 from .validation import ValidationRunner
@@ -1660,9 +1660,12 @@ class TrajectoryCommands:
                     raise CommandError("History action changes the active trajectory", "busy")
                 if operation.get("value", {}).get("id") == scenario.status["draft_id"]:
                     raise CommandError("History action changes the active trajectory", "busy")
-                if operation["op"] == "add": preview.insert(index, operation["value"])
-                elif operation["op"] == "remove": del preview[index]
-                else: preview[index] = operation["value"]
+                if operation["op"] == "add":
+                    preview.insert(index, operation["value"])
+                elif operation["op"] == "remove":
+                    del preview[index]
+                else:
+                    preview[index] = operation["value"]
 
     @command(write=True, destructive=True)
     def undo_edits(
@@ -1911,9 +1914,9 @@ class TrajectoryCommands:
                            for w in plan["windows"] if w["close"] is None]
             metadata = sample.get("metadata", {})
             context = {"windows": windows, "agent_name": metadata.get("agent_name", "Kidra") if isinstance(metadata, dict) else "Kidra"}
-            recorder = lambda entry: self._record_interaction(
-                record_sample_id, entry, expected_revision
-            )
+            def recorder(entry):
+                return self._record_interaction(record_sample_id, entry, expected_revision)
+
         return await self.tool_sessions.call(
             session_id, name, arguments, recorder, context, outcome
         )

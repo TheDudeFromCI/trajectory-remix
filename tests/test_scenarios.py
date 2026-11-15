@@ -989,7 +989,6 @@ def test_chat_delivery_requires_a_successful_visible_reply(
             }
         ]
         plan = compiler.compile(sample)
-    runner = app_for(tmp_path, compiler, ScenarioClient()).state.scenario_runner
     from trajectory_remix.validation import ValidationRunner
     report = ValidationRunner.chat_delivery_report(sample, plan)
     assert report["valid"] == (kind == "success")

@@ -1,11 +1,9 @@
 import copy
-import json
 from datetime import datetime
 
 import pytest
 
 from trajectory_remix.dataset import trajectory_uuid
-from trajectory_remix.llm import SampleBuilder, default_config
 from trajectory_remix.tool_sessions import ToolSessions
 from trajectory_remix.tools import SCHEMAS, Sandbox, ToolError
 

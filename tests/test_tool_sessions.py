@@ -1,11 +1,8 @@
-from trajectory_remix.storage import DatasetStore
-import asyncio
 import copy
 import json
 
 import pytest
 
-from trajectory_remix.authoring import CommandError
 from trajectory_remix.tool_sessions import ToolSessionError, ToolSessions
 
 
@@ -363,7 +360,6 @@ async def test_authored_subagent_can_be_recorded_without_provider_access(
     )
     assert result["interaction"]["outcome"]["result"]["conversationId"] == "reviewer"
     source = (await call(studio, "get_trajectory", sample_id="test"))["sample"]
-    plan = compiler.compile(source)
     # Recording represents a curated observation; executable source authoring uses create_tool_call.
     observations = [
         e

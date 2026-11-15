@@ -76,7 +76,7 @@ async def test_subagent_uses_only_authored_replies():
         "conversationId": "conversation-1",
         "response": "Authored inspection",
     }
-    with pytest.raises(ToolError, match="authored response") as error:
+    with pytest.raises(ToolError, match="authored response"):
         await sandbox.call(
             "subagent", {"task": "Explain", "resume": result["conversationId"]}
         )

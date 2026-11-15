@@ -20,7 +20,7 @@ def _run(runtime, args, windows):
         "synthetic": True,
         "calls": runtime.calls,
         "tasks": {
-            status: sum((n["status"] == status for n in runtime.notes.values()))
+            status: sum(n["status"] == status for n in runtime.notes.values())
             for status in STATUSES
         },
         "subagents": [runtime.conversation_summary(k) for k in runtime.conversations],

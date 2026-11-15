@@ -1,0 +1,34 @@
+"""Verify an installed trajectory_remix wheel ships its package data.
+
+Run with the interpreter of a clean environment, from outside the source checkout:
+    python scripts/check_package.py
+"""
+
+import importlib.resources as resources
+import subprocess
+import sys
+
+REQUIRED = [
+    "static/index.html",
+    "static/app.js",
+    "static/style.css",
+    "Skill.md",
+]
+
+
+def main() -> int:
+    root = resources.files("trajectory_remix")
+    missing = [name for name in REQUIRED if not root.joinpath(name).is_file()]
+    for pattern_dir in ("guides", "scenario_templates", "review_templates"):
+        if not root.joinpath(pattern_dir).is_dir() or not any(root.joinpath(pattern_dir).iterdir()):
+            missing.append(pattern_dir + "/")
+    if missing:
+        print("Missing package data:", ", ".join(missing), file=sys.stderr)
+        return 1
+    subprocess.run([sys.executable, "-m", "trajectory_remix", "--help"], check=True)
+    print("Package data OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

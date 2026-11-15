@@ -9,9 +9,9 @@ import pytest
 
 from trajectory_remix.server import create_app
 from trajectory_remix.scenarios import ScenarioRegistry
-from trajectory_remix.trajectory_review import build_checklist, public_checklist
+from trajectory_remix.trajectory_review import build_checklist
 from test_authoring import call, source
-from test_scenarios import EXAMPLES, ScenarioClient, app_for, finish, write_scenario
+from test_scenarios import EXAMPLES, ScenarioClient, app_for, write_scenario
 
 
 async def configure(studio):
@@ -169,7 +169,7 @@ async def test_snapshot_is_portable_and_preserved_when_registry_changes(studio):
 
 
 async def test_legacy_metadata_fallback_unknown_and_conflicting_scenarios(studio, tmp_path):
-    prepared = await configure(studio)
+    await configure(studio)
     await call(studio, 'update_trajectory_metadata', sample_id='test', patch={'metadata': {
         'tags': ['coding'], 'scenario': 'user_problem',
     }})

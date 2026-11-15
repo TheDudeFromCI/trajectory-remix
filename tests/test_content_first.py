@@ -9,9 +9,7 @@ import pytest
 
 from trajectory_remix.content_first import RequestBudget, dataset_generation_metrics
 from trajectory_remix.dataset import training_eligible
-from trajectory_remix.scenarios import ScenarioRegistry
 from trajectory_remix.server import create_app
-from trajectory_remix.storage import DatasetStore
 from trajectory_remix.training import query_batch
 from test_scenarios import app_for, finish, ScenarioClient
 
