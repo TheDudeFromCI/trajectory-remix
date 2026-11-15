@@ -1,5 +1,6 @@
 """Historical phase semantics retained only as a compiler regression oracle."""
 
+
 def visible_to(query: dict, key: dict, windows: list[dict]) -> bool:
     """Exact causal attention predicate for a target query, before target commit.
 
@@ -34,4 +35,3 @@ def visible_to(query: dict, key: dict, windows: list[dict]) -> bool:
             key["phase"] == "B" and key["input_rank"] < query["input_rank"]
         )
     return False
-

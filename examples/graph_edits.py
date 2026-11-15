@@ -1,4 +1,5 @@
 """Small graph edit/CAS example; creates only the supplied new project path."""
+
 import argparse
 import json
 from pathlib import Path
@@ -28,8 +29,16 @@ def main():
     repaired = commands.remove_dependency(ident, "think", "input", 3)
     assert not repaired.has_errors
     assert commands.read(ident, 1).record == created.record
-    print(json.dumps({"trajectory_id": ident, "revision": repaired.record.revision,
-                      "commit_id": repaired.record.commit_id, "errors": repaired.has_errors}))
+    print(
+        json.dumps(
+            {
+                "trajectory_id": ident,
+                "revision": repaired.record.revision,
+                "commit_id": repaired.record.commit_id,
+                "errors": repaired.has_errors,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

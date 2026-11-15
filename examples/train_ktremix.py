@@ -5,23 +5,37 @@ See docs/KTREMIX-TRAINING-DEMO.md. Run from a source checkout:
   python examples/train_ktremix.py run /tmp/letter-addition --user-machine
 No provider endpoints, downloads of model weights, or teacher model are used.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import platform
-from pathlib import Path
 import random
 import time
+from pathlib import Path
 
+import ktremix_dataset as k
 import numpy as np
 import torch
+from ktremix_training_data import (
+    BOS,
+    CONTRACT,
+    CONTROLS,
+    EOS,
+    NOOP,
+    VOCAB,
+    Emission,
+    Frame,
+    Token,
+    build_dataset,
+    check_training_report,
+    compiler,
+    timing_report,
+)
 from torch import nn
 from torch.nn import functional as F
 
-import ktremix_dataset as k
-from ktremix_training_data import (BOS, EOS, NOOP, VOCAB, CONTRACT, Frame,
-                                    Emission, Token, CONTROLS, compiler, build_dataset, timing_report, check_training_report)
 from trajectory_remix.graph.models import GraphSource
 
 
@@ -32,6 +46,7 @@ class GlobalSharedKV(nn.Module):
     target token is used to initialize its prediction query. Both paths obey
     per-row construction frontiers at EVERY layer, preventing indirect leakage.
     """
+
     def __init__(self):
         super().__init__()
         self.norm = nn.LayerNorm(48)
@@ -42,7 +57,9 @@ class GlobalSharedKV(nn.Module):
         # Generic local-position prior, not a task-specific retrieval mask.
         # Each head uses a different scale; content projections learn freely.
         offsets = torch.arange(-64, 65).abs().float()
-        self.register_buffer("relative_bias", -torch.tensor([.25, .5, 1., 2.])[:, None] * offsets)
+        self.register_buffer(
+            "relative_bias", -torch.tensor([0.25, 0.5, 1.0, 2.0])[:, None] * offsets
+        )
         self.ff_norm = nn.LayerNorm(48)
         self.ff = nn.Sequential(
             nn.Linear(48, 144, bias=False),
@@ -56,7 +73,7 @@ class GlobalSharedKV(nn.Module):
         query = query.view(batch_size, sequence_length, 4, 12).transpose(1, 2)
         relative = (memory_positions[:, None, :] - query_positions[:, :, None]).clamp(-64, 64) + 64
         bias = self.relative_bias[:, relative].permute(1, 0, 2, 3)
-        bias = bias.masked_fill(~allowed[:, None], float('-inf'))
+        bias = bias.masked_fill(~allowed[:, None], float("-inf"))
         attended = F.scaled_dot_product_attention(
             query,
             key.expand(-1, 4, -1, -1),
@@ -69,14 +86,18 @@ class GlobalSharedKV(nn.Module):
         )
         return values + self.ff(self.ff_norm(values))
 
-    def forward(self, memory, queries, memory_allowed, query_allowed, memory_positions, query_positions):
+    def forward(
+        self, memory, queries, memory_allowed, query_allowed, memory_positions, query_positions
+    ):
         normed = self.norm(memory)
         key = self.k(normed)[:, None]
         value = self.v(normed)[:, None]
         # Both paths read the same pre-layer bank: queries cannot see memory
         # updates from this layer, which keeps the layer's depth well-defined.
-        return (self.attend(memory, key, value, memory_allowed, memory_positions, memory_positions),
-                self.attend(queries, key, value, query_allowed, query_positions, memory_positions))
+        return (
+            self.attend(memory, key, value, memory_allowed, memory_positions, memory_positions),
+            self.attend(queries, key, value, query_allowed, query_positions, memory_positions),
+        )
 
 
 class TinyKidra(nn.Module):
@@ -92,7 +113,7 @@ class TinyKidra(nn.Module):
     @staticmethod
     def initialize(module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            nn.init.normal_(module.weight, std=.02)
+            nn.init.normal_(module.weight, std=0.02)
 
     def embed(self, tokens, windows, positions):
         return self.tokens(tokens) + self.windows(windows) + self.positions(positions)
@@ -123,8 +144,14 @@ class TinyKidra(nn.Module):
             query = queries[:, start:end]
             construction = batch["memory_allowed"] & live[:, None, :]
             for layer in self.layers:
-                live_memory, query = layer(live_memory, query, construction, current,
-                    batch["memory_positions"], batch["query_positions"][:, start:end])
+                live_memory, query = layer(
+                    live_memory,
+                    query,
+                    construction,
+                    current,
+                    batch["memory_positions"],
+                    batch["query_positions"][:, start:end],
+                )
             outputs.append(F.linear(self.norm(query), self.tokens.weight))
             start = end
         return torch.cat(outputs, dim=1)
@@ -170,9 +197,12 @@ def collate(samples, device="cpu", *, inference_queries=None):
             header_ends.setdefault(int(arrays["window_ids"][row]), int(arrays["position_ids"][row]))
         task_letters = np.zeros(len(labels), dtype=np.bool_)
         if inference_queries is None:
-            task_letters = (labels < 26) & np.asarray([
-                position > header_ends.get(int(window), float("inf"))
-                for window, position in zip(target_windows, query_positions)])
+            task_letters = (labels < 26) & np.asarray(
+                [
+                    position > header_ends.get(int(window), float("inf"))
+                    for window, position in zip(target_windows, query_positions)
+                ]
+            )
         visible_from = arrays["visible_from"][memory_rows]
         visible_until = arrays["visible_until"][memory_rows]
         construction_frontiers = arrays["query_frontiers"][memory_rows]
@@ -220,9 +250,9 @@ def collate(samples, device="cpu", *, inference_queries=None):
         for i, item in enumerate(items):
             value = item[name]
             if value.ndim == 2:
-                out[i, :value.shape[0], :value.shape[1]] = value
+                out[i, : value.shape[0], : value.shape[1]] = value
             else:
-                out[i, :len(value)] = value
+                out[i, : len(value)] = value
         # Padding is zero-filled. The attention masks exclude padded memory rows.
         batch[name] = torch.from_numpy(out).to(device)
     return batch
@@ -241,10 +271,12 @@ def objective(logits, batch):
 @torch.no_grad()
 def evaluate(model, dataset, batch_size, device):
     model.eval()
-    total_loss, total, correct, exact = 0., 0, 0, 0
+    total_loss, total, correct, exact = 0.0, 0, 0, 0
     groups = {"letters": [0, 0], "header_letters": [0, 0], "noop": [0, 0], "eos": [0, 0]}
     for offset in range(0, len(dataset), batch_size):
-        b = collate([dataset[i] for i in range(offset, min(len(dataset), offset + batch_size))], device)
+        b = collate(
+            [dataset[i] for i in range(offset, min(len(dataset), offset + batch_size))], device
+        )
         logits = model(b)
         valid = b["weights"] > 0
         matches = logits.argmax(-1) == b["labels"]
@@ -253,17 +285,22 @@ def evaluate(model, dataset, batch_size, device):
         total += n
         correct += int((matches & valid).sum())
         exact += int((matches | ~valid).all(-1).sum())
-        for name, mask in (("letters", b["task_letters"].bool()),
-                           ("header_letters", (b["labels"] < 26) & ~b["task_letters"].bool()),
-                           ("noop", b["labels"] == NOOP),
-                           ("eos", b["labels"] == EOS)):
+        for name, mask in (
+            ("letters", b["task_letters"].bool()),
+            ("header_letters", (b["labels"] < 26) & ~b["task_letters"].bool()),
+            ("noop", b["labels"] == NOOP),
+            ("eos", b["labels"] == EOS),
+        ):
             selected = mask & valid
             groups[name][0] += int((matches & selected).sum())
             groups[name][1] += int(selected.sum())
-    return {"loss": total_loss / total, "token_accuracy": correct / total,
-            "exact_trajectory_accuracy": exact / len(dataset),
-            **{name + "_accuracy": a / b if b else 0. for name, (a, b) in groups.items()},
-            **{name + "_targets": b for name, (a, b) in groups.items()}}
+    return {
+        "loss": total_loss / total,
+        "token_accuracy": correct / total,
+        "exact_trajectory_accuracy": exact / len(dataset),
+        **{name + "_accuracy": a / b if b else 0.0 for name, (a, b) in groups.items()},
+        **{name + "_targets": b for name, (a, b) in groups.items()},
+    }
 
 
 @torch.no_grad()
@@ -282,10 +319,14 @@ def rollout(model, sources, device, *, seed=17):
         c = compiler(seed)
         schedule = list(c.frames(source))
         timing = timing_report(source, schedule)
-        input_ready_timing_satisfied &= timing['input_ready_timing_satisfied']
-        external_inputs_independent &= timing['external_inputs_independent']
-        expected = {f.tick: e.tokens[0].id for f in schedule for e in f.outputs
-                    if e.event and e.window == "result"}
+        input_ready_timing_satisfied &= timing["input_ready_timing_satisfied"]
+        external_inputs_independent &= timing["external_inputs_independent"]
+        expected = {
+            f.tick: e.tokens[0].id
+            for f in schedule
+            for e in f.outputs
+            if e.event and e.window == "result"
+        }
         external = {f.tick: f.inputs for f in schedule if f.inputs}
         runtime = c._runtime_for(source)
         observed, malformed, sleeping = {}, False, False
@@ -296,26 +337,36 @@ def rollout(model, sources, device, *, seed=17):
             runtime.apply_inputs(inputs)
             if sleeping and not inputs:
                 continue
-            live = [(w, i) for w, i in sorted(runtime.live.items()) if runtime.instances[i].writable]
+            live = [
+                (w, i) for w, i in sorted(runtime.live.items()) if runtime.instances[i].writable
+            ]
             live.append(("@available", runtime.available))
             queries = []
-            for w, index in live:
+            for _window, index in live:
                 previous = runtime._latest(index)
                 position = runtime.a["position_ids"][previous] + 1
                 if position >= 128:
                     malformed = True
                     break
-                queries.append((runtime.a["token_ids"][previous], runtime.instances[index].slot,
-                                position, runtime.frontier))
+                queries.append(
+                    (
+                        runtime.a["token_ids"][previous],
+                        runtime.instances[index].slot,
+                        position,
+                        runtime.frontier,
+                    )
+                )
             if malformed:
                 break
             prediction = model(collate([runtime.columns()], device, inference_queries=[queries]))
-            tokens = prediction[0, :len(queries)].argmax(-1).tolist()
+            tokens = prediction[0, : len(queries)].argmax(-1).tolist()
             outputs = []
-            for (window, index), token in zip(live, tokens):
+            for (window, _index), token in zip(live, tokens):
                 opening = False
                 if window == "@available" and token != NOOP:
-                    if "result" in runtime.live or any(w.logical == "result" for w in runtime.instances):
+                    if "result" in runtime.live or any(
+                        w.logical == "result" for w in runtime.instances
+                    ):
                         malformed = True
                         break
                     window, opening = "result", True
@@ -325,28 +376,46 @@ def rollout(model, sources, device, *, seed=17):
                 control = next((name for name, value in CONTROLS.items() if value == token), None)
                 if window == "result" and token != NOOP:
                     observed[tick] = token
-                outputs.append(Emission(None, window, (Token(token, control),), True, 1., opening=opening))
+                outputs.append(
+                    Emission(None, window, (Token(token, control),), True, 1.0, opening=opening)
+                )
             if malformed:
                 break
             runtime.apply(Frame(tick, (), tuple(outputs)))
             sleeping = all(t == NOOP for t in tokens)
             if any(e.tokens[0].control == "eos" and e.window == "result" for e in outputs):
                 break
-        letter_ticks = {f.tick for f in schedule for e in f.outputs
-                        if e.event and e.event.startswith("sum-") and e.tokens[0].control != "eos"}
+        letter_ticks = {
+            f.tick
+            for f in schedule
+            for e in f.outputs
+            if e.event and e.event.startswith("sum-") and e.tokens[0].control != "eos"
+        }
         letters_correct += sum(observed.get(tick) == expected[tick] for tick in letter_ticks)
         passed = not malformed and observed == expected
         exact += int(passed)
         failures += int(malformed)
         if len(examples) < 3:
-            examples.append(dict(id=source.id, expected=expected, observed=observed,
-                                 exact=passed, malformed=malformed, timing=timing))
-    return dict(trajectories=len(sources), exact_timing_and_closure_accuracy=exact / len(sources),
-                letters_at_correct_tick_accuracy=letters_correct / (10 * len(sources)),
-                malformed_trajectories=failures, examples=examples,
-                scored_timing_policy='earliest-legal-after-streamed-header-and-prior-output',
-                external_inputs_independent=external_inputs_independent,
-                input_ready_timing_satisfied=input_ready_timing_satisfied)
+            examples.append(
+                dict(
+                    id=source.id,
+                    expected=expected,
+                    observed=observed,
+                    exact=passed,
+                    malformed=malformed,
+                    timing=timing,
+                )
+            )
+    return dict(
+        trajectories=len(sources),
+        exact_timing_and_closure_accuracy=exact / len(sources),
+        letters_at_correct_tick_accuracy=letters_correct / (10 * len(sources)),
+        malformed_trajectories=failures,
+        examples=examples,
+        scored_timing_policy="earliest-legal-after-streamed-header-and-prior-output",
+        external_inputs_independent=external_inputs_independent,
+        input_ready_timing_satisfied=input_ready_timing_satisfied,
+    )
 
 
 def synchronize(device):
@@ -354,20 +423,35 @@ def synchronize(device):
         torch.cuda.synchronize(device)
 
 
-def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_every=500,
-          learning_rate=.002, rollout_count=64):
+def train(
+    directory,
+    *,
+    steps=3000,
+    batch_size=16,
+    seed=17,
+    device="cpu",
+    eval_every=500,
+    learning_rate=0.002,
+    rollout_count=64,
+):
     directory = Path(directory)
     torch.manual_seed(seed)
     rng = random.Random(seed)
     model = TinyKidra().to(device)
     count = sum(p.numel() for p in model.parameters())
     assert 45000 <= count <= 55000, count
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=.01)
-    timing = {"sample_seconds": 0., "collate_and_transfer_seconds": 0.,
-              "forward_backward_optimizer_seconds": 0., "evaluation_seconds": 0.}
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+    timing = {
+        "sample_seconds": 0.0,
+        "collate_and_transfer_seconds": 0.0,
+        "forward_backward_optimizer_seconds": 0.0,
+        "evaluation_seconds": 0.0,
+    }
     target_count, row_count, history = 0, 0, []
-    with k.Dataset(sorted(directory.glob("train-*.ktremix")), verify_index=True) as data, \
-         k.Dataset(sorted(directory.glob("validation-*.ktremix")), verify_index=True) as validation:
+    with (
+        k.Dataset(sorted(directory.glob("train-*.ktremix")), verify_index=True) as data,
+        k.Dataset(sorted(directory.glob("validation-*.ktremix")), verify_index=True) as validation,
+    ):
         for shard in data.shards + validation.shards:
             if shard.manifest["execution_contract"] != CONTRACT:
                 raise ValueError("Wrong training execution contract")
@@ -393,7 +477,7 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
             optimizer.zero_grad(set_to_none=True)
             loss = objective(model(batch), batch)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             synchronize(device)
             timing["forward_backward_optimizer_seconds"] += time.perf_counter() - before
@@ -408,7 +492,9 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
         train_elapsed = time.perf_counter() - start
         source_lines = (directory / "validation.jsonl").read_text().splitlines()[:rollout_count]
         before = time.perf_counter()
-        free_running = rollout(model, [json.loads(line) for line in source_lines], device, seed=seed)
+        free_running = rollout(
+            model, [json.loads(line) for line in source_lines], device, seed=seed
+        )
         synchronize(device)
         timing["evaluation_seconds"] += time.perf_counter() - before
     active_phases = (
@@ -419,18 +505,39 @@ def train(directory, *, steps=3000, batch_size=16, seed=17, device="cpu", eval_e
     active_seconds = sum(timing[name] for name in active_phases)
     # Saving a state_dict is for the demo's locally produced checkpoint only.
     torch.save(model.state_dict(), directory / "model.pt")
-    report = {"parameters": count, "layers": 2, "vocabulary": len(VOCAB), "non_special_tokens": 36,
-              "device": str(device), "torch": torch.__version__, "threads": torch.get_num_threads(),
-              "python": platform.python_version(), "platform": platform.platform(),
-              "steps": steps, "batch_size": batch_size, "seed": seed, "learning_rate": learning_rate,
-              "initial_validation": initial, "history": history, "rollout": free_running,
-              "timing": timing, "train_wall_seconds_including_periodic_validation": train_elapsed,
-              "training_trajectories_per_second": steps * batch_size / active_seconds,
-              "training_rows_per_second": row_count / active_seconds,
-              "supervised_targets_per_second": target_count / active_seconds}
+    report = {
+        "parameters": count,
+        "layers": 2,
+        "vocabulary": len(VOCAB),
+        "non_special_tokens": 36,
+        "device": str(device),
+        "torch": torch.__version__,
+        "threads": torch.get_num_threads(),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "steps": steps,
+        "batch_size": batch_size,
+        "seed": seed,
+        "learning_rate": learning_rate,
+        "initial_validation": initial,
+        "history": history,
+        "rollout": free_running,
+        "timing": timing,
+        "train_wall_seconds_including_periodic_validation": train_elapsed,
+        "training_trajectories_per_second": steps * batch_size / active_seconds,
+        "training_rows_per_second": row_count / active_seconds,
+        "supervised_targets_per_second": target_count / active_seconds,
+    }
     (directory / "training.json").write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps({"training_trajectories_per_second": report["training_trajectories_per_second"],
-                      "rollout": free_running}), flush=True)
+    print(
+        json.dumps(
+            {
+                "training_trajectories_per_second": report["training_trajectories_per_second"],
+                "rollout": free_running,
+            }
+        ),
+        flush=True,
+    )
     return report
 
 
@@ -447,7 +554,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--eval-every", type=int, default=500)
     parser.add_argument("--rollout-count", type=int, default=64)
-    parser.add_argument("--learning-rate", type=float, default=.002)
+    parser.add_argument("--learning-rate", type=float, default=0.002)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument(
@@ -458,12 +565,22 @@ def main():
     parser.add_argument("--user-machine", action="store_true")
     args = parser.parse_args()
     from trajectory_remix.graph.user_validation import require_user_machine
+
     try:
         require_user_machine(args.user_machine)
     except ValueError as error:
         parser.exit(2, str(error) + "\n")
-    for name in ("train_samples", "validation_samples", "shard_size", "max_gap", "steps", "batch_size",
-                 "eval_every", "rollout_count", "threads"):
+    for name in (
+        "train_samples",
+        "validation_samples",
+        "shard_size",
+        "max_gap",
+        "steps",
+        "batch_size",
+        "eval_every",
+        "rollout_count",
+        "threads",
+    ):
         if getattr(args, name) < 1:
             parser.error(f"{name} must be positive")
     if args.learning_rate <= 0:
@@ -505,7 +622,7 @@ def main():
         try:
             check_training_report(report)
         except ValueError as error:
-            parser.exit(1, str(error) + '\n')
+            parser.exit(1, str(error) + "\n")
 
 
 if __name__ == "__main__":

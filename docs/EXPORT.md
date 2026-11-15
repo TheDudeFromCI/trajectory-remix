@@ -74,8 +74,11 @@ from trajectory_remix.graph.export import ArtifactService, ExportOptions
 
 artifacts = ArtifactService()  # sweeps expired and abandoned exports on startup
 artifact_id, manifest = artifacts.build(
-    records, settings, compiler=compiler,
-    options=ExportOptions(trajectories_per_file=100, metadata="remove_all"))
+    records,
+    settings,
+    compiler=compiler,
+    options=ExportOptions(trajectories_per_file=100, metadata="remove_all"),
+)
 with artifacts.lease(artifact_id, "download.zip") as stream:
     consume(stream)  # stream to the client while holding the lease
 ```

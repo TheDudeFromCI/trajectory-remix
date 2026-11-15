@@ -145,9 +145,17 @@ request_id = jobs.enqueue(job, trajectory_id, endpoint_id, step_id, payload)
 ticket = await jobs.execute_one(endpoint_id, provider_call)
 if ticket is not None:
     body = jobs.result(ticket)
-    jobs.accept(job, ticket.epoch, trajectory_id, ticket.step,
-                updated_source, expected_revision, checkpoint,
-                request=ticket, outcome=None)
+    jobs.accept(
+        job,
+        ticket.epoch,
+        trajectory_id,
+        ticket.step,
+        updated_source,
+        expected_revision,
+        checkpoint,
+        request=ticket,
+        outcome=None,
+    )
 ```
 
 - `provider_call(ticket)` is **one** complete API invocation with no hidden retries, returning

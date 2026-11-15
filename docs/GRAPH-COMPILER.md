@@ -18,8 +18,9 @@ from trajectory_remix.graph import GraphSource
 from trajectory_remix.graph.compiler import GraphCompiler
 
 source = GraphSource.model_validate(source_json)
-compiler = GraphCompiler(settings.tokenizer_profiles[profile_id],
-                         settings=settings, active_limit=8, seed=17)
+compiler = GraphCompiler(
+    settings.tokenizer_profiles[profile_id], settings=settings, active_limit=8, seed=17
+)
 arrays, identity = compiler.compile(source)
 preview = compiler.preview(source, max_frames=500)
 ```

@@ -13,6 +13,7 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "tokenizers>=0.20,<1", 
 export = ["numpy>=2,<3", "lz4>=4,<5"]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
 mcp = ["mcp>=1.26,<2"]
+lint = ["ruff>=0.15,<1"]
 
 [project.scripts]
 trajectory-remix = "trajectory_remix.__main__:main"
@@ -26,3 +27,22 @@ asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]
 include = ["trajectory_remix*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# sampler_originals are verbatim, hash-pinned reference copies (see tests/test_graph_sampling.py).
+extend-exclude = ["tests/node_modules", "trajectory_remix/graph/sampler_originals"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "UP", "I"]
+# zip() calls here are intentionally length-tolerant; adding strict= could change behavior.
+ignore = ["B905"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["trajectory_remix"]
+
+[tool.ruff.lint.per-file-ignores]
+# Closures defined in loops and consumed within the iteration; not yet audited for late binding.
+"trajectory_remix/graph/export.py" = ["B023"]
+"examples/ktremix_training_data.py" = ["B023"]

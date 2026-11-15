@@ -10,6 +10,7 @@ This does not implement the authoring compiler or a Kidra trainer.
   python examples/ktremix_dataset.py sample '/tmp/ktremix-demo/*.ktremix' --count 5
   python examples/ktremix_dataset.py verify '/tmp/ktremix-demo/*.ktremix'
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,9 +33,9 @@ from pathlib import Path
 MAGIC = b"KTREMIX\0"
 RECORD_MAGIC = b"KTSAMP\0\0"
 HEADER = struct.Struct("<8sHHI6QIIQ16s16sIII4s")  # 128 bytes
-INDEX = struct.Struct("<16sQ6IBBHIQ")             # 64 bytes
-RECORD = struct.Struct("<8sHHI16s8I")             # 64 bytes
-COLUMN = struct.Struct("<HBBQQQI")               # 32 bytes
+INDEX = struct.Struct("<16sQ6IBBHIQ")  # 64 bytes
+RECORD = struct.Struct("<8sHHI16s8I")  # 64 bytes
+COLUMN = struct.Struct("<HBBQQQI")  # 32 bytes
 assert (HEADER.size, INDEX.size, RECORD.size, COLUMN.size) == (128, 64, 64, 32)
 ALIGNMENT = 64
 NONE = (1 << 32) - 1
@@ -43,8 +44,7 @@ DURABLE, MODEL, NOOP, EOS, BOS = 1, 2, 4, 8, 16
 READ_ONLY, INITIALLY_AVAILABLE = 1, 2
 CODECS = {"none": 0, "lz4": 1, "zlib": 2}
 # dtype ID -> struct/array code, byte width, NumPy dtype
-DTYPES = {1: ("B", 1, "u1"), 3: ("I", 4, "<u4"),
-          4: ("Q", 8, "<u8"), 6: ("f", 4, "<f4")}
+DTYPES = {1: ("B", 1, "u1"), 3: ("I", 4, "<u4"), 4: ("Q", 8, "<u8"), 6: ("f", 4, "<f4")}
 # column ID -> name, dtype ID, dimension
 COLUMNS = {
     1: ("token_ids", 3, "R"),
@@ -76,8 +76,9 @@ def align(n):
 
 
 def canonical(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True,
-                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
 
 
 def crc(data):
@@ -86,6 +87,7 @@ def crc(data):
 
 def _json(data, what):
     try:
+
         def invalid(value):
             raise ValueError(f"nonfinite JSON: {value}")
 
@@ -128,7 +130,11 @@ def _compatibility(manifest):
             raise ValueError("execution contract")
         tokenizer = manifest["tokenizer"]
         digest = tokenizer["sha256"]
-        if not isinstance(digest, str) or len(digest) != 64 or bytes.fromhex(digest).hex() != digest:
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or bytes.fromhex(digest).hex() != digest
+        ):
             raise ValueError("tokenizer SHA-256")
         controls = tokenizer["special_token_ids"]
         for name in ("bos", "eos", "noop"):
@@ -171,7 +177,9 @@ class Sample:
         if len(self._data) != raw_size or raw_size < RECORD.size:
             raise FormatError("Record size mismatch")
         fields = RECORD.unpack_from(self._data)
-        magic, major, minor, size, ident, count, meta_size, r, f, w, q, entry_size, reserved = fields
+        magic, major, minor, size, ident, count, meta_size, r, f, w, q, entry_size, reserved = (
+            fields
+        )
         if (magic, major, minor, size, entry_size, reserved) != (RECORD_MAGIC, 1, 0, 64, 32, 0):
             raise FormatError("Unsupported record header")
         if ident != entry[0] or (r, f, w, q) != (rows, frames, windows, targets):
@@ -220,14 +228,14 @@ class Sample:
         if not self._metadata_size:
             return {}
         start = self._metadata_start
-        return _json(self._data[start:start + self._metadata_size], "sample metadata")
+        return _json(self._data[start : start + self._metadata_size], "sample metadata")
 
     def column(self, name):
         """Native memoryview, little-endian hosts only. NumPy supports either host."""
         if sys.byteorder != "little":
             raise RuntimeError("Use numpy() for explicit little-endian views on this host")
         dtype, offset, size = self._columns[name]
-        return self._data[offset:offset + size].cast(DTYPES[dtype][0])
+        return self._data[offset : offset + size].cast(DTYPES[dtype][0])
 
     def numpy(self):
         """Read-only NumPy views; no per-token Python objects or extra data copies."""
@@ -248,12 +256,18 @@ class Sample:
     def validate(self):
         """Optional core semantic checks, O(rows + frames + windows*log(windows))."""
         import numpy as np
+
         a = self.numpy()
-        fail = lambda condition, message: _require(bool(condition), message)
+
+        def fail(condition, message):
+            return _require(bool(condition), message)
+
         fail(self.rows > 0 and self.frames > 0 and self.windows > 0, "Empty sample")
         offsets = a["frame_offsets"]
-        fail(offsets[0] == 0 and offsets[-1] == self.rows and
-             np.all(offsets[1:] > offsets[:-1]), "Invalid frame offsets")
+        fail(
+            offsets[0] == 0 and offsets[-1] == self.rows and np.all(offsets[1:] > offsets[:-1]),
+            "Invalid frame offsets",
+        )
         fail(np.all(a["window_ids"] < self.windows), "Invalid row window")
         weights = a["loss_weights"]
         fail(np.all(np.isfinite(weights)) and np.all(weights >= 0), "Invalid loss weights")
@@ -271,21 +285,36 @@ class Sample:
         fail(np.all(durable[bos]) and np.all(weights[bos] == 0), "BOS is zero-loss durable context")
         start, end = a["visible_from"], a["visible_until"]
         fail(np.all(start[durable] <= end[durable]), "Invalid visibility interval")
-        fail(np.all(start[~durable] == 0) and np.all(end[~durable] == 0),
-             "Nondurable row has visibility")
+        fail(
+            np.all(start[~durable] == 0) and np.all(end[~durable] == 0),
+            "Nondurable row has visibility",
+        )
         wid = a["window_ids"]
-        opened, closed, active = (a[n] for n in ("window_open_frontiers", "window_close_frontiers",
-                                                 "window_activation_frontiers"))
+        opened, closed, active = (
+            a[n]
+            for n in (
+                "window_open_frontiers",
+                "window_close_frontiers",
+                "window_activation_frontiers",
+            )
+        )
         fail(np.all(opened <= closed), "Invalid window lifetime")
-        fail(np.all((active == FOREVER) | ((active >= opened) & (active <= closed))),
-             "Invalid activation frontier")
+        fail(
+            np.all((active == FOREVER) | ((active >= opened) & (active <= closed))),
+            "Invalid activation frontier",
+        )
         fail(np.all((a["window_flags"] & 0xFC) == 0), "Unknown window flags")
         read_only = (a["window_flags"][wid] & READ_ONLY) != 0
         fail(np.all(~(read_only & ((flags & MODEL) != 0))), "Model writes into read-only window")
-        fail(np.all(start[durable] >= opened[wid[durable]]) and
-             np.all(end[durable] <= closed[wid[durable]]), "Visibility exceeds window lifetime")
-        fail(np.all(a["query_frontiers"][durable] < start[durable]),
-             "Memory row leaks into its own construction")
+        fail(
+            np.all(start[durable] >= opened[wid[durable]])
+            and np.all(end[durable] <= closed[wid[durable]]),
+            "Visibility exceeds window lifetime",
+        )
+        fail(
+            np.all(a["query_frontiers"][durable] < start[durable]),
+            "Memory row leaks into its own construction",
+        )
         # Physical slots may be reused, but never by overlapping window instances.
         order = np.lexsort((opened, a["window_slots"]))
         previous = {}
@@ -304,8 +333,10 @@ class Sample:
         targets = a["target_rows"]
         fail(np.all(prev[targets] != NONE), "Target has no BOS/prefix")
         # A target must never be its own visible conditioning key.
-        fail(np.all(~durable[targets] | (a["query_frontiers"][targets] < start[targets])),
-             "Target label leaks into its own query")
+        fail(
+            np.all(~durable[targets] | (a["query_frontiers"][targets] < start[targets])),
+            "Target label leaks into its own query",
+        )
         return self
 
 
@@ -325,11 +356,37 @@ class Shard:
             if len(raw) != 128:
                 raise FormatError("Truncated shard header")
             h = HEADER.unpack(raw)
-            (magic, major, minor, size, features, file_size, manifest_offset, manifest_size,
-             index_offset, count, entry_size, alignment, data_offset, dataset, shard,
-             header_crc, manifest_crc, index_crc, reserved) = h
+            (
+                magic,
+                major,
+                minor,
+                size,
+                features,
+                file_size,
+                manifest_offset,
+                manifest_size,
+                index_offset,
+                count,
+                entry_size,
+                alignment,
+                data_offset,
+                dataset,
+                shard,
+                header_crc,
+                manifest_crc,
+                index_crc,
+                reserved,
+            ) = h
             if (magic, major, minor, size, features, entry_size, alignment, reserved) != (
-                    MAGIC, 1, 0, 128, 0, 64, 64, b"\0" * 4):
+                MAGIC,
+                1,
+                0,
+                128,
+                0,
+                64,
+                64,
+                b"\0" * 4,
+            ):
                 raise FormatError("Unsupported shard header/version/features")
             if crc(raw[:112] + b"\0" * 4 + raw[116:]) != header_crc:
                 raise FormatError("Header checksum mismatch")
@@ -363,7 +420,7 @@ class Shard:
         self.count, self._index_offset, self._data_offset = count, index_offset, data_offset
         self._file_size, self._index_crc = file_size, index_crc
         if verify_index:
-            view = memoryview(self._mapping())[index_offset:index_offset + count * 64]
+            view = memoryview(self._mapping())[index_offset : index_offset + count * 64]
             if crc(view) != index_crc:
                 raise FormatError("Index checksum mismatch")
 
@@ -382,11 +439,23 @@ class Shard:
             raise IndexError(index)
         index_position = self._index_offset + index * 64
         entry = INDEX.unpack_from(self._mapping(), index_position)
-        _, offset, stored, raw, rows, frames, windows, _, codec, flags, reserved, targets, tail = entry
-        if (flags or reserved or tail or codec not in (0, 1, 2) or
-                offset % 64 or offset < self._data_offset or offset + stored > self._file_size or
-                not 64 <= raw <= self.max_record_bytes or not 0 < stored <= self.max_record_bytes or
-                not 0 < frames <= rows or not 0 < windows <= rows or targets > rows):
+        _, offset, stored, raw, rows, frames, windows, _, codec, flags, reserved, targets, tail = (
+            entry
+        )
+        if (
+            flags
+            or reserved
+            or tail
+            or codec not in (0, 1, 2)
+            or offset % 64
+            or offset < self._data_offset
+            or offset + stored > self._file_size
+            or not 64 <= raw <= self.max_record_bytes
+            or not 0 < stored <= self.max_record_bytes
+            or not 0 < frames <= rows
+            or not 0 < windows <= rows
+            or targets > rows
+        ):
             raise FormatError("Invalid index entry or resource limit")
         if codec == 0 and stored != raw:
             raise FormatError("Raw codec size mismatch")
@@ -395,7 +464,7 @@ class Shard:
     def read(self, index, *, verify=True):
         entry = self.entry(index)
         _, offset, stored, raw, _, _, _, checksum, codec, *_ = entry
-        block = memoryview(self._mapping())[offset:offset + stored]
+        block = memoryview(self._mapping())[offset : offset + stored]
         if verify and crc(block) != checksum:
             raise FormatError("Record checksum mismatch")
         try:
@@ -496,7 +565,7 @@ class Dataset:
         digest = hashlib.sha256(f"{seed}:{epoch}".encode()).digest()
         random.Random(int.from_bytes(digest, "little")).shuffle(order)
         # Disjoint ranks, then disjoint workers within a rank. No implicit padding.
-        yield from order[rank + world_size * worker_id::world_size * num_workers]
+        yield from order[rank + world_size * worker_id :: world_size * num_workers]
 
     def close(self):
         for shard in self.shards:
@@ -515,6 +584,7 @@ def _column_bytes(values, dtype):
     code, width, numpy_dtype = DTYPES[dtype]
     if hasattr(values, "dtype"):
         import numpy as np
+
         values = np.asarray(values)
         if values.ndim != 1 or values.dtype != np.dtype(numpy_dtype):
             raise ValueError(f"Expected a one-dimensional {numpy_dtype} array")
@@ -536,10 +606,7 @@ def encode_sample(ident, columns, metadata=None):
     ident = uuid.UUID(str(ident)).bytes
     if set(columns) != set(BY_NAME):
         raise ValueError("Writer requires exactly the 16 standard columns")
-    encoded = {
-        name: _column_bytes(columns[name], info[1])
-        for name, info in BY_NAME.items()
-    }
+    encoded = {name: _column_bytes(columns[name], info[1]) for name, info in BY_NAME.items()}
     rows = len(encoded["token_ids"]) // 4
     frames = len(encoded["frame_offsets"]) // 8 - 1
     windows = len(encoded["window_slots"]) // 4
@@ -567,7 +634,7 @@ def encode_sample(ident, columns, metadata=None):
         32,
         0,
     )
-    payload[directory_end:directory_end + len(meta)] = meta
+    payload[directory_end : directory_end + len(meta)] = meta
     for ordinal, (cid, (name, dtype, dimension)) in enumerate(COLUMNS.items()):
         value = encoded[name]
         count = len(value) // DTYPES[dtype][1]
@@ -576,17 +643,26 @@ def encode_sample(ident, columns, metadata=None):
         offset = align(len(payload))
         payload.extend(b"\0" * (offset - len(payload)))
         column_position = 64 + ordinal * 32
-        COLUMN.pack_into(
-            payload, column_position, cid, dtype, 1, offset, count, len(value), 0
-        )
+        COLUMN.pack_into(payload, column_position, cid, dtype, 1, offset, count, len(value), 0)
         payload.extend(value)
     payload.extend(b"\0" * (align(len(payload)) - len(payload)))
     if len(payload) > NONE:
         raise ValueError("Record exceeds uint32 size limit")
     payload = bytes(payload)
     entry = (
-        ident, 0, len(payload), len(payload), rows, frames, windows,
-        0, 0, 0, 0, targets, 0,
+        ident,
+        0,
+        len(payload),
+        len(payload),
+        rows,
+        frames,
+        windows,
+        0,
+        0,
+        0,
+        0,
+        targets,
+        0,
     )
     Sample(payload, entry).validate()
     return payload, entry
@@ -608,8 +684,12 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
     if type(count) is not int or count < 0:
         raise ValueError("sample_count must be a nonnegative integer")
     manifest = dict(manifest)
-    manifest.update(format="ktremix", version="1.0", array_schema="ktremix.frontier-arrays/1",
-                    sample_count=count)
+    manifest.update(
+        format="ktremix",
+        version="1.0",
+        array_schema="ktremix.frontier-arrays/1",
+        sample_count=count,
+    )
     manifest.setdefault("dataset_id", str(uuid.uuid4()))
     manifest.setdefault("shard_id", str(uuid.uuid4()))
     _compatibility(manifest)
@@ -643,9 +723,7 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
                 seen.add(entry[0])
                 selected = CODECS[codec]
                 if selected == 1:
-                    stored = _lz4().compress(
-                        payload, mode="fast", acceleration=1, store_size=False
-                    )
+                    stored = _lz4().compress(payload, mode="fast", acceleration=1, store_size=False)
                 elif selected == 2:
                     stored = zlib.compress(payload, level=1)
                 else:
@@ -656,8 +734,19 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
                 stream.write(stored)
                 stream.write(b"\0" * (align(stream.tell()) - stream.tell()))
                 end = stream.tell()
-                entry = (entry[0], offset, len(stored), len(payload), *entry[4:7],
-                         crc(stored), selected, 0, 0, entry[11], 0)
+                entry = (
+                    entry[0],
+                    offset,
+                    len(stored),
+                    len(payload),
+                    *entry[4:7],
+                    crc(stored),
+                    selected,
+                    0,
+                    0,
+                    entry[11],
+                    0,
+                )
                 stream.seek(index_offset + (actual - 1) * 64)
                 stream.write(INDEX.pack(*entry))
                 stream.seek(end)
@@ -675,9 +764,25 @@ def write_shard(path, samples, manifest, *, sample_count=None, codec="lz4"):
                 checksum = zlib.crc32(block, checksum)
                 remaining -= len(block)
             h = [
-                MAGIC, 1, 0, 128, 0, end, 128, len(encoded_manifest),
-                index_offset, count, 64, 64, data_offset, dataset, shard, 0,
-                crc(encoded_manifest), checksum & 0xFFFFFFFF, b"\0" * 4,
+                MAGIC,
+                1,
+                0,
+                128,
+                0,
+                end,
+                128,
+                len(encoded_manifest),
+                index_offset,
+                count,
+                64,
+                64,
+                data_offset,
+                dataset,
+                shard,
+                0,
+                crc(encoded_manifest),
+                checksum & 0xFFFFFFFF,
+                b"\0" * 4,
             ]
             h[15] = crc(HEADER.pack(*h))
             stream.seek(0)
@@ -707,10 +812,19 @@ def demo_columns(seed=0):
         "visible_from": [1, 2, 1, 3, 3, 0, 0, 4, 0, 0],
         "visible_until": [FOREVER, FOREVER, 5, 5, FOREVER, 0, 0, FOREVER, 0, 0],
         "previous_rows": [NONE, 0, NONE, 2, NONE, 3, 4, 1, 3, 4],
-        "loss_weights": [0, 0, 0, 1, 0, .1, .1, 0, 1, .1],
-        "row_flags": [DURABLE | BOS, DURABLE, DURABLE | BOS, DURABLE | MODEL,
-                      DURABLE | BOS, MODEL | NOOP, MODEL | NOOP, DURABLE,
-                      MODEL | EOS, MODEL | NOOP],
+        "loss_weights": [0, 0, 0, 1, 0, 0.1, 0.1, 0, 1, 0.1],
+        "row_flags": [
+            DURABLE | BOS,
+            DURABLE,
+            DURABLE | BOS,
+            DURABLE | MODEL,
+            DURABLE | BOS,
+            MODEL | NOOP,
+            MODEL | NOOP,
+            DURABLE,
+            MODEL | EOS,
+            MODEL | NOOP,
+        ],
         "frame_offsets": [0, 5, 7, 10],
         "window_slots": [0, 1, 2],
         "window_open_frontiers": [0, 0, 3],
@@ -722,12 +836,17 @@ def demo_columns(seed=0):
 
 
 def demo_manifest(dataset_id=None, shard_index=0):
-    return {"dataset_id": str(dataset_id or uuid.uuid4()), "shard_id": str(uuid.uuid4()),
-            "shard_index": shard_index,
-            "execution_contract": "ktremix.synthetic-demo/1",
-            "tokenizer": {"sha256": hashlib.sha256(b"synthetic demo; not a real tokenizer").hexdigest(),
-                          "special_token_ids": {"bos": 1, "eos": 2, "noop": 3}},
-            "description": "Synthetic format fixture; do not use for actual training."}
+    return {
+        "dataset_id": str(dataset_id or uuid.uuid4()),
+        "shard_id": str(uuid.uuid4()),
+        "shard_index": shard_index,
+        "execution_contract": "ktremix.synthetic-demo/1",
+        "tokenizer": {
+            "sha256": hashlib.sha256(b"synthetic demo; not a real tokenizer").hexdigest(),
+            "special_token_ids": {"bos": 1, "eos": 2, "noop": 3},
+        },
+        "description": "Synthetic format fixture; do not use for actual training.",
+    }
 
 
 def main(argv=None):
@@ -769,9 +888,17 @@ def main(argv=None):
         paths.extend(matches)
     with Dataset(paths, verify_index=args.command == "verify") as dataset:
         if args.command == "inspect":
-            print(json.dumps({"trajectories": len(dataset),
-                              "shards": [{"path": str(s.path), "manifest": s.manifest}
-                                         for s in dataset.shards]}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "trajectories": len(dataset),
+                        "shards": [
+                            {"path": str(s.path), "manifest": s.manifest} for s in dataset.shards
+                        ],
+                    },
+                    indent=2,
+                )
+            )
         elif args.command == "verify":
             seen = set()
             for i in range(len(dataset)):
@@ -779,7 +906,7 @@ def main(argv=None):
                 if sample.uuid in seen:
                     raise FormatError("Duplicate trajectory UUID across shards")
                 seen.add(sample.uuid)
-                sample.metadata
+                sample.metadata  # noqa: B018 - property access forces a metadata decode check
             print(f"Verified {len(dataset)} trajectories in {len(dataset.shards)} shards")
         else:
             if args.count < 0:
@@ -794,8 +921,9 @@ def main(argv=None):
                 import itertools
 
                 # An epoch visits each partitioned trajectory once, without padding.
-                indices = dataset.epoch_indices(args.seed, args.epoch, rank=args.rank,
-                                                world_size=args.world_size)
+                indices = dataset.epoch_indices(
+                    args.seed, args.epoch, rank=args.rank, world_size=args.world_size
+                )
                 samples = (dataset[i] for i in itertools.islice(indices, args.count))
             for sample in samples:
                 summary = {
@@ -814,4 +942,4 @@ if __name__ == "__main__":
         main()
     except (FormatError, OSError, RuntimeError, ValueError) as error:
         print(f"ktremix: {error}", file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(2) from error

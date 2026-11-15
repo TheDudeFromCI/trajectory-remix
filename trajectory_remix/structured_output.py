@@ -16,22 +16,39 @@ def decoding_schema(schema, local_constraints=None):
     values in defaults/examples/const are user data and must survive unchanged.
     """
     result = copy.deepcopy(schema)
-    maps = {'properties', 'patternProperties', '$defs', 'definitions',
-            'dependentSchemas', 'dependencies'}
-    single = {'additionalProperties', 'unevaluatedProperties', 'propertyNames',
-              'items', 'additionalItems', 'contains', 'unevaluatedItems', 'not',
-              'if', 'then', 'else', 'contentSchema'}
-    arrays = {'allOf', 'anyOf', 'oneOf', 'prefixItems'}
+    maps = {
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "dependencies",
+    }
+    single = {
+        "additionalProperties",
+        "unevaluatedProperties",
+        "propertyNames",
+        "items",
+        "additionalItems",
+        "contains",
+        "unevaluatedItems",
+        "not",
+        "if",
+        "then",
+        "else",
+        "contentSchema",
+    }
+    arrays = {"allOf", "anyOf", "oneOf", "prefixItems"}
 
     def child_path(path, key):
-        return path + '/' + str(key).replace('~', '~0').replace('/', '~1')
+        return path + "/" + str(key).replace("~", "~0").replace("/", "~1")
 
     def children(node):
         for key, value in node.items():
             if key in maps and isinstance(value, dict):
                 for name, child in value.items():
                     yield (key, name), child
-            elif key in arrays or (key == 'items' and isinstance(value, list)):
+            elif key in arrays or (key == "items" and isinstance(value, list)):
                 if isinstance(value, list):
                     for index, child in enumerate(value):
                         yield (key, index), child
@@ -42,17 +59,17 @@ def decoding_schema(schema, local_constraints=None):
         if not isinstance(node, dict) or id(node) in seen:
             return False
         seen = seen | {id(node)}
-        if node.get('uniqueItems') is True or any(key in node for key in ('if', 'then', 'else')):
+        if node.get("uniqueItems") is True or any(key in node for key in ("if", "then", "else")):
             return True
-        ref = node.get('$ref')
-        if follow_refs and isinstance(ref, str) and ref.startswith('#'):
+        ref = node.get("$ref")
+        if follow_refs and isinstance(ref, str) and ref.startswith("#"):
             target = schema
             try:
                 fragment = unquote(ref[1:])
-                if fragment and not fragment.startswith('/'):
+                if fragment and not fragment.startswith("/"):
                     raise KeyError(ref)
-                for part in fragment[1:].split('/') if fragment else []:
-                    part = part.replace('~1', '/').replace('~0', '~')
+                for part in fragment[1:].split("/") if fragment else []:
+                    part = part.replace("~1", "/").replace("~0", "~")
                     target = target[int(part)] if isinstance(target, list) else target[part]
             except (KeyError, IndexError, TypeError, ValueError):
                 target = None
@@ -62,35 +79,37 @@ def decoding_schema(schema, local_constraints=None):
                 return has_local_rules(schema, follow_refs=False)
             if has_local_rules(target, seen):
                 return True
-        return any(has_local_rules(child, seen, follow_refs=follow_refs) for _, child in children(node))
+        return any(
+            has_local_rules(child, seen, follow_refs=follow_refs) for _, child in children(node)
+        )
 
     def record(key, path):
         if local_constraints is not None:
-            local_constraints.append({'keyword': key, 'schema_path': child_path(path, key)})
+            local_constraints.append({"keyword": key, "schema_path": child_path(path, key)})
 
     def visit(node, path):
         if not isinstance(node, dict):
             return
         relaxed = has_local_rules(node)
-        exclusive_choice = any(has_local_rules(child) for child in node.get('oneOf', []))
-        if 'uniqueItems' in node and node.pop('uniqueItems') is True:
-            record('uniqueItems', path)
+        exclusive_choice = any(has_local_rules(child) for child in node.get("oneOf", []))
+        if "uniqueItems" in node and node.pop("uniqueItems") is True:
+            record("uniqueItems", path)
         # These keywords form one rule. Keeping a detached branch could change
         # its meaning or expose another unsupported keyword to the backend.
-        for key in ('if', 'then', 'else'):
+        for key in ("if", "then", "else"):
             if key in node:
                 node.pop(key)
                 record(key, path)
         # Relaxing a negated schema would otherwise strengthen the wire schema.
-        if 'not' in node and has_local_rules(node['not']):
-            visit(node.pop('not'), child_path(path, 'not'))
-            record('not', path)
-        if 'maxContains' in node and has_local_rules(node.get('contains')):
-            node.pop('maxContains')
-            record('maxContains', path)
+        if "not" in node and has_local_rules(node["not"]):
+            visit(node.pop("not"), child_path(path, "not"))
+            record("not", path)
+        if "maxContains" in node and has_local_rules(node.get("contains")):
+            node.pop("maxContains")
+            record("maxContains", path)
         # Conditional branches can supply evaluation annotations. Removing them
         # must not make previously valid properties/items become "unevaluated".
-        for key in ('unevaluatedProperties', 'unevaluatedItems'):
+        for key in ("unevaluatedProperties", "unevaluatedItems"):
             if relaxed and key in node:
                 visit(node.pop(key), child_path(path, key))
                 record(key, path)
@@ -100,18 +119,18 @@ def decoding_schema(schema, local_constraints=None):
                 location = child_path(location, part)
             visit(child, location)
         if exclusive_choice:
-            choice = {'anyOf': node.pop('oneOf')}
-            if 'anyOf' in node:
-                node.setdefault('allOf', []).append(choice)
+            choice = {"anyOf": node.pop("oneOf")}
+            if "anyOf" in node:
+                node.setdefault("allOf", []).append(choice)
             else:
                 node.update(choice)
-            record('oneOf', path)
+            record("oneOf", path)
         # Do not send empty allOf lists or tautological wrappers left after
         # removing conditional-only branches (as used by the standard idle flow).
-        if 'allOf' in node:
-            node['allOf'] = [child for child in node['allOf'] if child != {} and child is not True]
-            if not node['allOf']:
-                node.pop('allOf')
+        if "allOf" in node:
+            node["allOf"] = [child for child in node["allOf"] if child != {} and child is not True]
+            if not node["allOf"]:
+                node.pop("allOf")
 
-    visit(result, '')
+    visit(result, "")
     return result

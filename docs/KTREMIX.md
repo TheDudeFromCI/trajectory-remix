@@ -372,16 +372,16 @@ from glob import glob
 import random
 from ktremix_dataset import Dataset
 
-with Dataset(sorted(glob('train/*.ktremix')), max_open_shards=32) as data:
+with Dataset(sorted(glob("train/*.ktremix")), max_open_shards=32) as data:
     rng = random.Random(42)
     for step in range(100):
-        sample = data.sample(rng)              # uniform trajectory, with replacement
-        a = sample.numpy()                     # zero-copy views after decompression
-        targets = a['target_rows']
-        labels = a['token_ids'][targets]
-        weights = a['loss_weights'][targets]
-        prefix_rows = a['previous_rows'][targets]
-        query_frontiers = a['query_frontiers'][targets]
+        sample = data.sample(rng)  # uniform trajectory, with replacement
+        a = sample.numpy()  # zero-copy views after decompression
+        targets = a["target_rows"]
+        labels = a["token_ids"][targets]
+        weights = a["loss_weights"][targets]
+        prefix_rows = a["previous_rows"][targets]
+        query_frontiers = a["query_frontiers"][targets]
         # Pass these + memory columns/lifetimes/frame_offsets to the model's
         # multi-window training adapter. Fancy indexing above allocates only
         # the selected target arrays; a kernel can gather directly instead.
@@ -394,9 +394,15 @@ With-replacement draws may repeat; that is deliberate, not a uniqueness guarante
 For a no-replacement epoch with distributed ranks and loader workers:
 
 ```python
-with Dataset(paths) as data:                    # open inside each worker process
-    for i in data.epoch_indices(seed=42, epoch=3, rank=rank, world_size=world_size,
-                                worker_id=worker_id, num_workers=num_workers):
+with Dataset(paths) as data:  # open inside each worker process
+    for i in data.epoch_indices(
+        seed=42,
+        epoch=3,
+        rank=rank,
+        world_size=world_size,
+        worker_id=worker_id,
+        num_workers=num_workers,
+    ):
         sample = data[i]
         batch = sample.numpy()
 ```
