@@ -1,3 +1,4 @@
+import {renderProjectSettings, renderGenerationSettings} from './project-settings.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
 const $ = id => document.getElementById(id);
 const copy = value => structuredClone(value);
@@ -70,7 +71,7 @@ export class StudioUI {
     this.undo = []; this.redo = []; this.selectionGeneration = 0;
     this.preview = new PreviewController(async p => api(`/trajectories/${p.id}/preview`, 'POST', {
       expected_revision: p.revision, profile: p.profile, source: p.source, client_key: p.sourceHash
-    }), value => { this.frames = value.frames; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
+    }), value => { this.frames = value.frames; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
   }
   query() {
     const q = {}; if ($('sample-search').value) q.text = $('sample-search').value;
@@ -97,25 +98,80 @@ export class StudioUI {
     $('sample-page-prev').disabled = !this.offset; $('sample-page-next').disabled = this.offset + 50 >= data.total;
     $('sample-list').replaceChildren(...data.items.map(item => button(`${item.id.slice(0, 8)} · ${item.stage ?? 'Unfinished'} · ${item.split ?? 'Missing split'}${item.owner ? ' · Locked' : ''}`, () => this.select(item.id), 'sample-row' + (item.id === this.id ? ' selected' : ''))));
   }
-  async select(id, force = false) {
-    const generation = ++this.selectionGeneration;
-    this.preview.invalidate(); this.frames = null; clearTimeout(this.validationTimer); this.validationGeneration = (this.validationGeneration || 0) + 1;
-    if (this.id && this.draft) { this.stashEditor(); this.drafts.set(this.id, {record: this.record, draft: this.draft, event: this.event, editors: this.editors}); }
-    if (force) this.drafts.delete(id);
-    const cached = !force && this.drafts.get(id);
-    const record = cached?.record || await api(`/trajectories/${id}`);
-    if (generation !== this.selectionGeneration) return;
-    this.id = id; this.record = record; this.diagnostics = record.diagnostics; this.draft = cached?.draft || copy(record.source); this.editors = cached?.editors || new Map();
-    this.event = cached?.event || Object.keys(this.draft.events)[0]; this.position = 0;
-    $('window-id').value = this.draft.events[this.event]?.window || Object.keys(this.draft.windows)[0] || '';
-    this.renderDraft(); this.renderEvent(); this.listing(); this.schedulePreview();
-  }
-  isDirty() { return this.record && JSON.stringify(this.draft) !== JSON.stringify(this.record.source); }
-  stashEditor() {
-    if (!this.event || !this.editors) return;
+  editorState() {
     const ids = ['event-content', 'content-mode', 'event-kind', 'event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight'];
     const flags = ['chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat'];
-    this.editors.set(this.event, Object.fromEntries([...ids.map(id => [id, $(id).value]), ...flags.map(id => [id, $(id).checked])]));
+    return Object.fromEntries([...ids.map(id => [id, $(id).value]), ...flags.map(id => [id, $(id).checked])]);
+  }
+  isDirty() {
+    if (!this.record || !this.draft) return false;
+    return JSON.stringify(this.draft) !== JSON.stringify(this.record.source) || this.editors.size > 0 ||
+      (this.event && this.editorBaseline && JSON.stringify(this.editorState()) !== JSON.stringify(this.editorBaseline)) ||
+      $('source-json').value !== json(this.draft) || $('metadata-json').value !== json(this.draft.metadata || {});
+  }
+  stashEditor() {
+    if (!this.event || !this.editors) return;
+    const state = this.editorState();
+    if (JSON.stringify(state) !== JSON.stringify(this.editorBaseline)) this.editors.set(this.event, state);
+    else this.editors.delete(this.event);
+  }
+  async select(id, force = false) {
+    const generation = ++this.selectionGeneration;
+    this.followPreviewEnd = false;
+    this.preview.invalidate(); this.frames = null; clearTimeout(this.validationTimer); this.validationGeneration = (this.validationGeneration || 0) + 1;
+    if (this.id && this.draft) {
+      this.stashEditor();
+      if (this.isDirty()) this.drafts.set(this.id, {record: this.record, draft: this.draft, event: this.event, editors: this.editors,
+        sourceText: $('source-json').value, metadataText: $('metadata-json').value});
+      else this.drafts.delete(this.id);
+    }
+    if (force) this.drafts.delete(id);
+    const cached = !force && this.drafts.get(id);
+    const latest = await api(`/trajectories/${id}`);
+    if (generation !== this.selectionGeneration) return;
+    this.id = id; this.record = cached ? {...cached.record, owner: latest.owner} : latest;
+    this.diagnostics = cached ? cached.record.diagnostics : latest.diagnostics;
+    this.draft = cached?.draft || copy(latest.source); this.editors = cached?.editors || new Map();
+    this.event = cached?.event || Object.keys(this.draft.events)[0]; this.position = 0;
+    $('window-id').value = this.draft.events[this.event]?.window || Object.keys(this.draft.windows)[0] || '';
+    this.renderDraft(); this.renderEvent();
+    if (cached) { $('source-json').value = cached.sourceText; $('metadata-json').value = cached.metadataText;
+      if (latest.revision !== cached.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.'); }
+    this.listing(); this.schedulePreview();
+  }
+  async refreshSelected() {
+    if (!this.id) return;
+    const id = this.id, generation = this.selectionGeneration;
+    const latest = await api(`/trajectories/${id}`);
+    if (id !== this.id || generation !== this.selectionGeneration) return;
+    if (latest.revision === this.record.revision && latest.owner === this.record.owner) return;
+    if (this.isDirty()) {
+      this.record.owner = latest.owner;
+      this.applyLock();
+      if (latest.revision !== this.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.');
+      return;
+    }
+    const followEnd = this.position >= Number($('scrubber').max);
+    this.followPreviewEnd = this.prefs.mode === 'ticks' && followEnd;
+    this.preview.invalidate(); this.frames = null;
+    this.record = latest; this.draft = copy(latest.source); this.diagnostics = latest.diagnostics;
+    if (followEnd && this.prefs.mode !== 'ticks') this.position = Math.max(0, graphOrder(this.draft).length - 1);
+    this.editors.clear(); this.drafts.delete(id);
+    if (!this.draft.events[this.event]) this.event = Object.keys(this.draft.events)[0];
+    this.renderDraft(); this.renderEvent(); this.schedulePreview();
+  }
+  applyLock() {
+    const locked = !!this.record?.owner;
+    for (const id of ['save-source', 'delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
+    for (const root of ['graph-editor-fields', 'metadata-panel']) {
+      const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) input.disabled = locked;
+    }
+    // Existing markup uses these stable controls even before the shell update.
+    for (const id of ['event-content','event-kind','event-window','call-id','tool-id','chat-speaker','delivery','weight','chain','replace-body','close-window','masked','begin','end','echo-chat','window-id','window-purpose','window-writable','window-effort','window-left-open','metadata-json','source-json','stage','split']) $(id).disabled = locked;
+    let ownerLink = $('open-selected-job');
+    if (!ownerLink) { ownerLink = button('Inspect owning job', () => this.inspectJob(this.record.owner)); ownerLink.id = 'open-selected-job'; $('dirty-indicator').after(ownerLink); }
+    ownerLink.hidden = !locked;
+    $('dirty-indicator').textContent = locked ? `Locked by job ${this.record.owner}` : this.isDirty() ? 'Unsaved draft' : `Revision ${this.record?.revision || ''}`;
   }
   changed() {
     this.frames = null; this.preview.invalidate();
@@ -134,7 +190,7 @@ export class StudioUI {
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split: export assigns automatically and warns.';
     $('source-json').value = json(this.draft);
     this.renderDiagnostics();
-    for (const id of ['save-source', 'delete-sample']) $(id).disabled = !!this.record.owner;
+    this.applyLock();
     $('dirty-indicator').textContent = this.record.owner ? `Locked by job ${this.record.owner}` : this.isDirty() ? 'Unsaved draft' : `Revision ${this.record.revision}`;
     this.renderTimeline();
   }
@@ -169,7 +225,7 @@ export class StudioUI {
     const e = this.draft?.events[this.event];
     $('event-picker').value = this.event || '';
     $('dependency-options').replaceChildren(...Object.keys(this.draft?.events || {}).filter(id => id !== this.event).map(id => { const n = node('option'); n.value = id; return n; }));
-    if (!e) { $('event-content').value = ''; $('dependencies').replaceChildren(); return; }
+    if (!e) { $('event-content').value = ''; $('dependencies').replaceChildren(); this.editorBaseline = null; return; }
     $('event-kind').value = e.kind; $('event-window').value = e.window; $('call-id').value = e.call_id || '';
     $('tool-id').value = e.tool || ''; $('chat-speaker').value = e.chat?.speaker || 'User'; $('delivery').value = e.delivery?.mode || 'instant';
     $('chain').checked = e.delivery?.chain_immediately ?? true; $('replace-body').checked = e.replace_body ?? false;
@@ -177,6 +233,7 @@ export class StudioUI {
     $('begin').checked = e.insert_tool_begin ?? e.insert_response_begin ?? true; $('end').checked = e.insert_tool_end ?? e.insert_response_end ?? true;
     $('echo-chat').checked = e.echo_chat ?? true;
     $('content-mode').value = typeof e.content === 'string' ? 'text' : 'json'; $('event-content').value = typeof e.content === 'string' ? e.content : json(e.content);
+    this.editorBaseline = this.editorState();
     const stashed = this.editors.get(this.event);
     if (stashed) for (const [id, value] of Object.entries(stashed)) { if (typeof value === 'boolean') $(id).checked = value; else $(id).value = value; }
     this.kindControls(); this.renderArguments(); this.renderDependencies();
@@ -213,13 +270,15 @@ export class StudioUI {
     if (kind === 'chat_message') { e.chat = {speaker: $('chat-speaker').value}; if ($('call-id').value) e.call_id = $('call-id').value; }
     return e;
   }
-  applyEvent() { if (!this.event || !this.draft.events[this.event]) return; this.draft.events[this.event] = this.composeEvent(); this.editors.delete(this.event); this.changed(); }
+  applyEvent() { if (!this.event || !this.draft.events[this.event]) return; this.draft.events[this.event] = this.composeEvent(); this.editors.delete(this.event); this.editorBaseline = this.editorState(); this.changed(); }
   renderDependencies() {
     $('dependencies').replaceChildren(...(this.draft.events[this.event]?.after || []).map(dep => button(`${this.draft.events[dep] ? '' : 'Broken: '}${dep} ×`, () => {
+      if (this.record?.owner) return message('This trajectory is locked. Detach it before editing.');
       this.draft.events[this.event].after = this.draft.events[this.event].after.filter(x => x !== dep); this.renderDependencies(); this.changed();
     })));
   }
   addDependency(dep) {
+    if (this.record?.owner) return message('This trajectory is locked. Detach it before editing.');
     if (!this.draft.events[this.event] || dep === this.event || !dep) return;
     const after = this.draft.events[this.event].after; if (!after.includes(dep)) after.push(dep);
     this.renderDependencies(); this.changed();
@@ -343,6 +402,64 @@ export class StudioUI {
     if (!response.ok) throw new Error('Artifact unavailable or expired');
     const url = URL.createObjectURL(await response.blob()), a = node('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  renderSettingsForms() {
+    const settings = JSON.parse($('settings-json').value);
+    const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
+    if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
+    if ($('generation-settings-editor')) renderGenerationSettings($('generation-settings-editor'), settings, opts);
+  }
+  async openSettings() {
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();
+    const usage = await api('/logs/usage'); $('log-usage').textContent = json(usage); $('settings-dialog').showModal();
+  }
+  async saveSettings(dialog) {
+    await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
+    await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
+  }
+  async openGenerationSettings() {
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
+    const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
+    const box = $('generation-run-controls'); box.replaceChildren(node('h3', 'Generate trajectories'));
+    box.append(node('p', 'Uses the saved project matrix and current Workbench pins. Each run freezes its settings and requests.'));
+    box.append(button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved generation settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }));
+    const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); box.append(label); return input; };
+    const count = field('Attempts', 'generation-attempts', 100); count.min = '1'; count.max = '1000'; count.step = '1';
+    const seed = field('Starting seed', 'generation-seed', 137); seed.step = '1';
+    const pins = sampler?.pins || {}; box.append(node('p', Object.keys(pins).length ? 'Pinned choices: ' + Object.entries(pins).map(([k,v]) => `${k}: ${v}`).join(' · ') : 'No pinned choices. Sampling uses the saved matrix weights.'));
+    const status = node('p'); status.setAttribute('role', 'status');
+    const start = button('Start generation', async () => {
+      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save generation settings before starting a run.');
+      if (sampler?.dirty()) throw new Error('Save or discard the Workbench matrix draft before generating.');
+      const n = Number(count.value), first = Number(seed.value);
+      if (!count.value || !Number.isInteger(n) || n < 1 || n > 1000 || !seed.value || !Number.isSafeInteger(first) || !Number.isSafeInteger(first + n - 1)) throw new Error('Supply 1–1000 attempts and a safe integer seed.');
+      start.disabled = true;
+      try {
+        const requests = Array.from({length:n}, (_, i) => ({seed:first+i, overrides:{...(sampler?.pins || {})}}));
+        const run = await api('/generation/runs', 'POST', {requests, instructions:{}});
+        status.textContent = `Started ${n} attempts. Job ${run.job_id}`;
+        $('generation-settings-dialog').close(); await this.inspectJob(run.job_id); await this.listing();
+      } finally { start.disabled = false; }
+    }); start.id = 'generation-start'; box.append(start, status);
+    $('generation-settings-dialog').showModal();
+  }
+  async openJobs() {
+    if (!this.jobsOverview) {
+      const dialog = node('dialog'), heading = node('h2', 'Jobs'), listing = node('div'), controls = node('div'), previous = button('Previous jobs', async () => { this.jobsOffset = Math.max(0, (this.jobsOffset || 0) - 50); await this.renderJobs(); }), next = button('Next jobs', async () => { this.jobsOffset = (this.jobsOffset || 0) + 50; await this.renderJobs(); });
+      dialog.id = 'jobs-dialog'; controls.append(previous, next, button('Refresh jobs', () => this.renderJobs()), button('Close', () => dialog.close()));
+      dialog.append(heading, node('p', 'Inspect generation, review, import and export jobs. Closing this panel leaves jobs running.'), listing, controls); document.body.append(dialog);
+      this.jobsOverview = {dialog, listing, previous, next};
+    }
+    this.jobsOverview.dialog.showModal(); await this.renderJobs();
+  }
+  async renderJobs() {
+    const offset = this.jobsOffset || 0, jobs = await api(`/job-summaries?limit=50&offset=${offset}`);
+    const view = this.jobsOverview; view.listing.replaceChildren();
+    if (!jobs.length) view.listing.append(node('p', 'No jobs on this page.'));
+    for (const job of jobs) {
+      const row = node('div', undefined, 'job-overview-row'); row.append(node('strong', `${job.kind} · ${job.state}`), node('span', ` ${job.progress}/${job.total} · ${job.id} `), button('Inspect job', () => this.inspectJob(job.id))); view.listing.append(row);
+    }
+    view.previous.disabled = offset === 0; view.next.disabled = jobs.length < 50;
+  }
   async pollJobs() {
     const jobs = await api('/job-summaries');
     $('job-status-bar').replaceChildren(...jobs.map(job => button(`${job.kind} · ${job.state} · ${job.progress}/${job.total}`, () => this.inspectJob(job.id))));
@@ -390,6 +507,14 @@ export class StudioUI {
     view.logs.textContent = view.logs.textContent.slice(-200000);
     view.files.replaceChildren();
     for (const endpoint of j.paused_endpoints || []) view.files.append(button('Resume endpoint ' + endpoint, () => api(`/endpoints/${endpoint}/resume`, 'POST')));
+    if (j.kind === 'run') {
+      const attempts = await api(`/jobs/${id}/attempts?limit=100&offset=${view.attemptOffset || 0}`);
+      for (const attempt of attempts) if (attempt.state === 'active') {
+        view.files.append(button('Detach trajectory ' + attempt.trajectory_id.slice(0, 8), async () => { if (!confirm('Detach this trajectory permanently and stop all automatic work on it?')) return; await api(`/jobs/${id}/detach/${attempt.trajectory_id}`, 'POST'); await this.refreshJob(id); await this.refreshSelected(); }));
+      }
+      if (view.attemptOffset) view.files.append(button('Previous attempts', async () => { view.attemptOffset = Math.max(0, view.attemptOffset - 100); await this.refreshJob(id); }));
+      if (attempts.length === 100) view.files.append(button('Next attempts', async () => { view.attemptOffset = (view.attemptOffset || 0) + 100; await this.refreshJob(id); }));
+    }
     if (j.kind === 'bulk') {
       const rows = await api(`/jobs/${id}/results?limit=100`); view.files.append(node('pre', json(rows.map(r => ({id: r.trajectory_id, state: r.state, warning: r.warning})))));
     }
@@ -406,7 +531,7 @@ export class StudioUI {
   renderToolSettings(selected = '') {
     const box = $('tool-schema-editor'); box.replaceChildren(node('h3', 'Synthetic tool inputs'));
     const data = JSON.parse($('settings-json').value); data.tools ||= {};
-    const write = () => { $('settings-json').value = json(data); };
+    const write = () => { const current = JSON.parse($('settings-json').value); current.tools = data.tools; $('settings-json').value = json(current); };
     const select = node('select'); select.setAttribute('aria-label', 'Project tool');
     for (const [id, tool] of Object.entries(data.tools)) { const opt = node('option', tool.name + ' · ' + id); opt.value = id; select.append(opt); }
     if (selected && data.tools[selected]) select.value = selected;
@@ -440,6 +565,7 @@ export class StudioUI {
     }));
   }
   async init() {
+    window.addEventListener?.('beforeunload', e => { if (this.isDirty()) { e.preventDefault(); e.returnValue = ''; } });
     window.addEventListener?.('pagehide', () => { this.stopped = true; clearTimeout(this.pollTimer); clearTimeout(this.validationTimer); this.preview.invalidate(); if (this.playing) clearInterval(this.playing); });
     document.addEventListener('graph-job-started', e => this.inspectJob(e.detail));
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('preview-debounce').value = this.prefs.debounce;
@@ -471,13 +597,17 @@ export class StudioUI {
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
     on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
-    const scrub = value => { this.position = Number(value); this.renderTimeline(); };
+    const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
     on('scrubber', 'input', e => scrub(e.target.value)); on('tick-number', 'change', e => scrub(e.target.value));
     on('first-tick', 'click', () => scrub(0)); on('prev-tick', 'click', () => scrub(this.position - 1)); on('next-tick', 'click', () => scrub(this.position + 1)); on('last-tick', 'click', () => scrub($('scrubber').max));
     on('play', 'click', () => { if (this.playing) { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; } else { $('play').textContent = 'Pause'; this.playing = setInterval(() => scrub(this.position >= Number($('scrubber').max) ? 0 : this.position + 1), 500); } });
-    on('settings-button', 'click', async () => { await this.loadSettings(); $('settings-json').value = json(this.settings); this.renderToolSettings(); const usage = await api('/logs/usage'); $('log-usage').textContent = json(usage); $('settings-dialog').showModal(); });
-    on('settings-json', 'change', () => this.renderToolSettings());
-    on('settings-save', 'click', async () => { await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsRecord.revision}); await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); $('settings-dialog').close(); });
+    on('settings-button', 'click', () => this.openSettings());
+    if ($('generation-settings-button')) on('generation-settings-button', 'click', () => this.openGenerationSettings());
+    if ($('jobs-button')) on('jobs-button', 'click', () => this.openJobs());
+    if ($('generation-sampler-button')) on('generation-sampler-button', 'click', () => { $('generation-settings-dialog').close(); $('sampler-tab').click(); });
+    if ($('generation-settings-save')) on('generation-settings-save', 'click', () => this.saveSettings('generation-settings-dialog'));
+    on('settings-json', 'change', () => { this.renderToolSettings(); this.renderSettingsForms(); });
+    on('settings-save', 'click', () => this.saveSettings('settings-dialog'));
     on('logs-clear', 'click', () => api('/logs', 'DELETE'));
     on('import-button', 'click', () => $('file-input').click()); on('file-input', 'change', async () => { const file = $('file-input').files[0]; if (!file) return; const r = await api('/imports', 'POST', {text: await file.text()}); await this.inspectJob(r.job_id); $('file-input').value = ''; });
     on('export-button', 'click', () => $('export-dialog').showModal());
@@ -505,7 +635,22 @@ export class StudioUI {
     });
     document.querySelectorAll('[data-close]').forEach(n => n.onclick = () => n.closest('dialog').close());
     await this.listing(); if (this.lastItems?.length) await this.select(this.lastItems[0].id); await this.pollJobs();
-    const poll = async () => { if (this.stopped) return; try { await this.pollJobs(); const changes = await api(`/changes?after=${this.cursor || 0}`); if (changes.items.length || changes.resync) { this.cursor = changes.items.at(-1)?.cursor || changes.latest; if (changes.resync || changes.items.some(x => x.kind === 'settings')) { await this.loadSettings(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); } await this.listing(); if (this.id && changes.items.some(x => x.entity_id === this.id)) message('Saved source changed. Your draft is retained; reload to reconcile.'); } } catch (e) { message(e); } if (!this.stopped) this.pollTimer = setTimeout(poll, 1500); }; this.pollTimer = setTimeout(poll, 1500);
+    const poll = async () => { if (this.stopped) return; try { await this.pollChanges(); } catch (e) { message(e); } if (!this.stopped) this.pollTimer = setTimeout(poll, 1500); }; this.pollTimer = setTimeout(poll, 1500);
+  }
+  async pollChanges() {
+    await this.pollJobs();
+    const changes = await api(`/changes?after=${this.cursor || 0}`);
+    if (changes.items.length || changes.resync) {
+      this.cursor = changes.items.at(-1)?.cursor || changes.latest;
+      if (changes.resync || changes.items.some(x => x.kind === 'settings')) { await this.loadSettings(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); }
+      for (const change of changes.items) if (change.entity_id !== this.id) {
+        const cached = this.drafts.get(change.entity_id);
+        if (cached && JSON.stringify(cached.draft) === JSON.stringify(cached.record.source) && !cached.editors.size) this.drafts.delete(change.entity_id);
+      }
+      await this.listing();
+    }
+    await this.refreshSelected();
+    if (this.jobsOverview?.dialog.open) await this.renderJobs();
   }
   savePreferences() { localStorage.setItem('graph-preferences', JSON.stringify(this.prefs)); }
 }

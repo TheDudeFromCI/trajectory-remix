@@ -39,6 +39,9 @@ separate split shards. Downloads live in `/tmp`, expire after 24 hours and can
 also disappear through operating-system cleanup. Clearing logs does not clear
 sources, checkpoints, evaluations or ownership.
 
+For dashboard setup and job controls, see [Dashboard](docs/DASHBOARD.md) and
+[Project settings](docs/PROJECT-SETTINGS.md).
+
 | Task | Guide |
 | --- | --- |
 | Author source and synthetic tools | [Source format](docs/GRAPH-SOURCE.md), [Studio](docs/GRAPH-STUDIO.md), [Tools/chat](docs/TOOLS.md) |

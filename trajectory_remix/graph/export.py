@@ -37,9 +37,14 @@ class ExportOptions:
     seed: int = 0
 
     def __post_init__(self):
+        for name in ('compiled', 'include_stale', 'exclude_missing_split'):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f'{name} must be a boolean')
+        if type(self.seed) is not int:
+            raise ValueError('seed must be an integer')
         if type(self.trajectories_per_file) is not int or self.trajectories_per_file < 1:
             raise ValueError("trajectories_per_file must be positive")
-        if self.minimum_stage not in (None, 0, 1, 2, 3):
+        if self.minimum_stage is not None and (type(self.minimum_stage) is not int or self.minimum_stage not in (0, 1, 2, 3)):
             raise ValueError("minimum_stage must be Pending through Ready, or None")
         if self.metadata not in ("full", "remove_all", "measured_metrics", "all_metrics"):
             raise ValueError("Invalid metadata projection")

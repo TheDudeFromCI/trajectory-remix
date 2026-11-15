@@ -54,7 +54,7 @@ def make_source(seed, index=0, split="train", max_gap=5):
     rng = random.Random(f"{seed}:{split}:{index}")
     letters = [rng.choice(string.ascii_lowercase) for _ in range(10)]
     digits = [rng.randrange(10) for _ in range(10)]
-    events = {"header": dict(kind="agent_text", window="result", content="", after=[])}
+    events = {"header": dict(kind="agent_text", window="result", content="", after=[], supervision={"weight": 0.1})}
     previous = "header"
     for i, (letter, digit) in enumerate(zip(letters, digits)):
         left, right, output = f"letter-{i}", f"digit-{i}", f"sum-{i}"
@@ -67,16 +67,16 @@ def make_source(seed, index=0, split="train", max_gap=5):
             events[late]["after"].append(early)
         events[output] = dict(kind="agent_text", window="result",
                               content=chr((ord(letter) - 97 + digit) % 26 + 97),
-                              after=[left, right, previous], close_window=i == 9)
+                              after=[left, right, previous], close_window=i == 9, supervision={"weight": 5.0})
         previous = output
-    ident = str(uuid.uuid5(uuid.NAMESPACE_URL, f"graph-addition/2/{seed}/{split}/{index}"))
+    ident = str(uuid.uuid5(uuid.NAMESPACE_URL, f"graph-addition/3/{seed}/{split}/{index}"))
     return GraphSource.model_validate(dict(
         format="kidra-trajectory-graph/1", id=ident,
-        defaults={"noop_loss_weight": 1.0},
+        defaults={"noop_loss_weight": 0.1},
         windows={"letters": dict(purpose="document", agent_writable=False),
                  "digits": dict(purpose="document", agent_writable=False),
                  "result": dict(purpose="reasoning", agent_writable=True)},
-        events=events, metadata={"split": split, "demo": "graph-addition/2",
+        events=events, metadata={"split": split, "demo": "graph-addition/3",
             "timing_policy": "earliest-legal-after-streamed-header-and-prior-output"})).to_dict()
 
 
@@ -131,7 +131,7 @@ def build_dataset(directory, *, train_samples=2048, validation_samples=256,
     (directory / "tokenizer.json").write_text(c.tokenizer.to_str())
     report = dict(trajectories=train_samples + validation_samples, rows=0, targets=0,
                   compiler="kidra.graph-compiler/1")
-    dataset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{CONTRACT}/addition/2/{seed}/{max_gap}")
+    dataset_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{CONTRACT}/addition/3/{seed}/{max_gap}")
     for split, count in (("train", train_samples), ("validation", validation_samples)):
         with (directory / f"{split}.jsonl").open("x") as raw:
             for shard, start in enumerate(range(0, count, shard_size)):

@@ -183,3 +183,15 @@ assertions. Existing sampler and studio browser checks remain available. Live
 model quality, tool-response coherence, native-schema compatibility and local
 context-limit behavior need the user-machine checks. No throughput/load/scale
 benchmark, training or live LLM test is part of this suite or CI.
+
+## Provider output contracts
+
+Simple closed object contracts use native strict JSON-schema decoding. Repair
+root unions and unrestricted tool-argument objects are not in the common strict
+OpenAI schema subset. Those requests use JSON-object mode and include the full
+output schema in the provider prompt. The authoritative graph schema is still
+validated locally, with the same bounded format-correction policy. This changes
+only the request's decoding format: the endpoint and model remain frozen, and no
+provider fallback, probe or additional retry is introduced. Local servers must
+support the requested JSON response format; provider errors retain normal
+endpoint retry/pause behavior.

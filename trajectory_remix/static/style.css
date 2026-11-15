@@ -700,6 +700,7 @@ h2 {
   overflow: auto;
   padding: 9px 12.5px;
 }
+#events-view[hidden],
 .view[hidden] {
   display: none;
 }
@@ -1472,23 +1473,6 @@ dialog::backdrop {
   border-color: var(--accent);
   color: var(--accent);
   background: #213f3a;
-}
-.export-body {
-  padding: 12.5px;
-  line-height: 1.8;
-}
-.export-body label {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 7px 0;
-}
-.export-body p {
-  color: var(--muted);
-  margin-top: 0;
-}
-#export-dialog {
-  max-width: 640px;
 }
 @media (max-width: 1250px) {
   .workspace {

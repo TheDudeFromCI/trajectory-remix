@@ -90,6 +90,15 @@ For these short streams, inputs may all arrive before the header completes; the
 fixture therefore does not establish learned waiting across later arrivals.
 Generic wait events, replay tick anchors and disabled-header paths remain absent.
 
+The fixture balances loss so the ten arithmetic outputs are not drowned out by
+fixed framing: result-header weight is 0.1, implicit NOOP weight is 0.1, and each
+sum event (including its closing EOS) has weight 5. External events remain masked.
+These are whole-event weights, not token-level exceptions. Dataset identities are
+versioned as `graph-addition/3` so regenerated shards identify the changed objective.
+Held-out `letters_accuracy` counts only the ten sums after CTX_END;
+`header_letters_accuracy` is reported separately. Header prediction cannot inflate
+the task accuracy gate.
+
 Writable windows and Available predict supervised NOOP when idle; read-only
 windows count as NOOP without predictions. All-NOOP sleeps retain one decision
 and resume only on external input. No EOS token is ever a KV key.
@@ -111,7 +120,7 @@ query's memory prevents erased content from surviving indirectly in another
 window's hidden state. Padded samples never attend across trajectories.
 
 This is a dense, inspectable reference model, not an optimized KV cache/runtime.
-It recomputes memory for each query and backpropagates through complete samples.
+It rebuilds memory for each distinct expiry state and backpropagates through complete samples. Queries sharing that state reuse a memory bank; the original construction frontier still excludes future keys at every layer. Closed/replaced keys are removed before rebuilding, preventing indirect resurrection. Tiny tests compare both logits and parameter gradients against the per-query reference.
 Do not compare its throughput with the old adapter's historical numbers or
 silently detach prefixes to make it faster.
 

@@ -97,19 +97,28 @@ class TinyKidra(nn.Module):
         queries = self.embed(
             batch["query_previous"], batch["query_windows"], batch["query_positions"]
         )
-        # Rebuild memory for each query's currently visible context. Original
-        # construction masks alone retain indirect copies of closed/replaced
-        # text in surviving windows. Intersect at EVERY layer, including memory
-        # construction, so erased content cannot return through hidden states.
+        # Rebuild memory when visible lifetimes change. Construction masks
+        # alone retain indirect copies of closed/replaced text in surviving
+        # windows; exclude expired keys at EVERY layer, including construction.
+        # Queries sharing an expiry state can reuse that same rebuilt bank.
         outputs = []
-        for index in range(queries.shape[1]):
-            current = batch["query_allowed"][:, index:index + 1]
+        start = 0
+        while start < queries.shape[1]:
+            end = start + 1
+            live = batch["memory_live"][:, start]
+            while end < queries.shape[1] and torch.equal(batch["memory_live"][:, end], live):
+                end += 1
+            # Future rows cannot influence an earlier visible row because every
+            # layer also applies the original construction frontier. Only expiry
+            # changes require rebuilding memory; ordinary prefix growth does not.
+            current = batch["query_allowed"][:, start:end]
             live_memory = memory
-            query = queries[:, index:index + 1]
-            construction = batch["memory_allowed"] & current
+            query = queries[:, start:end]
+            construction = batch["memory_allowed"] & live[:, None, :]
             for layer in self.layers:
                 live_memory, query = layer(live_memory, query, construction, current)
             outputs.append(F.linear(self.norm(query), self.tokens.weight))
+            start = end
         return torch.cat(outputs, dim=1)
 
 
@@ -146,6 +155,16 @@ def collate(samples, device="cpu", *, inference_queries=None):
             labels = np.zeros(len(live), dtype=np.int64)
             weights = np.ones(len(live))
 
+        # Task accuracy excludes ordinary letters in generated CTX headers.
+        # Recover each header boundary from the actual compiled control rows.
+        header_ends = {}
+        for row in np.flatnonzero(arrays["token_ids"] == CONTROLS["ctx_end"]):
+            header_ends.setdefault(int(arrays["window_ids"][row]), int(arrays["position_ids"][row]))
+        task_letters = np.zeros(len(labels), dtype=np.bool_)
+        if inference_queries is None:
+            task_letters = (labels < 26) & np.asarray([
+                position > header_ends.get(int(window), float("inf"))
+                for window, position in zip(target_windows, query_positions)])
         visible_from = arrays["visible_from"][memory_rows]
         visible_until = arrays["visible_until"][memory_rows]
         construction_frontiers = arrays["query_frontiers"][memory_rows]
@@ -159,6 +178,7 @@ def collate(samples, device="cpu", *, inference_queries=None):
                 "query_windows": query_windows,
                 "query_positions": query_positions,
                 "labels": labels,
+                "task_letters": task_letters,
                 "weights": weights,
                 # Each memory row is visible only during its explicit lifetime,
                 # both when it was constructed and when a prediction is made.
@@ -166,6 +186,7 @@ def collate(samples, device="cpu", *, inference_queries=None):
                     (visible_from[None] <= construction_frontiers[:, None])
                     & (construction_frontiers[:, None] < visible_until[None])
                 ),
+                "memory_live": frontiers[:, None] < visible_until[None],
                 "query_allowed": (
                     (visible_from[None] <= frontiers[:, None])
                     & (frontiers[:, None] < visible_until[None])
@@ -179,7 +200,7 @@ def collate(samples, device="cpu", *, inference_queries=None):
     for name in items[0]:
         if name == "memory_allowed":
             shape, dtype = (len(items), max_memory_rows, max_memory_rows), np.bool_
-        elif name == "query_allowed":
+        elif name in ("query_allowed", "memory_live"):
             shape, dtype = (len(items), max_queries, max_memory_rows), np.bool_
         else:
             length = max_memory_rows if name.startswith("memory_") else max_queries
@@ -211,7 +232,7 @@ def objective(logits, batch):
 def evaluate(model, dataset, batch_size, device):
     model.eval()
     total_loss, total, correct, exact = 0., 0, 0, 0
-    groups = {"letters": [0, 0], "noop": [0, 0], "eos": [0, 0]}
+    groups = {"letters": [0, 0], "header_letters": [0, 0], "noop": [0, 0], "eos": [0, 0]}
     for offset in range(0, len(dataset), batch_size):
         b = collate([dataset[i] for i in range(offset, min(len(dataset), offset + batch_size))], device)
         logits = model(b)
@@ -222,7 +243,9 @@ def evaluate(model, dataset, batch_size, device):
         total += n
         correct += int((matches & valid).sum())
         exact += int((matches | ~valid).all(-1).sum())
-        for name, mask in (("letters", b["labels"] < 26), ("noop", b["labels"] == NOOP),
+        for name, mask in (("letters", b["task_letters"].bool()),
+                           ("header_letters", (b["labels"] < 26) & ~b["task_letters"].bool()),
+                           ("noop", b["labels"] == NOOP),
                            ("eos", b["labels"] == EOS)):
             selected = mask & valid
             groups[name][0] += int((matches & selected).sum())

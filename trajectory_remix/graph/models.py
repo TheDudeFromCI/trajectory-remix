@@ -272,7 +272,10 @@ class GenerationOptions(DTO):
 
 class ProjectSettings(DTO):
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
-    tools: dict[Identifier, ToolDefinition] = Field(default_factory=dict)
+    tools: dict[Identifier, ToolDefinition] = Field(default_factory=lambda: {
+        "chat": ToolDefinition(name="Chat", input_schema={"type": "object",
+            "properties": {"content": {"type": "string"}}, "required": ["content"],
+            "additionalProperties": False})})
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)

@@ -1,0 +1,55 @@
+/* Small form interaction checks: no server, endpoints, model or compiler. */
+import assert from 'node:assert/strict';
+import {Window} from 'happy-dom';
+const window = new Window(); globalThis.document = window.document;
+const {renderProjectSettings, renderGenerationSettings} = await import('../trajectory_remix/static/project-settings.js');
+const root = document.createElement('div'), generation = document.createElement('div'); document.body.append(root,generation);
+let draft = {endpoints:{},endpoint_roles:{},generation:{fast:true,critical:true,repair:true,format_retries:2,repair_context_bytes:65536},review_checklists:{core:{evidence:{text:'Ground claims in evidence',allow_not_applicable:false}},critical:{}},tokenizer_profiles:{},tools:{chat:{name:'Chat',input_schema:{type:'object'}}},reasoning_levels:['Low','Medium','High'],split_ratios:{train:.8,development:.1,test:.1},log_cache_mib:1024};
+let writes=0;
+const options = {getSettings:()=>draft,onChange:value=>{draft=value;writes++;}};
+const byLabel = (parent,name) => [...parent.querySelectorAll('[aria-label]')].find(n=>n.getAttribute('aria-label')===name);
+const btn = (parent,name) => [...parent.querySelectorAll('button')].find(n=>n.textContent===name);
+const enter = (n,value) => {n.value=value;n.dispatchEvent(new window.Event('input'));};
+const change = (n,value) => {n.value=value;n.dispatchEvent(new window.Event('change'));};
+renderProjectSettings(root,draft,options);
+enter(byLabel(root,'New endpoint ID'),'local-model');btn(root,'Add endpoint').click();
+assert.equal(draft.endpoints['local-model'].url,'http://127.0.0.1:8000/v1');
+enter(byLabel(root,'Endpoint local-model model'),'tiny-local');
+enter(byLabel(root,'Endpoint local-model concurrency'),'3');
+enter(byLabel(root,'Endpoint local-model retries'),'4');
+change(byLabel(root,'Generator endpoint'),'local-model');
+change(byLabel(root,'Fast Review endpoint'),'local-model');
+assert.deepEqual(draft.endpoints['local-model'],{url:'http://127.0.0.1:8000/v1',model:'tiny-local',concurrency:3,retries:4});
+assert.deepEqual(draft.endpoint_roles,{generator:'local-model',fast:'local-model'});
+assert.match(root.textContent,/REMIX_API_KEY_LOCAL_MODEL/);
+// A separate editor changes the same authoritative draft between keystrokes.
+draft.tools.chat.name='Renamed elsewhere';
+enter(byLabel(root,'Endpoint local-model URL'),'http://localhost:8080/v1');
+assert.equal(draft.tools.chat.name,'Renamed elsewhere');
+renderGenerationSettings(generation,draft,options);
+const repair=byLabel(generation,'Attempt repair after review failure');repair.checked=false;repair.dispatchEvent(new window.Event('change'));
+enter(byLabel(generation,'core criterion evidence'),'Require exact supporting events');
+enter(byLabel(generation,'New critical criterion ID'),'quality');btn(generation,'Add critical criterion').click();
+enter(byLabel(generation,'critical criterion quality'),'Avoid unsupported conclusions');
+assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists.critical.quality.text,'Avoid unsupported conclusions');
+assert.equal(draft.endpoints['local-model'].model,'tiny-local');
+btn(root,'Remove endpoint local-model').click();
+assert.deepEqual(draft.endpoint_roles,{});assert.deepEqual(draft.endpoints,{});
+assert.match(root.textContent,/Cleared endpoint roles: generator, fast/);
+assert.equal(draft.review_checklists.core.evidence.text,'Require exact supporting events');
+// Import a real-shaped tokenizer JSON and keep its original vocabulary intact.
+const names=['bos','eos','noop','ctx_begin','ctx_end','tool_begin','tool_end','response_begin','response_end','msg_begin','msg_end','window_ref'];
+const definition={model:{type:'WordLevel',vocab:{x:0}},added_tokens:names.map((name,i)=>({id:i+1,content:`<|${name}|>`,special:true}))};
+enter(byLabel(root,'New tokenizer profile ID'),'demo');
+const upload=byLabel(root,'Tokenizer JSON file');Object.defineProperty(upload,'files',{value:[{text:async()=>JSON.stringify(definition)}]});await upload.onchange();
+assert.equal(Object.keys(draft.tokenizer_profiles.demo.special_tokens).length,12);
+assert.deepEqual(draft.tokenizer_profiles.demo.definition,definition);
+assert.ok(writes>10);
+// The callback-only API also retains edits across structural redraws.
+const standalone=document.createElement('div');let result;
+renderProjectSettings(standalone,draft,{onChange:v=>result=v});
+enter(byLabel(standalone,'New endpoint ID'),'one');btn(standalone,'Add endpoint').click();
+enter(byLabel(standalone,'Endpoint one model'),'first');enter(byLabel(standalone,'Endpoint one concurrency'),'2');
+assert.equal(result.endpoints.one.model,'first');assert.equal(result.endpoints.one.concurrency,2);
+console.log('Project/generation settings forms: endpoint CRUD, roles, shared drafts, checklists, tokenizer import and callback state passed.');
+window.happyDOM.abort();

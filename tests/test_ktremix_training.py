@@ -116,6 +116,9 @@ class TrainingDemoTests(unittest.TestCase):
                 before = model(t.collate([columns]))[0, query_index]
                 after = model(t.collate([altered]))[0, query_index]
             torch.testing.assert_close(before, after, rtol=0, atol=1e-6)
+            # Mixed samples and variable expiry states retain the exact reference
+            # outputs and gradients; future-token invariance alone is insufficient.
+            self.assert_reference_equivalent(model, t.collate([columns, altered]))
 
     def test_free_running_runtime_matches_compiler_with_mock_predictions(self):
         # No model or provider inference: prescribed predictions verify that
@@ -139,6 +142,49 @@ class TrainingDemoTests(unittest.TestCase):
         report = t.rollout(Oracle(), [source.to_dict()], "cpu")
         self.assertEqual(report["exact_timing_and_closure_accuracy"], 1.)
         self.assertEqual(report["letters_at_correct_tick_accuracy"], 1.)
+
+    @staticmethod
+    def reference_logits(model, batch):
+        memory = model.embed(batch['memory_tokens'], batch['memory_windows'], batch['memory_positions'])
+        queries = model.embed(batch['query_previous'], batch['query_windows'], batch['query_positions'])
+        rows = []
+        for index in range(queries.shape[1]):
+            current = batch['query_allowed'][:, index:index + 1]
+            mem, query = memory, queries[:, index:index + 1]
+            for layer in model.layers:
+                mem, query = layer(mem, query, batch['memory_allowed'] & current, current)
+            rows.append(t.F.linear(model.norm(query), model.tokens.weight))
+        return torch.cat(rows, dim=1)
+
+    def assert_reference_equivalent(self, model, batch):
+        actual = model(batch)
+        expected = self.reference_logits(model, batch)
+        torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
+        t.objective(actual, batch).backward()
+        gradients = {name: parameter.grad.clone() for name, parameter in model.named_parameters()}
+        model.zero_grad(set_to_none=True)
+        t.objective(expected, batch).backward()
+        for name, parameter in model.named_parameters():
+            torch.testing.assert_close(parameter.grad, gradients[name], rtol=2e-4, atol=2e-6)
+
+    def test_expiry_grouping_matches_per_query_logits_and_gradients(self):
+        _, _, _, sample = self.fixture()
+        self.assert_reference_equivalent(t.TinyKidra(), t.collate([sample]))
+
+    def test_task_letter_accuracy_excludes_header_letters(self):
+        _, _, _, sample = self.fixture()
+        batch = t.collate([sample])
+        self.assertEqual(int(batch["task_letters"].sum()), 10)
+        class WrongHeaders(torch.nn.Module):
+            def forward(self, b):
+                predicted = b["labels"].clone()
+                headers = (predicted < 26) & ~b["task_letters"].bool()
+                predicted[headers] = (predicted[headers] + 1) % 26
+                logits = torch.full((*predicted.shape, len(d.VOCAB)), -10.)
+                return logits.scatter_(-1, predicted[..., None], 10.)
+        metrics = t.evaluate(WrongHeaders(), [sample], 1, 'cpu')
+        self.assertEqual(metrics["letters_accuracy"], 1.)
+        self.assertEqual(metrics["header_letters_accuracy"], 0.)
 
     def test_raw_graph_shards_and_one_optimizer_step(self):
         with tempfile.TemporaryDirectory() as root:

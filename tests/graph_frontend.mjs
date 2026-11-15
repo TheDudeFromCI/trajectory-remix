@@ -12,7 +12,7 @@ for (const key of ['document', 'localStorage', 'HTMLElement', 'Event', 'MouseEve
 const nativeFetch = globalThis.fetch;
 const paths = [];
 globalThis.fetch = (path, init) => { paths.push(String(path)); return nativeFetch(new URL(path, base), init); };
-const code = await fs.readFile(new URL('../trajectory_remix/static/graph.js', import.meta.url), 'utf8');
+const code = (await fs.readFile(new URL('../trajectory_remix/static/graph.js', import.meta.url), 'utf8')).replace("'./project-settings.js'", JSON.stringify(new URL('../trajectory_remix/static/project-settings.js', import.meta.url).href));
 const module = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const ui = globalThis.graphStudio, $ = id => document.getElementById(id);
 const until = async predicate => { for(let i=0;i<300;i++){ if(await predicate()) return; await new Promise(r=>setTimeout(r,10)); } throw new Error('DOM state did not settle: ' + $('status').textContent); };

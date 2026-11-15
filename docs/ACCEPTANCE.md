@@ -3,8 +3,33 @@
 Workbench B is the selected sampler UI. Integration is on
 `feat/overhaul-acceptance-guides`, based on `feat/event-generation-review` at
 `56bbb153936b8e25b495aea3f959197405ce8048`. The draft targets that branch.
-**User acceptance is pending.** A green deterministic check or synthetic model
-verdict does not approve data quality, throughput or training convergence.
+The user has delegated completion, review and merging to the coordinator and
+waived stress testing. A green deterministic check or synthetic model verdict
+still does not establish content quality or training convergence.
+
+## Dashboard restoration and final review
+
+The original desktop workflow is restored over the graph REST services:
+File/Edit/View menus, dataset/sidebar, central windows/timeline and right event
+inspector. Project Settings has endpoint/role/tokenizer forms; Generation Settings
+and Jobs are persistent actions. Clean sources update live and unlock on completion;
+real unsaved drafts survive changes. See [Dashboard](DASHBOARD.md) and
+[Project Settings](PROJECT-SETTINGS.md).
+
+A fresh-project Chromium check exercises form setup, endpoint/tool draft round
+trips, generation, job pause/resume, clean live updates, historical scrubbing and
+dirty-buffer retention. Screenshots are in `docs/images/dashboard-restored/`.
+The independent audit additionally fixed ambiguous REST export option types,
+missing default chat schemas, and strict-provider response-schema compatibility.
+
+Real OpenAI and Hugging Face connectivity attempts were blocked by the execution
+network proxy with tunnel HTTP 403 before a model response. No live external-model
+quality claim is made. Full demo convergence is being investigated; the original
+header-contaminated accuracy metric is corrected to score only actual sums.
+Scale/stress workloads were not run and are no longer a release gate under the
+current user instruction. The manual workload harness remains available for later
+use. Historical evidence and previously prepared commands follow below.
+
 
 ### Integration-review follow-up — November 14, 2026
 
