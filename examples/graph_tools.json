@@ -1,0 +1,24 @@
+{
+  "format": "kidra-trajectory-graph/1",
+  "id": "085888f4-ed94-4a26-9506-bde7332f2e87",
+  "windows": {
+    "request": {"purpose": "tool", "agent_writable": true},
+    "observation": {"purpose": "tool", "agent_writable": false}
+  },
+  "events": {
+    "prefix": {
+      "kind": "tool_call", "window": "request", "call_id": "read-1", "tool": "read",
+      "content": "{\"path\":", "insert_tool_begin": true, "insert_tool_end": false
+    },
+    "submit": {
+      "kind": "tool_call", "window": "request", "call_id": "read-1", "tool": "read", "after": ["prefix"],
+      "content": "\"notes.txt\"}", "insert_tool_begin": false, "insert_tool_end": true, "close_window": true
+    },
+    "result": {
+      "kind": "tool_response", "window": "observation", "call_id": "read-1", "after": ["submit"],
+      "content": "The saved note.", "delivery": {"mode": "streamed", "chain_immediately": true},
+      "insert_response_begin": true, "insert_response_end": true, "close_window": true
+    }
+  },
+  "metadata": {"label": "Authored observation; no tool execution", "split": "Auto"}
+}

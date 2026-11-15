@@ -1,0 +1,67 @@
+/* Workbench uses the studio palette, with fixed numeric columns and quiet rules. */
+.studio-tabs{display:flex;gap:4px;padding:0 14px;border-bottom:1px solid #354456;background:#151d28}
+.studio-tabs button{border:0;border-radius:0;padding:12px 18px;background:transparent;color:#a3b0c2;border-bottom:2px solid transparent}
+.studio-tabs button[aria-selected=true]{color:#b6e9db;border-bottom-color:#7acdb7;background:#1c2b34}
+#sampler-workbench{flex:1;min-height:0;overflow:auto;background:#111923;color:#dce6f2;padding:24px 30px;font-size:13px}
+#sampler-workbench *{box-sizing:border-box}
+#sampler-workbench h1{font-size:28px;margin:5px 0;font-weight:600;letter-spacing:-.6px}
+#sampler-workbench h2{font-size:21px;margin:8px 0}
+#sampler-workbench h3{font-size:14px}
+#sampler-workbench p{line-height:1.6;color:#aab8c9;margin:8px 0}
+#sampler-workbench button{cursor:pointer;padding:7px 11px;border:1px solid #3a4a5f;border-radius:5px;background:#243143;color:#e0e9f4}
+#sampler-workbench button:hover{background:#2c4053;border-color:#7b9caa}
+#sampler-workbench button:disabled{opacity:.45;cursor:default}
+#sampler-workbench :focus-visible,.studio-tabs :focus-visible{outline:2px solid #8cdbcb;outline-offset:3px}
+#sampler-workbench input,#sampler-workbench select,#sampler-workbench textarea{background:#111b28;border:1px solid #3d4d62;border-radius:4px;color:#e4edf8;padding:7px 9px;font:inherit}
+#sampler-workbench label{color:#aebcd0;font-size:12px;display:block;margin:0}
+#sampler-workbench label input,#sampler-workbench label select{display:block;margin-top:6px;width:100%}
+#sampler-workbench input[type=checkbox]{accent-color:#80cdb9;width:15px;height:15px}
+#sampler-workbench [aria-invalid=true]{border-color:#ef8e88}
+.sw-heading{display:flex;justify-content:space-between;gap:20px;align-items:center}
+.sw-eyebrow{font-size:10px;letter-spacing:1.6px;color:#86a4b8;font-weight:600}
+.sw-save{display:flex;align-items:center;gap:10px}.sw-save span{font-size:12px;color:#b7c8d7}
+#sampler-workbench .sw-primary{background:#85d5bd;border-color:#85d5bd;color:#102c28;font-weight:600}
+.sw-notice{border-left:2px solid #649f91;background:#1a2a30;color:#a8c9c1;padding:10px 14px;margin:14px 0 0;font-size:12px}
+#sampler-message{min-height:30px;padding:7px 0;color:#8fdbc2;white-space:pre-wrap;overflow-wrap:anywhere}#sampler-message.error{color:#ffb0a2}
+.sw-layout{display:grid;grid-template-columns:255px minmax(0,1fr);gap:24px;align-items:start}
+.sw-navigation{border:1px solid #304051;border-radius:7px;background:#17212e;position:sticky;top:0}
+.sw-nav-tools{padding:15px;display:grid;gap:12px;border-bottom:1px solid #304051}.sw-nav-tools span{font-size:11px;color:#8d9eaf}
+#sampler-nav{max-height:calc(100vh - 400px);min-height:220px;overflow:auto;padding:8px}
+#sampler-nav h3{font-size:10px;margin:15px 8px 6px;text-transform:uppercase;letter-spacing:1.2px;color:#8698b1}
+#sampler-nav .sw-nav-row{width:100%;text-align:left;background:transparent;border:1px solid transparent;padding:8px;display:flex;justify-content:space-between;gap:8px;font-size:12px;margin:2px 0}
+#sampler-nav .sw-nav-row.selected{background:#253c44;border-color:#456f70;color:#b5eadc}
+.sw-nav-row small{color:#8eacb7;white-space:nowrap;font-variant-numeric:tabular-nums}
+.sw-main{min-width:0}#sampler-detail{padding:20px;border:1px solid #344456;border-radius:7px;background:#182330}
+.sw-help{max-width:800px;font-size:12px}.sw-bulk{display:flex;align-items:center;gap:8px;padding:12px 0}.sw-bulk span{margin-right:auto;color:#97aabc}.sw-bulk input{width:95px}
+.sw-table-wrap{overflow:auto;max-height:480px;border:1px solid #35475a;border-radius:5px}
+.sw-table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:12px}.sw-table th{background:#213141;color:#9bafc3;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:500;position:sticky;top:0;z-index:1}
+.sw-table th,.sw-table td{padding:10px;border-bottom:1px solid #2c3c4d}.sw-table th:first-child{width:38px}.sw-table th:nth-child(3){width:48px}.sw-table th:nth-child(4){width:115px}.sw-table th:nth-child(5){width:110px}.sw-table th:nth-child(6){width:82px}
+.sw-table tr:last-child td{border-bottom:0}.sw-table tbody tr:nth-child(even){background:#1b2836}.sw-table tr:focus-within{background:#253c47}
+#sampler-workbench .sw-choice{padding:0;border:0;background:none;text-align:left;color:#d9e8f6;text-transform:capitalize;font-weight:600}
+.sw-table td small{display:block;font-size:11px;color:#96a8bb;line-height:1.45;margin-top:4px}.sw-table input[type=number]{width:100%;font-variant-numeric:tabular-nums;text-align:right}
+.sw-share{font-variant-numeric:tabular-nums;text-align:right;background:linear-gradient(90deg,#34514f var(--share),transparent var(--share));background-size:100% 2px;background-position:bottom;background-repeat:no-repeat;color:#b0ddd0}
+#sampler-workbench .sw-footnote{font-size:11px;color:#90a4b9;margin:10px 0 18px}
+.sw-metric,.sw-advanced,.sw-preview{border-top:1px solid #344658;padding:13px 0}.sw-preview{margin-top:16px;padding:16px 20px;background:#182330;border:1px solid #344658;border-radius:7px}
+#sampler-workbench summary{cursor:pointer;color:#bdd0e4;font-size:12px}.sw-preview summary{font-weight:600}.sw-preview summary span{color:#88a6b7;font-size:11px;font-weight:400;margin-left:12px}
+.sw-metric label{display:inline-block!important;width:calc(50% - 12px);margin:8px 10px 8px 0!important}
+#sampler-workbench textarea{width:100%;min-height:260px;resize:vertical;font:12px/1.6 monospace;margin:10px 0;tab-size:2}
+#sampler-workbench pre{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.7 monospace;background:#111b28;border:1px solid #2d4053;border-radius:5px;padding:14px;max-height:300px;overflow:auto}
+.sw-inspector{padding-top:6px}.sw-inspector small{color:#89a2b9}.sw-pins{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.sw-preview-controls{display:flex;align-items:end;gap:12px}.sw-preview-controls input{max-width:160px}
+@media(min-width:1650px){.sw-layout{grid-template-columns:280px minmax(0,1fr)}#sampler-workbench{padding-inline:48px}.sw-table-wrap{max-height:550px}}
+@media(max-width:1000px){#sampler-workbench{padding:16px}.sw-layout{grid-template-columns:210px minmax(0,1fr);gap:12px}.sw-heading{align-items:start;flex-direction:column}.sw-table{min-width:590px}.sw-pins{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){.sw-layout{display:block}.sw-navigation{position:static;margin-bottom:16px}#sampler-nav{min-height:0;max-height:180px}.sw-save{flex-wrap:wrap}.sw-pins{grid-template-columns:1fr}.sw-metric label{width:100%}}
+.sw-properties{display:grid;grid-template-columns:180px minmax(0,1fr);font-size:12px;line-height:1.5;border-top:1px solid #344658}
+.sw-properties dt,.sw-properties dd{padding:9px 0;border-bottom:1px solid #2c3c4d;margin:0}.sw-properties dt{color:#91a7bd;text-transform:capitalize}.sw-properties dd{white-space:pre-wrap;overflow-wrap:anywhere;color:#cfdeed;font-variant-numeric:tabular-nums}
+.sw-rule-list{padding-left:18px;font-size:12px;color:#b4c6d8;line-height:1.7}.sw-rule-list li{padding:4px 0}
+@media(max-width:650px){.sw-properties{grid-template-columns:125px minmax(0,1fr)}}
+#sampler-workbench .sw-heading{height:auto;min-height:72px;border:0;padding:0;background:transparent}
+#sampler-detail h2{text-transform:capitalize}
+.sw-rule-cards{display:grid;gap:6px;max-height:290px;overflow:auto;margin:14px 0}
+#sampler-workbench .sw-rule-cards button{text-align:left;line-height:1.6;font-size:12px;background:#1d2c3a}
+
+.sw-pin-cell{text-align:center;color:#8394a8}
+#sampler-workbench .sw-pin{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:5px;color:#8394a8;background:transparent;border:1px solid transparent;border-radius:5px}
+#sampler-workbench .sw-pin svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;fill:none}
+#sampler-workbench .sw-pin:hover{color:#c4ddd8;background:#253c44;border-color:#456f70}
+#sampler-workbench .sw-pin[aria-pressed=true]{color:#a4edda;background:#23443e;border-color:#69b8a4}
+#sampler-workbench .sw-pin[aria-pressed=true] svg path:first-child{fill:currentColor}

@@ -1,0 +1,124 @@
+.graph-studio {height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.graph-studio .workspace {flex:1;min-height:0;display:flex;overflow:hidden}
+.graph-studio .sidebar {width:270px;flex-shrink:0;overflow:auto;padding:12px;border-right:1px solid var(--border,#334155)}
+.graph-studio main {flex:1;min-width:0;overflow:auto;display:flex;flex-direction:column}
+.graph-studio .replay-view {min-height:220px;flex:1;overflow:auto}
+.graph-studio .window-grid {padding:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.graph-studio .window-card {border:1px solid #465263;border-radius:6px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.graph-studio .timeline-section {min-height:160px;flex:none;padding:12px}
+.graph-studio .editor {padding:16px;border-top:1px solid #465263;min-height:300px;overflow:visible}
+.graph-studio label {display:block;margin:5px 0;font-size:12px}
+.graph-studio input:not([type=checkbox]),.graph-studio select {max-width:100%}
+.graph-studio textarea {width:100%;min-height:120px;font-family:monospace}
+.graph-studio #source-json,.graph-studio #settings-json {min-height:300px}
+.graph-studio .graph-editor-grid {display:grid;grid-template-columns:minmax(180px,1fr) minmax(250px,2fr);gap:20px}
+.graph-studio .token-block {display:inline-block;border:1px solid #80a6cc;border-radius:3px;padding:1px 4px;font-size:10px;margin:2px;text-transform:uppercase;color:#a8c9f1}
+.graph-studio .event-node {margin:4px;border:1px solid #586578;white-space:pre-wrap}
+.graph-studio .event-node.selected {border-color:#7abaff;background:#244462}
+.graph-studio #scrubber {width:100%}
+.graph-studio #tick-number {width:70px}
+.graph-studio #timeline {max-height:180px;overflow:auto}
+.graph-studio #status {min-height:22px;color:#f5c86c;padding:2px 12px}
+.graph-studio #job-status-bar {border-top:1px solid #465263;padding:6px;display:flex;gap:8px;overflow:auto;min-height:40px}
+.graph-studio dialog {width:min(800px,90vw);max-height:85vh;overflow:auto;background:#18202b;color:#e0e8f2;border:1px solid #53647a;border-radius:8px;padding:24px}
+.graph-studio dialog::backdrop {background:#0007}
+.graph-studio .job-logs {white-space:pre-wrap;max-height:260px;overflow:auto}
+.graph-studio .sample-row {display:block;width:100%;text-align:left;margin:5px 0;overflow-wrap:anywhere}
+.graph-studio .sample-row.selected {border-color:#7abaff}
+.graph-studio .diagnostic {display:block;text-align:left;color:#f5c86c}
+.graph-studio #dependencies button {margin:3px}
+@media(max-width:800px){.graph-studio .sidebar{width:210px}.graph-studio .graph-editor-grid{grid-template-columns:1fr}}
+
+.graph-studio [hidden] {display:none!important}
+.graph-studio .timeline-lanes {position:relative;min-width:100%}
+.graph-studio .timeline-lanes .event-node {position:absolute;margin:0;min-height:32px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:1}
+.graph-studio .dependency-edges {position:absolute;inset:0;pointer-events:none}
+.graph-studio .timeline-cursor {position:absolute;top:0;bottom:0;border-left:2px solid #81dac8;pointer-events:none;z-index:2}
+
+/* Preserve the desktop studio: dataset, window/timeline canvas, event inspector. */
+.graph-studio .toolbar {height:auto;min-height:42px;flex:0 0 auto;justify-content:space-between;gap:12px;background:#161d28;padding:5px 12px}
+.graph-studio .menu-bar {gap:3px;flex-wrap:wrap;min-width:0}
+.graph-studio .app-title {color:var(--muted);font-size:12px;margin-left:12px;white-space:nowrap}
+.graph-studio .toolbar-actions {display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.graph-studio .toolbar-actions button {padding:6px 10px;font-size:12px}
+.app-menu {position:relative}
+.app-menu>summary {list-style:none;cursor:pointer;padding:5px 10px;border-radius:4px;font-size:13px;color:var(--text)}
+.app-menu>summary::-webkit-details-marker {display:none}
+.app-menu>summary:hover,.app-menu[open]>summary {background:#2b394c}
+.app-menu-popup {position:absolute;top:calc(100% + 7px);left:0;z-index:30;display:grid;min-width:210px;padding:5px;border:1px solid var(--border);border-radius:7px;background:var(--panel2);box-shadow:0 10px 32px #0008}
+.app-menu-popup button {border:0;background:transparent;text-align:left;padding:9px 10px}
+.app-menu-popup button:hover {background:#2b394c}
+.app-menu-popup hr {width:100%;border:0;border-top:1px solid var(--border);margin:4px 0}
+.graph-studio #status {flex:0 0 auto;font-size:12px;line-height:1.5;padding:5px 14px;background:#211f1b;border-bottom:1px solid #4a412c}
+.graph-studio #status:empty {display:none}
+.graph-studio .workspace {background:var(--bg);min-width:0}
+.graph-studio .sidebar {width:255px;min-width:225px;padding:14px 12px;background:var(--panel);display:flex;flex-direction:column;gap:8px}
+.graph-studio .side-heading {display:flex;align-items:center;gap:8px;letter-spacing:1.3px;font-size:10px;font-weight:600;margin:0 0 3px}
+.graph-studio .side-heading #new-sample {margin-left:auto}
+.graph-studio .sidebar>label {display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:8px;margin:0}
+.graph-studio .sidebar input:not([type=checkbox]),.graph-studio .sidebar select {width:100%}
+.graph-studio #sample-list {flex:1;min-height:100px;overflow:auto}
+.graph-studio .sample-row {line-height:1.5;padding:9px 8px;border:1px solid transparent;border-radius:5px;background:transparent;font-size:11px}
+.graph-studio .sample-row.selected {background:#223b46;border-color:#5b9d98;color:#d1f3e8}
+.graph-studio .sample-pagination {display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.graph-studio .metadata-panel {border-top:1px solid var(--border);padding-top:12px;margin-top:3px}
+.graph-studio .metadata-panel>label {display:grid;grid-template-columns:45px 1fr;align-items:center;gap:6px}
+.graph-studio .advanced-metadata {margin:10px 0;font-size:11px}
+.graph-studio .metadata-panel textarea {min-height:110px;max-height:200px;font-size:11px}
+.graph-studio main {flex:1;min-width:0;min-height:0;overflow:hidden}
+.graph-studio .replay-view {min-height:160px;flex:1;padding:0;overflow:auto;background:#101722}
+.graph-studio .replay-toolbar {position:sticky;top:0;z-index:3;min-height:37px;margin:0;padding:9px 14px;gap:12px;background:#182230;border-bottom:1px solid var(--border)}
+.graph-studio .replay-toolbar b {letter-spacing:1.2px;font-size:10px;color:#b5c6da}
+.graph-studio .view-note {margin-left:auto;font-size:10px;text-align:right}
+.graph-studio .window-grid {padding:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));align-items:start}
+.graph-studio .window-grid:empty::after {content:'Select a trajectory to inspect its windows, or start a generation run.';display:block;grid-column:1/-1;padding:40px 20px;text-align:center;color:var(--muted);font-size:13px;line-height:1.8}
+.graph-studio .window-card {background:var(--panel);border:1px solid #34475d;border-radius:7px;overflow:hidden;padding:12px 14px;font-size:13px;line-height:1.7;box-shadow:0 3px 12px #0002}
+.graph-studio .window-card h3 {font-size:12px;line-height:1.5;margin:0 0 10px;padding-bottom:9px;color:var(--accent);border-bottom:1px solid var(--border)}
+.graph-studio .timeline-section {flex:0 0 190px;min-height:145px;max-height:32vh;padding:10px 14px 8px;background:#141d2a;display:flex;flex-direction:column;gap:8px}
+.graph-studio .timeline-controls {gap:10px;align-items:center;flex-wrap:wrap}
+.graph-studio .timeline-controls label {margin:0}
+.graph-studio .timeline-controls .transport {gap:5px}
+.graph-studio #timeline {flex:1;min-height:55px;max-height:none;overflow:auto;border:1px solid #2b3b51;border-radius:5px;background:#101722}
+.graph-studio .timeline-section>small {font-size:10px;line-height:1.5}
+.graph-studio .event-node {font-size:11px;padding:6px 8px;border-radius:4px;background:#233246;color:#dce5f4}
+.graph-studio .event-node.selected {background:#28554e;border-color:var(--accent)}
+.graph-studio .editor-panel {flex:0 0 370px;width:370px;min-width:320px;max-width:40vw;min-height:0;overflow:auto;border-top:0;border-left:1px solid var(--border);padding:14px;background:#151e2c}
+.graph-studio .editor-toolbar {align-items:center;gap:6px;margin:0 0 12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.graph-studio .editor-toolbar b {width:100%;font-size:10px;letter-spacing:1.4px;margin-bottom:5px;color:#b5c6da}
+.graph-studio .editor-toolbar button {font-size:11px;padding:6px 8px}
+.graph-studio .graph-editor-grid {display:flex;flex-direction:column;gap:12px}
+.graph-studio .graph-editor-grid>div:last-child {order:-1}
+.graph-studio .graph-editor-grid>div:first-child {border-top:1px solid var(--border);padding-top:8px}
+.graph-studio .graph-editor-grid label {margin:8px 0;line-height:1.7}
+.graph-studio .graph-editor-grid input:not([type=checkbox]),.graph-studio .graph-editor-grid select {width:100%;margin-top:3px}
+.graph-studio #event-content {min-height:190px;max-height:45vh;line-height:1.7;font-size:12px;padding:10px;border:1px solid #3c506a;border-radius:5px}
+.graph-studio #event-apply {margin:7px 0;background:#23483e;border-color:#477d6d;color:#c8f0df}
+.graph-studio #dependencies {margin-top:5px;display:flex;flex-wrap:wrap}
+.graph-studio #dependencies button {white-space:normal;font-size:10px;line-height:1.4}
+.graph-studio .event-options,.graph-studio #source-details {border-top:1px solid var(--border);margin-top:12px;padding-top:10px}
+.graph-studio #source-json {font-size:11px;min-height:220px}
+.graph-studio #diagnostics {font-size:11px;line-height:1.6}
+.graph-studio .diagnostic {padding:7px 8px;border-left:2px solid #c5a25b;background:#29271f;margin-bottom:7px;overflow-wrap:anywhere}
+.graph-studio #job-status-bar {flex:0 0 auto;min-height:39px;background:#17222e;border-top:1px solid #34475d;align-items:center;padding:5px 12px;gap:7px}
+.graph-studio #job-status-bar button {font-size:11px;padding:6px 10px;border-radius:5px;background:#213545;border-color:#3d6070;white-space:nowrap}
+.graph-studio #job-status-bar:empty::before {content:'No jobs yet · use Generation Settings to begin';font-size:11px;color:var(--muted)}
+.graph-studio dialog {width:min(950px,calc(100vw - 48px));max-height:calc(100vh - 60px);padding:24px;border:1px solid #41576d;border-radius:10px;box-shadow:0 24px 80px #0009}
+.graph-studio dialog::backdrop {background:#050a12b8;backdrop-filter:blur(2px)}
+.graph-studio dialog h2 {font-size:21px;margin:0 0 10px}
+.graph-studio dialog p {color:#a8bacd;font-size:12px;line-height:1.7;max-width:760px}
+.graph-studio dialog>label {margin:12px 0}
+.graph-studio dialog textarea {font-size:12px;padding:10px}
+.graph-studio .dialog-actions {display:flex;gap:8px;flex-wrap:wrap;padding-top:18px;margin-top:16px;border-top:1px solid var(--border)}
+.graph-studio summary {cursor:pointer;color:#b8ccdf;font-size:12px;line-height:1.7}
+.graph-studio button:focus-visible,.graph-studio summary:focus-visible,.graph-studio input:focus-visible,.graph-studio select:focus-visible,.graph-studio textarea:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
+.graph-studio .workspace.dataset-panel-hidden .sidebar {display:none}
+.graph-studio .workspace.editor-panel-hidden .editor-panel {display:none}
+@media(max-width:1200px){.graph-studio .editor-panel{flex-basis:320px;width:320px;min-width:280px}.graph-studio .sidebar{width:225px;min-width:200px}.graph-studio .app-title{display:none}.graph-studio .view-note{display:none}.graph-studio .window-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:850px){.graph-studio .workspace{flex-wrap:wrap;overflow:auto}.graph-studio .sidebar{width:210px;min-width:180px;flex-basis:210px;max-height:70vh}.graph-studio main{height:65vh;min-width:300px}.graph-studio .editor-panel{flex-basis:100%;width:100%;max-width:none;max-height:65vh;border-left:0;border-top:1px solid var(--border)}.graph-studio .graph-editor-grid{display:grid;grid-template-columns:1fr 1fr}.graph-studio .graph-editor-grid>div:last-child{order:0}.graph-studio .toolbar{gap:5px}.graph-studio .toolbar-actions button{font-size:11px;padding:5px 7px}}
+@media(max-width:560px){.graph-studio .sidebar{flex-basis:100%;width:100%;min-width:0;max-height:230px}.graph-studio main{flex-basis:100%;height:65vh;min-width:0}.graph-studio .graph-editor-grid{display:flex}.graph-studio .toolbar-actions{gap:3px}.graph-studio .toolbar-actions button{font-size:10px}.graph-studio dialog{width:calc(100vw - 24px);padding:16px}.graph-studio .timeline-controls{gap:5px}}
+.graph-studio .event-selection {display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0 12px}
+.graph-studio .event-selection>label {flex-basis:100%;margin:0 0 3px}
+.graph-studio .event-selection select {width:100%;margin-top:4px}
+.graph-studio .event-context {display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin:0 0 10px}
+.graph-studio .event-context>label {min-width:0;margin:3px 0}
+.graph-studio .event-context input,.graph-studio .event-context select {display:block;width:100%;margin-top:4px}
