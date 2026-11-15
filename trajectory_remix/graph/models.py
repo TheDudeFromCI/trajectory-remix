@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 import jsonschema
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator, model_serializer
 
 Identifier = Annotated[str, Field(min_length=1)]
 Weight = Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -62,6 +62,15 @@ class Window(DTO):
     purpose: Identifier
     agent_writable: bool
     reasoning_effort: Identifier | None = None
+    intentionally_left_open: bool = False
+
+    @model_serializer(mode='wrap')
+    def serialize(self, handler):
+        result = handler(self)
+        # Preserve pre-acknowledgment source hashes/review identities by default.
+        if not self.intentionally_left_open:
+            result.pop('intentionally_left_open', None)
+        return result
 
 
 class Event(DTO):

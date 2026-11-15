@@ -21,7 +21,7 @@ from torch.nn import functional as F
 
 import ktremix_dataset as k
 from ktremix_training_data import (BOS, EOS, NOOP, VOCAB, CONTRACT, Frame,
-                                    Emission, Token, CONTROLS, compiler, build_dataset)
+                                    Emission, Token, CONTROLS, compiler, build_dataset, timing_report, check_training_report)
 from trajectory_remix.graph.models import GraphSource
 
 
@@ -241,10 +241,15 @@ def rollout(model, sources, device, *, seed=17):
     """
     model.eval()
     exact, letters_correct, failures, examples = 0, 0, 0, []
+    input_ready_timing_satisfied = True
+    external_inputs_independent = True
     for raw in sources:
         source = GraphSource.model_validate(raw)
         c = compiler(seed)
         schedule = list(c.frames(source))
+        timing = timing_report(source, schedule)
+        input_ready_timing_satisfied &= timing['input_ready_timing_satisfied']
+        external_inputs_independent &= timing['external_inputs_independent']
         expected = {f.tick: e.tokens[0].id for f in schedule for e in f.outputs
                     if e.event and e.window == "result"}
         external = {f.tick: f.inputs for f in schedule if f.inputs}
@@ -301,10 +306,13 @@ def rollout(model, sources, device, *, seed=17):
         failures += int(malformed)
         if len(examples) < 3:
             examples.append(dict(id=source.id, expected=expected, observed=observed,
-                                 exact=passed, malformed=malformed))
+                                 exact=passed, malformed=malformed, timing=timing))
     return dict(trajectories=len(sources), exact_timing_and_closure_accuracy=exact / len(sources),
                 letters_at_correct_tick_accuracy=letters_correct / (10 * len(sources)),
-                malformed_trajectories=failures, examples=examples)
+                malformed_trajectories=failures, examples=examples,
+                scored_timing_policy='earliest-legal-after-streamed-header-and-prior-output',
+                external_inputs_independent=external_inputs_independent,
+                input_ready_timing_satisfied=input_ready_timing_satisfied)
 
 
 def synchronize(device):
@@ -411,7 +419,7 @@ def main():
     parser.add_argument(
         "--check",
         action="store_true",
-        help="fail unless held-out letters >=99%% and exact free rollouts >=95%%",
+        help="require independent arrivals, held-out letters >=99%% and exact earliest-legal free rollouts >=95%%",
     )
     parser.add_argument("--user-machine", action="store_true")
     args = parser.parse_args()
@@ -460,9 +468,10 @@ def main():
         json.dumps(command_report, default=str, indent=2) + "\n"
     )
     if args.check:
-        if (report["history"][-1]["validation"]["letters_accuracy"] < .99 or
-                report["rollout"]["exact_timing_and_closure_accuracy"] < .95):
-            parser.exit(1, "Training check failed; inspect training.json for accuracy and timing errors.\n")
+        try:
+            check_training_report(report)
+        except ValueError as error:
+            parser.exit(1, str(error) + '\n')
 
 
 if __name__ == "__main__":

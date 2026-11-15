@@ -33,7 +33,7 @@ class TrainingDemoTests(unittest.TestCase):
         raw, entry = k.encode_sample(source.id, columns, metadata)
         return source, columns, metadata, k.Sample(raw, entry).validate()
 
-    def test_vocabulary_headers_and_earliest_eligible_modulo_outputs(self):
+    def test_vocabulary_headers_and_earliest_legal_modulo_outputs(self):
         self.assertEqual(len(d.SYMBOLS), 36)
         self.assertEqual(d.tokenizer().encode("bz29").ids, [1, 25, 28, 35])
         source, a, meta, _ = self.fixture()
@@ -42,12 +42,15 @@ class TrainingDemoTests(unittest.TestCase):
         starts = {e.event: frame.tick for frame in reversed(frames) for e in (*frame.inputs, *frame.outputs) if e.event}
         self.assertEqual(starts["header"], 0)
         self.assertGreater(finish["header"], 1)  # Real streamed CTX, no disabled-header adapter.
+        self.assertEqual(min(f.tick for f in frames if f.inputs), 0)
+        self.assertFalse(d.timing_report(source, frames)['input_ready_timing_satisfied'])
         for i in range(10):
             letter = source.events[f"letter-{i}"].content
             digit = int(source.events[f"digit-{i}"].content)
             output = source.events[f"sum-{i}"].content
             self.assertEqual(output, chr((ord(letter) - 97 + digit) % 26 + 97))
-            self.assertEqual(starts[f"sum-{i}"], max(finish[f"letter-{i}"], finish[f"digit-{i}"]))
+            prior = 'header' if i == 0 else f'sum-{i-1}'
+            self.assertEqual(starts[f"sum-{i}"], max(finish[f"letter-{i}"], finish[f"digit-{i}"], finish[prior] + 1))
         result = next(e for f in reversed(frames) for e in f.outputs if e.event == "sum-9")
         self.assertEqual(result.tokens[0].control, "eos")
         self.assertEqual(meta["peak_active_windows"], 3)

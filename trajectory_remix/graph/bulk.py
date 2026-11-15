@@ -87,10 +87,11 @@ class BulkService:
             return [json.loads(r[0]) for r in db.execute('SELECT delta FROM graph_bulk_items WHERE job_id=? AND delta IS NOT NULL ORDER BY position LIMIT ? OFFSET ?', (job, limit, offset))]
 
     def _settle_item(self, db, job, position, state, warning=None, delta=None):
-        db.execute('UPDATE graph_bulk_items SET state=?,warning=?,delta=? WHERE job_id=? AND position=?',
-                   (state, warning, canonical(delta) if delta else None, job, position))
-        db.execute('UPDATE graph_jobs SET progress=progress+1 WHERE id=?', (job,))
-        self.jobs._notify(db, job)
+        settled = db.execute("UPDATE graph_bulk_items SET state=?,warning=?,delta=? WHERE job_id=? AND position=? AND state IN ('pending','working')",
+                             (state, warning, canonical(delta) if delta else None, job, position))
+        if settled.rowcount:
+            db.execute('UPDATE graph_jobs SET progress=progress+1 WHERE id=?', (job,))
+            self.jobs._notify(db, job)
 
     def _delete(self, db, record):
         ident = record.source.id

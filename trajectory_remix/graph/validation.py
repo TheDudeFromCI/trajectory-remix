@@ -160,7 +160,8 @@ def diagnose(source: GraphSource, settings: ProjectSettings | None = None) -> li
                         emit("output_after_close", "Logical windows cannot reopen after closure", later,
                              "window", related=[ident])
         definition = source.windows.get(window)
-        if definition and definition.purpose in ("reasoning", "tool") and not any(events[i].close_window for i in ids):
+        if (definition and definition.purpose in ("reasoning", "tool")
+                and not definition.intentionally_left_open and not any(events[i].close_window for i in ids)):
             emit("open_window", "Reasoning/tool window remains open", ids[-1], "close_window", warning=True)
 
     submitted = {}

@@ -298,10 +298,28 @@ class JobService:
     def detach(self, job, trajectory):
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            self._job(db, job)
+            j = self._job(db, job)
             if not db.execute('SELECT 1 FROM graph_owners WHERE job_id=? AND trajectory_id=?', (job, trajectory)).fetchone():
                 raise OwnershipConflict('Job does not own trajectory')
             self._detach(db, job, trajectory, 'abandoned')
+            if j['kind'] == 'bulk':
+                # Manual review/repair uses bulk items rather than run attempts.
+                # Pause/recovery can leave an owned item pending. Settle either
+                # state and preserve all edits committed before the detach fence.
+                item = db.execute("SELECT * FROM graph_bulk_items WHERE job_id=? AND trajectory_id=? AND state IN ('pending','working')",
+                                  (job, trajectory)).fetchone()
+                if item is not None:
+                    current = self.store._read(db, trajectory)
+                    before = self.store._read(db, trajectory, item['revision']).source.to_dict()
+                    after = current.source.to_dict()
+                    delta = (dict(id=trajectory, before=before, after=after, expected_revision=current.revision,
+                                  expected_commit=current.commit_id) if before != after else None)
+                    db.execute("UPDATE graph_bulk_items SET state='detached',warning=?,delta=? WHERE job_id=? AND position=?",
+                               ('Detached manually; committed edits retained, no review verdict implied',
+                                canonical(delta) if delta else None, job, item['position']))
+                    db.execute('UPDATE graph_jobs SET progress=progress+1 WHERE id=?', (job,))
+                    if not db.execute("SELECT 1 FROM graph_bulk_items WHERE job_id=? AND state IN ('pending','working')", (job,)).fetchone():
+                        db.execute("UPDATE graph_jobs SET state='completed' WHERE id=?", (job,))
             self._notify(db, job)
         self._interrupt_calls(job, trajectory)
 

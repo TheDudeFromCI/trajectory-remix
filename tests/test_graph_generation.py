@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trajectory_remix.graph.storage import GraphStore, RevisionConflict
-from trajectory_remix.graph.jobs import JobService, OwnershipConflict
+from trajectory_remix.graph.jobs import JobService, OwnershipConflict, Fenced
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.sampling import SamplerService
 from trajectory_remix.graph.generation import GenerationService
@@ -210,6 +210,79 @@ async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path, failure
     restored = gen.bulk.restore(history)
     gen.bulk.restore(restored['deltas'], undo=False)
     assert len(fake.calls) == 3  # Redo never invokes model.
+
+
+@pytest.mark.parametrize('repaired', [False, True])
+@pytest.mark.parametrize('paused', [False, True])
+def test_manual_detach_settles_progress_history_and_fences_late_result(tmp_path, repaired, paused):
+    gen, _ = service(tmp_path)
+    record = gen.store.create(dict(format='kidra-trajectory-graph/1', id=str(uuid4()),
+        windows=plan()['windows'], events={'x': dict(kind='agent_text', window='reason', content='before')},
+        metadata={'stage': -1}))
+    ident = record.source.id
+    job = gen.start_review({}, trajectory=ident, expected_revision=record.revision)
+    gen._manual_admit(job)
+    gen._prepare(job, ident)
+    ticket = gen.jobs.claim('f')
+    if repaired:
+        gen.jobs.request_result(ticket, {'output': {'action': 'patch', 'event_id': 'x',
+            'expected_source_hash': ticket.payload['source_hash'], 'patch': {'content': 'repaired'}}})
+        gen.consume(ticket)
+        gen._prepare(job, ident)
+        ticket = gen.jobs.claim('f')
+    current = gen.store.read(ident)
+    if paused:
+        gen.jobs.control(job, 'pause')
+    gen.jobs.detach(job, ident)
+    assert gen.jobs.inspect(job)['state'] == 'completed'
+    assert gen.jobs.inspect(job)['progress'] == gen.jobs.inspect(job)['total'] == 1
+    item, = gen.bulk.results(job)
+    assert item['state'] == 'detached' and 'Detached' in item['warning']
+    assert ident not in gen._owners(job)
+    assert gen.store.read(ident).source.metadata['stage'] == -1  # No invented verdict.
+    with pytest.raises(Fenced):
+        gen.jobs.request_result(ticket, {'output': {'action': 'verdict', 'review': report(ticket.payload)}})
+    with pytest.raises(Fenced):
+        gen.jobs.accept(job, ticket.epoch, ident, 'late', current.source, current.revision, {})
+    assert gen.store.read(ident).commit_id == current.commit_id
+    with pytest.raises(OwnershipConflict):
+        gen.jobs.detach(job, ident)
+    assert gen.jobs.inspect(job)['progress'] == 1
+    history = gen.bulk.history(job)
+    assert len(history) == int(repaired)
+    if repaired:
+        assert history[0]['before']['events']['x']['content'] == 'before'
+        assert history[0]['after']['events']['x']['content'] == 'repaired'
+        gen.bulk.restore(history)
+        assert gen.store.read(ident).source.events['x'].content == 'before'
+
+
+def test_manual_detach_keeps_other_items_running_and_cannot_be_resettled(tmp_path):
+    gen, _ = service(tmp_path)
+    for _ in range(2):
+        gen.store.create(dict(format='kidra-trajectory-graph/1', id=str(uuid4()),
+            windows={}, events={}, metadata={'stage': 0}))
+    job = gen.start_review({}, repair=False)
+    gen._manual_admit(job)
+    first, second = gen._owners(job)
+    gen._prepare(job, first)
+    ticket = gen.jobs.claim('f')
+    gen.jobs.detach(job, first)
+    assert gen.jobs.inspect(job)['state'] == 'running'
+    assert gen.jobs.inspect(job)['progress'] == 1
+    assert gen._owners(job) == [second]
+    with pytest.raises(Fenced):
+        gen.jobs.request_result(ticket, {'output': report(ticket.payload)})
+    # A concurrent admission/driver failure must not overwrite the terminal item.
+    with gen.store.connect() as db:
+        item = next(i for i in gen.bulk.results(job) if i['trajectory_id'] == first)
+        gen.bulk._settle_item(db, job, item['position'], 'skipped', 'late failure')
+    gen._manual_admit(job)
+    assert gen.jobs.inspect(job)['progress'] == 1
+    assert next(i for i in gen.bulk.results(job) if i['trajectory_id'] == first)['state'] == 'detached'
+    gen.jobs.detach(job, second)
+    assert gen.jobs.inspect(job)['state'] == 'completed'
+    assert gen.jobs.inspect(job)['progress'] == 2
 
 
 @pytest.mark.asyncio

@@ -45,10 +45,15 @@ the intrinsic hash or structural validation. Review staleness is determined by
 consumers comparing saved source/checklist identities; this layer does not
 rewrite signoffs, downstream event content or stages.
 
-A window has `purpose`, `agent_writable`, and optional `reasoning_effort`.
+A window has `purpose`, `agent_writable`, optional `reasoning_effort`, and
+`intentionally_left_open` (default `false`).
 A reasoning effort must name a configured project level when settings are used.
 `purpose: "chatroom"` is required for structured chat. `reasoning` and `tool`
-windows left open receive advisory warnings. There is no authored Available
+windows left open receive advisory warnings unless that window's
+`intentionally_left_open` acknowledgment is true. The studio's Windows editor
+provides this checkbox. It only suppresses `open_window` for that window; it
+does not insert EOS, change compilation or suppress lifecycle/framing errors.
+There is no authored Available
 window, native physical slot, explicit open event, sandbox or tick anchor.
 
 All events have `kind`, `window`, `after` (default `[]`), `content`,

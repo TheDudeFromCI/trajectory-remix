@@ -6,6 +6,34 @@ Workbench B is the selected sampler UI. Integration is on
 **User acceptance is pending.** A green deterministic check or synthetic model
 verdict does not approve data quality, throughput or training convergence.
 
+### Integration-review follow-up — November 14, 2026
+
+The targeted follow-up starts exactly at integration commit
+`110fc26c6653966374fc8c5cae244236fb22c829` and targets
+`feat/overhaul-acceptance-guides` in a separate draft PR.
+
+- Manual review/repair detach now atomically settles the bulk item/progress,
+  preserves committed changed-only Undo history, releases ownership and fences
+  later results. Other items continue; detaching the last item completes the job,
+  including while paused. No quality verdict is invented.
+- Windows have an `intentionally_left_open` acknowledgment and dashboard control.
+  It suppresses only that window's `open_window` advisory, preserves existing
+  default source hashes and leaves compiled execution/lifecycle errors unchanged.
+- Demo arrivals now depend only on external events. The prior result/header gates
+  were removed. The streamed-header conflict was explained before changing the
+  agreed timing criterion: the user selected streamed headers, independent
+  arrivals and sums at the earliest legal tick after the header/prior output.
+  [Demo timing](KTREMIX-TRAINING-DEMO.md) documents the rule and its limits.
+  Reports distinguish input-ready ticks from legal emission ticks; `--check`
+  rejects old result-gated datasets even with perfect nominal predictions.
+
+Focused regressions cover these contracts, including interrupted repairs,
+remaining work, Undo, per-window diagnostics, unchanged compiler arrays and
+external-schedule invariance after removing agent events. Current validation
+results are recorded in the follow-up PR. No benchmark, load/scale workload,
+optimizer update, full training, live LLM call or merge was performed in this
+follow-up. User-machine acceptance remains pending.
+
 ## Prerequisite evidence
 
 These completion records were read before the integration audit. Their checks

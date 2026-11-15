@@ -116,7 +116,11 @@ cancelled. It does not change quality stages or invent failed attempts. SQLite
 serialization settles authorized source writers before locks are released;
 a provider may still finish externally, but its fenced response cannot publish.
 `detach(job, trajectory)` permanently releases that trajectory and fences its
-pending requests. Resume is rejected for terminal jobs. Idempotent acceptance
+pending requests. For manual review/repair bulk jobs it also settles the item as
+`detached`, increments progress once, and retains changed-only Undo history for
+already committed edits. The job completes when no pending/working items remain,
+including detachment while paused. Detachment does not invent a quality verdict.
+Resume is rejected for terminal jobs. Idempotent acceptance
 never promises exactly-once provider execution/billing across ambiguous failures.
 
 ## Frozen bulk targets and history

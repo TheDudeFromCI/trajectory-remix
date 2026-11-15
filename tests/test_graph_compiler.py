@@ -71,6 +71,19 @@ def test_source_phase_headers_and_metadata_independence():
     assert m["peak_active_windows"] == 2
 
 
+def test_open_window_acknowledgment_does_not_change_compiled_execution():
+    s = source({'think': event('agent_text', 'w', content='open')},
+               windows={'w': dict(purpose='reasoning', agent_writable=True)})
+    c = GraphCompiler(profile())
+    original, _ = c.compile(s)
+    frames = list(c.frames(s))
+    acknowledged = s.to_dict()
+    acknowledged['windows']['w']['intentionally_left_open'] = True
+    acknowledged = GraphSource.model_validate(acknowledged)
+    assert c.compile(acknowledged)[0] == original
+    assert list(c.frames(acknowledged)) == frames
+
+
 @pytest.mark.parametrize("immediate,expected", [(True, 0), (False, 1)])
 def test_external_chain_checkbox(immediate, expected):
     s = source({"a": event("external_text", "a"),

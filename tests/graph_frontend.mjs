@@ -109,6 +109,24 @@ assert.equal(ui.settings.tools.fixture_tool.input_schema.properties.payload.type
 // CAS conflict leaves the browser draft intact.
 await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:(await module.api('/trajectories/'+ui.id)).revision,patch:{metadata:{test:true}}});
 await assert.rejects(()=>ui.save(),/Revision conflict/); assert.equal(ui.draft.events.first.content,'unsaved');
+// Per-window acknowledgment persists, suppresses only its advisory, and is undoable.
+await until(()=>[...ui.ownedBulk].every(id=>ui.recorded.has(id)));
+const ack = await module.api('/trajectories', 'POST', {format:'kidra-trajectory-graph/1',id:crypto.randomUUID(),
+ windows:{a:{purpose:'reasoning',agent_writable:true},b:{purpose:'tool',agent_writable:true}},
+ events:{a:{kind:'agent_text',window:'a',content:'open'},b:{kind:'agent_text',window:'b',content:'open'}}});
+await ui.select(ack.source.id);
+assert.equal(ui.diagnostics.filter(d=>d.code==='open_window').length,2);
+$('window-id').value='a'; $('window-id').dispatchEvent(new Event('change'));
+assert.equal($('window-left-open').checked,false);
+$('window-left-open').checked=true; $('window-save').click(); await ui.save();
+assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
+assert.deepEqual(ui.diagnostics.filter(d=>d.code==='open_window').map(d=>d.event_id),['b']);
+assert.equal(ui.record.source.events.a.close_window,false);
+await ui.select(ack.source.id,true); assert.equal($('window-left-open').checked,true);
+$('window-id').value='b'; $('window-id').dispatchEvent(new Event('change'));
+assert.equal($('window-left-open').checked,false);
+await ui.restore(true); assert.equal(ui.record.source.windows.a.intentionally_left_open ?? false,false);
+await ui.restore(false); assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
 ui.stopped=true;clearTimeout(ui.pollTimer);clearTimeout(ui.validationTimer);ui.preview.invalidate();if(ui.playing)clearInterval(ui.playing);
 assert.ok(paths.every(path => path.startsWith('/api/v1/')));
 console.log('Graph DOM/API: dependency editing, graph/tick scrub, debounce fencing/cache, partial tool content, chat, JSON recovery, split separation, independent jobs and CAS drafts passed.');

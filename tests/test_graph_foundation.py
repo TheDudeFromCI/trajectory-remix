@@ -149,6 +149,34 @@ def test_abandoned_prefix_is_valid_but_cannot_receive_a_response():
     assert codes(raw, settings()) == {"unsubmitted_call"}
 
 
+@pytest.mark.parametrize('purpose', ['reasoning', 'tool'])
+def test_intentionally_left_open_acknowledgment_is_per_window_and_advisory(tmp_path, purpose):
+    raw = source()
+    raw['windows']['thought']['purpose'] = purpose
+    raw['events']['think']['close_window'] = False
+    raw['windows']['other'] = dict(purpose='tool', agent_writable=True)
+    raw['events']['other'] = dict(kind='agent_text', window='other', content='still open')
+    store = GraphStore.initialize(tmp_path / 'ack.sqlite')
+    record = store.create(raw)
+    assert 'intentionally_left_open' not in record.source.to_dict()['windows']['thought']
+    assert {d.event_id for d in diagnose(record.source) if d.code == 'open_window'} == {'think', 'other'}
+    changed = GraphCommands(store).patch(record.source.id,
+        {'windows': {'thought': {'intentionally_left_open': True}}}, record.revision)
+    assert changed.record.source.windows['thought'].intentionally_left_open
+    assert {d.event_id for d in changed.diagnostics if d.code == 'open_window'} == {'other'}
+    reopened = GraphStore(store.path).read(record.source.id)
+    assert reopened.source.windows['thought'].intentionally_left_open
+    assert reopened.source.events['think'].close_window is False
+    # An acknowledgment never conceals invalid output after EOS.
+    invalid = reopened.source.to_dict()
+    invalid['events']['think']['close_window'] = True
+    invalid['events']['later'] = dict(kind='agent_text', window='thought', content='late', after=['think'])
+    assert 'output_after_close' in codes(invalid)
+    invalid['windows']['thought']['intentionally_left_open'] = 1
+    with pytest.raises(ValidationError):
+        GraphSource.model_validate(invalid)
+
+
 def test_tool_schema_warning_only_after_submission_and_no_contamination():
     raw = tool_source()
     raw["events"]["submit"]["content"] = '1}'

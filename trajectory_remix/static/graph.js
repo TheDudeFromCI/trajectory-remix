@@ -55,6 +55,7 @@ export function graphOrder(source) {
 async function intrinsicHash(source) {
   const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])])) : value;
   const intrinsic = copy(source); delete intrinsic.metadata;
+  for (const w of Object.values(intrinsic.windows || {})) if (!w.intentionally_left_open) delete w.intentionally_left_open;
   const data = new TextEncoder().encode(JSON.stringify(canonical(intrinsic)));
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(v => v.toString(16).padStart(2, '0')).join('');
 }
@@ -106,6 +107,7 @@ export class StudioUI {
     if (generation !== this.selectionGeneration) return;
     this.id = id; this.record = record; this.diagnostics = record.diagnostics; this.draft = cached?.draft || copy(record.source); this.editors = cached?.editors || new Map();
     this.event = cached?.event || Object.keys(this.draft.events)[0]; this.position = 0;
+    $('window-id').value = this.draft.events[this.event]?.window || Object.keys(this.draft.windows)[0] || '';
     this.renderDraft(); this.renderEvent(); this.listing(); this.schedulePreview();
   }
   isDirty() { return this.record && JSON.stringify(this.draft) !== JSON.stringify(this.record.source); }
@@ -124,6 +126,8 @@ export class StudioUI {
     if (!this.draft) return;
     options('event-picker', Object.keys(this.draft.events).map(id => [id, id]), this.event);
     options('event-window', Object.keys(this.draft.windows).map(id => [id, id]), $('event-window').value || this.draft.events[this.event]?.window);
+    $('window-options').replaceChildren(...Object.keys(this.draft.windows).map(id => { const n = node('option'); n.value = id; return n; }));
+    this.renderWindow();
     $('metadata-json').value = json(this.draft.metadata || {});
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
     $('review-stale').textContent = this.record.review_status?.stale ? 'Review stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : '';
@@ -140,6 +144,14 @@ export class StudioUI {
       if (d.event_id) n.append(button('Inspect event', () => this.selectEvent(d.event_id)));
       return n;
     }));
+  }
+  renderWindow() {
+    const w = this.draft?.windows[$('window-id').value];
+    if (w) {
+      $('window-purpose').value = w.purpose; $('window-writable').checked = w.agent_writable;
+      $('window-effort').value = w.reasoning_effort || '';
+    }
+    $('window-left-open').checked = w?.intentionally_left_open ?? false;
   }
   scheduleDiagnostics() {
     clearTimeout(this.validationTimer); const generation = this.validationGeneration = (this.validationGeneration || 0) + 1;
@@ -448,7 +460,8 @@ export class StudioUI {
     for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); });
     on('tool-id', 'change', () => this.renderArguments());
     on('dependency-add', 'click', () => this.addDependency($('dependency-picker').value));
-    on('window-save', 'click', () => { const id = $('window-id').value; if (!id) throw new Error('Supply a window ID'); const w = {purpose: $('window-purpose').value, agent_writable: $('window-writable').checked}; if ($('window-effort').value) w.reasoning_effort = $('window-effort').value; this.draft.windows[id] = w; this.renderDraft(); this.renderEvent(); this.changed(); });
+    on('window-id', 'change', () => this.renderWindow());
+    on('window-save', 'click', () => { const id = $('window-id').value; if (!id) throw new Error('Supply a window ID'); const w = {...this.draft.windows[id], purpose: $('window-purpose').value, agent_writable: $('window-writable').checked, reasoning_effort: $('window-effort').value || null, intentionally_left_open: $('window-left-open').checked}; this.draft.windows[id] = w; this.renderDraft(); this.renderEvent(); this.changed(); });
     on('window-delete', 'click', () => { delete this.draft.windows[$('window-id').value]; this.renderDraft(); this.renderEvent(); this.changed(); });
     on('metadata-apply', 'click', () => { const m = JSON.parse($('metadata-json').value); if (!m || Array.isArray(m) || typeof m !== 'object') throw new Error('Metadata must be an object'); this.draft.metadata = m; this.renderDraft(); this.changed(); });
     for (const id of ['stage', 'split']) on(id, 'change', () => { this.draft.metadata ||= {}; if (id === 'split' && !$(id).value) delete this.draft.metadata.split; else this.draft.metadata[id] = id === 'stage' ? Number($(id).value) : $(id).value; this.renderDraft(); this.changed(); });

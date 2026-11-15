@@ -22,8 +22,10 @@ directory must be new and under `/tmp`. Defaults remain 2,048 training samples,
 256 held-out samples, 256 samples/shard, 3,000 steps, batch 16, seed 17, one CPU
 thread, evaluation every 500 steps and 64 free-running evaluation samples.
 `--check` requires held-out ordinary-letter accuracy of 99% and exact free-running
-timing/closure accuracy of 95%; these are unverified convergence gates for the
-new framed task, not results already obtained.
+timing/closure accuracy of 95% under the approved earliest-legal policy below.
+It also requires external inputs independent of agent outputs; old result-gated
+datasets must be regenerated. These are unverified user-machine convergence
+gates, not results already obtained.
 
 Separate generation, conformance and training:
 
@@ -37,12 +39,12 @@ For ordinary local correctness, run only the tiny fixture suite:
 
 ```bash
 python -m pytest -q tests/test_graph_compiler.py tests/test_graph_export.py \
-  tests/test_ktremix_format.py tests/test_ktremix_training.py
+  tests/test_ktremix_format.py tests/test_graph_demo.py
 ```
 
-It generates a few records and performs exactly one optimizer update. It also
-checks free-running runtime parity with prescribed mock predictions, without a
-training campaign, live LLM call or throughput measurement.
+These checks need no PyTorch, optimizer update, training campaign, live LLM call
+or throughput measurement. The optional `tests/test_ktremix_training.py` suite
+adds model/runtime parity checks and exactly one optimizer update.
 
 ## Task, framing and timing
 
@@ -57,18 +59,36 @@ including their headers, are masked. There are three peak Active windows plus
 one Available reserve, with seeded randomized physical slots.
 
 A root empty-content agent event generates the result window's required CTX
-header one token per tick. This activates Available and creates its replacement.
-Only after that startup do the first inputs arrive. External headers are atomic.
-Each pair depends on the previous result; one stream may additionally depend on
-the other stream with `chain_immediately=false`, producing variable arrivals
-through actual dependencies. The retained `--max-gap` CLI option now controls
-how often this extra dependency is chosen; it does not create tick delays.
+header one token per tick, concurrently with the first external inputs at tick
+zero. This activates Available and creates its replacement. External headers are
+atomic. Each input depends only on its stream's preceding input, with an optional
+dependency on its same-index peer. `chain_immediately=false` staggers arrivals
+through external dependencies. No input depends on a header or sum: deleting or
+delaying every agent event leaves the external schedule unchanged. The retained
+`--max-gap` option controls how often the peer dependency is chosen; it does not
+create tick delays.
 
-Every sum starts on the earliest tick both inputs and the prior result are
-complete. Its single letter is generated immediately; the last event's EOS
-follows one tick later. The explicit fixture accounts for header startup, input
-framing, NOOP decisions and the agent-completion-to-next-tick rule. Generic wait
-events, replay tick anchors and disabled-header compatibility paths are absent.
+The original task had a conflict: emit each sum on the first
+tick both inputs are ready, while streaming the agent-created result header.
+With this tokenizer, the header occupies ticks 0–57; the first pair is ready at
+tick 0 or 1. A sum cannot occupy a tick already used by its header. Later sums
+also require a separate tick after the previous agent output. After this conflict
+was explained, the user explicitly selected streamed headers, independent
+arrivals and earliest-legal result timing on November 14, 2026. The compiler and
+header protocol stay unchanged.
+
+The executable fixture emits at the earliest **legal** tick:
+`max(input_ready_tick, header_or_previous_sum_finish_tick + 1)`. Its single
+letter is generated then; the last event's EOS follows one tick later. A pure
+`timing_report` exposes input-ready, earliest-legal and compiled letter ticks.
+Training rollout reports identify this scored policy and separately expose
+`input_ready_timing_satisfied` as a diagnostic of the prior literal criterion.
+That diagnostic is not the newly agreed timing gate. A result-gated dataset
+cannot pass `--check` even if nominal schedule accuracy is perfect.
+
+For these short streams, inputs may all arrive before the header completes; the
+fixture therefore does not establish learned waiting across later arrivals.
+Generic wait events, replay tick anchors and disabled-header paths remain absent.
 
 Writable windows and Available predict supervised NOOP when idle; read-only
 windows count as NOOP without predictions. All-NOOP sleeps retain one decision
