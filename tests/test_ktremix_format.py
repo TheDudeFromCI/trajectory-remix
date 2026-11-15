@@ -3,10 +3,10 @@
 python tests/test_ktremix_format.py
 Dependencies: numpy; lz4 tests are skipped when lz4 is not installed.
 """
+
 import copy
 import importlib.util
 import json
-from pathlib import Path
 import random
 import struct
 import subprocess
@@ -14,10 +14,11 @@ import sys
 import tempfile
 import unittest
 import uuid
-import zlib
+from pathlib import Path
+
+from trajectory_remix.graph import ktremix as k
 
 SCRIPT = Path(__file__).resolve().parents[1] / "examples" / "ktremix_dataset.py"
-from trajectory_remix.graph import ktremix as k
 
 
 @unittest.skipUnless(importlib.util.find_spec("numpy"), "reference writer tests require numpy")
@@ -28,11 +29,17 @@ class KTREMIXTests(unittest.TestCase):
         self.root = Path(self.temp.name)
 
     def write(self, name="sample", count=1, *, codec="none", manifest=None, columns=None, offset=0):
-        rows = [(uuid.uuid5(uuid.NAMESPACE_URL, f"test/{offset + i}"),
-                 copy.deepcopy(columns or k.demo_columns(i + offset)), {"name": f"sample {i}"})
-                for i in range(count)]
-        return k.write_shard(self.root / f"{name}.ktremix", rows,
-                             manifest or k.demo_manifest(), codec=codec)
+        rows = [
+            (
+                uuid.uuid5(uuid.NAMESPACE_URL, f"test/{offset + i}"),
+                copy.deepcopy(columns or k.demo_columns(i + offset)),
+                {"name": f"sample {i}"},
+            )
+            for i in range(count)
+        ]
+        return k.write_shard(
+            self.root / f"{name}.ktremix", rows, manifest or k.demo_manifest(), codec=codec
+        )
 
     def test_wire_sizes_and_independent_header_offsets(self):
         path = self.write(count=2)
@@ -79,6 +86,7 @@ class KTREMIXTests(unittest.TestCase):
 
     def test_training_read_does_not_parse_record_metadata(self):
         from unittest.mock import patch
+
         path = self.write()
         shard = k.Shard(path)
         self.addCleanup(shard.close)
@@ -100,9 +108,11 @@ class KTREMIXTests(unittest.TestCase):
     def test_distributed_epoch_is_disjoint_complete_and_reproducible(self):
         path = self.write(count=17)
         with k.Dataset([path]) as data:
-            groups = [list(data.epoch_indices(19, 2, rank=r, world_size=3,
-                                               worker_id=w, num_workers=2))
-                      for r in range(3) for w in range(2)]
+            groups = [
+                list(data.epoch_indices(19, 2, rank=r, world_size=3, worker_id=w, num_workers=2))
+                for r in range(3)
+                for w in range(2)
+            ]
             flat = [x for group in groups for x in group]
             self.assertEqual(sorted(flat), list(range(17)))
             self.assertEqual(len(flat), len(set(flat)))
@@ -221,7 +231,11 @@ class KTREMIXTests(unittest.TestCase):
         # Same-frontier NOOP targets cannot see their own labels; NOOPs never keys.
         for row in (5, 6):
             frontier = a["query_frontiers"][row]
-            allowed = ((a["row_flags"] & k.DURABLE) != 0) & (a["visible_from"] <= frontier) & (frontier < a["visible_until"])
+            allowed = (
+                ((a["row_flags"] & k.DURABLE) != 0)
+                & (a["visible_from"] <= frontier)
+                & (frontier < a["visible_until"])
+            )
             self.assertFalse(allowed[row])
             self.assertTrue(allowed[a["previous_rows"][row]])
         # Simulate replacing a document: old text vanishes at the boundary at
@@ -247,9 +261,16 @@ class KTREMIXTests(unittest.TestCase):
             "visible_until": [3, k.FOREVER, 3, k.FOREVER, 6, k.FOREVER, 6, 0],
             "previous_rows": [k.NONE, k.NONE, 0, 1, k.NONE, 3, 4, 6],
             "loss_weights": [0, 0, 0, 1, 0, 1, 1, 1],
-            "row_flags": [k.DURABLE | k.BOS, k.DURABLE | k.BOS, k.DURABLE,
-                          k.DURABLE | k.MODEL, k.DURABLE | k.BOS,
-                          k.DURABLE | k.MODEL, k.DURABLE | k.MODEL, k.MODEL | k.EOS],
+            "row_flags": [
+                k.DURABLE | k.BOS,
+                k.DURABLE | k.BOS,
+                k.DURABLE,
+                k.DURABLE | k.MODEL,
+                k.DURABLE | k.BOS,
+                k.DURABLE | k.MODEL,
+                k.DURABLE | k.MODEL,
+                k.MODEL | k.EOS,
+            ],
             "frame_offsets": [0, 4, 5, 7, 8],
             "window_slots": [0, 1, 0],
             "window_open_frontiers": [0, 0, 3],
@@ -261,8 +282,14 @@ class KTREMIXTests(unittest.TestCase):
         path = self.write(columns=cols)
         with k.Dataset([path]) as data:
             a = data[0].validate().numpy()
+
             def visible_at(q):
-                return ((a["row_flags"] & k.DURABLE) != 0) & (a["visible_from"] <= q) & (q < a["visible_until"])
+                return (
+                    ((a["row_flags"] & k.DURABLE) != 0)
+                    & (a["visible_from"] <= q)
+                    & (q < a["visible_until"])
+                )
+
             for row in (5, 6):
                 visible = visible_at(a["query_frontiers"][row])
                 self.assertFalse(visible[5])
@@ -273,13 +300,15 @@ class KTREMIXTests(unittest.TestCase):
             self.assertTrue(visible_at(a["query_frontiers"][7])[5:7].all())
 
     def test_semantic_errors_do_not_silently_create_trainable_arrays(self):
-        for field, index, value in (("loss_weights", 3, float("nan")),
-                                    ("window_ids", 3, 100),
-                                    ("previous_rows", 3, 3),
-                                    ("row_flags", 5, k.NOOP | k.DURABLE | k.MODEL),
-                                    ("target_rows", 0, 0),
-                                    ("visible_from", 3, 2),
-                                    ("window_slots", 2, 0)):
+        for field, index, value in (
+            ("loss_weights", 3, float("nan")),
+            ("window_ids", 3, 100),
+            ("previous_rows", 3, 3),
+            ("row_flags", 5, k.NOOP | k.DURABLE | k.MODEL),
+            ("target_rows", 0, 0),
+            ("visible_from", 3, 2),
+            ("window_slots", 2, 0),
+        ):
             with self.subTest(field=field):
                 cols = k.demo_columns()
                 cols[field][index] = value
@@ -302,13 +331,33 @@ class KTREMIXTests(unittest.TestCase):
 
     def test_cli_demo_verify_sample(self):
         folder = self.root / "cli"
-        subprocess.run([sys.executable, str(SCRIPT), "demo", str(folder), "--codec", "zlib"],
-                       check=True, capture_output=True)
-        result = subprocess.run([sys.executable, str(SCRIPT), "verify", str(folder / "*.ktremix")],
-                                check=True, capture_output=True, text=True)
+        subprocess.run(
+            [sys.executable, str(SCRIPT), "demo", str(folder), "--codec", "zlib"],
+            check=True,
+            capture_output=True,
+        )
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "verify", str(folder / "*.ktremix")],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         self.assertIn("Verified 10 trajectories", result.stdout)
-        result = subprocess.run([sys.executable, str(SCRIPT), "sample", str(folder / "*.ktremix"),
-                                 "--count", "3", "--epoch", "2"], check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "sample",
+                str(folder / "*.ktremix"),
+                "--count",
+                "3",
+                "--epoch",
+                "2",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         records = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(len(records), 3)
         self.assertEqual(len({r["uuid"] for r in records}), 3)

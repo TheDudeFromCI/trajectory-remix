@@ -1,23 +1,24 @@
 """Small graph/demo integration checks; one optimizer update, no training run."""
+
 import copy
 import importlib.util
 import json
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 sys.path.insert(0, str(EXAMPLES))
 AVAILABLE = all(importlib.util.find_spec(n) for n in ("torch", "numpy", "tokenizers", "lz4"))
 if AVAILABLE:
-    import numpy as np
-    import torch
     import ktremix_dataset as k
     import ktremix_training_data as d
+    import torch
     import train_ktremix as t
-    from trajectory_remix.graph.models import GraphSource
+
     from trajectory_remix.graph.compiler import GraphCompiler
+    from trajectory_remix.graph.models import GraphSource
 
 
 @unittest.skipUnless(AVAILABLE, "install project and optional training demo dependencies")
@@ -38,19 +39,32 @@ class TrainingDemoTests(unittest.TestCase):
         self.assertEqual(d.tokenizer().encode("bz29").ids, [1, 25, 28, 35])
         source, a, meta, _ = self.fixture()
         frames = list(self.compiler.frames(source))
-        finish = {e.event: frame.tick for frame in frames for e in (*frame.inputs, *frame.outputs) if e.event}
-        starts = {e.event: frame.tick for frame in reversed(frames) for e in (*frame.inputs, *frame.outputs) if e.event}
+        finish = {
+            e.event: frame.tick
+            for frame in frames
+            for e in (*frame.inputs, *frame.outputs)
+            if e.event
+        }
+        starts = {
+            e.event: frame.tick
+            for frame in reversed(frames)
+            for e in (*frame.inputs, *frame.outputs)
+            if e.event
+        }
         self.assertEqual(starts["header"], 0)
         self.assertGreater(finish["header"], 1)  # Real streamed CTX, no disabled-header adapter.
         self.assertEqual(min(f.tick for f in frames if f.inputs), 0)
-        self.assertFalse(d.timing_report(source, frames)['input_ready_timing_satisfied'])
+        self.assertFalse(d.timing_report(source, frames)["input_ready_timing_satisfied"])
         for i in range(10):
             letter = source.events[f"letter-{i}"].content
             digit = int(source.events[f"digit-{i}"].content)
             output = source.events[f"sum-{i}"].content
             self.assertEqual(output, chr((ord(letter) - 97 + digit) % 26 + 97))
-            prior = 'header' if i == 0 else f'sum-{i-1}'
-            self.assertEqual(starts[f"sum-{i}"], max(finish[f"letter-{i}"], finish[f"digit-{i}"], finish[prior] + 1))
+            prior = "header" if i == 0 else f"sum-{i - 1}"
+            self.assertEqual(
+                starts[f"sum-{i}"],
+                max(finish[f"letter-{i}"], finish[f"digit-{i}"], finish[prior] + 1),
+            )
         result = next(e for f in reversed(frames) for e in f.outputs if e.event == "sum-9")
         self.assertEqual(result.tokens[0].control, "eos")
         self.assertEqual(meta["peak_active_windows"], 3)
@@ -85,10 +99,13 @@ class TrainingDemoTests(unittest.TestCase):
     def test_closed_and_replaced_memory_cannot_survive_through_peer_hidden_state(self):
         # A surviving window was constructed while OLD was visible. A later query
         # must not recover OLD through that window's higher-layer representation.
-        from test_graph_compiler import source, event, profile
+        from test_graph_compiler import event, profile, source
+
         for replacement in (False, True):
-            events = {"old": event("external_text", "a", "OLD"),
-                      "peer": event("external_text", "b", "v", ["old"])}
+            events = {
+                "old": event("external_text", "a", "OLD"),
+                "peer": event("external_text", "b", "v", ["old"]),
+            }
             if replacement:
                 events["erase"] = event("external_text", "a", "NEW", ["peer"], replace_body=True)
             else:
@@ -102,12 +119,19 @@ class TrainingDemoTests(unittest.TestCase):
                 columns["token_ids"][i] = token % len(d.VOCAB)
             altered = copy.deepcopy(columns)
             targets = columns["target_rows"]
-            query_index = next(i for i, row in enumerate(targets)
-                               if columns["window_ids"][row] == 2 and
-                               columns["row_flags"][row] & k.MODEL and not columns["row_flags"][row] & k.NOOP)
+            query_index = next(
+                i
+                for i, row in enumerate(targets)
+                if columns["window_ids"][row] == 2
+                and columns["row_flags"][row] & k.MODEL
+                and not columns["row_flags"][row] & k.NOOP
+            )
             q = columns["query_frontiers"][targets[query_index]]
-            erased = [i for i, end in enumerate(columns["visible_until"])
-                      if end <= q and columns["row_flags"][i] & k.DURABLE]
+            erased = [
+                i
+                for i, end in enumerate(columns["visible_until"])
+                if end <= q and columns["row_flags"][i] & k.DURABLE
+            ]
             self.assertTrue(erased)
             for row in erased:
                 altered["token_ids"][row] = (altered["token_ids"][row] + 1) % len(d.VOCAB)
@@ -125,35 +149,49 @@ class TrainingDemoTests(unittest.TestCase):
         # rollout and export agree about headers, inputs, allocation and EOS.
         source = GraphSource.model_validate(d.make_source(8))
         schedule = list(d.compiler().frames(source))
+
         class Oracle:
             def __init__(self):
                 self.step = 0
+
             def eval(self):
                 return self
+
             def __call__(self, batch):
                 outputs = schedule[self.step].outputs
                 self.step += 1
-                logits = torch.full((1, len(outputs), len(d.VOCAB)), -10.)
+                logits = torch.full((1, len(outputs), len(d.VOCAB)), -10.0)
                 # Live writable logical windows precede the reserve, matching
                 # the scheduler's stable output order for this one-agent demo.
                 for index, emission in enumerate(outputs):
-                    logits[0, index, emission.tokens[0].id] = 10.
+                    logits[0, index, emission.tokens[0].id] = 10.0
                 return logits
+
         report = t.rollout(Oracle(), [source.to_dict()], "cpu")
-        self.assertEqual(report["exact_timing_and_closure_accuracy"], 1.)
-        self.assertEqual(report["letters_at_correct_tick_accuracy"], 1.)
+        self.assertEqual(report["exact_timing_and_closure_accuracy"], 1.0)
+        self.assertEqual(report["letters_at_correct_tick_accuracy"], 1.0)
 
     @staticmethod
     def reference_logits(model, batch):
-        memory = model.embed(batch['memory_tokens'], batch['memory_windows'], batch['memory_positions'])
-        queries = model.embed(batch['query_previous'], batch['query_windows'], batch['query_positions'])
+        memory = model.embed(
+            batch["memory_tokens"], batch["memory_windows"], batch["memory_positions"]
+        )
+        queries = model.embed(
+            batch["query_previous"], batch["query_windows"], batch["query_positions"]
+        )
         rows = []
         for index in range(queries.shape[1]):
-            current = batch['query_allowed'][:, index:index + 1]
-            mem, query = memory, queries[:, index:index + 1]
+            current = batch["query_allowed"][:, index : index + 1]
+            mem, query = memory, queries[:, index : index + 1]
             for layer in model.layers:
-                mem, query = layer(mem, query, batch['memory_allowed'] & current, current,
-                    batch['memory_positions'], batch['query_positions'][:, index:index + 1])
+                mem, query = layer(
+                    mem,
+                    query,
+                    batch["memory_allowed"] & current,
+                    current,
+                    batch["memory_positions"],
+                    batch["query_positions"][:, index : index + 1],
+                )
             rows.append(t.F.linear(model.norm(query), model.tokens.weight))
         return torch.cat(rows, dim=1)
 
@@ -176,24 +214,28 @@ class TrainingDemoTests(unittest.TestCase):
         # Use a character-level framing profile to ensure there ARE header
         # letters; compact framing macros have no ordinary-letter header rows.
         profile = d.profile()
-        profile.definition['pre_tokenizer'] = json.loads(d.pre_tokenizers.Split('', behavior='isolated').__getstate__())
+        profile.definition["pre_tokenizer"] = json.loads(
+            d.pre_tokenizers.Split("", behavior="isolated").__getstate__()
+        )
         source = GraphSource.model_validate(d.make_source(5))
         arrays, metadata = GraphCompiler(profile).compile(source)
         payload, entry = k.encode_sample(source.id, arrays, metadata)
         sample = k.Sample(payload, entry)
         batch = t.collate([sample])
-        self.assertGreater(int(((batch['labels'] < 26) & ~batch['task_letters'].bool()).sum()), 0)
+        self.assertGreater(int(((batch["labels"] < 26) & ~batch["task_letters"].bool()).sum()), 0)
         self.assertEqual(int(batch["task_letters"].sum()), 10)
+
         class WrongHeaders(torch.nn.Module):
             def forward(self, b):
                 predicted = b["labels"].clone()
                 headers = (predicted < 26) & ~b["task_letters"].bool()
                 predicted[headers] = (predicted[headers] + 1) % 26
-                logits = torch.full((*predicted.shape, len(d.VOCAB)), -10.)
-                return logits.scatter_(-1, predicted[..., None], 10.)
-        metrics = t.evaluate(WrongHeaders(), [sample], 1, 'cpu')
-        self.assertEqual(metrics["letters_accuracy"], 1.)
-        self.assertEqual(metrics["header_letters_accuracy"], 0.)
+                logits = torch.full((*predicted.shape, len(d.VOCAB)), -10.0)
+                return logits.scatter_(-1, predicted[..., None], 10.0)
+
+        metrics = t.evaluate(WrongHeaders(), [sample], 1, "cpu")
+        self.assertEqual(metrics["letters_accuracy"], 1.0)
+        self.assertEqual(metrics["header_letters_accuracy"], 0.0)
 
     def test_raw_graph_shards_and_one_optimizer_step(self):
         with tempfile.TemporaryDirectory() as root:
@@ -201,13 +243,17 @@ class TrainingDemoTests(unittest.TestCase):
             report = d.build_dataset(directory, train_samples=2, validation_samples=1, shard_size=1)
             self.assertEqual(report["trajectories"], 3)
             self.assertEqual(len(list(directory.glob("train-*.ktremix"))), 2)
-            self.assertTrue(all(json.loads(line)["format"] == "kidra-trajectory-graph/1"
-                                for line in (directory / "train.jsonl").read_text().splitlines()))
+            self.assertTrue(
+                all(
+                    json.loads(line)["format"] == "kidra-trajectory-graph/1"
+                    for line in (directory / "train.jsonl").read_text().splitlines()
+                )
+            )
             with k.Dataset(sorted(directory.glob("train-*.ktremix")), verify_index=True) as dataset:
                 for i in range(len(dataset)):
                     dataset[i].validate()
                 model = t.TinyKidra()
-                optimizer = torch.optim.AdamW(model.parameters(), lr=.001)
+                optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
                 batch = t.collate([dataset[0]])
                 before = model.tokens.weight.detach().clone()
                 loss = t.objective(model(batch), batch)

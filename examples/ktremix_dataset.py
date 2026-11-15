@@ -1,9 +1,10 @@
 """Public command-line entry point for the packaged KTREMIX reference codec."""
-from pathlib import Path
+
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from trajectory_remix.graph.ktremix import *  # noqa: F403
+from trajectory_remix.graph.ktremix import main  # noqa: E402
 
 if __name__ == "__main__":
     main()

@@ -65,9 +65,17 @@ ticket = await jobs.execute_one(endpoint_id, provider_call)
 if ticket is not None:
     body = jobs.result(ticket)
     # Validate complete body, build one event/review/repair patch outside SQLite.
-    jobs.accept(job, ticket.epoch, trajectory_id, ticket.step,
-                updated_source, expected_revision, checkpoint,
-                request=ticket, outcome=None)
+    jobs.accept(
+        job,
+        ticket.epoch,
+        trajectory_id,
+        ticket.step,
+        updated_source,
+        expected_revision,
+        checkpoint,
+        request=ticket,
+        outcome=None,
+    )
 ```
 
 `provider_call(ticket)` is an async callback for **one** complete API invocation.
@@ -126,12 +134,12 @@ never promises exactly-once provider execution/billing across ambiguous failures
 ## Frozen bulk targets and history
 
 ```python
-job = bulk.start({'stage': 0, 'split': 'Auto'}, 'stage', {'value': 1})
+job = bulk.start({"stage": 0, "split": "Auto"}, "stage", {"value": 1})
 bulk.advance(job, batch_size=25)  # repeat in a host-owned task until settled
 results = bulk.results(job, limit=100, offset=0)
 deltas = bulk.history(job, limit=100, offset=0)
 undo = bulk.restore(deltas, undo=True)
-redo = bulk.restore(undo['deltas'], undo=False)
+redo = bulk.restore(undo["deltas"], undo=False)
 ```
 
 `start` uses one `INSERT ... SELECT` to snapshot every matching ID/revision across

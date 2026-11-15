@@ -78,6 +78,7 @@ python tests/run_graph_frontend.py
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 node --check trajectory_remix/static/graph.js
+ruff check . && ruff format --check .
 git diff --check
 ```
 

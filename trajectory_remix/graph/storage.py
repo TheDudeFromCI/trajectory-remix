@@ -1,7 +1,7 @@
 """Separate new-format SQLite/WAL store with immutable snapshots and source CAS."""
+
 from __future__ import annotations
 
-import json
 import sqlite3
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -19,8 +19,12 @@ PROVENANCE = TypeAdapter(dict[str, JsonValue])
 class RevisionConflict(ValueError):
     code = "revision_conflict"
 
-    def __init__(self, entity_id: str, expected_revision: int, current_revision: int, commit_id: str):
-        super().__init__(f"Revision conflict for {entity_id}: expected {expected_revision}, current {current_revision}")
+    def __init__(
+        self, entity_id: str, expected_revision: int, current_revision: int, commit_id: str
+    ):
+        super().__init__(
+            f"Revision conflict for {entity_id}: expected {expected_revision}, current {current_revision}"
+        )
         self.entity_id = entity_id
         self.expected_revision = expected_revision
         self.current_revision = current_revision
@@ -105,7 +109,9 @@ class GraphStore:
             with self.connect() as db:
                 row = db.execute("SELECT format,id FROM graph_project WHERE singleton=1").fetchone()
         except sqlite3.DatabaseError as error:
-            raise ValueError("Not a graph project; no legacy reader or migration is available") from error
+            raise ValueError(
+                "Not a graph project; no legacy reader or migration is available"
+            ) from error
         if row is None or row[0] != PROJECT_FORMAT:
             raise ValueError("Unsupported graph project format")
         self.project_id = row[1]
@@ -125,9 +131,13 @@ class GraphStore:
                 with db:
                     db.executescript(SCHEMA)
                     commit = str(uuid4())
-                    db.execute("INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(1,?,?)",
-                               (commit, encoded))
-                    db.execute("INSERT INTO graph_project VALUES(1,?,?,1)", (PROJECT_FORMAT, str(uuid4())))
+                    db.execute(
+                        "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(1,?,?)",
+                        (commit, encoded),
+                    )
+                    db.execute(
+                        "INSERT INTO graph_project VALUES(1,?,?,1)", (PROJECT_FORMAT, str(uuid4()))
+                    )
             return cls(path)
         except BaseException:
             for suffix in ("", "-wal", "-shm", "-journal"):
@@ -146,17 +156,28 @@ class GraphStore:
     def _record(row):
         if row is None:
             raise KeyError("Trajectory/revision not found")
-        return SourceRecord(GraphSource.model_validate_json(row["source"]), row["revision"], row["commit_id"],
-                            row["intrinsic_hash"], row["intrinsic_revision"], row["metadata_revision"],
-                            row["settings_revision"])
+        return SourceRecord(
+            GraphSource.model_validate_json(row["source"]),
+            row["revision"],
+            row["commit_id"],
+            row["intrinsic_hash"],
+            row["intrinsic_revision"],
+            row["metadata_revision"],
+            row["settings_revision"],
+        )
 
     def _read(self, db, trajectory_id, revision=None):
         if revision is None:
-            row = db.execute("""SELECT r.* FROM graph_trajectories t JOIN graph_trajectory_revisions r
-                ON r.trajectory_id=t.id AND r.revision=t.revision WHERE t.id=?""", (trajectory_id,)).fetchone()
+            row = db.execute(
+                """SELECT r.* FROM graph_trajectories t JOIN graph_trajectory_revisions r
+                ON r.trajectory_id=t.id AND r.revision=t.revision WHERE t.id=?""",
+                (trajectory_id,),
+            ).fetchone()
         else:
-            row = db.execute("SELECT * FROM graph_trajectory_revisions WHERE trajectory_id=? AND revision=?",
-                             (trajectory_id, revision)).fetchone()
+            row = db.execute(
+                "SELECT * FROM graph_trajectory_revisions WHERE trajectory_id=? AND revision=?",
+                (trajectory_id, revision),
+            ).fetchone()
         return self._record(row)
 
     def read(self, trajectory_id: str, revision: int | None = None):
@@ -166,10 +187,14 @@ class GraphStore:
     def _settings(self, db, revision=None):
         if revision is None:
             revision = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
-        row = db.execute("SELECT * FROM graph_settings_revisions WHERE revision=?", (revision,)).fetchone()
+        row = db.execute(
+            "SELECT * FROM graph_settings_revisions WHERE revision=?", (revision,)
+        ).fetchone()
         if row is None:
             raise KeyError("Settings revision not found")
-        return SettingsRecord(ProjectSettings.model_validate_json(row["settings"]), revision, row["commit_id"])
+        return SettingsRecord(
+            ProjectSettings.model_validate_json(row["settings"]), revision, row["commit_id"]
+        )
 
     def settings(self, revision: int | None = None):
         with self.connect() as db:
@@ -183,8 +208,10 @@ class GraphStore:
             old = self._settings(db)
             self._check_revision("settings", expected_revision, old)
             revision, commit = old.revision + 1, str(uuid4())
-            db.execute("INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(?,?,?)",
-                       (revision, commit, canonical(settings.model_dump(mode="json"))))
+            db.execute(
+                "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(?,?,?)",
+                (revision, commit, canonical(settings.model_dump(mode="json"))),
+            )
             db.execute("UPDATE graph_project SET settings_revision=?", (revision,))
             self._change(db, "settings", self.project_id, revision, commit)
             return SettingsRecord(settings.model_copy(deep=True), revision, commit)
@@ -198,25 +225,40 @@ class GraphStore:
 
     @staticmethod
     def _change(db, kind, entity, revision, commit):
-        db.execute("INSERT INTO graph_project_changes(kind,entity_id,revision,commit_id) VALUES(?,?,?,?)",
-                   (kind, entity, revision, commit))
-        db.execute("DELETE FROM graph_project_changes WHERE cursor <= (SELECT max(cursor)-1000 FROM graph_project_changes)")
+        db.execute(
+            "INSERT INTO graph_project_changes(kind,entity_id,revision,commit_id) VALUES(?,?,?,?)",
+            (kind, entity, revision, commit),
+        )
+        db.execute(
+            "DELETE FROM graph_project_changes WHERE cursor <= (SELECT max(cursor)-1000 FROM graph_project_changes)"
+        )
 
     def create(self, source: GraphSource | dict, provenance: dict | None = None):
         source = GraphSource.model_validate(source)
-        provenance = PROVENANCE.validate_python({} if provenance is None else provenance, strict=True)
+        provenance = PROVENANCE.validate_python(
+            {} if provenance is None else provenance, strict=True
+        )
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if db.execute("SELECT 1 FROM graph_trajectory_revisions WHERE trajectory_id=?", (source.id,)).fetchone():
+            if db.execute(
+                "SELECT 1 FROM graph_trajectory_revisions WHERE trajectory_id=?", (source.id,)
+            ).fetchone():
                 raise ValueError("Trajectory already exists")
             return self._commit(db, source, None, provenance)
 
-    def replace(self, trajectory_id: str, source: GraphSource | dict, expected_revision: int,
-                provenance: dict | None = None):
+    def replace(
+        self,
+        trajectory_id: str,
+        source: GraphSource | dict,
+        expected_revision: int,
+        provenance: dict | None = None,
+    ):
         source = GraphSource.model_validate(source)
         if source.id != trajectory_id:
             raise ValueError("Trajectory identity is immutable")
-        provenance = PROVENANCE.validate_python({} if provenance is None else provenance, strict=True)
+        provenance = PROVENANCE.validate_python(
+            {} if provenance is None else provenance, strict=True
+        )
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             old = self._read(db, trajectory_id)
@@ -228,34 +270,70 @@ class GraphStore:
     def _check_owner(db, trajectory_id):
         # Jobs are an additive service on the new graph store. Foundation-only
         # projects need no runtime tables, but all edit transports honor owners.
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_owners'").fetchone():
-            if db.execute("SELECT 1 FROM graph_owners WHERE trajectory_id=?", (trajectory_id,)).fetchone():
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_owners'"
+        ).fetchone():
+            if db.execute(
+                "SELECT 1 FROM graph_owners WHERE trajectory_id=?", (trajectory_id,)
+            ).fetchone():
                 from .jobs import OwnershipConflict
+
                 raise OwnershipConflict("Trajectory is owned by an active operation")
 
     def _commit(self, db, source, old, provenance):
         revision, commit = (old.revision + 1 if old else 1), str(uuid4())
         source_hash = source.intrinsic_hash
-        intrinsic_revision = old.intrinsic_revision + (source_hash != old.intrinsic_hash) if old else 1
+        intrinsic_revision = (
+            old.intrinsic_revision + (source_hash != old.intrinsic_hash) if old else 1
+        )
         old_metadata = old.source.to_dict().get("metadata") if old else None
-        metadata_revision = old.metadata_revision + (old_metadata != source.to_dict().get("metadata")) if old else 1
+        metadata_revision = (
+            old.metadata_revision + (old_metadata != source.to_dict().get("metadata")) if old else 1
+        )
         settings_revision = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
-        db.execute("""INSERT INTO graph_trajectory_revisions(trajectory_id,revision,commit_id,parent_commit_id,
+        db.execute(
+            """INSERT INTO graph_trajectory_revisions(trajectory_id,revision,commit_id,parent_commit_id,
             source,intrinsic_hash,intrinsic_revision,metadata_revision,settings_revision,provenance)
-            VALUES(?,?,?,?,?,?,?,?,?,?)""", (source.id, revision, commit, old.commit_id if old else None,
-            canonical(source.to_dict()), source_hash, intrinsic_revision, metadata_revision,
-            settings_revision, canonical(provenance)))
-        db.execute("INSERT INTO graph_trajectories(id,revision) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision",
-                   (source.id, revision))
+            VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (
+                source.id,
+                revision,
+                commit,
+                old.commit_id if old else None,
+                canonical(source.to_dict()),
+                source_hash,
+                intrinsic_revision,
+                metadata_revision,
+                settings_revision,
+                canonical(provenance),
+            ),
+        )
+        db.execute(
+            "INSERT INTO graph_trajectories(id,revision) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision",
+            (source.id, revision),
+        )
         db.execute("DELETE FROM graph_tool_usage WHERE trajectory_id=?", (source.id,))
         tools = sorted({e.tool for e in source.events.values() if e.kind == "tool_call"})
-        db.executemany("INSERT INTO graph_tool_usage VALUES(?,?,?)", [(t, source.id, revision) for t in tools])
+        db.executemany(
+            "INSERT INTO graph_tool_usage VALUES(?,?,?)", [(t, source.id, revision) for t in tools]
+        )
         self._change(db, "trajectory", source.id, revision, commit)
         return self._read(db, source.id)
 
     def using_tool(self, tool_id: str, *, limit: int = 100, offset: int = 0):
-        if type(limit) is not int or not 1 <= limit <= 1000 or type(offset) is not int or offset < 0:
+        if (
+            type(limit) is not int
+            or not 1 <= limit <= 1000
+            or type(offset) is not int
+            or offset < 0
+        ):
             raise ValueError("Invalid pagination")
         with self.connect() as db:
-            return [dict(row) for row in db.execute("""SELECT trajectory_id,source_revision FROM graph_tool_usage
-                WHERE tool_id=? ORDER BY trajectory_id LIMIT ? OFFSET ?""", (tool_id, limit, offset))]
+            return [
+                dict(row)
+                for row in db.execute(
+                    """SELECT trajectory_id,source_revision FROM graph_tool_usage
+                WHERE tool_id=? ORDER BY trajectory_id LIMIT ? OFFSET ?""",
+                    (tool_id, limit, offset),
+                )
+            ]

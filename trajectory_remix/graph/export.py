@@ -3,25 +3,26 @@
 A durable job service may call build(), supply cancellation, persist the returned
 manifest identity, and serve lease() downloads. No jobs are faked here.
 """
+
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import asdict, dataclass
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import random
 import shutil
 import tempfile
 import time
 import uuid
 import zipfile
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
-from .compiler import Cancelled, GraphCompiler, CONTRACT, VERSION
-from .models import GraphSource, ProjectSettings
 from . import ktremix as k
+from .compiler import CONTRACT, VERSION, Cancelled, GraphCompiler
+from .models import GraphSource, ProjectSettings
 
 SPLITS = ("train", "development", "test")
 
@@ -37,14 +38,16 @@ class ExportOptions:
     seed: int = 0
 
     def __post_init__(self):
-        for name in ('compiled', 'include_stale', 'exclude_missing_split'):
+        for name in ("compiled", "include_stale", "exclude_missing_split"):
             if type(getattr(self, name)) is not bool:
-                raise ValueError(f'{name} must be a boolean')
+                raise ValueError(f"{name} must be a boolean")
         if type(self.seed) is not int:
-            raise ValueError('seed must be an integer')
+            raise ValueError("seed must be an integer")
         if type(self.trajectories_per_file) is not int or self.trajectories_per_file < 1:
             raise ValueError("trajectories_per_file must be positive")
-        if self.minimum_stage is not None and (type(self.minimum_stage) is not int or self.minimum_stage not in (0, 1, 2, 3)):
+        if self.minimum_stage is not None and (
+            type(self.minimum_stage) is not int or self.minimum_stage not in (0, 1, 2, 3)
+        ):
             raise ValueError("minimum_stage must be Pending through Ready, or None")
         if self.metadata not in ("full", "remove_all", "measured_metrics", "all_metrics"):
             raise ValueError("Invalid metadata projection")
@@ -69,8 +72,11 @@ def resolve_splits(sources, settings, *, seed=0, exclude_missing=False):
         groups.setdefault(key, []).append(source)
     explicit, automatic, counts = {}, [], dict.fromkeys(SPLITS, 0)
     for key, members in groups.items():
-        choices = {s.metadata["split"].lower() for s in members
-                   if s.metadata.get("split") not in (None, "Auto", "auto")}
+        choices = {
+            s.metadata["split"].lower()
+            for s in members
+            if s.metadata.get("split") not in (None, "Auto", "auto")
+        }
         if len(choices) > 1:
             raise ValueError(f"Conflicting explicit family splits: {key[1]}")
         if choices:
@@ -102,7 +108,9 @@ def project(source, policy):
     elif policy != "full":
         keys = ("metrics",) if policy == "measured_metrics" else ("metrics", "targets")
         if "metadata" in result:
-            result["metadata"] = {key: value for key, value in source.metadata.items() if key in keys}
+            result["metadata"] = {
+                key: value for key, value in source.metadata.items() if key in keys
+            }
     return result
 
 
@@ -132,31 +140,43 @@ class ArtifactService:
 
     def publish_files(self, files, *, metadata=None):
         """Publish a job's retained log snapshot using the same lease/expiry rules."""
-        if not files or any(Path(name).name != name or name.startswith('.') or
-                            name in {'manifest.json', 'download.zip'} for name in files):
-            raise ValueError('Invalid artifact filenames')
-        with (self.root / '.registry.lock').open('a') as registry:
+        if not files or any(
+            Path(name).name != name
+            or name.startswith(".")
+            or name in {"manifest.json", "download.zip"}
+            for name in files
+        ):
+            raise ValueError("Invalid artifact filenames")
+        with (self.root / ".registry.lock").open("a") as registry:
             fcntl.flock(registry, fcntl.LOCK_EX)
-            directory = Path(tempfile.mkdtemp(prefix='export-', dir=self.root))
-            lock = (directory / '.lease').open('w')
+            directory = Path(tempfile.mkdtemp(prefix="export-", dir=self.root))
+            lock = (directory / ".lease").open("w")
             fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             entries = []
             for name, body in files.items():
                 path = directory / name
-                with path.open('xb') as stream:
-                    for chunk in ([body] if isinstance(body, bytes) else body):
+                with path.open("xb") as stream:
+                    for chunk in [body] if isinstance(body, bytes) else body:
                         stream.write(chunk)
                     stream.flush()
                     os.fsync(stream.fileno())
                 entries.append(dict(name=name, bytes=path.stat().st_size, sha256=_sha256(path)))
             completed = self.clock()
-            _publish_json(directory / 'manifest.json', dict(files=entries, assets=[],
-                completed_at=completed, expires_at=completed + 86400, metadata=metadata or {}))
-            with zipfile.ZipFile(directory / 'download.zip', 'x') as archive:
-                for name in [*files, 'manifest.json']:
+            _publish_json(
+                directory / "manifest.json",
+                dict(
+                    files=entries,
+                    assets=[],
+                    completed_at=completed,
+                    expires_at=completed + 86400,
+                    metadata=metadata or {},
+                ),
+            )
+            with zipfile.ZipFile(directory / "download.zip", "x") as archive:
+                for name in [*files, "manifest.json"]:
                     archive.write(directory / name, name)
-            _publish_json(directory / '.complete.json', dict(expires_at=completed + 86400))
+            _publish_json(directory / ".complete.json", dict(expires_at=completed + 86400))
             return directory.name
         except BaseException:
             shutil.rmtree(directory)
@@ -166,45 +186,68 @@ class ArtifactService:
 
     def discard(self, artifact):
         """Remove an unaccepted job artifact; active download leases defer cleanup."""
-        if Path(artifact).name != artifact or not artifact.startswith('export-'):
-            raise ValueError('Invalid artifact path')
+        if Path(artifact).name != artifact or not artifact.startswith("export-"):
+            raise ValueError("Invalid artifact path")
         directory = self.root / artifact
         try:
-            with (directory / '.lease').open('r') as lock:
+            with (directory / ".lease").open("r") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 shutil.rmtree(directory)
         except FileNotFoundError:
             pass
 
-    def build(self, records, settings: ProjectSettings, *, options=ExportOptions(),
-              compiler: GraphCompiler | None = None, cancelled=lambda: False):
+    def build(
+        self,
+        records,
+        settings: ProjectSettings,
+        *,
+        options=ExportOptions(),  # noqa: B008 - immutable default
+        compiler: GraphCompiler | None = None,
+        cancelled=lambda: False,
+    ):
         # Freeze the caller's sources/revisions before selection or projection.
         snapshot, provenance, identities = [], {}, set()
         for record in records:
             source = record.source if hasattr(record, "source") else record
-            source = GraphSource.model_validate(source.to_dict() if isinstance(source, GraphSource) else source)
+            source = GraphSource.model_validate(
+                source.to_dict() if isinstance(source, GraphSource) else source
+            )
             if source.id in identities:
                 raise ValueError(f"Duplicate source: {source.id}")
             identities.add(source.id)
             stage = source.metadata.get("stage", 0)
-            if options.minimum_stage is not None and (type(stage) is not int or stage < options.minimum_stage):
+            if options.minimum_stage is not None and (
+                type(stage) is not int or stage < options.minimum_stage
+            ):
                 continue
             if not options.include_stale:
                 from .reviews import stale
-                if source.metadata.get("stale", False) or stale(source, settings)['stale']:
+
+                if source.metadata.get("stale", False) or stale(source, settings)["stale"]:
                     continue
             snapshot.append(source)
-            provenance[source.id] = {"intrinsic_hash": source.intrinsic_hash,
-                                     **{key: getattr(record, key) for key in
-                                        ("revision", "commit_id", "settings_revision") if hasattr(record, key)}}
+            provenance[source.id] = {
+                "intrinsic_hash": source.intrinsic_hash,
+                **{
+                    key: getattr(record, key)
+                    for key in ("revision", "commit_id", "settings_revision")
+                    if hasattr(record, key)
+                },
+            }
         settings = ProjectSettings.model_validate(settings.model_dump())
-        assignments, warnings = resolve_splits(snapshot, settings, seed=options.seed,
-                                               exclude_missing=options.exclude_missing_split)
+        assignments, warnings = resolve_splits(
+            snapshot, settings, seed=options.seed, exclude_missing=options.exclude_missing_split
+        )
         if options.compiled and compiler is None:
             raise ValueError("Compiled export requires an explicit compiler/profile")
         if options.compiled:
-            compiler = GraphCompiler(compiler.profile, active_limit=compiler.active_limit,
-                                     seed=compiler.seed, settings=settings, max_rows=compiler.max_rows)
+            compiler = GraphCompiler(
+                compiler.profile,
+                active_limit=compiler.active_limit,
+                seed=compiler.seed,
+                settings=settings,
+                max_rows=compiler.max_rows,
+            )
         dataset = str(uuid.uuid4())
         with (self.root / ".registry.lock").open("a") as registry:
             fcntl.flock(registry, fcntl.LOCK_EX)
@@ -212,62 +255,108 @@ class ArtifactService:
             lease = (directory / ".lease").open("w")
             fcntl.flock(lease, fcntl.LOCK_EX)
         try:
+
             def check():
                 if cancelled():
                     raise Cancelled("Export cancelled")
+
             files, assets = [], []
             if options.compiled:
                 _publish_json(directory / "profile.json", compiler.profile.model_dump())
                 # Exact serialization whose hash is embedded in every shard.
-                (directory / "tokenizer.json").write_text(compiler.tokenizer.to_str(), encoding="utf-8")
+                (directory / "tokenizer.json").write_text(
+                    compiler.tokenizer.to_str(), encoding="utf-8"
+                )
                 assets = ["profile.json", "tokenizer.json"]
             for split in SPLITS:
-                members = sorted((s for s in snapshot if assignments.get(s.id) == split), key=lambda s: s.id)
-                for shard, start in enumerate(range(0, len(members), options.trajectories_per_file)):
+                members = sorted(
+                    (s for s in snapshot if assignments.get(s.id) == split), key=lambda s: s.id
+                )
+                for shard, start in enumerate(
+                    range(0, len(members), options.trajectories_per_file)
+                ):
                     check()
-                    chunk = members[start:start + options.trajectories_per_file]
+                    chunk = members[start : start + options.trajectories_per_file]
                     suffix = "ktremix" if options.compiled else "jsonl"
                     path = directory / f"{split}-{shard:04}.{suffix}"
                     if options.compiled:
-                        manifest = dict(dataset_id=dataset, shard_id=str(uuid.uuid4()), split=split,
-                                        shard_index=shard, execution_contract=CONTRACT, compiler=VERSION,
-                                        seed=compiler.seed, active_window_limit=compiler.active_limit,
-                                        profile_sha256=compiler.profile.fingerprint,
-                                        export={"split": split, **asdict(options)},
-                                        tokenizer={"sha256": hashlib.sha256(
-                                            compiler.tokenizer.to_str().encode()).hexdigest(),
-                                            "special_token_ids": compiler.controls})
+                        manifest = dict(
+                            dataset_id=dataset,
+                            shard_id=str(uuid.uuid4()),
+                            split=split,
+                            shard_index=shard,
+                            execution_contract=CONTRACT,
+                            compiler=VERSION,
+                            seed=compiler.seed,
+                            active_window_limit=compiler.active_limit,
+                            profile_sha256=compiler.profile.fingerprint,
+                            export={"split": split, **asdict(options)},
+                            tokenizer={
+                                "sha256": hashlib.sha256(
+                                    compiler.tokenizer.to_str().encode()
+                                ).hexdigest(),
+                                "special_token_ids": compiler.controls,
+                            },
+                        )
+
                         def samples():
                             for source in chunk:
                                 check()
                                 columns, _ = compiler.compile(source, cancelled=cancelled)
-                                yield source.id, columns, project(source, options.metadata).get("metadata")
+                                yield (
+                                    source.id,
+                                    columns,
+                                    project(source, options.metadata).get("metadata"),
+                                )
+
                         k.write_shard(path, samples(), manifest, sample_count=len(chunk))
                     else:
                         partial = path.with_suffix(".partial")
                         with partial.open("x", encoding="utf-8") as stream:
                             for source in chunk:
                                 check()
-                                stream.write(json.dumps(project(source, options.metadata), ensure_ascii=False,
-                                                        allow_nan=False) + "\n")
+                                stream.write(
+                                    json.dumps(
+                                        project(source, options.metadata),
+                                        ensure_ascii=False,
+                                        allow_nan=False,
+                                    )
+                                    + "\n"
+                                )
                             stream.flush()
                             os.fsync(stream.fileno())
                         os.link(partial, path)
                         partial.unlink()
-                    files.append({"name": path.name, "split": split, "trajectories": len(chunk),
-                                  "bytes": path.stat().st_size,
-                                  "sha256": _sha256(path)})
+                    files.append(
+                        {
+                            "name": path.name,
+                            "split": split,
+                            "trajectories": len(chunk),
+                            "bytes": path.stat().st_size,
+                            "sha256": _sha256(path),
+                        }
+                    )
             check()
             completed = self.clock()
-            manifest = dict(dataset_id=dataset, completed_at=completed, expires_at=completed + 24 * 60 * 60,
-                            files=files, assets=assets, assignments=assignments, warnings=warnings,
-                            settings_hash=hashlib.sha256(
-                                k.canonical(settings.model_dump())).hexdigest(),
-                            split_seed=options.seed,
-                            sources={ident: provenance[ident] for ident in assignments},
-                            metadata=options.metadata, compiled=options.compiled, selection=asdict(options))
+            manifest = dict(
+                dataset_id=dataset,
+                completed_at=completed,
+                expires_at=completed + 24 * 60 * 60,
+                files=files,
+                assets=assets,
+                assignments=assignments,
+                warnings=warnings,
+                settings_hash=hashlib.sha256(k.canonical(settings.model_dump())).hexdigest(),
+                split_seed=options.seed,
+                sources={ident: provenance[ident] for ident in assignments},
+                metadata=options.metadata,
+                compiled=options.compiled,
+                selection=asdict(options),
+            )
             _publish_json(directory / "manifest.json", manifest)
-            with zipfile.ZipFile(directory / "download.zip.partial", "x", compression=zipfile.ZIP_STORED) as archive:
+            with zipfile.ZipFile(
+                directory / "download.zip.partial", "x", compression=zipfile.ZIP_STORED
+            ) as archive:
                 for name in [f["name"] for f in files] + assets + ["manifest.json"]:
                     check()
                     archive.write(directory / name, name)
@@ -285,7 +374,11 @@ class ArtifactService:
     @contextmanager
     def lease(self, artifact, name):
         directory = self.root / artifact
-        if Path(artifact).name != artifact or not artifact.startswith("export-") or Path(name).name != name:
+        if (
+            Path(artifact).name != artifact
+            or not artifact.startswith("export-")
+            or Path(name).name != name
+        ):
             raise ValueError("Invalid artifact path")
         with (directory / ".lease").open("r") as lock:
             fcntl.flock(lock, fcntl.LOCK_SH)
@@ -293,7 +386,11 @@ class ArtifactService:
             if complete["expires_at"] <= self.clock():
                 raise FileNotFoundError("Export expired")
             manifest = json.loads((directory / "manifest.json").read_text())
-            allowed = {f["name"] for f in manifest["files"]} | set(manifest["assets"]) | {"manifest.json", "download.zip"}
+            allowed = (
+                {f["name"] for f in manifest["files"]}
+                | set(manifest["assets"])
+                | {"manifest.json", "download.zip"}
+            )
             if name not in allowed:
                 raise FileNotFoundError(name)
             with (directory / name).open("rb") as stream:
@@ -317,7 +414,10 @@ class ArtifactService:
                         continue
                     complete = directory / ".complete.json"
                     # An unlocked incomplete directory is abandoned (e.g. crash).
-                    if not complete.exists() or json.loads(complete.read_text())["expires_at"] <= self.clock():
+                    if (
+                        not complete.exists()
+                        or json.loads(complete.read_text())["expires_at"] <= self.clock()
+                    ):
                         shutil.rmtree(directory)
                         removed.append(directory.name)
             except FileNotFoundError:

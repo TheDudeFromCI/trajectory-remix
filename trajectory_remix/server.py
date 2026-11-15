@@ -1,4 +1,5 @@
 """Public application factory for graph projects only."""
+
 from .graph.studio_api import create_studio_app
 
 
