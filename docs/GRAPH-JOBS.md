@@ -246,3 +246,6 @@ changed-only Undo/Redo, log eviction/clear/export, real raw artifact jobs and
 HTTP controls/downloads. No benchmarks, scale tests, full training or live model
 calls are part of this validation. Real Flow/review/repair and graph metric
 population views remain downstream integrations; the manual studio uses these services today.
+
+Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
+See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.

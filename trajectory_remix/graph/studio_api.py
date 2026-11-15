@@ -16,8 +16,10 @@ from starlette.routing import Route
 
 from .job_api import create_job_app
 from .models import DTO, GraphSource, JsonValue, ProjectSettings
-from .studio import Studio, result
+from .studio import Studio
 from .validation import diagnose
+from .flow import ProposalInput, SamplerRun
+from .reviews import ReviewInput
 
 
 class Edit(DTO):
@@ -65,17 +67,6 @@ class SamplerEdit(Delete):
     metric_options: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-class ProposalInput(DTO):
-    seed: int | None = None
-    world_group_id: str | None = None
-    overrides: dict[str, str] = Field(default_factory=dict)
-
-
-class SamplerRun(DTO):
-    requests: list[ProposalInput] = Field(min_length=1, max_length=1000)
-    instructions: dict[str, JsonValue] = Field(default_factory=dict)
-
-
 class MetricAnnotation(Delete):
     value: JsonValue
     origin: Literal['manual_annotation', 'export'] = 'manual_annotation'
@@ -93,7 +84,7 @@ class AgentCall(DTO):
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
 
 
-def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mcp_allowed_origins=()):
+def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mcp_allowed_origins=(), provider=None):
     app = create_job_app(path, artifact_root=artifact_root)
     app.title = 'Trajectory Remix — Graph Studio'
     studio = Studio(app.state.jobs, app.state.bulk, app.state.artifacts, app.state.worker)
@@ -101,6 +92,13 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
     from .metrics import MetricService
     sampler = app.state.sampler = SamplerService(app.state.jobs)
     metrics = app.state.metrics = MetricService(sampler)
+    from .generation import GenerationService
+    from .provider import OpenAITransport
+    generation = app.state.generation = GenerationService(app.state.jobs, sampler, app.state.bulk, provider or OpenAITransport())
+    app.state.worker.handlers['run'] = generation.run
+    app.state.worker.handlers['bulk:review_repair'] = generation.run
+    app.state.worker.review_start = generation.start_review
+    studio.generation = generation
     app.state.worker.bulk_handlers['metrics'] = metrics.calculate
     app.state.studio = studio
     app.state.worker.handlers['import'] = studio.import_job
@@ -174,7 +172,24 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
 
     @router.post('/sampler/runs', status_code=202)
     async def sampler_run(body: SamplerRun):
-        job = sampler.run([r.model_dump() for r in body.requests], body.instructions)
+        if 'generator' in studio.store.settings().settings.endpoint_roles:
+            job = generation.start([r.model_dump() for r in body.requests], body.instructions)
+        else:
+            job = sampler.run([r.model_dump() for r in body.requests], body.instructions)
+        studio.worker.kick(job)
+        return dict(job_id=job, status_url=f'/api/v1/jobs/{job}')
+
+    @router.post('/generation/runs', status_code=202)
+    async def generation_run(body: SamplerRun):
+        job = generation.start([r.model_dump() for r in body.requests], body.instructions)
+        studio.worker.kick(job)
+        return dict(job_id=job, status_url=f'/api/v1/jobs/{job}')
+
+    @router.post('/reviews', status_code=202)
+    async def review_run(body: ReviewInput):
+        if body.trajectory is not None and body.expected_revision is None:
+            raise ValueError('Selected-source review requires expected_revision')
+        job = generation.start_review(**body.model_dump())
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f'/api/v1/jobs/{job}')
 
@@ -201,7 +216,7 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
 
     @router.get('/project')
     def project():
-        return dict(id=studio.store.project_id, format='kidra-graph-project/1', generation_available=False)
+        return dict(id=studio.store.project_id, format='kidra-graph-project/1', generation_available='generator' in studio.store.settings().settings.endpoint_roles)
 
     @router.get('/settings')
     def settings():
@@ -228,7 +243,7 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
 
     @router.post('/trajectories', status_code=201)
     def create(body: GraphSource):
-        return result(studio.commands.create(body.to_dict()))
+        return studio.present(studio.commands.create(body.to_dict()))
 
     @router.get('/trajectories/{ident}')
     def read(ident: str, revision: int | None = Query(None, ge=1)):
@@ -236,11 +251,11 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
 
     @router.put('/trajectories/{ident}')
     def replace(ident: str, body: Replace):
-        return result(studio.commands.replace(ident, body.source.to_dict(), body.expected_revision))
+        return studio.present(studio.commands.replace(ident, body.source.to_dict(), body.expected_revision))
 
     @router.patch('/trajectories/{ident}')
     def patch(ident: str, body: Edit):
-        return result(studio.commands.patch(ident, body.patch, body.expected_revision))
+        return studio.present(studio.commands.patch(ident, body.patch, body.expected_revision))
 
     @router.delete('/trajectories/{ident}')
     def delete(ident: str, body: Delete):
@@ -248,19 +263,19 @@ def create_studio_app(path, *, artifact_root='/tmp/trajectory-remix-exports', mc
 
     @router.post('/trajectories/{ident}/events/{event}')
     def add_event(ident: str, event: str, body: EventInput):
-        return result(studio.commands.add_event(ident, event, body.event, body.expected_revision))
+        return studio.present(studio.commands.add_event(ident, event, body.event, body.expected_revision))
 
     @router.patch('/trajectories/{ident}/events/{event}')
     def patch_event(ident: str, event: str, body: Edit):
-        return result(studio.commands.patch_event(ident, event, body.patch, body.expected_revision))
+        return studio.present(studio.commands.patch_event(ident, event, body.patch, body.expected_revision))
 
     @router.delete('/trajectories/{ident}/events/{event}')
     def delete_event(ident: str, event: str, body: Delete):
-        return result(studio.commands.delete_event(ident, event, body.expected_revision))
+        return studio.present(studio.commands.delete_event(ident, event, body.expected_revision))
 
     @router.put('/trajectories/{ident}/events/{event}/dependencies')
     def dependencies(ident: str, event: str, body: Dependencies):
-        return result(studio.commands.set_dependencies(ident, event, body.after, body.expected_revision))
+        return studio.present(studio.commands.set_dependencies(ident, event, body.after, body.expected_revision))
 
     @router.get('/trajectories/{ident}/graph')
     def graph(ident: str):

@@ -184,8 +184,10 @@ class ArtifactService:
             stage = source.metadata.get("stage", 0)
             if options.minimum_stage is not None and (type(stage) is not int or stage < options.minimum_stage):
                 continue
-            if not options.include_stale and source.metadata.get("stale", False):
-                continue
+            if not options.include_stale:
+                from .reviews import stale
+                if source.metadata.get("stale", False) or stale(source, settings)['stale']:
+                    continue
             snapshot.append(source)
             provenance[source.id] = {"intrinsic_hash": source.intrinsic_hash,
                                      **{key: getattr(record, key) for key in

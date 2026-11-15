@@ -2,8 +2,9 @@
 
 UI B adds a dedicated **Sampler Matrix** tab to Graph Studio. It uses the shared
 sampler and linked metric registry from #75, based on
-`2e91fff48a177355d8b52f6877c9c0f7e017ca64`. No sampler, schema, backend or generation
-semantics change. This is one design alternative for review.
+`2e91fff48a177355d8b52f6877c9c0f7e017ca64`. The original UI-only baseline remains one design alternative for review.
+The event-generation integration now connects these pins to frozen run requests;
+see the event Flow guide below.
 
 ## Quick tuning workflow
 
@@ -17,7 +18,7 @@ semantics change. This is one design alternative for review.
    button for each supported choice. Muted means unpinned; a highlighted, filled
    pin means selected. Click again to unpin; picking a sibling moves the pin.
    Pins stay synchronized with the preview dropdowns and survive group/filter
-   navigation. They apply to proposal previews only, without editing weights or
+   navigation. They apply to previews and generation requests, without editing weights or
    saving project changes. Fields the shared sampler cannot pin show a dash.
    Each button supports keyboard activation and exposes its pressed state.
 3. Click a choice to inspect constraints and referencing conditions. Expand its
@@ -100,3 +101,6 @@ Compare the speed of finding a dimension, inspecting a constraint and repeating
 weight edits with UI A/C. Assess table density, navigation grouping, visibility of
 saved versus draft state, JSON-only rule editing and the save-before-preview step.
 This prototype does not select a winning design or replace the metrics panel.
+
+Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
+See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.

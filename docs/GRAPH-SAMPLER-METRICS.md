@@ -111,3 +111,6 @@ staleness, missing-only calculation/history, family conflicts and split balancin
 are checked. `python tests/run_graph_frontend.py` checks the retained studio.
 No benchmarks, full training, scale tests or live LLM calls are run. User-machine
 25k-stored/20-active, live Flow and training validation remain separate gates.
+
+Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
+See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.

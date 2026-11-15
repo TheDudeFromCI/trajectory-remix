@@ -130,7 +130,7 @@ Job, bulk, change-feed, export and download routes are the existing
 [shared job router](GRAPH-JOBS.md#rest-integration-for-the-graph-studio).
 Invalid JSON/DTOs return 422 with field locations; structurally invalid graphs
 return editable diagnostics; revision/ownership conflicts return 409; missing
-records/artifacts return 404. No model/provider access is added.
+records/artifacts return 404. The event Flow supplies model access through the authenticated generation/review routes.
 
 MCP offers `get_graph_session`, `get_authoring_guide`, `list_graphs`, `read_graph`,
 `create_graph`, `patch_graph`, `patch_graph_event`, `export_graphs`, and
@@ -156,3 +156,6 @@ conflict drafts. API checks exercise source locks, immutable drafts, pinned real
 raw/compiled ZIP downloads, import progress/warnings and shared agent commands.
 No throughput/scale measurements, training or live LLM calls belong to these
 checks. User-machine 25k-stored/20-active and local-model acceptance remain open.
+
+Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
+See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.

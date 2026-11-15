@@ -56,6 +56,7 @@ class JobWorker:
         self.jobs, self.bulk, self.artifacts = jobs, bulk, artifacts
         self.handlers, self.bulk_handlers = handlers or {}, bulk_handlers or {}
         self.tasks = {}
+        self.review_start = None
 
     def kick(self, job):
         if job not in self.tasks or self.tasks[job].done():
@@ -65,9 +66,13 @@ class JobWorker:
         j = self.jobs.inspect(job)
         try:
             if j['kind'] == 'bulk':
-                while self.jobs.inspect(job)['state'] == 'running':
-                    await asyncio.to_thread(self.bulk.advance, job, self.bulk_handlers)
-                    await asyncio.sleep(0)
+                handler = self.handlers.get('bulk:' + j['config'].get('action', ''))
+                if handler:
+                    await handler(self.jobs, job)
+                else:
+                    while self.jobs.inspect(job)['state'] == 'running':
+                        await asyncio.to_thread(self.bulk.advance, job, self.bulk_handlers)
+                        await asyncio.sleep(0)
             elif j['kind'] == 'export':
                 await asyncio.to_thread(self.artifacts.build_export, job)
             elif j['kind'] in self.handlers:
@@ -146,6 +151,12 @@ def job_router(jobs, bulk, artifacts, worker):
 
     @router.post('/bulk')
     async def start_bulk(body: BulkInput):
+        if body.action == 'review_repair' and worker.review_start:
+            if set(body.config) - {'mode', 'repair'}:
+                raise ValueError('Review options are mode and repair')
+            job = worker.review_start(body.query, **body.config)
+            worker.kick(job)
+            return accepted(job)
         if body.action in {'metrics', 'review_repair'} and body.action not in worker.bulk_handlers:
             raise ValueError(f'{body.action} driver is not installed')
         job = bulk.start(body.query, body.action, body.config)

@@ -66,7 +66,7 @@ try {
   assert.equal(await page.locator('.sw-table input[type=number]').first().inputValue(),'-2');
   await page.locator('.sw-table input[type=number]').first().fill('3.5');
   // Same seed/pins -> same payload; pins don't alter weights.
-  await page.locator('.sw-preview summary').click(); await page.getByLabel('Pin domain',{exact:true}).selectOption('software_engineering');
+  await page.locator('.sw-preview > summary').click(); await page.getByLabel('Pin domain',{exact:true}).selectOption('software_engineering');
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>document.getElementById('sampler-proposal').textContent.length>10);
   const first=JSON.parse(await page.locator('#sampler-proposal').textContent());
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>!document.getElementById('sampler-preview').disabled);
@@ -110,7 +110,7 @@ try {
   assert.equal(await pin('medium').getAttribute('aria-pressed'),'true');
   assert.equal(paths.length,requestsBeforePins);
   assert.deepEqual(await state(),savedBeforePins); assert.equal(await page.locator('#sampler-save').isDisabled(),true);
-  await page.locator('.sw-preview summary').click();
+  await page.locator('.sw-preview > summary').click();
   await page.getByLabel('Pin complexity',{exact:true}).selectOption('large');
   assert.equal(await pin('large').getAttribute('aria-pressed'),'true');
   assert.equal(await pin('medium').getAttribute('aria-pressed'),'false');
@@ -119,7 +119,7 @@ try {
   assert.deepEqual((await previewRequest).postDataJSON().overrides,{complexity:'large'});
   await page.waitForFunction(()=>document.getElementById('sampler-proposal').textContent.length>10);
   assert.equal(JSON.parse(await page.locator('#sampler-proposal').textContent()).proposal.metrics.sampling.complexity,'large');
-  await pin('medium').click(); await page.locator('.sw-preview summary').click();
+  await pin('medium').click(); await page.locator('.sw-preview > summary').click();
   await fs.mkdir(new URL('../docs/images/sampler-workbench/',import.meta.url),{recursive:true});
   await page.locator('#sampler-workbench').evaluate(n=>n.scrollTop=0); await page.locator('#sampler-nav').evaluate(n=>n.scrollTop=0);
   await page.screenshot({path:new URL('../docs/images/sampler-workbench/desktop.png',import.meta.url).pathname,fullPage:true});

@@ -149,12 +149,12 @@ class JobService:
             db.execute('BEGIN IMMEDIATE')
             return self._create(db, kind, config, total)
 
-    def create_run(self, config, proposals):
+    def create_run(self, config, proposals, *, settings_record=None):
         # Explicit proposals pin all later attempts now, never resample on resume.
         config, proposals = json.loads(canonical(config)), json.loads(canonical(proposals))
         if not isinstance(config, dict) or not isinstance(proposals, list) or not proposals or not all(isinstance(p, dict) for p in proposals):
             raise ValueError('A run requires config and one object per attempt')
-        settings = self.store.settings()
+        settings = settings_record or self.store.settings()
         snapshot = dict(config=config, settings=settings.settings.model_dump(mode='json'),
                         settings_revision=settings.revision, settings_commit=settings.commit_id)
         run = str(uuid4())
@@ -174,11 +174,13 @@ class JobService:
             return [dict(r) | {'proposal': json.loads(r['proposal'])} for r in db.execute(
                 'SELECT * FROM graph_attempts WHERE run_id=? ORDER BY ordinal LIMIT ? OFFSET ?', (run, limit, offset))]
 
-    def start_attempt(self, job, ordinal, source):
+    def start_attempt(self, job, ordinal, source, *, expected_epoch=None):
         source = GraphSource.model_validate(source)
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             j = self._job(db, job)
+            if expected_epoch is not None:
+                self._fence(db, job, expected_epoch)
             if j['state'] != 'running':
                 raise OwnershipConflict('Run is not running')
             attempt = db.execute('SELECT * FROM graph_attempts WHERE run_id=? AND ordinal=?', (j['run_id'], ordinal)).fetchone()
@@ -227,14 +229,14 @@ class JobService:
                 raise Fenced('Trajectory ownership changed')
         return j
 
-    def accept(self, job, epoch, trajectory, step, source, expected_revision, checkpoint, *, request=None, outcome=None):
+    def accept(self, job, epoch, trajectory, step, source, expected_revision, checkpoint, *, request=None, outcome=None, bulk_position=None):
         source = GraphSource.model_validate(source)
         checkpoint = json.loads(canonical(checkpoint))
         if request is not None and not isinstance(request, Ticket):
             raise ValueError('Acceptance requires the claimed request Ticket')
         request_id = request.id if request else None
         identity = digest(dict(trajectory=trajectory, source=source.to_dict(), checkpoint=checkpoint,
-                               request=request_id, lease=request.lease if request else None, outcome=outcome))
+                               request=request_id, lease=request.lease if request else None, outcome=outcome, bulk_position=bulk_position))
         if source.id != trajectory:
             raise ValueError('Source identity differs')
         if outcome not in (None, 'pass', 'fail', 'abandoned'):
@@ -264,6 +266,20 @@ class JobService:
                 db.execute("UPDATE graph_requests SET state='accepted',result=NULL WHERE id=?", (request_id,))
             if outcome is not None:
                 self._detach(db, job, trajectory, outcome)
+            if bulk_position is not None:
+                item = db.execute('SELECT * FROM graph_bulk_items WHERE job_id=? AND position=?', (job, bulk_position)).fetchone()
+                if item is None or item['trajectory_id'] != trajectory or item['state'] != 'working':
+                    raise Fenced('Review target is no longer current')
+                before = self.store._read(db, trajectory, item['revision']).source.to_dict()
+                after = record.source.to_dict()
+                delta = (dict(id=trajectory, before=before, after=after, expected_revision=record.revision,
+                              expected_commit=record.commit_id) if before != after else None)
+                db.execute('UPDATE graph_bulk_items SET delta=?,state=? WHERE job_id=? AND position=?',
+                           (canonical(delta) if delta else None, ('changed' if delta else 'unchanged') if outcome else 'working', job, bulk_position))
+                if outcome:
+                    db.execute('UPDATE graph_jobs SET progress=progress+1 WHERE id=?', (job,))
+                    if not db.execute("SELECT 1 FROM graph_bulk_items WHERE job_id=? AND state IN ('pending','working')", (job,)).fetchone():
+                        db.execute("UPDATE graph_jobs SET state='completed' WHERE id=?", (job,))
             self._notify(db, job)
             return dict(db.execute('SELECT * FROM graph_steps WHERE job_id=? AND step=?', (job, step)).fetchone())
 
@@ -352,14 +368,14 @@ class JobService:
             # All unaccepted bodies are disposable. Original request payloads survive.
             db.execute("UPDATE graph_requests SET state='queued',result=NULL WHERE state IN ('running','ready')")
 
-    def enqueue(self, job, trajectory, endpoint, step, payload):
+    def enqueue(self, job, trajectory, endpoint, step, payload, *, expected_epoch=None):
         payload = canonical(payload)
         if not isinstance(json.loads(payload), dict) or not step:
             raise ValueError('Request requires object payload and stable step')
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             j = self._job(db, job)
-            self._fence(db, job, j['epoch'], trajectory)
+            self._fence(db, job, j['epoch'] if expected_epoch is None else expected_epoch, trajectory)
             old = db.execute('SELECT * FROM graph_requests WHERE job_id=? AND step=?', (job, step)).fetchone()
             if old:
                 if (old['trajectory_id'], old['endpoint'], old['payload']) != (trajectory, endpoint, payload):
@@ -374,6 +390,8 @@ class JobService:
                 if pinned is None:
                     raise ValueError('Endpoint is not in the frozen run settings')
                 retry_limit = pinned['retries']
+            elif json.loads(j['config']).get('options', {}).get('settings'):
+                retry_limit = json.loads(j['config'])['options']['settings']['endpoints'][endpoint]['retries']
             ident = str(uuid4())
             db.execute('INSERT INTO graph_requests(id,endpoint,job_id,trajectory_id,step,payload,state,retry_limit) VALUES(?,?,?,?,?,?,\'queued\',?)',
                        (ident, endpoint, job, trajectory, step, payload, retry_limit))
@@ -496,6 +514,9 @@ class JobService:
             result['requests'] = [dict(r) for r in db.execute('SELECT state,count(*) AS count FROM graph_requests WHERE job_id=? GROUP BY state', (job,))]
             result['paused_endpoints'] = [r[0] for r in db.execute('''SELECT DISTINCT e.id FROM graph_endpoints e JOIN graph_requests r
                 ON r.endpoint=e.id WHERE r.job_id=? AND e.paused=1 AND r.state='queued' ''', (job,))]
+            result['attempt_states'] = [dict(r) for r in db.execute('SELECT state,outcome,count(*) AS count FROM graph_attempts WHERE run_id=? GROUP BY state,outcome', (result['run_id'],))]
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_bulk_items'").fetchone():
+                result['result_states'] = [dict(r) for r in db.execute('SELECT state,count(*) AS count FROM graph_bulk_items WHERE job_id=? GROUP BY state', (job,))]
             return result
 
     def listing(self, *, limit=100, offset=0):

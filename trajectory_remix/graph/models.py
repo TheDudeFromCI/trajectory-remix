@@ -230,6 +230,37 @@ class SplitRatios(DTO):
         return self
 
 
+class Criterion(DTO):
+    text: Identifier
+    allow_not_applicable: bool = False
+
+
+def default_checklists():
+    return {
+        'core': {key: Criterion(text=text) for key, text in {
+            'objective_alignment': 'The episode meaningfully exercises its objective; numeric targets are advisory.',
+            'causal_evidence': 'Every decision uses only evidence visible at its causal frontier.',
+            'actor_and_supervision': 'Sources, masks, chat delivery and tool framing match actor ownership.',
+            'world_consistency': 'Observations, identities and authored tool outcomes are consistent.',
+            'coherent_reasoning': 'Supervised reasoning follows evidence; distinguish intentional masked mistakes.',
+            'truthful_episode_outcome': 'Progress, blocking and completion claims match observed evidence.'}.items()},
+        'critical': {key: Criterion(text=text) for key, text in {
+            'decision_quality': 'Decisions consider relevant constraints, alternatives and proportional delegation.',
+            'long_horizon_continuity': 'Ownership and retained context remain coherent across interruptions and participants.',
+            'exploration_and_recovery': 'Critique and recovery respond to actual evidence without hindsight.',
+            'training_value': 'The episode teaches useful behavior without padded boilerplate.'}.items()}}
+
+
+class GenerationOptions(DTO):
+    fast: bool = True
+    critical: bool = True
+    repair: bool = True
+    format_retries: Annotated[int, Field(ge=0, le=5)] = 2
+    # An explicit byte budget for the continuing repair transcript, not a token
+    # estimate or a spending limit. Provider context exhaustion also terminates it.
+    repair_context_bytes: Annotated[int, Field(ge=256)] = 65536
+
+
 class ProjectSettings(DTO):
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
     tools: dict[Identifier, ToolDefinition] = Field(default_factory=dict)
@@ -238,6 +269,8 @@ class ProjectSettings(DTO):
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
     endpoint_roles: dict[Literal["generator", "fast", "critical"], Identifier] = Field(default_factory=dict)
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
+    review_checklists: dict[Literal['core', 'critical'], dict[Identifier, Criterion]] = Field(default_factory=default_checklists)
+    generation: GenerationOptions = Field(default_factory=GenerationOptions)
     matrix: VersionedReference | None = None
     metric_registry: VersionedReference | None = None
     sampler_configuration: dict[str, JsonValue] | None = None

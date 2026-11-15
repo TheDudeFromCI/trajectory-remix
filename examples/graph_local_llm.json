@@ -1,0 +1,13 @@
+{
+  "endpoints": {
+    "local-generator": {"url": "http://127.0.0.1:8000/v1", "model": "YOUR_LOCAL_MODEL", "concurrency": 1, "retries": 1},
+    "local-fast": {"url": "http://127.0.0.1:8000/v1", "model": "YOUR_LOCAL_MODEL", "concurrency": 1, "retries": 1},
+    "local-critical": {"url": "http://127.0.0.1:8000/v1", "model": "YOUR_LOCAL_MODEL", "concurrency": 1, "retries": 1}
+  },
+  "endpoint_roles": {"generator": "local-generator", "fast": "local-fast", "critical": "local-critical"},
+  "generation": {"fast": true, "critical": true, "repair": true, "format_retries": 2, "repair_context_bytes": 65536},
+  "tools": {
+    "chat": {"name": "Chat", "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"], "additionalProperties": false}},
+    "read": {"name": "Read document", "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": false}}
+  }
+}

@@ -53,6 +53,10 @@ class Studio:
         r = self.store.settings()
         return dict(settings=r.settings.model_dump(mode='json'), revision=r.revision, commit_id=r.commit_id)
 
+    def present(self, value):
+        from .reviews import stale
+        return result(value) | dict(review_status=stale(value.record.source, self.store.settings().settings))
+
     def update_settings(self, settings, expected_revision):
         self.store.update_settings(ProjectSettings.model_validate(settings), expected_revision)
         self.jobs.configure_endpoints()
@@ -62,7 +66,9 @@ class Studio:
         value = result(self.commands.read(ident, revision))
         with self.store.connect() as db:
             owner = db.execute('SELECT job_id FROM graph_owners WHERE trajectory_id=?', (ident,)).fetchone()
-        return value | dict(owner=owner[0] if owner else None)
+        from .reviews import stale
+        review = stale(GraphSource.model_validate(value['source']), self.store.settings().settings)
+        return value | dict(owner=owner[0] if owner else None, review_status=review)
 
     def graph(self, ident):
         value = self.read(ident)

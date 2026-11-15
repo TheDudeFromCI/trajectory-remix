@@ -44,13 +44,14 @@ export class SamplerWorkbench {
     <div class="sw-notice">Changes apply to future runs. Existing runs retain their frozen matrix, targets and instructions.</div>
     <div id="sampler-message" role="status" aria-live="polite"></div>
     <div class="sw-layout"><aside class="sw-navigation"><div class="sw-nav-tools"><label>Find a dimension or entry<input id="sampler-search" type="search" placeholder="Search names, values, rules…"></label><label>Show<select id="sampler-filter"><option value="">All groups</option><option>Focus</option><option>Behaviors</option><option>Decisions</option><option>Dimensions</option><option>Events</option><option>Rules</option><option>Metrics</option><option>Advanced</option><option value="changed">Changed groups</option></select></label><span id="sampler-count"></span></div><nav id="sampler-nav" aria-label="Matrix groups"></nav></aside>
-    <div class="sw-main"><section id="sampler-detail"></section><details class="sw-preview"><summary>Proposal preview <span>Fixed seed · saved project · per-run pins</span></summary><p>One proposal through the shared sampler API. Pins do not edit weights. Save the project draft first. No model or compiler calls.</p><div class="sw-preview-controls"><label>Seed<input id="sampler-seed" type="number" step="1" value="137"></label><button id="sampler-preview">Sample one proposal</button></div><div id="sampler-pins" class="sw-pins"></div><p id="sampler-preview-status" role="status"></p><pre id="sampler-proposal"></pre></details></div></div>`;
+    <div class="sw-main"><section id="sampler-detail"></section><details class="sw-preview"><summary>Proposal preview &amp; generation <span>Fixed seed · saved project · per-run pins</span></summary><p>One proposal through the shared sampler API. Pins do not edit weights. Save the project draft first. Sampling a preview makes no model or compiler calls.</p><div class="sw-preview-controls"><label>Seed<input id="sampler-seed" type="number" step="1" value="137"></label><button id="sampler-preview">Sample one proposal</button></div><div id="sampler-pins" class="sw-pins"></div><p id="sampler-preview-status" role="status"></p><pre id="sampler-proposal"></pre><hr><h2>Generate trajectories</h2><p>Uses the saved matrix and the same pins. Configure Generator, Fast and Critical roles in Project Settings. Reviews and repair follow the project toggles.</p><label>Attempts<input id="sampler-attempts" type="number" min="1" max="1000" step="1" value="1"></label><details><summary>Advanced Flow instructions</summary><label>Run instructions JSON<textarea id="sampler-instructions">{}</textarea></label></details><button id="sampler-generate">Start generation</button><p id="sampler-run-status" role="status"></p></details></div></div>`;
     $('sampler-search').oninput = e => { this.query = e.target.value.toLowerCase().trim(); this.renderNav(); };
     $('sampler-filter').onchange = e => { this.filter = e.target.value; this.renderNav(); };
     $('sampler-save').onclick = () => this.save();
     $('sampler-reload').onclick = async () => { if (this.dirty() && !confirm('Discard your draft and load the latest saved configuration?')) return; try { this.adopt(await this.api('/sampler')); this.renderPins(); this.renderNav(); this.renderDetail(); this.update(); ++this.generation; this.report('Latest saved configuration loaded.'); } catch (e) { this.report(e.message, true); } };
     $('sampler-reset').onclick = () => { if (!this.dirty() || confirm('Discard all unsaved matrix and metric changes?')) { this.adopt(this.record); this.renderPins(); this.renderNav(); this.renderDetail(); this.update(); this.report('Draft discarded.'); } };
     $('sampler-preview').onclick = () => this.preview();
+    $('sampler-generate').onclick = () => this.generate();
     this.renderPins();
     this.renderNav(); this.renderDetail(); this.update();
   }
@@ -70,7 +71,7 @@ export class SamplerWorkbench {
   setPin(key, value) {
     if (value) this.pins[key] = value; else delete this.pins[key];
     this.refreshPins(); ++this.generation;
-    this.report(value ? `${label(key)} pinned to ${label(value)} for proposal previews. Project weights are unchanged.` : `${label(key)} unpinned; the sampler will choose it. Project weights are unchanged.`);
+    this.report(value ? `${label(key)} pinned to ${label(value)} for previews and generation. Project weights are unchanged.` : `${label(key)} unpinned; the sampler will choose it. Project weights are unchanged.`);
     if ($('sampler-proposal').textContent) $('sampler-preview-status').textContent = 'Pins changed; sample again to update the previous preview.';
   }
   refreshPins() {
@@ -78,7 +79,7 @@ export class SamplerWorkbench {
     for (const button of this.root.querySelectorAll('.sw-pin')) {
       const pinned = this.pins[button.dataset.pinKey] === button.dataset.pinValue;
       button.setAttribute('aria-pressed', String(pinned));
-      button.title = `${pinned ? 'Unpin' : 'Pin'} ${label(button.dataset.pinValue)} for ${label(button.dataset.pinKey)} · proposal previews only`;
+      button.title = `${pinned ? 'Unpin' : 'Pin'} ${label(button.dataset.pinValue)} for ${label(button.dataset.pinKey)} · previews and generation`;
     }
   }
   renderNav() {
@@ -102,6 +103,7 @@ export class SamplerWorkbench {
     const dirty = this.dirty(); $('sampler-dirty').textContent = dirty ? 'Unsaved project draft' : `Saved · revision ${this.record.settings_revision}`;
     $('sampler-save').disabled = !dirty || this.saving; $('sampler-reset').disabled = !dirty || this.saving;
     $('sampler-preview').disabled = dirty || this.saving;
+    $('sampler-generate').disabled = dirty || this.saving || this.starting;
     $('sampler-preview-status').textContent = dirty ? 'Save project changes to preview this matrix.' : 'Uses the saved project configuration at request time.';
   }
   mutate() { this.update(); this.renderNav(); const raw = this.root.querySelector('textarea[aria-label="Group JSON"]'); if (raw && !raw.dataset.edited) { const g = this.group(); raw.value = pretty(g.raw || ['event_tags', 'sampler'].includes(g.id) ? this.config.matrix[g.id] : g.items); } ++this.generation; if ($('sampler-proposal').textContent) $('sampler-preview-status').textContent = 'Previous preview retained below; configuration has changed.'; }
@@ -237,6 +239,20 @@ export class SamplerWorkbench {
       this.renderPins(); this.renderNav(); if (!newer) this.renderDetail(); this.report(newer ? 'Submitted changes saved. Newer edits remain in your draft.' : 'Project configuration saved. Existing runs are unchanged.'); ++this.generation;
     } catch (e) { this.report('Save rejected; your draft is retained. ' + e.message + ' If another editor changed settings, copy your group JSON before discarding and reloading.', true); }
     finally { this.saving = false; this.update(); }
+  }
+  async generate() {
+    if (this.dirty()) return this.report('Save project changes before generating.', true);
+    const seed = Number($('sampler-seed').value), count = Number($('sampler-attempts').value);
+    if ($('sampler-seed').value === '' || !Number.isSafeInteger(seed) || !Number.isInteger(count) || count < 1 || count > 1000 || !Number.isSafeInteger(seed + count - 1)) return this.report('Supply a safe integer seed and 1–1000 attempts.', true);
+    this.starting = true; this.update();
+    try {
+      const instructions = JSON.parse($('sampler-instructions').value);
+      const requests = Array.from({length:count}, (_, i) => ({seed:seed+i, overrides:{...this.pins}}));
+      const run = await this.api('/generation/runs', 'POST', {requests, instructions});
+      $('sampler-run-status').textContent = `Started ${count} attempts · job ${run.job_id}. Inputs and pins are frozen for this run.`;
+      document.dispatchEvent(new CustomEvent('graph-job-started', {detail:run.job_id}));
+    } catch (e) { this.report('Generation rejected: ' + e.message, true); }
+    finally { this.starting = false; this.update(); }
   }
   async preview() {
     if (this.dirty()) return this.report('Save project changes before previewing.', true);

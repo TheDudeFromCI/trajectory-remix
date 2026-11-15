@@ -126,6 +126,7 @@ export class StudioUI {
     options('event-window', Object.keys(this.draft.windows).map(id => [id, id]), $('event-window').value || this.draft.events[this.event]?.window);
     $('metadata-json').value = json(this.draft.metadata || {});
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
+    $('review-stale').textContent = this.record.review_status?.stale ? 'Review stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : '';
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split: export assigns automatically and warns.';
     $('source-json').value = json(this.draft);
     this.renderDiagnostics();
@@ -334,6 +335,13 @@ export class StudioUI {
     $('job-status-bar').replaceChildren(...jobs.map(job => button(`${job.kind} · ${job.state} · ${job.progress}/${job.total}`, () => this.inspectJob(job.id))));
     for (const job of jobs) {
       this.jobs.set(job.id, job);
+      if (this.reviewJob === job.id) {
+        const fullJob = await api(`/jobs/${job.id}`);
+        const skipped = (fullJob.result_states || []).find(r => r.state === 'skipped')?.count || 0;
+        $('review-progress').textContent = `${job.state} · ${job.progress}/${job.total} complete · ${skipped} skipped`;
+        if (['completed', 'cancelled'].includes(job.state)) { $('review-dialog').close(); this.reviewJob = null; message($('review-progress').textContent); }
+        else if (job.state === 'paused') message('Review paused. Open its job in the bottom status bar to Resume.');
+      }
       if (this.ownedBulk.has(job.id) && job.kind === 'bulk' && ['completed', 'cancelled'].includes(job.state) && !this.recorded.has(job.id)) {
         const deltas = []; for (let offset = 0;; offset += 1000) { const part = await api(`/jobs/${job.id}/history?limit=1000&offset=${offset}`); deltas.push(...part); if (part.length < 1000) break; }
         this.recorded.add(job.id); this.history(deltas); await this.listing();
@@ -354,7 +362,7 @@ export class StudioUI {
   }
   async refreshJob(id) {
     const view = this.dialogs.get(id), j = await api(`/jobs/${id}`);
-    view.state.textContent = `${j.kind} · ${j.state}\n${j.progress} / ${j.total}\nPaused endpoints: ${(j.paused_endpoints || []).join(', ') || 'none'}`;
+    view.state.textContent = `${j.kind} · ${j.state}\n${j.progress} / ${j.total}\nPaused endpoints: ${(j.paused_endpoints || []).join(', ') || 'none'}\n` + (j.attempt_states || []).map(r => `${r.state} ${r.outcome || ''}: ${r.count}`).join(' · ');
     const controls = view.controls.querySelectorAll('button');
     controls[0].disabled = j.state !== 'running'; controls[1].disabled = j.state !== 'paused'; controls[2].disabled = !['running', 'paused'].includes(j.state);
     const log = await api(`/jobs/${id}/logs?after=${view.cursor}&limit=100`);
@@ -378,6 +386,7 @@ export class StudioUI {
     }
   }
   async init() {
+    document.addEventListener('graph-job-started', e => this.inspectJob(e.detail));
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('preview-debounce').value = this.prefs.debounce;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
@@ -418,6 +427,15 @@ export class StudioUI {
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
+    on('review-button', 'click', () => { $('review-start').disabled = false; $('review-progress').textContent = ''; $('review-dialog').showModal(); });
+    on('review-start', 'click', async () => {
+      const selected = $('review-scope').value === 'selected';
+      if (selected && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
+      const r = await api('/reviews', 'POST', {mode:$('review-mode').value, repair:$('review-repair').checked,
+        ...(selected ? {trajectory:this.id, expected_revision:this.record.revision} : {query:this.query()})});
+      this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id); $('review-start').disabled = true;
+      $('review-progress').textContent = 'Review running · ' + r.job_id;
+    });
     on('metrics-button', 'click', async () => {
       const population = await api('/metrics/population', 'POST', {query: this.query()});
       const selected = this.id ? await api(`/metrics/trajectories/${this.id}`) : null;
