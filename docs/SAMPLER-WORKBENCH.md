@@ -1,115 +1,80 @@
-# Sampler Matrix workbench (UI B)
+# Sampler Matrix workbench
 
-Workbench B is the selected **Sampler Matrix** UI in Graph Studio. It uses the
-shared sampler and linked metric registry. Alternative UI A/C branches remain
-separate and are not integrated.
-The event-generation integration now connects these pins to frozen run requests;
-see the event Flow guide below.
-
-## Quick tuning workflow
-
-1. Open **Sampler Matrix**. Search names, descriptions or serialized constraints;
-   filter navigation to Dimensions, Behaviors, Decisions, Rules or Metrics.
-2. Select a group. Filter its choices, compare aligned numeric weights and base
-   shares, and edit with the keyboard. Select multiple choices and **Set selected**
-   for repeated changes. This action affects only checked entries in that group;
-   checks remain selected even when a choice filter hides them.
-   The **Pin** column, between the description and base weight, has a small pin
-   button for each supported choice. Muted means unpinned; a highlighted, filled
-   pin means selected. Click again to unpin; picking a sibling moves the pin.
-   Pins stay synchronized with the preview dropdowns and survive group/filter
-   navigation. They apply to previews and generation requests, without editing weights or
-   saving project changes. Fields the shared sampler cannot pin show a dash.
-   Each button supports keyboard activation and exposes its pressed state.
-3. Click a choice to inspect constraints and referencing conditions. Expand its
-   linked metric to edit label, units, target description and per-metric absolute
-   and relative tolerance bands. Both bands are required together; clearing both
-   leaves tolerance unspecified. Unknown actuals remain unavailable in the existing
-   **Dataset Metrics** panel.
-4. **Add or remove entries** copies a selected entry to a new ID or removes it
-   after confirmation. Copies preserve required/custom fields for inspection;
-   copying a family prefixes child behavior IDs. **Add or remove rules** provides
-   condition/value/target controls for a single-condition multiplier or forced
-   dimension, plus copy/remove. Save validates the entire project; dangling
-   references block save and retain the draft. Pins and references are never
-   silently rewritten. Inspect inherited constraints and referencing rules.
-   Use **Advanced JSON** for arbitrary constraints, multi-condition rules and custom fields.
-   **Apply JSON to project draft** affects only the current group. It does not save.
-   Unapplied JSON text is a local buffer; apply it before leaving the group.
-5. **Save project changes** persists the full matrix and metric customizations via
-   a settings revision check. A rejected save retains the draft. On a revision
-   conflict, copy the group JSON, reload the latest saved configuration, and
-   reapply the intended changes. Reload and discard prompt before losing changes.
-6. Expand **Proposal preview** after saving. Set a fixed integer seed and optional
-   supported per-request pins. Sample one proposal; inspect its payload/matrix
-   digests and settings revision. Pins never change weights. Preview uses the
-   saved configuration at request time and creates an immutable proposal snapshot.
-   It does not start generation. Existing runs retain their frozen inputs.
-
-## Interpretation and tradeoffs
-
-- Base share is only `weight / group total`. Conditional multipliers, eligibility,
-  forced propagation and joint balancing are evaluated by the original sampler.
-  Base shares are neither measured output frequencies nor exact joint probabilities.
-  Event tags instead show their unnormalized base probabilities and explain caps.
-- The navigation and compact choice table support scanning and repeated edits;
-  detailed constraints remain below the table. This avoids placing arbitrary nested
-  rules in every row, at the cost of an extra inspection click or vertical scroll.
-- Repeated edits are intentionally scoped to selected choices within one group.
-  There is no cross-group bulk rewrite or spreadsheet paste mode.
-- Advanced nested constraints use JSON with shared backend validation rather than
-  a second visual rule language. Unknown fields round-trip through the full cloned
-  matrix. Editing JSON is an explicit replacement of that group, so omitted fields
-  in a user-edited replacement are removed deliberately.
-- Preview requires saving first because the shared proposal endpoint samples the
-  saved project, not an unsaved browser matrix. The browser does not reinterpret
-  sampler behavior. Concurrent external changes can affect which saved revision
-  the preview uses; its returned revision and digest identify the actual input.
-- Weight keystrokes update only the draft, share cells and navigation summaries.
-  The detail pane does not rebuild, retaining focus and selection. Group/table
-  scroll and checked choices survive saved updates. Project drafts remain local
-  to this browser tab; there is no automatic conflict merge or global project Undo.
-- Narrow screens stack navigation above details. The dense numeric table scrolls
-  horizontally inside its own container. Desktop is the primary tuning surface.
-
-## Screenshots
-
-Real Chromium against a temporary local project; no model calls.
+The **Sampler Matrix** is where you tune *what kinds of trajectories get generated*: how likely each
+domain, lifecycle stage, user trait or behavior is, and which combinations are allowed. This page is the
+workflow guide. The sampler itself and the linked metrics are described in
+[Sampler and metrics](GRAPH-SAMPLER-METRICS.md), and generation in
+[Event generation](GRAPH-GENERATION.md).
 
 ![Choice comparison and constraint inspector](images/sampler-workbench/desktop.png)
 
+## Tune the matrix
+
+1. **Open Sampler Matrix.** Search names, descriptions or serialized constraints, and filter navigation to
+   Dimensions, Behaviors, Decisions, Rules or Metrics.
+2. **Pick a group** and compare its choices: numeric weights and base shares line up in a table you can edit
+   with the keyboard. To change several at once, tick the choices and use **Set selected**. It affects only
+   checked entries in that group, even ones a filter is hiding.
+3. **Pin a choice.** The **Pin** column has a small button per supported choice. Muted is unpinned, and a
+   filled, highlighted pin is selected. Click again to unpin, and picking a sibling moves the pin. Pins stay
+   in sync with the preview dropdowns and survive navigation. They apply to previews and generation requests
+   **without changing weights or saving anything**. A dash means the sampler can't pin that field.
+4. **Inspect a choice.** Click it to see its constraints and the rules that reference it. Expand its linked
+   metric to edit the label, units, target description and absolute and relative **tolerance bands**. Both
+   bands go together, and clearing both leaves tolerance unspecified.
+5. **Add or remove entries and rules.** *Add or remove entries* copies a choice to a new ID or removes it
+   after confirmation. Copying a family prefixes its child behavior IDs. *Add or remove rules* offers simple
+   condition, value and target controls for a single-condition multiplier or forced dimension.
+6. **Use Advanced JSON** for anything else, such as multi-condition rules or custom fields. **Apply JSON to
+   project draft** replaces only the current group and doesn't save. Apply it before leaving the group.
+7. **Save project changes.** The whole matrix and metric customizations are saved with a settings revision
+   check. Dangling references block saving and keep your draft, and pins and references are never silently
+   rewritten. After a revision conflict, copy the group JSON, reload the latest settings and reapply.
+
+## Preview a proposal
+
+Expand **Proposal preview** **after saving**, because the preview samples the *saved* matrix, not the browser
+draft. Set a fixed integer seed and optional pins, then sample one proposal. You'll see its payload and matrix
+digests and the settings revision it used. The preview creates an immutable proposal snapshot and doesn't start
+generation, and existing runs keep their frozen inputs.
+
+When you're happy, generate from here ([Event generation](GRAPH-GENERATION.md#run-a-generation)).
+
 ![Shared rule inspection and advanced editing](images/sampler-workbench/rules.png)
 
-## Small correctness and browser checks
+## Reading the numbers
 
-```sh
+- **Base share** is just `weight ÷ group total`. Conditional multipliers, eligibility, forced values and joint
+  balancing are applied by the original sampler, so base shares are **not** measured output frequencies or
+  exact joint probabilities. Event tags show their unnormalized base probabilities and explain caps.
+- Weight edits only update the draft, the share cells and navigation summaries. The detail pane doesn't rebuild,
+  so your focus and selection stay put. Drafts live in this browser tab, with no automatic conflict merge or
+  global project Undo.
+- Unknown actual metrics stay unavailable in **Dataset Metrics**, and are never shown as zero.
+
+## What it doesn't do
+
+The workbench keeps things simple on purpose:
+
+- Repeated edits are scoped to checked choices in one group. There is no cross-group bulk rewrite or
+  spreadsheet paste.
+- Nested constraints use JSON with shared backend validation rather than a second visual rule language. Editing
+  JSON replaces the group, so omitted fields are removed deliberately.
+- New top-level dimension groups, decision axes and arbitrary nested eligibility rules are advanced JSON work.
+  There is no automatic reference repair.
+- Narrow screens stack navigation above details and scroll the dense table sideways. Desktop is the primary
+  surface.
+
+## Checks
+
+```bash
 python -m pytest -q tests/test_graph_sampling.py
 python tests/run_graph_frontend.py
 python tests/run_sampler_frontend.py
 ```
 
-The sampler browser check needs optional `playwright` resolvable by Node and a
-Chromium executable (`CHROMIUM_PATH`, default `/usr/bin/chromium`). The existing
-Graph Studio DOM suite needs the optional dependencies in `tests/package.json`.
-
-The real-browser check uses one temporary SQLite project and a handful of seeded
-proposals. It checks navigation/search/filtering, keyboard focus, repeated edits,
-inline pin toggles/exclusivity/keyboard/navigation, dropdown synchronization and
-actual preview overrides, custom-field and metric-tolerance persistence, invalid constraints and numeric
-edits, revision conflicts, fixed seed/pins, run snapshot isolation, page reload and
-narrow layout. Screenshots are refreshed by that check. The existing sampler suite
-covers exact originals, deterministic overrides and frozen target behavior.
-No benchmarks, training, live LLM calls or compiler/tokenizer operations run in
-the new browser check.
-
-## Remaining advanced scope
-
-Adding/removing choices, behaviors, families, event tags and simple rules has
-friendly controls. Creating new top-level dimension groups or decision axes,
-editing arbitrary nested eligibility rules, and cross-group spreadsheet paste
-remain advanced JSON/manual work. There is no visual arbitrary-rule language
-or automatic reference repair. Empty rule groups can add a first simple rule.
-Workbench B remains the selected UI and reuses the existing metrics panel.
-
-Generation and manual Review & Repair now use the shared [event Flow](GRAPH-GENERATION.md).
-See [local-LLM validation](GRAPH-LOCAL-LLM.md) for user-machine quality checks.
+The browser check needs the optional Node `playwright` package and a Chromium (`CHROMIUM_PATH`, default
+`/usr/bin/chromium`). It uses a temporary project and a handful of seeded proposals, covering navigation,
+keyboard focus, repeated edits, pins, previews, persistence, revision conflicts, frozen run snapshots and the
+narrow layout, and refreshes the screenshots above. It runs no benchmarks, training, live model calls or
+tokenizer work.

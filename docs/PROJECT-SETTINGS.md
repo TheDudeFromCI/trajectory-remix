@@ -1,50 +1,78 @@
-# Project and generation settings
+# Project settings
 
-**Project Settings** contains forms for endpoints, their roles, tokenizer
-profiles, tools and project defaults. **Generation Settings** contains automatic
-review/repair toggles and editable Core/Critical criteria. Settings are a shared
-local draft until the dialog's Save action succeeds. Closing or editing a field
-never starts a model request. Existing jobs retain their frozen configuration.
+**Project Settings** holds the things shared by everyone using a project: model
+endpoints and roles, tokenizer profiles, tools and defaults. **Generation Settings**
+holds review and repair options and the review checklists.
 
-## Configure a local model
+Both are a shared local draft until you press **Save**. Closing a dialog or editing a
+field never starts a model request, and running jobs keep the configuration they
+started with.
 
-1. Start your own OpenAI-compatible server.
+## Configure a model endpoint
+
+You bring your own OpenAI-compatible server. Remix doesn't launch, probe or download
+models.
+
+1. Start your server.
 2. In Project Settings, enter a unique endpoint ID and click **Add endpoint**.
-3. Set its base URL (for example `http://127.0.0.1:8000/v1`), exact model
-   identifier, concurrent-request limit and transport retry count.
-4. Assign Generator, Fast Review and Critical Review using the role dropdowns.
-   One endpoint may serve all roles. Leave a review role unconfigured to omit it.
-5. Save settings. In Generation Settings, choose automatic review/repair options
-   and inspect the project checklists, then save those changes.
+3. Fill in the **base URL** (for example `http://127.0.0.1:8000/v1`; Remix adds
+   `/chat/completions`), the exact **model** name, a **concurrent-request limit** and a
+   **retry count** for transport errors.
+4. Assign the **Generator**, **Fast Review** and **Critical Review** roles from the
+   dropdowns. One endpoint can fill all three. Leave a review role empty to skip that
+   review.
+5. **Save**, then open Generation Settings to choose review and repair options.
 
-If authentication is required, configure the server process environment before
-starting Remix. The endpoint card names its variable, such as
-`REMIX_API_KEY_LOCAL_MODEL` for endpoint `local-model`. Credentials are never
-stored in project JSON, generated sources or logs. The forms do not probe the
-endpoint or silently launch or download a model.
+Removing an endpoint also clears the roles that pointed at it. Saving that affects only
+future work.
 
-Removing an endpoint from the draft also clears roles referring to it. Saving
-that change affects future operations; frozen existing jobs keep their endpoint
-configuration. Use their job dialog to pause, cancel or resume them.
+### Credentials
+
+If your server needs a key, set it in the environment **before starting Remix**. The
+variable is `REMIX_API_KEY_<ENDPOINT>`, with the endpoint ID uppercased and hyphens
+turned into underscores. For example, endpoint `local-model` reads
+`REMIX_API_KEY_LOCAL_MODEL`. The endpoint card shows its variable name. Credentials
+never go into project settings, sources, instructions or logs.
 
 ## Tokenizer profiles
 
-Expand **Tokenizer profiles**, enter an ID and choose the tokenizer's JSON file.
-Map all twelve logical controls to existing dedicated special tokens. Recognized
-control spellings are preselected; other spellings can be selected explicitly.
-Profiles with missing or duplicate mappings are rejected on Save. Files with
-fewer than twelve dedicated special tokens are rejected on import. Remix never
-extends the imported vocabulary. Choose preview and export profiles independently
-in their corresponding controls; ordinary graph authoring needs no tokenizer.
+You only need a profile for **Tick history** preview and for compiled export. Graph
+authoring, generation, review and metrics never touch a tokenizer.
 
-## Defaults and review criteria
+1. Expand **Tokenizer profiles**, enter an ID and choose the tokenizer's JSON file.
+2. Map all twelve logical controls to dedicated special tokens that already exist in
+   the file. Recognized spellings are preselected, and you can pick others.
+3. Save. Profiles with missing or duplicate mappings are rejected, as are files with
+   fewer than twelve dedicated special tokens. Remix never extends the vocabulary.
 
-Project defaults include train/development/test fractions (which must total 1),
-reasoning effort levels and the retained log size in MiB. Blank log size means
-unlimited. Client-only preferences remain in Preferences.
+The twelve controls are `bos`, `eos`, `noop`, `ctx_begin`, `ctx_end`, `tool_begin`,
+`tool_end`, `response_begin`, `response_end`, `msg_begin`, `msg_end` and `window_ref`.
 
-Generation Settings exposes each criterion as text with an optional
-not-applicable allowance. You can add/remove criteria in Core and Critical.
-Checklist changes mark affected signoffs stale, preserving stage and requiring
-manual re-review. Advanced project JSON remains available for unusual settings;
-form edits preserve unrelated fields and do not replace tool or sampler drafts.
+Pick the preview profile in your browser **Preferences** and the export profile in the
+Export dialog. They are chosen independently.
+
+## Tools
+
+The tool list is a catalogue of **input schemas** (JSON Schema). Tools have no code and
+no output schema: authors and models write the results. The settings form can create an
+object schema and add or remove fields and required flags. Advanced JSON keeps nested or
+custom schemas. Removing a tool keeps the existing calls that use it. See
+[Synthetic tools and chat](TOOLS.md).
+
+## Defaults
+
+| Setting | Notes |
+| --- | --- |
+| Train / development / test fractions | Must total 1. Used when export assigns splits. |
+| Reasoning effort levels | Defaults to Low, Medium and High. |
+| Log cache size (MiB) | Project-wide retained log cap. Default 1024, blank means unlimited. |
+
+## Review criteria
+
+In **Generation Settings**, each criterion is a line of text with an optional
+**not-applicable** allowance. Add or remove criteria in the **Core** and **Critical**
+lists. Fast review checks Core, and Critical review checks Core plus Critical.
+
+Changing a checklist marks affected sign-offs **stale**. Their stages are kept, and you
+re-review manually. Form edits preserve unrelated fields, and the advanced project
+JSON remains for unusual settings.

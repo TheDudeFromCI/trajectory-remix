@@ -1,25 +1,38 @@
 # Project storage
 
-An initialized graph project is a SQLite database using WAL. It contains current
-trajectory heads, immutable source/settings revisions, tool-usage indexes, job
-ownership, FIFO requests, frozen run inputs and committed checkpoints. Source
-edits use revision compare-and-swap; an unrelated source edit does not invalidate
-a save. Attached generation and manual review hold exclusive source ownership.
+This page explains what a Remix project file contains, what it doesn't, and how to back it up safely. You never need to open
+the database yourself: use the studio, [REST or MCP](MCP.md), which enforce the rules below.
 
-Use the [shared REST/MCP services](MCP.md) rather than writing tables directly.
-A database copied for backup should be taken with SQLite's backup API or after
-the server has closed; copying only a live main file can omit WAL changes.
+## What's in a project
 
-Browser Preferences and bounded Undo/Redo history are local to that browser.
-Project settings and source revisions remain server-side. Clearing the log cache
-never removes source, checkpoints, signoffs or ownership. Runtime credentials are
-not stored in project records. See [jobs](GRAPH-JOBS.md) and
-[project settings](PROJECT-SETTINGS.md).
+A project is one SQLite database in WAL mode (format `kidra-graph-project/1`). It holds:
 
-Source JSONL exports are portable authored graphs; compiled `.ktremix` shards are
-training artifacts. Downloads and ZIPs are temporary `/tmp` files with 24-hour
-expiry and can also disappear through OS cleanup. Exporting does not rewrite the
-source's split or metadata. See [export](EXPORT.md) and [KTREMIX](KTREMIX.md).
+- the current head of every trajectory, plus **immutable revisions** of each source and of the project settings,
+- an index of which trajectories use which tool,
+- job state: ownership, FIFO request queues, frozen run inputs and committed checkpoints.
 
-Old replay/sandbox databases have no compatibility reader or migration path.
-Retain an old project separately if historical data is needed.
+Edits use compare-and-swap on a per-trajectory revision, so an edit to one trajectory never invalidates a save to another.
+A pipeline that owns a trajectory (generation, or a manual review) holds it exclusively, and other edits wait for it.
+
+## What isn't in it
+
+- **Credentials.** API keys come from the server's environment and are never stored in project records, sources or logs.
+- **Browser state.** Preferences and the bounded Undo and Redo history stay in your browser. Settings and source revisions
+  stay on the server.
+- **Exports.** Downloads and ZIPs are temporary files under `/tmp`, kept for 24 hours and possibly removed sooner by the
+  operating system. Exporting doesn't change a source's split or metadata.
+- **Old formats.** Replay and sandbox databases have no reader or migration. Keep any old project separately.
+
+Clearing the log cache never removes sources, checkpoints, sign-offs or ownership.
+
+## Backups
+
+Copying only the main `.sqlite` file of a **running** project can miss changes that are still in the WAL file. Take backups
+using SQLite's backup API, or copy after the server has closed.
+
+## Related
+
+- [Jobs](GRAPH-JOBS.md): ownership, checkpoints and recovery.
+- [Project settings](PROJECT-SETTINGS.md): what's stored as settings.
+- [Export](EXPORT.md) and [KTREMIX](KTREMIX.md): the portable outputs. Source JSONL is a portable authored graph, and
+  `.ktremix` shards are training artifacts.
