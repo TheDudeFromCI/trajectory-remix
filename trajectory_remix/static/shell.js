@@ -44,10 +44,33 @@ for (const list of document.querySelectorAll('.tab-list[role=tablist]')) {
   }
 }
 
-// Panel toggles in the editor bar.
-for (const [id, cls] of [['toggle-dataset-panel', 'dataset-panel-hidden'], ['toggle-editor-panel', 'editor-panel-hidden']]) {
-  document.getElementById(id)?.addEventListener('click', () => document.getElementById('workspace').classList.toggle(cls));
+// View menu: show or hide editor panels; the layout is remembered in this browser.
+const PANELS = {dataset: 'dataset panel', timeline: 'timeline panel', editor: 'event panel'};
+const workspace = document.getElementById('workspace');
+let hidden = {};
+try { hidden = JSON.parse(localStorage.getItem('studio-layout') || '{}'); } catch { hidden = {}; }
+function applyLayout() {
+  for (const [panel, name] of Object.entries(PANELS)) {
+    workspace?.classList.toggle(`${panel}-panel-hidden`, !!hidden[panel]);
+    const item = document.querySelector(`[data-panel="${panel}"] span`);
+    if (item) item.textContent = `${hidden[panel] ? 'Show' : 'Hide'} ${name}`;
+  }
+  try { localStorage.setItem('studio-layout', JSON.stringify(hidden)); } catch { /* storage unavailable */ }
 }
+for (const button of document.querySelectorAll('[data-panel]')) {
+  button.addEventListener('click', () => { hidden[button.dataset.panel] = !hidden[button.dataset.panel]; applyLayout(); });
+}
+document.getElementById('show-all-panels')?.addEventListener('click', () => { hidden = {}; applyLayout(); });
+applyLayout();
+
+// Expanded window: step controls drive the main timeline; Escape shrinks it.
+for (const step of document.querySelectorAll('#window-popout [data-step]')) {
+  step.addEventListener('click', () => document.getElementById(step.dataset.step)?.click());
+}
+document.addEventListener('keydown', event => {
+  const popout = document.getElementById('window-popout');
+  if (event.key === 'Escape' && popout && !popout.hidden && !document.querySelector('dialog[open], details.menu[open]')) popout.querySelector('.window-shrink')?.click();
+});
 
 // Tooltips: [data-tip] shows one floating bubble after a short delay, on hover or focus.
 const bubble = document.getElementById('tooltip');

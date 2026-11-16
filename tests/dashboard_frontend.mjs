@@ -26,7 +26,12 @@ try {
  assert.equal(await page.evaluate(()=>JSON.parse(document.getElementById('settings-json').value).endpoints.fixture.model),'fake-browser');
  await page.locator('#settings-dialog').evaluate(n=>n.scrollTop=0);await screenshot('settings');await page.locator('#settings-save').click();await page.waitForFunction(()=>!document.getElementById('settings-dialog').open);
  const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.generator,'fixture');assert.ok(saved.settings.tools.notes);
- await page.locator('#generation-settings-button').click();await page.locator('#generation-attempts').fill('1');
+ await page.locator('#generation-settings-button').click();
+ // The Generate dialog shows the adaptive Flow when the backend serves one, or says it uses the built-in recipe.
+ const flowServed=await page.evaluate(async()=>(await fetch('/api/v1/generation/flow',{headers:{'X-Remix-Token':document.querySelector('meta[name=remix-token]').content}})).ok);
+ if(flowServed){await page.locator('.flow-summary').waitFor();assert.equal(await page.locator('#generation-flow-custom').isChecked(),false);}
+ else{await page.locator('.flow-section p').waitFor();assert.match(await page.locator('.flow-section').textContent(),/built-in recipe/);}
+ await page.locator('#generation-attempts').fill('1');
  await page.locator('#generation-start').click();await page.waitForFunction(()=>graphStudio.dialogs.size===1);
  const jobs=await api('/job-summaries'),job=jobs[0].id;
  await page.waitForFunction(()=>!document.getElementById('jobs-view').hidden);
@@ -45,6 +50,11 @@ try {
  assert.equal((await api('/jobs/'+job)).state,'completed');
  assert.equal(await page.evaluate(()=>graphStudio.isDirty()),false);
  await page.locator('#scrubber').evaluate(n=>{n.value='2';n.dispatchEvent(new Event('input'));});await screenshot('desktop');
+ // View menu hides and restores editor panels.
+ await page.locator('#view-menu summary').click();await page.locator('#toggle-timeline-panel').click();
+ assert.equal(await page.locator('.timeline-widget').isVisible(),false);
+ await page.locator('#view-menu summary').click();assert.equal(await page.locator('#toggle-timeline-panel').textContent(),'Show timeline panel');
+ await page.locator('#show-all-panels').click();assert.equal(await page.locator('.timeline-widget').isVisible(),true);
  // Clean changes refresh, while genuinely typed (not yet applied) editor text survives.
  const id=attempt.trajectory_id;
  // Follow appended server events when already at the live edge; preserve an

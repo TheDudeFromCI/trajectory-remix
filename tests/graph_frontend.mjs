@@ -80,6 +80,16 @@ ui.prefs.profile='bytes'; ui.prefs.debounce=0; $('view-mode').value='ticks'; $('
 await until(()=>ui.frames?.length); $('last-tick').click(); assert.equal(ui.position,ui.frames.length-1);
 assert.ok($('window-grid').textContent.includes('EOS'));
 assert.equal($('window-grid').textContent.includes('@available'),false);
+// NOOP runs fold into one chip; the readable view, Raw toggle and pop-out show the same window.
+for (const chip of $('window-grid').querySelectorAll('.noop')) assert.equal(chip.nextElementSibling?.classList.contains('noop') ?? false,false);
+const firstWindow=[...ui.windowModels.keys()][0];
+ui.openPopout(firstWindow); assert.equal($('window-popout').hidden,false);
+assert.equal($('window-popout-body').querySelector('h2').textContent,firstWindow);
+$('window-popout-body').querySelector('.window-shrink').click(); assert.equal($('window-popout').hidden,true);
+$('window-grid').querySelector('.window-raw').click();
+assert.equal($('window-grid').querySelector('.window-raw').getAttribute('aria-pressed'),'true');
+assert.ok($('window-grid').querySelector('.window-tokens'));
+$('window-grid').querySelector('.window-raw').click();
 const tickNode=$('timeline').querySelector('button'); assert.ok(tickNode.title.includes('Depends on:'));
 $('first-tick').click(); assert.equal(ui.position,0);
 assert.equal($('export-profile').value,'');

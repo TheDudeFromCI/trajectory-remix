@@ -23,6 +23,9 @@
 <symbol id="i-prev" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
 <symbol id="i-next" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
 <symbol id="i-last" viewBox="0 0 16 16"><path d="M12 3.5v9M4 3.5 9 8l-5 4.5"/></symbol>
+<symbol id="i-expand" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></symbol>
+<symbol id="i-shrink" viewBox="0 0 16 16"><path d="M13.5 6.5h-4v-4M9.5 6.5l4-4M2.5 9.5h4v4M6.5 9.5l-4 4"/></symbol>
+<symbol id="i-timeline" viewBox="0 0 16 16"><path d="M2.5 4.5h7M2.5 8h11M2.5 11.5h5"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 3v3.5H9.5"/><path d="M12.6 6.5A5 5 0 1 0 13 9"/></symbol>
 </svg>
 
@@ -44,6 +47,14 @@
       <button id="export-button">Export dataset…</button>
       <hr>
       <button id="preferences-button">Preferences…</button>
+    </div></details>
+    <details class="menu app-menu" id="view-menu"><summary>View</summary><div class="menu-list end">
+      <span class="menu-label">Editor panels</span>
+      <button id="toggle-dataset-panel" data-panel="dataset"><svg class="ico"><use href="#i-panel-left"/></svg><span>Hide dataset panel</span></button>
+      <button id="toggle-timeline-panel" data-panel="timeline"><svg class="ico"><use href="#i-timeline"/></svg><span>Hide timeline panel</span></button>
+      <button id="toggle-editor-panel" data-panel="editor"><svg class="ico"><use href="#i-panel-right"/></svg><span>Hide event panel</span></button>
+      <hr>
+      <button id="show-all-panels">Show all panels</button>
     </div></details>
     <button id="settings-button" class="ghost">Settings</button>
     <button id="review-button">Review &amp; Repair</button>
@@ -93,16 +104,13 @@
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
           <button id="reload-source">Reload saved source</button>
           <hr>
-          <button id="toggle-dataset-panel"><svg class="ico"><use href="#i-panel-left"/></svg>Show / hide dataset</button>
-          <button id="toggle-editor-panel"><svg class="ico"><use href="#i-panel-right"/></svg>Show / hide event editor</button>
-          <hr>
           <button id="delete-sample" class="danger">Delete trajectory</button>
         </div></details>
       </div>
       <div class="bar-row meta-row">
         <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
         <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
-        <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
+        <small id="split-warning" class="tag tone-warning"></small><small id="flow-outcome" class="tag tone-mint" tabindex="0"></small><small id="review-stale" class="tag tone-warning"></small>
         <span id="lock-slot" class="row"></span>
       </div>
     </section>
@@ -132,6 +140,18 @@
       </div>
     </section>
   </div>
+
+  <section class="window-popout widget" id="window-popout" aria-label="Expanded window" hidden>
+    <div class="popout-bar">
+      <span class="small muted">Timeline</span>
+      <button class="ghost icon sm" data-step="first-tick" aria-label="First position"><svg class="ico"><use href="#i-first"/></svg></button>
+      <button class="ghost icon sm" data-step="prev-tick" aria-label="Previous position"><svg class="ico"><use href="#i-prev"/></svg></button>
+      <span id="popout-position" class="num small"></span>
+      <button class="ghost icon sm" data-step="next-tick" aria-label="Next position"><svg class="ico"><use href="#i-next"/></svg></button>
+      <button class="ghost icon sm" data-step="last-tick" aria-label="Last position"><svg class="ico"><use href="#i-last"/></svg></button>
+    </div>
+    <div id="window-popout-body" class="popout-body"></div>
+  </section>
 
   <aside class="widget event-panel editor-panel" id="event-editor-panel" aria-label="Event editor">
     <div class="widget-head">

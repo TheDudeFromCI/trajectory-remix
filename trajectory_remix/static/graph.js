@@ -1,6 +1,8 @@
 import {renderProjectSettings, renderGenerationSettings} from './project-settings.js';
 import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
+import {windowBody} from './window-render.js';
+import {renderFlowPanel} from './flow-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
@@ -245,6 +247,9 @@ export class StudioUI {
     const stale = this.record.review_status?.stale;
     $('review-stale').textContent = stale ? 'Review stale' : '';
     setAttr($('review-stale'), 'data-tip', stale ? 'Review is stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : null);
+    const outcome = this.draft.metadata?.flow_outcome, reason = outcome && typeof outcome === 'object' ? String(outcome.reason || '') : '';
+    $('flow-outcome').textContent = outcome ? (outcome.finished === false ? 'Flow stopped' : 'Flow finished') : '';
+    setAttr($('flow-outcome'), 'data-tip', outcome ? `The generation controller's own finish explanation, not measured coverage${reason ? ': ' + (reason.length > 360 ? reason.slice(0, 360) + '…' : reason) : '.'}` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
@@ -434,30 +439,63 @@ export class StudioUI {
       for (const f of frames.slice(0, this.position + 1)) for (const emission of [...f.inputs, ...f.outputs]) {
         if (emission.window === '@available') continue;
         const w = ensure(emission.window); if (emission.replace) w.tokens = w.tokens.filter(t => t.header);
-        for (const t of emission.tokens) { w.tokens.push(t); if (t.control === 'eos') w.closed = true; }
+        for (const t of emission.tokens) { w.tokens.push({...t, event: emission.event}); if (t.control === 'eos') w.closed = true; }
       }
     } else for (const id of order.filter(id => visible.has(id))) {
-      const e = this.draft.events[id], w = ensure(e.window);
+      const e = this.draft.events[id], w = ensure(e.window), add = token => w.tokens.push({...token, event: id});
       if (e.replace_body) w.tokens = [];
       if (!w.tokens.length) w.tokens.push({control: 'ctx_begin'}, {text: this.draft.windows[e.window]?.purpose || e.window}, {control: 'ctx_end'});
       const tool = e.kind === 'tool_call', response = e.kind === 'tool_response', chat = e.kind === 'chat_message';
-      if (tool && e.insert_tool_begin || response && e.insert_response_begin || chat) w.tokens.push({control: chat ? 'msg_begin' : tool ? 'tool_begin' : 'response_begin'});
-      if (chat) w.tokens.push({text: e.chat.speaker + ': '});
-      w.tokens.push({text: typeof e.content === 'string' ? e.content : e.content.map(p => p.kind === 'text' ? p.text : `[${p.window}]`).join('')});
-      if (tool && e.insert_tool_end || response && e.insert_response_end || chat) w.tokens.push({control: chat ? 'msg_end' : tool ? 'tool_end' : 'response_end'});
-      if (e.close_window) { w.tokens.push({control: 'eos'}); w.closed = true; }
+      if (tool && e.insert_tool_begin || response && e.insert_response_begin || chat) add({control: chat ? 'msg_begin' : tool ? 'tool_begin' : 'response_begin'});
+      if (chat) add({text: e.chat.speaker + ': '});
+      add({text: typeof e.content === 'string' ? e.content : e.content.map(p => p.kind === 'text' ? p.text : `[${p.window}]`).join('')});
+      if (tool && e.insert_tool_end || response && e.insert_response_end || chat) add({control: chat ? 'msg_end' : tool ? 'tool_end' : 'response_end'});
+      if (e.close_window) { add({control: 'eos'}); w.closed = true; }
     }
-    const cards = [...windows].map(([id, w]) => {
-      const card = node('article', undefined, 'window-card'), head = node('header', undefined, 'window-card-head');
-      card.style.setProperty('--tone', `var(--pastel-${this.windowTone(id)})`);
-      head.append(node('span', undefined, 'dot'), node('h3', id, 'truncate'), node('span', this.draft.windows[id]?.purpose || '', 'small muted truncate'));
-      if (w.closed) head.append(tag('Closed', 'muted'));
-      const body = node('div', undefined, 'window-tokens');
-      for (const t of w.tokens) body.append(t.control ? node('span', t.control.replaceAll('_', ' ').toUpperCase(), 'token-block') : node('span', t.reference ? `[${t.reference[0]}]` : t.text || ''));
-      card.append(head, body); return card;
-    });
+    this.windowModels = windows;
+    const cards = [...windows].map(([id, w]) => this.windowCard(id, w));
     $('window-grid').replaceChildren(...(cards.length ? cards : [node('div', order.length ? 'No window has content at this position. Move the timeline forward.' : 'This trajectory has no events yet.', 'empty')]));
     if (!ticks) $('preview-status').textContent = '';
+    this.renderPopout();
+  }
+  isAgentMessage(eventId, speaker) {
+    const e = this.draft?.events[eventId];
+    if (String(eventId || '').endsWith(':echo') || speaker === 'agent') return true;
+    return !!(e?.call_id && Object.values(this.draft.events).some(o => o.kind === 'tool_call' && o.call_id === e.call_id));
+  }
+  windowCard(id, w, popout = false) {
+    this.rawWindows ||= new Set();
+    const raw = this.rawWindows.has(id), card = node('article', undefined, 'window-card' + (popout ? ' popout-card' : ''));
+    const head = node('header', undefined, 'window-card-head'), purpose = this.draft.windows[id]?.purpose || '';
+    card.style.setProperty('--tone', `var(--pastel-${this.windowTone(id)})`);
+    head.append(node('span', undefined, 'dot'), node(popout ? 'h2' : 'h3', id, 'truncate'), node('span', purpose, 'small muted truncate'));
+    if (w.closed) head.append(tag('Closed', 'muted'));
+    const toggle = button('Raw', () => { if (raw) this.rawWindows.delete(id); else this.rawWindows.add(id); this.renderTimeline(); }, 'ghost sm window-raw');
+    toggle.setAttribute('aria-pressed', String(raw)); toggle.setAttribute('aria-label', `Show raw tokens for window ${id}`);
+    toggle.dataset.tip = raw ? 'Showing the exact token stream. Click for the readable view.' : 'Show the exact token stream instead of the readable view.';
+    const size = popout
+      ? button('', () => this.closePopout(), 'ghost icon sm window-shrink')
+      : button('', () => this.openPopout(id), 'ghost icon sm window-expand');
+    size.append(icon(popout ? 'shrink' : 'expand')); size.setAttribute('aria-label', `${popout ? 'Shrink' : 'Expand'} window ${id}`);
+    size.dataset.tip = popout ? 'Shrink back to the window grid (Esc)' : 'Expand this window into a large panel';
+    head.append(toggle, size);
+    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker)}));
+    return card;
+  }
+  openPopout(id) { this.popoutWindow = id; $('window-popout').hidden = false; this.renderPopout(); $('window-popout').querySelector('.window-shrink')?.focus(); }
+  closePopout() {
+    const id = this.popoutWindow; this.popoutWindow = null; $('window-popout').hidden = true;
+    [...$('window-grid').querySelectorAll('.window-expand')].find(b => b.getAttribute('aria-label') === `Expand window ${id}`)?.focus();
+  }
+  renderPopout() {
+    const panel = $('window-popout'); if (!panel || !this.popoutWindow) return;
+    if (!this.draft) { this.closePopout(); return; }
+    const w = this.windowModels?.get(this.popoutWindow) || {tokens: [], closed: false};
+    const body = $('window-popout-body'), scroll = body.querySelector('.window-formatted, .window-tokens')?.scrollTop;
+    body.replaceChildren(this.windowCard(this.popoutWindow, w, true));
+    const inner = body.querySelector('.window-formatted, .window-tokens'); if (inner && scroll) inner.scrollTop = scroll;
+    setText($('popout-position'), `${this.position} / ${$('scrubber').max}`);
+    if (!w.tokens.length) body.querySelector('.window-card').append(node('div', 'This window has no content at this position.', 'empty'));
   }
   history(deltas) { if (!deltas.length) return; this.undo.push(deltas); if (this.undo.length > 50) this.undo.shift(); this.redo = []; this.historyButtons(); }
   historyButtons() { $('undo-edit').disabled = !this.undo.length; $('redo-edit').disabled = !this.redo.length; }
@@ -535,7 +573,9 @@ export class StudioUI {
     pinBox.append(node('span', 'Pins', 'muted small'));
     if (Object.keys(pins).length) for (const [k, v] of Object.entries(pins)) pinBox.append(tag(`${k}: ${v}`, 'lilac'));
     else pinBox.append(node('span', 'None — the sampler uses saved matrix weights', 'small faint'));
-    box.append(pinBox, node('p', 'Each run freezes its settings, matrix and pins when it starts.', 'note'));
+    const flowBox = node('section', undefined, 'flow-section');
+    box.append(pinBox, flowBox, node('p', 'Each run freezes its settings, matrix, pins and flow when it starts.', 'note'));
+    this.flowPanel = await renderFlowPanel(flowBox, api);
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
       if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save generation settings before starting a run.');
@@ -545,7 +585,7 @@ export class StudioUI {
       start.disabled = true;
       try {
         const requests = Array.from({length:n}, (_, i) => ({seed:first+i, overrides:{...(sampler?.pins || {})}}));
-        const run = await api('/generation/runs', 'POST', {requests, instructions:{}});
+        const run = await api('/generation/runs', 'POST', {requests, instructions: this.flowPanel?.instructions() || {}});
         status.textContent = `Started ${n} attempts. Job ${run.job_id}`;
         $('generation-settings-dialog').close(); await this.inspectJob(run.job_id); await this.listing();
       } finally { start.disabled = false; }

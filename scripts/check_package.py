@@ -17,6 +17,8 @@ REQUIRED = [
     "static/ui-kit.js",
     "static/jobs-view.js",
     "static/metrics-view.js",
+    "static/window-render.js",
+    "static/flow-panel.js",
     "static/style.css",
     "static/ibm-plex-sans-latin-400-normal.woff2",
     "static/fonts-LICENSE.txt",
