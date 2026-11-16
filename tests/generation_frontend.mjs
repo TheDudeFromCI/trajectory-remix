@@ -34,17 +34,18 @@ try {
   page.once('dialog',d=>d.accept()); await page.locator('#sampler-reset').click();
   await page.locator('#trajectory-tab').click();
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
-  await page.locator('#review-button').click(); await page.locator('#review-repair').uncheck(); await page.locator('#review-start').click();
-  await page.waitForFunction(()=>!document.getElementById('review-dialog').open);
+  await page.locator('#review-tab').click(); await page.locator('#review-repair').uncheck(); await page.locator('#review-start').click();
+  await page.waitForFunction(()=>document.getElementById('review-progress').textContent.startsWith('completed'));
   const reviewed = await get(`/trajectories/${record.source.id}`);
   assert.equal(reviewed.source.metadata.stage,1);
   assert.equal(reviewed.source.metadata.evaluations.length,1); // Standard Pending is Fast only.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
-  await page.locator('#review-button').click(); await page.locator('#review-mode').selectOption('force_critical'); await page.locator('#review-start').click();
-  await page.waitForFunction(()=>!document.getElementById('review-dialog').open);
+  await page.locator('#review-tab').click(); await page.locator('#review-mode').selectOption('force_critical'); await page.locator('#review-start').click();
+  await page.waitForFunction(()=>document.getElementById('review-progress').textContent.startsWith('completed'));
   assert.equal((await get(`/trajectories/${record.source.id}`)).source.metadata.stage,2);
   // Two distinct review jobs, independent logs and settled history records.
   assert.equal((await get('/job-summaries')).filter(j=>j.kind==='bulk').length,2);
+  await page.locator('#trajectory-tab').click();
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
   // The acknowledgment is usable at desktop and compact sizes, persists, and
   // affects only the open-window advisory rather than inserting closure.

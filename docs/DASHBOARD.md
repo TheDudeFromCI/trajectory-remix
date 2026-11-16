@@ -15,7 +15,7 @@ with the tabs at the top and reveal detail with tabs, menus and tooltips.
 | Area | What it does |
 | --- | --- |
 | **View tabs** | **Editor**, **Jobs**, **Metrics** and **Sampler**. A badge on Jobs counts running and paused jobs. |
-| **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings**, **Review & Repair** and **Generate**. |
+| **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings** and **Generate**. **Review & Repair** is a tab next to **Sampler**. |
 | **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. |
 
 Hover anything with an **ⓘ** for an explanation. Units, reasons and definitions live in
@@ -80,12 +80,13 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
    including credentials, are in [Project settings](PROJECT-SETTINGS.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
    standard flow produces a chatroom reply. Removing it is your choice.
-3. **Open Generate.** The left side shows which endpoint fills each role, any pins from
-   the Sampler, and the **Flow** that will build the trajectories. The right side holds
-   automatic review and repair options and the Core and Critical checklists. Click
+3. **Set up review (optional).** Open the **Review & Repair** tab to choose automatic
+   review and repair options and edit the Core and Critical checklists. Click
    **Save review settings** if you change them.
-4. **Tune the sampler (optional).** **Open Sampler** jumps to the weights and pins.
-5. **Start.** Set the number of attempts and a starting seed, then click
+4. **Open Generate.** It shows which endpoint fills each role, any pins from the
+   Sampler, and the **Flow** that will build the trajectories.
+5. **Tune the sampler (optional).** **Open Sampler** jumps to the weights and pins.
+6. **Start.** Set the number of attempts and a starting seed, then click
    **Start generation**. The new job opens in the Jobs view.
 
 ![The Generate dialog](images/dashboard/generate.png)
@@ -204,12 +205,14 @@ behave as before.
 
 1. Save the trajectory you want reviewed, or set up a search that matches the ones you
    want.
-2. Click **Review & Repair**. Choose the **Scope** (the selected trajectory, or every
+2. Open the **Review & Repair** tab. Choose the **Scope** (the selected trajectory, or every
    search match across all pages) and the **Mode**.
-3. Click **Start review**. The dialog shows progress and closes when the review ends. The
-   job also appears in Jobs.
+3. Click **Start review**. The tab shows progress until the review ends. The job also
+   appears in Jobs.
 
-![The Review & Repair dialog](images/dashboard/review.png)
+The same tab holds the automatic review and repair settings and the review checklists.
+
+![The Review & Repair tab](images/dashboard/review.png)
 
 ### Change many trajectories at once
 

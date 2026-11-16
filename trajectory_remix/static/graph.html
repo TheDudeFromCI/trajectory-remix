@@ -36,6 +36,7 @@
     <button id="jobs-button" role="tab" aria-selected="false" aria-controls="jobs-view">Jobs <span id="jobs-running-badge" class="badge accent" hidden></span></button>
     <button id="metrics-button" role="tab" aria-selected="false" aria-controls="metrics-view">Metrics</button>
     <button id="sampler-tab" role="tab" aria-selected="false" aria-controls="sampler-workbench">Sampler</button>
+    <button id="review-tab" role="tab" aria-selected="false" aria-controls="review-view">Review &amp; Repair</button>
   </nav>
   <div class="header-actions">
     <div class="btn-group">
@@ -57,7 +58,6 @@
       <button id="show-all-panels">Show all panels</button>
     </div></details>
     <button id="settings-button" class="ghost">Settings</button>
-    <button id="review-button">Review &amp; Repair</button>
     <button id="generation-settings-button" class="primary">Generate</button>
   </div>
   <input id="file-input" type="file" accept=".json,.jsonl" hidden>
@@ -283,6 +283,23 @@
 
 <!-- ===== Sampler ===== -->
 <section class="view" id="sampler-workbench" aria-label="Sampler Matrix workbench" hidden></section>
+<!-- ===== Review & Repair ===== -->
+<section class="view review-view" id="review-view" aria-label="Review and Repair" hidden>
+  <section class="review-run settings-card">
+    <h2>Review a batch</h2>
+    <div class="form-grid two">
+      <label>Scope<select id="review-scope"><option value="selected">Selected saved trajectory</option><option value="query">All search matches, across all pages</option></select></label>
+      <label>Mode<select id="review-mode"><option value="standard">Standard · stage based</option><option value="force_fast">Force Fast</option><option value="force_critical">Force Critical</option></select></label>
+    </div>
+    <label><input id="review-repair" type="checkbox" checked>Attempt repair after failure</label>
+    <p class="note">Standard mode reviews Pending trajectories with Fast and Candidate trajectories with Critical. Failed stages repair at their own tier. Other stages and locked sources are skipped.</p>
+    <div class="review-run-foot"><p id="review-progress" role="status" class="status-line" data-status></p><button id="review-start" class="primary">Start review</button></div>
+  </section>
+  <section class="review-settings">
+    <div id="review-settings-editor"></div>
+    <div class="review-settings-foot"><span class="status-line">Review settings apply to future runs.</span><button id="review-settings-save">Save review settings</button></div>
+  </section>
+</section>
 </main>
 
 <footer class="status-bar">
@@ -292,19 +309,6 @@
 <div id="tooltip" role="tooltip"></div>
 
 <!-- ===== Dialogs ===== -->
-<dialog id="review-dialog" aria-labelledby="review-title">
-  <div class="dialog-head"><h2 id="review-title">Review &amp; Repair</h2><button class="ghost sm" data-close>Close</button></div>
-  <div class="dialog-body">
-    <div class="form-grid two">
-      <label>Scope<select id="review-scope"><option value="selected">Selected saved trajectory</option><option value="query">All search matches, across all pages</option></select></label>
-      <label>Mode<select id="review-mode"><option value="standard">Standard · stage based</option><option value="force_fast">Force Fast</option><option value="force_critical">Force Critical</option></select></label>
-    </div>
-    <label><input id="review-repair" type="checkbox" checked>Attempt repair after failure</label>
-    <p class="note">Standard mode reviews Pending trajectories with Fast and Candidate trajectories with Critical. Failed stages repair at their own tier. Other stages and locked sources are skipped.</p>
-  </div>
-  <div class="dialog-foot"><p id="review-progress" role="status" class="status-line" data-status></p><button id="review-start" class="primary">Start review</button></div>
-</dialog>
-
 <dialog id="preferences-dialog" aria-labelledby="preferences-title">
   <div class="dialog-head"><h2 id="preferences-title">Preferences</h2><button class="ghost sm" data-close>Close</button></div>
   <div class="dialog-body">
@@ -345,11 +349,8 @@
   <div class="dialog-head"><h2 id="generation-title">Generate trajectories</h2><button class="ghost sm" data-close>Close</button></div>
   <div class="generation-layout">
     <section id="generation-run-controls" class="generation-run"></section>
-    <section class="generation-settings">
-      <div id="generation-settings-editor"></div>
-    </section>
   </div>
-  <div class="dialog-foot"><button id="generation-sampler-button" class="ghost">Open Sampler</button><span class="grow"></span><span class="status-line">Review settings apply to future runs.</span><button id="generation-settings-save">Save review settings</button></div>
+  <div class="dialog-foot"><button id="generation-sampler-button" class="ghost">Open Sampler</button><span class="grow"></span></div>
 </dialog>
 
 <dialog id="export-dialog" aria-labelledby="export-title">
