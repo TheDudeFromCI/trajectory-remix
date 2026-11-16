@@ -1,4 +1,5 @@
 /* UI B: project draft editor over the shared sampler/registry REST API. */
+import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
 const pretty = value => JSON.stringify(value, null, 2);
@@ -43,7 +44,7 @@ export class SamplerWorkbench {
     this.root.innerHTML = `<header class="sw-heading"><h1>Sampler matrix <span class="info" tabindex="0" data-tip="The weights and rules that decide what each generated trajectory is about. Changes apply to future runs; existing runs keep their frozen matrix, targets and instructions."></span></h1><div class="sw-save"><span id="sampler-dirty"></span><button id="sampler-reload" class="ghost sm">Reload saved</button><button id="sampler-reset" class="sm">Discard draft</button><button id="sampler-save" class="primary sm">Save project changes</button></div></header>
     <div id="sampler-message" role="status" aria-live="polite"></div>
     <div class="sw-layout"><aside class="sw-navigation"><div class="sw-nav-tools"><input id="sampler-search" type="search" aria-label="Find a dimension or entry" placeholder="Find a dimension or entry"><select id="sampler-filter" aria-label="Show groups"><option value="">All groups</option><option>Focus</option><option>Behaviors</option><option>Decisions</option><option>Dimensions</option><option>Events</option><option>Rules</option><option>Metrics</option><option>Advanced</option><option value="changed">Changed groups</option></select><span id="sampler-count"></span></div><nav id="sampler-nav" aria-label="Matrix groups"></nav></aside>
-    <div class="sw-main"><section id="sampler-detail"></section><details class="sw-preview"><summary>Proposal preview &amp; generation <span>Fixed seed · saved project · per-run pins</span></summary><p>Sample one proposal from the saved matrix to see what a run would ask for. Pins force a choice for previews and generation without editing weights. Previews make no model or compiler calls.</p><div class="sw-preview-controls"><label>Seed<input id="sampler-seed" type="number" step="1" value="137"></label><button id="sampler-preview">Sample one proposal</button></div><div id="sampler-pins" class="sw-pins"></div><p id="sampler-preview-status" role="status"></p><pre id="sampler-proposal"></pre><hr><h3>Generate with these pins</h3><div class="sw-generate"><label>Attempts<input id="sampler-attempts" type="number" min="1" max="1000" step="1" value="1"></label><button id="sampler-generate" class="primary">Start generation</button></div><details class="collapsible"><summary>Advanced Flow instructions</summary><div class="collapsible-body"><label>Run instructions JSON<textarea id="sampler-instructions">{}</textarea></label></div></details><p id="sampler-run-status" role="status" class="small muted"></p></details></div></div>`;
+    <div class="sw-main"><section id="sampler-detail"></section><details class="sw-preview"><summary>Proposal preview &amp; generation <span>Fixed seed · saved project · per-run pins</span></summary><p>Sample one proposal from the saved matrix to see what a run would ask for. Pins force a choice for previews and generation without editing weights. Previews make no model or compiler calls.</p><div class="sw-preview-controls"><label>Seed<input id="sampler-seed" type="number" step="1" value="0" title="0 picks a random seed"></label><button id="sampler-preview">Sample one proposal</button></div><div id="sampler-pins" class="sw-pins"></div><p id="sampler-preview-status" role="status"></p><pre id="sampler-proposal"></pre><hr><h3>Generate with these pins</h3><div class="sw-generate"><label>Attempts<input id="sampler-attempts" type="number" min="1" max="1000" step="1" value="1"></label><button id="sampler-generate" class="primary">Start generation</button></div><details class="collapsible"><summary>Advanced Flow instructions</summary><div class="collapsible-body"><label>Run instructions JSON<textarea id="sampler-instructions">{}</textarea></label></div></details><p id="sampler-run-status" role="status" class="small muted"></p></details></div></div>`;
     $('sampler-search').oninput = e => { this.query = e.target.value.toLowerCase().trim(); this.renderNav(); };
     $('sampler-filter').onchange = e => { this.filter = e.target.value; this.renderNav(); };
     $('sampler-save').onclick = () => this.save();
@@ -51,6 +52,9 @@ export class SamplerWorkbench {
     $('sampler-reset').onclick = () => { if (!this.dirty() || confirm('Discard all unsaved matrix and metric changes?')) { this.adopt(this.record); this.renderPins(); this.renderNav(); this.renderDetail(); this.update(); this.report('Draft discarded.'); } };
     $('sampler-preview').onclick = () => this.preview();
     $('sampler-generate').onclick = () => this.generate();
+    const saved = loadRunInputs({attempts: 1});
+    $('sampler-seed').value = saved.seed; $('sampler-attempts').value = saved.attempts;
+    persistInput($('sampler-seed'), 'seed'); persistInput($('sampler-attempts'), 'attempts');
     this.renderPins();
     this.renderNav(); this.renderDetail(); this.update();
   }
@@ -297,7 +301,7 @@ export class SamplerWorkbench {
   }
   async generate() {
     if (this.dirty()) return this.report('Save project changes before generating.', true);
-    const seed = Number($('sampler-seed').value), count = Number($('sampler-attempts').value);
+    const seed = resolveSeed(Number($('sampler-seed').value)), count = Number($('sampler-attempts').value);
     if ($('sampler-seed').value === '' || !Number.isSafeInteger(seed) || !Number.isInteger(count) || count < 1 || count > 1000 || !Number.isSafeInteger(seed + count - 1)) return this.report('Supply a safe integer seed and 1–1000 attempts.', true);
     this.starting = true; this.update();
     try {
@@ -311,7 +315,7 @@ export class SamplerWorkbench {
   }
   async preview() {
     if (this.dirty()) return this.report('Save project changes before previewing.', true);
-    const seed = Number($('sampler-seed').value); if ($('sampler-seed').value === '' || !Number.isSafeInteger(seed)) return this.report('Seed must be a safe integer.', true);
+    const seed = resolveSeed(Number($('sampler-seed').value)); if ($('sampler-seed').value === '' || !Number.isSafeInteger(seed)) return this.report('Seed must be a safe integer.', true);
     const overrides = {...this.pins};
     const generation = ++this.generation; $('sampler-preview').disabled = true;
     try {
