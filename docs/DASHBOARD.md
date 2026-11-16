@@ -14,7 +14,7 @@ with the tabs at the top and reveal detail with tabs, menus and tooltips.
 
 | Area | What it does |
 | --- | --- |
-| **View tabs** | **Editor**, **Jobs**, **Metrics** and **Sampler**. A badge on Jobs counts running and paused jobs. |
+| **View tabs** | **Editor**, **Jobs**, **Metrics**, **Sampler** and **Flow**. A badge on Jobs counts running and paused jobs. |
 | **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings** and **Generate**. **Review Settings** is a tab next to **Sampler**. |
 | **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. |
 
@@ -70,6 +70,28 @@ filters as the Editor's dataset panel. See [Metrics](METRICS.md).
 
 The weights and rules that decide what each generated trajectory is about. It has its
 own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
+
+### The Flow view
+
+![The Flow editor with a branch node selected](images/dashboard/flow-editor.png)
+
+The **flow** is the recipe every generated trajectory follows. The Flow view draws it as a
+flowchart you can edit, and lets you walk through one generation step by step. It has two
+modes, chosen at the top:
+
+| Mode | What it does |
+| --- | --- |
+| **Edit** | The chart on the left, and tabs on the right for the selected **Node**, **Flow settings** (start node, limits and the actor instruction), the **YAML** it will save, and any **Problems**. |
+| **Walkthrough** | Sample one proposal and step through the flow. The chart lights up the current node, counts visits and highlights the link just taken. See [Walk through a generation step by step](#walk-through-a-generation-step-by-step). |
+
+Each node kind has its own colour:
+
+| Node | What it does with the data |
+| --- | --- |
+| **Select** (blue) | Asks the Generator what happens next. Its output, the **Selection**, says whether to finish and which event to write. |
+| **Write event** (green) | Asks the Generator to write the event the last Select chose, and adds it to the trajectory. |
+| **Branch** (purple) | Reads one field of the last Selection, such as `finished`, and follows **then** (solid) or **otherwise** (dashed). No model call. |
+| **End** (orange) | Finishes the trajectory and hands it to review. |
 
 ## Set up and generate
 
@@ -175,9 +197,10 @@ nodes (hover a node for its instruction).
 
 ![The Flow outline in the Generate dialog](images/dashboard/flow.png)
 
-- **For every future run**, edit `flow.yaml` beside the project database. The studio has
-  no file editor for it; the next run picks it up. See
-  [Event generation](GRAPH-GENERATION.md).
+- **For every future run**, edit the flow in the **Flow** tab and **Save flow** (or edit
+  `flow.yaml` beside the project database by hand). The next run picks it up. See
+  [Edit the flow chart](#edit-the-flow-chart) and [Event generation](GRAPH-GENERATION.md).
+  **Open Flow editor** in the Generate dialog takes you there.
 - **For one run**, open **Custom flow for this run**. It starts as the current flow written
   as YAML. Edit it, make sure **Use this YAML for the next run only** is ticked, and start
   the run. Invalid YAML is rejected before any attempt is reserved, and `flow.yaml` on disk
@@ -189,6 +212,63 @@ measured coverage.
 
 On an older backend, the section says the server uses its built-in recipe and runs
 behave as before.
+
+### Edit the flow chart
+
+1. Open the **Flow** tab. The chart shows the saved `flow.yaml`, or the packaged default
+   if the project has none yet.
+2. Click a node to edit it on the **Node** tab: its ID, kind, instruction and where it
+   goes next. Renaming a node updates every link to it.
+3. To change where a node goes, drag the small dot on its bottom edge onto another node,
+   or pick the target from the list on the **Node** tab. A branch has two dots: green for
+   **then**, orange for **otherwise**.
+4. **Add node** creates a node near the selected one. **Delete node** removes it; links
+   into it become *not connected* so you can see what to fix.
+5. Problems show as a red or amber dot on the node and on the **Problems** tab. Errors
+   block saving; warnings, such as a node that can never be reached, do not.
+6. **Save flow** writes `flow.yaml`. Runs already in progress keep the flow they started
+   with. **Discard** drops your draft; **Reload** loads the file again.
+
+You can also edit the text on the **YAML** tab and choose **Apply YAML to chart**. If you
+save without touching the chart afterwards, your exact text is kept, comments included.
+Once you edit the chart, the file is rewritten from the chart and old comments are lost.
+
+Drag nodes to arrange them; your layout is remembered in this browser. **Tidy layout**
+arranges them by distance from the start node. If someone else saves `flow.yaml` while
+you edit, saving tells you so and keeps your draft until you **Reload**.
+
+### Walk through a generation step by step
+
+Use a walkthrough to debug generation settings: you see exactly what the Generator is
+asked at each step, what it replied, and what the flow knows afterwards.
+
+![A walkthrough paused after the first written event](images/dashboard/flow-walkthrough.png)
+
+1. Open the **Flow** tab and choose **Walkthrough**.
+2. Enter a **Seed** (0 picks one at random) and choose **Sample & start**. Pins set on the
+   **Sampler** tab apply. The walkthrough uses the chart as drawn, unsaved edits included.
+3. Choose **Run next step** to advance one step, or **Run to end** to keep going until the
+   flow finishes (**Stop** pauses it).
+4. Read the step on the tabs below:
+
+   | Tab | Shows |
+   | --- | --- |
+   | **Prompt** | The messages sent to the model. Tick **Show exact text sent** for the raw text; the HTTP body and output schema are below. On the newest step it shows what will be sent next. |
+   | **Reply** | The model's reply, whether it was accepted, and why not. |
+   | **Flow knows** | Position, step and event counts, the last Selection (what branches read), the task waiting to be written, and any correction the next request will carry. |
+   | **Trajectory** | The events written so far; the step's new events are marked. |
+   | **Proposal** | The sampled proposal the selector reads. Actors never see it. |
+
+5. Click a numbered chip under the chart, or use **‹** and **›**, to look back at any
+   step. **Rewind to here** drops the later steps so you can try again from that point.
+
+To test a reply without a model, switch **Call the Generator** to **Type replies myself**.
+The **Reply** tab then offers a template; your reply is checked exactly like a model's. A
+rejected reply leaves the flow where it was and adds the correction a real run would send.
+
+A walkthrough stores nothing. **Save trajectory** adds the trajectory, as it is at the
+step you are viewing, to the dataset. Model calls go straight to the Generator endpoint,
+one at a time, without the job queue's retries; a failed call is shown and can be retried.
 
 ### Import and export
 
@@ -301,7 +381,7 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 
 | File | Responsibility |
 | --- | --- |
-| `graph.html` | App shell: header, the four views, status bar and dialogs. |
+| `graph.html` | App shell: header, the views, status bar and dialogs. |
 | `style.css` | Theme tokens (the *Dark Cyan Base* design system) and shared components: buttons, fields, widgets, tags, tabs, menus, progress bars, tooltips, dialogs, tables. |
 | `graph.css` | Layout of the shell, Editor, Jobs and Metrics views and the status bar. |
 | `sampler.css`, `project-settings.css` | The Sampler view and the settings forms. |
@@ -313,6 +393,12 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
 | `window-render.js` | Readable window view: header fields, chat bubbles, tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
 | `flow-panel.js` | The Generate dialog's Flow section: `GET /generation/flow`, the node outline, and a lossless YAML writer for per-run `instructions.flow_yaml`. |
+| `flow-view.js` | `FlowView`, the Flow tab controller: draft, checks, save with revision, YAML tab and mode switch. |
+| `flow-model.js` | Pure flow helpers: node kinds, links, rename/delete/kind changes and the layered layout. |
+| `flow-canvas.js` | The flowchart: node cards over an SVG link layer, dragging, port connections, zoom and walkthrough highlighting. |
+| `flow-inspector.js` | The Node, Flow settings and Problems forms. Typing does not rebuild the form. |
+| `flow-walkthrough.js` | `WalkthroughPanel`: sampling, stepping, history, and the Prompt, Reply, Flow knows, Trajectory and Proposal views. |
+| `flow-view.css` | Layout and styling of the Flow view. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use

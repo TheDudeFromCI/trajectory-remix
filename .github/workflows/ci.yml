@@ -89,6 +89,7 @@ jobs:
       - run: node tests/studio_ui_frontend.mjs
       - run: node tests/window_render_frontend.mjs
       - run: node tests/run_inputs_frontend.mjs
+      - run: node tests/flow_editor_frontend.mjs
 
   browser:
     name: Browser workflow tests
@@ -116,6 +117,7 @@ jobs:
           python tests/run_dashboard_frontend.py
           python tests/run_sampler_frontend.py
           python tests/run_generation_frontend.py
+          python tests/run_flow_frontend.py
 
   package:
     name: Package build and install

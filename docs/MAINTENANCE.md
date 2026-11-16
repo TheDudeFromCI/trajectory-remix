@@ -16,9 +16,10 @@ Paths below are relative to `trajectory_remix/`.
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
 | Compiler/export | `graph/compiler.py`, `graph/export.py`, `graph/ktremix.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
 | Generation/review | `graph/flow.py`, `graph/generation.py`, `graph/reviews.py`, `graph/provider.py` | Frozen inputs, actor context, checklist evidence, stage transitions and single repair sessions |
+| Flow editor/walkthrough | `graph/flow_document.py`, `graph/walkthrough.py`, `graph/flow_api.py`, `graph/adaptive_driver.py` | Located diagnostics, lossless YAML, revision-checked saves, and walkthrough parity with runs (shared `request_payload`/acceptance; nothing stored) |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `flow-panel.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `flow-panel.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `flow-view.js`, `flow-model.js`, `flow-canvas.js`, `flow-inspector.js`, `flow-walkthrough.js`, `flow-view.css` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -42,7 +43,9 @@ Paths below are relative to `trajectory_remix/`.
   ownership; detachment is permanent. Manual review/repair requires a detached
   source and one shared operation slot.
 - Keep each API request in its endpoint FIFO slot through retries. Exhaustion
-  pauses that endpoint for explicit recovery; never silently change models.
+  pauses that endpoint for explicit recovery; never silently change models. The Flow
+  walkthrough is the one interactive exception: a user-initiated, single, unretried
+  Generator call that stores nothing and is never logged.
 - A model/API failure is not a quality verdict. Record per-item review evidence
   and source/checklist identities. Repairs preserve completed spot edits, use
   the matching tier, and end on verdict or context exhaustion. Ready is manual.
@@ -79,9 +82,11 @@ node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
+node tests/flow_editor_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
+python tests/run_flow_frontend.py
 for f in trajectory_remix/static/*.js; do node --check "$f"; done
 ruff check . && ruff format --check .
 git diff --check
@@ -121,3 +126,10 @@ copying model or exception bodies to logs.
 Endpoint controls: `python -m pytest -q tests/test_endpoint_sampling.py` checks
 wire omission versus explicit zeros, timeout cancellation, accepted ranges,
 settings API/schema and frozen run configuration with fake HTTP responses.
+
+Flow editor and walkthrough: `python -m pytest -q tests/test_flow_document.py
+tests/test_flow_walkthrough.py` checks located diagnostics, lossless YAML, revision
+conflicts, comment-preserving saves, and that a walkthrough sends the same prompts as a
+real run while storing nothing. `node tests/flow_editor_frontend.mjs` covers the editor
+draft and walkthrough panel; `python tests/run_flow_frontend.py` drives the Flow tab in
+Chromium with a fake Generator.

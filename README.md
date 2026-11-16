@@ -60,6 +60,7 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 | Understand the source format | [Source format](docs/GRAPH-SOURCE.md), [Synthetic tools and chat](docs/TOOLS.md) |
 | Tune what gets generated | [Sampler Matrix](docs/SAMPLER-WORKBENCH.md), [Metrics](docs/METRICS.md) |
 | Generate, review and repair | [Event generation](docs/GRAPH-GENERATION.md) |
+| Edit the generation flow or debug it step by step | [Flow view](docs/DASHBOARD.md#the-flow-view), [Walkthrough](docs/DASHBOARD.md#walk-through-a-generation-step-by-step) |
 | Watch, pause and recover jobs | [Jobs](docs/GRAPH-JOBS.md) |
 | Export for training | [Export](docs/EXPORT.md), [Compiler](docs/GRAPH-COMPILER.md), [KTREMIX format](docs/KTREMIX.md) |
 | Try training on exported data | [Training demo](docs/KTREMIX-TRAINING-DEMO.md) |

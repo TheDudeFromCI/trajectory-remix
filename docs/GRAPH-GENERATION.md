@@ -56,6 +56,12 @@ exhaustion retains the partial source as **Unfinished**, without a fabricated pa
 
 ### Edit flow.yaml
 
+The easiest way to edit the flow is the **Flow** tab in the dashboard: a flowchart you
+can rearrange and connect, which saves `flow.yaml` for you. Its **Walkthrough** mode
+steps through one generation so you can see each prompt and reply. See
+[Edit the flow chart](DASHBOARD.md#edit-the-flow-chart) and
+[Walk through a generation step by step](DASHBOARD.md#walk-through-a-generation-step-by-step).
+
 Place `flow.yaml` beside the project's SQLite database to override the packaged
 [`flow.yaml`](../trajectory_remix/graph/flow.yaml). It is read when a new run starts;
 editing it never changes active runs. Alternatively pass YAML text as
@@ -246,8 +252,9 @@ request body. Empty `instructions` now selects the adaptive YAML Flow. Existing
 Do not send both `plan` and `flow_yaml`.
 
 New authenticated `GET /api/v1/generation/flow` returns `{flow, flow_hash}` for the
-current on-disk policy (or packaged default). Editing is through `flow.yaml` or a
-per-run `instructions.flow_yaml` string; there is no filesystem-write endpoint.
+current on-disk policy (or packaged default). Editing is through `flow.yaml`, the Flow
+editor's save route (see [Flow editor and walkthrough API](#flow-editor-and-walkthrough-api))
+or a per-run `instructions.flow_yaml` string.
 MCP `generate_graphs` accepts the same instructions through its existing service.
 There are no source-format, settings-schema, stage or ownership changes.
 
@@ -257,7 +264,39 @@ The checkpoint has an additional `flow` object with node, steps, output and task
 consumers should treat it as opaque. Job logs report successful selections and limit
 exhaustion without copying private prompts or response bodies. `flow_outcome` metadata
 records the controller's finish explanation; it is not measured coverage. Compilation
-and semantic acceptance remain separate. No frontend files are changed by this feature.
+and semantic acceptance remain separate.
+
+### Flow editor and walkthrough API
+
+These routes back the dashboard's **Flow** tab. They need the same local session token
+as the rest of `/api/v1`.
+
+| Route | Action |
+| --- | --- |
+| `GET /generation/flow` | `{flow, flow_hash}` as before, plus `text` (the file or packaged YAML), `origin` (`project` or `packaged`), `revision`, `path`, `valid` and `diagnostics`. |
+| `POST /generation/flow/check` | `{flow}` or `{yaml}`. Returns `valid`, `diagnostics` (each with `severity`, `code`, `message`, and `node`/`field` when it has a location), the normalized `flow`, `flow_hash` and rendered `yaml`. Never raises for a bad draft. |
+| `PUT /generation/flow` | `{flow}` or `{yaml}` with `expected_revision` from the last read. Writes `flow.yaml` atomically. `yaml` text is written verbatim; `flow` is rendered with only the fields each node kind uses. A stale revision returns 409 `flow_conflict` with `current_revision`; errors return 422 and leave the file untouched. |
+| `POST /walkthrough/start` | `{seed, overrides, flow?, flow_yaml?}`. Samples one proposal (not stored) and freezes a plan exactly as a run does. Returns `{state, next}`. |
+| `POST /walkthrough/step` | `{state, mode: "call" \| "manual", response?}`. Runs one transition and returns `{state, trace, next}`. |
+| `POST /walkthrough/describe` | `{...state}`. Returns `next` for a state without running it. |
+
+`next` describes the coming step: `action` (`model`, `branch`, `chat_echo`, `end`,
+`limit`, `blocked` or `done`), the node, a summary, `knows` (the interpreter's position,
+memory and draft diagnostics) and, for model steps, `request`: the payload messages,
+schema, task, endpoint, the exact HTTP body without credentials (`wire`) and the context
+budget. `trace` adds what happened: `accepted`, `error`, `response` (model, usage and
+output), the branch value read, the accepted Selection or written event, `added_events`
+and `to`.
+
+Walkthroughs use the same prompt builders and acceptance checks as runs
+(`adaptive_driver.request_payload`, `accept_selection`, `append_event`), so a step
+shows what a run would send and accept. A rejected reply keeps the state and records the
+correction; passing `format_retries` ends the walkthrough as `invalid_provider_output`,
+as a run would mark it Unsuccessful. The state lives in the browser; nothing is written
+to the dataset or job tables, and the proposal snapshot is not persisted. `call` mode
+sends one request straight to the Generator endpoint, at most one walkthrough call at a
+time, outside the job FIFO and without its retries. It is an explicit, interactive
+action; walkthrough errors are returned to the caller and never logged.
 
 ### Context scope and local-model budgets
 
