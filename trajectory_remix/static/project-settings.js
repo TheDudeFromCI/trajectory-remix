@@ -124,18 +124,22 @@ export function renderGenerationSettings(container, initial, options = {}) {
   }
   const {current, write, input, status, error} = editor(container, initial, options);
   const render = () => renderGenerationSettings(container, current(), options.getSettings ? options : {...options, getSettings: current});
-  heading(container, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
+  const column = name => node('div', undefined, `review-column review-column-${name}`);
+  const settingsColumn = column('settings'), coreColumn = column('core'), criticalColumn = column('critical');
+  container.classList.add('review-columns'); container.append(settingsColumn, coreColumn, criticalColumn);
+  heading(settingsColumn, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
   const toggle = (key, title) => {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
-  container.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
+  settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
   const advanced = node('details', undefined, 'settings-subsection'); advanced.append(node('summary', 'Response and repair limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
   const bytes = input('Repair transcript byte limit', current().generation?.repair_context_bytes ?? 65536, value => write(d => { d.generation ||= {}; d.generation.repair_context_bytes = value; }), 'number'); bytes.min = 256; bytes.step = 1;
-  advanced.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), node('p', 'Repair keeps one continuing session. This transcript bound and provider context exhaustion end that attempt; it is not a spending cap.', 'settings-help')); container.append(advanced);
-  heading(container, 'Review checklists', 'Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.');
-  for (const [group, name] of [['core','Core · Fast and Critical'], ['critical','Additional Critical criteria']]) {
+  advanced.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), node('p', 'Repair keeps one continuing session. This transcript bound and provider context exhaustion end that attempt; it is not a spending cap.', 'settings-help')); settingsColumn.append(advanced);
+  const checklistHelp = 'Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
+  for (const [group, name, target] of [['core','Core checklist · Fast and Critical', coreColumn], ['critical','Critical checklist · additional Critical criteria', criticalColumn]]) {
+    if (group === 'core') heading(target, 'Core checklist', checklistHelp); else heading(target, 'Critical checklist');
     const section = node('section', undefined, 'settings-card'); section.append(node('h4', name));
     for (const [id, criterion] of Object.entries(current().review_checklists?.[group] || {})) {
       const row = node('div', undefined, 'settings-criterion'), text = node('textarea'); text.value = criterion.text; text.setAttribute('aria-label', `${group} criterion ${id}`);
@@ -148,7 +152,7 @@ export function renderGenerationSettings(container, initial, options = {}) {
     section.append(field('New criterion ID', id), button(`Add ${group} criterion`, () => {
       const key = id.value.trim(); if (!validId(key) || Object.hasOwn(current().review_checklists?.[group] || {}, key)) return error('Use a unique criterion ID with lowercase letters, numbers, hyphens or underscores.');
       write(d => { d.review_checklists ||= {}; d.review_checklists[group] ||= {}; d.review_checklists[group][key] = {text:'New criterion', allow_not_applicable:false}; }); render();
-    })); container.append(section);
+    })); target.append(section);
   }
-  container.append(status);
+  settingsColumn.append(status);
 }
