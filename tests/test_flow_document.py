@@ -10,6 +10,7 @@ from test_graph_generation import service
 
 from trajectory_remix.graph import flow_document
 from trajectory_remix.graph.adaptive_flow import load_flow
+from trajectory_remix.graph.flow_store import project_text
 from trajectory_remix.graph.studio_api import create_studio_app
 
 
@@ -19,8 +20,13 @@ def client(tmp_path):
     app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
     with TestClient(app) as client:
         client.headers["X-Remix-Token"] = app.state.csrf
-        client.flow_path = gen.store.path.parent / "flow.yaml"
+        client.store = gen.store
         yield client
+
+
+def stored(client):
+    """The flow future runs will load, read back from the project database."""
+    return load_flow(text=project_text(client.store))["flow"]
 
 
 def test_packaged_flow_round_trips_through_rendered_yaml():
@@ -91,7 +97,7 @@ def test_graph_warnings_catch_flows_that_would_misbehave():
     assert "branch_cycle" in codes and "no_end" in codes
 
 
-def test_save_writes_the_project_file_and_rejects_stale_revisions(client):
+def test_save_stores_the_project_flow_and_rejects_stale_revisions(client):
     loaded = client.get("/api/v1/generation/flow").json()
     flow = loaded["flow"]
     flow["max_events"] = 64
@@ -101,7 +107,7 @@ def test_save_writes_the_project_file_and_rejects_stale_revisions(client):
     assert saved.status_code == 200, saved.text
     document = saved.json()
     assert document["origin"] == "project" and document["flow"]["max_events"] == 64
-    assert load_flow(client.flow_path)["flow"]["max_events"] == 64  # Future runs use it.
+    assert stored(client)["max_events"] == 64  # Future runs use it.
     stale = client.put(
         "/api/v1/generation/flow", json={"flow": flow, "expected_revision": loaded["revision"]}
     )
@@ -111,7 +117,7 @@ def test_save_writes_the_project_file_and_rejects_stale_revisions(client):
         "/api/v1/generation/flow", json={"flow": flow, "expected_revision": document["revision"]}
     )
     assert invalid.status_code == 422
-    assert load_flow(client.flow_path)["flow"]["start"] == "set_scene"
+    assert stored(client)["start"] == "set_scene"
 
 
 def test_raw_yaml_save_keeps_comments(client):
@@ -120,7 +126,7 @@ def test_raw_yaml_save_keeps_comments(client):
     saved = client.put(
         "/api/v1/generation/flow", json={"yaml": text, "expected_revision": loaded["revision"]}
     ).json()
-    assert client.flow_path.read_text() == text and saved["text"] == text
+    assert project_text(client.store) == text and saved["text"] == text
     both = client.put(
         "/api/v1/generation/flow",
         json={"yaml": text, "flow": saved["flow"], "expected_revision": saved["revision"]},

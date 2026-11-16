@@ -197,14 +197,15 @@ nodes (hover a node for its instruction).
 
 ![The Flow outline in the Generate dialog](images/dashboard/flow.png)
 
-- **For every future run**, edit the flow in the **Flow** tab and **Save flow** (or edit
-  `flow.yaml` beside the project database by hand). The next run picks it up. See
+- **For every future run**, edit the flow in the **Flow** tab and **Save flow**. It is
+  stored in the project database, so the project stays a single file. The next run picks
+  it up. See
   [Edit the flow chart](#edit-the-flow-chart) and [Event generation](GRAPH-GENERATION.md).
   **Open Flow editor** in the Generate dialog takes you there.
 - **For one run**, open **Custom flow for this run**. It starts as the current flow written
   as YAML. Edit it, make sure **Use this YAML for the next run only** is ticked, and start
-  the run. Invalid YAML is rejected before any attempt is reserved, and `flow.yaml` on disk
-  is not changed.
+  the run. Invalid YAML is rejected before any attempt is reserved, and the saved project
+  flow is not changed.
 
 Trajectories finished by the flow show a **Flow finished** tag in the trajectory bar. Hover
 it for the generation controller's own finish explanation. It describes intent, not
@@ -215,8 +216,8 @@ behave as before.
 
 ### Edit the flow chart
 
-1. Open the **Flow** tab. The chart shows the saved `flow.yaml`, or the packaged default
-   if the project has none yet.
+1. Open the **Flow** tab. The chart shows the project's saved flow, or the packaged
+   default if the project has none yet.
 2. Click a node to edit it on the **Node** tab: its ID, kind, instruction and where it
    goes next. Renaming a node updates every link to it.
 3. To change where a node goes, drag the small dot on its bottom edge onto another node,
@@ -226,18 +227,23 @@ behave as before.
    into it become *not connected* so you can see what to fix.
 5. Problems show as a red or amber dot on the node and on the **Problems** tab. Errors
    block saving; warnings, such as a node that can never be reached, do not.
-6. **Save flow** writes `flow.yaml`. Runs already in progress keep the flow they started
-   with. **Discard** drops your draft; **Reload** loads the file again.
+6. **Save flow** stores the flow in the project database. Runs already in progress keep
+   the flow they started with. **Discard** drops your draft; **Reload** loads the saved
+   flow again.
 
 You can also edit the text on the **YAML** tab and choose **Apply YAML to chart**. If you
 save without touching the chart afterwards, your exact text is kept, comments included.
-Once you edit the chart, the file is rewritten from the chart and old comments are lost.
+Once you edit the chart, the YAML is rewritten from the chart and old comments are lost.
 
 Drag nodes to arrange them; your layout is remembered in this browser. **Tidy layout**
 arranges them again: each phase runs down the page, a chain of branches joined by
 *otherwise* sits in one row like a switch, and links that loop back run along the sides.
-**Fit** zooms to show the whole chart, which is how it opens. If someone else saves `flow.yaml` while
+**Fit** zooms to show the whole chart, which is how it opens. If someone else saves the flow while
 you edit, saving tells you so and keeps your draft until you **Reload**.
+
+Projects from older versions kept their flow in a `flow.yaml` file beside the database.
+That file is imported into the database the first time the flow is read. After that the
+database copy is used; the file is left in place but no longer read, so you can delete it.
 
 ### Walk through a generation step by step
 

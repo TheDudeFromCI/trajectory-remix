@@ -72,7 +72,7 @@ const base = () => ({
 
 // ---------- Editor ----------
 const calls = [];
-let doc = {flow: base(), flow_hash: 'a'.repeat(64), text: '# note\nversion: adaptive-flow/1\n', origin: 'packaged', revision: 'packaged', diagnostics: [], path: '/p/flow.yaml'};
+let doc = {flow: base(), flow_hash: 'a'.repeat(64), text: '# note\nversion: adaptive-flow/1\n', origin: 'packaged', revision: 'packaged', diagnostics: []};
 const api = async (path, method = 'GET', body) => {
   calls.push({path, method, body: structuredClone(body)});
   if (path === '/generation/flow' && method === 'GET') return structuredClone(doc);

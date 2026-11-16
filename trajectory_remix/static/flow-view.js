@@ -1,5 +1,5 @@
-/* Flow view: a flowchart editor for flow.yaml plus the step-by-step walkthrough.
-   Edits stay in a draft until Save; saving writes the project's flow.yaml. */
+/* Flow view: a flowchart editor for the project flow plus the step-by-step walkthrough.
+   Edits stay in a draft until Save; saving stores the flow in the project database. */
 import {node, tag} from './ui-kit.js';
 import {FlowCanvas} from './flow-canvas.js';
 import {renderFlowForm, renderNodeForm, renderProblems} from './flow-inspector.js';
@@ -34,7 +34,7 @@ export class FlowView {
 
   mount() {
     this.root.innerHTML = `<header class="flow-toolbar">
-        <h1>Flow <span class="info" tabindex="0" data-tip="How each trajectory is built: Select nodes ask the Generator what happens next, Write event nodes ask it to write that event, Branch nodes route on the selection, End finishes. Saved to flow.yaml beside the project; runs freeze the flow when they start."></span></h1>
+        <h1>Flow <span class="info" tabindex="0" data-tip="How each trajectory is built: Select nodes ask the Generator what happens next, Write event nodes ask it to write that event, Branch nodes route on the selection, End finishes. Saved in the project database; runs freeze the flow when they start."></span></h1>
         <span id="flow-origin"></span><span id="flow-hash"></span><span id="flow-dirty" class="tag"></span>
         <div class="seg" role="tablist" aria-label="Flow mode"><button type="button" role="tab" data-mode="edit">Edit</button><button type="button" role="tab" data-mode="walk">Walkthrough</button></div>
         <span class="grow"></span>
@@ -176,7 +176,7 @@ export class FlowView {
   }
 
   async reload() {
-    if (this.dirty() && !confirm('Discard your unsaved flow changes and load flow.yaml?')) return;
+    if (this.dirty() && !confirm('Discard your unsaved flow changes and load the saved flow?')) return;
     try { this.adopt(await this.api('/generation/flow')); this.status('Loaded the saved flow.'); } catch (error) { this.status(error.message, true); }
   }
 
@@ -185,9 +185,9 @@ export class FlowView {
     const body = this.rawText !== null ? {yaml: this.rawText} : {flow: this.draft};
     try {
       const doc = await this.api('/generation/flow', 'PUT', {...body, expected_revision: this.doc.revision});
-      this.adopt(doc); this.status('Saved flow.yaml. New runs and walkthroughs use it; running jobs keep the flow they started with.');
+      this.adopt(doc); this.status('Saved the project flow. New runs and walkthroughs use it; running jobs keep the flow they started with.');
     } catch (error) {
-      throw new Error(/changed since/.test(error.message) ? 'flow.yaml was changed elsewhere. Your draft is kept; Reload to see the saved version.' : error.message);
+      throw new Error(/changed since/.test(error.message) ? 'The project flow was changed elsewhere. Your draft is kept; Reload to see the saved version.' : error.message);
     }
   }
 
@@ -201,8 +201,8 @@ export class FlowView {
 
   renderHeader() {
     if (!this.doc) return;
-    const origin = this.doc.origin === 'project' ? tag('flow.yaml', 'accent', 'mono') : tag('packaged default', 'muted');
-    origin.dataset.tip = this.doc.origin === 'project' ? this.doc.path : 'No flow.yaml beside the project yet. Saving creates one.';
+    const origin = this.doc.origin === 'project' ? tag('project flow', 'accent') : tag('packaged default', 'muted');
+    origin.dataset.tip = this.doc.origin === 'project' ? 'Saved in the project database.' : 'This project has no saved flow yet, so it uses the default that ships with Remix. Saving stores your version in the project database.';
     this.el.origin.replaceChildren(origin);
     this.el.hash.replaceChildren(...(this.hash ? [Object.assign(tag(this.hash.slice(0, 10), 'faint', 'mono'), {title: 'Flow hash ' + this.hash})] : []));
     const dirty = this.dirty() || (this.rawText !== null && this.rawText !== this.doc.text);
@@ -253,7 +253,7 @@ export class FlowView {
       const auto = layout(this.draft);
       this.positions = Object.fromEntries(Object.keys(this.draft.nodes).map(id => [id, this.positions[id] || auto[id]]));
       if (!(this.selected in this.draft.nodes)) this.selected = this.draft.start;
-      this.status('YAML applied to the chart. Save to write flow.yaml.'); this.render();
+      this.status('YAML applied to the chart. Save to store it in the project.'); this.render();
     };
     const actions = node('div', undefined, 'panel-actions'); actions.append(apply);
     body.replaceChildren(note, area, actions);

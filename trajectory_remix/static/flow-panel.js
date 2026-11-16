@@ -59,7 +59,7 @@ export async function renderFlowPanel(container, api) {
   summary.append(tag(flow.version || 'flow', 'muted'), hashTag,
     node('span', `${Object.keys(flow.nodes || {}).length} nodes · ≤ ${flow.max_events} events · ≤ ${flow.max_steps} steps`, 'small muted'));
   const info = node('span', undefined, 'info'); info.tabIndex = 0;
-  info.dataset.tip = 'Loaded from flow.yaml beside the project database, or the packaged default. Edit it in the Flow tab to change future runs, or use a custom flow for one run below.';
+  info.dataset.tip = 'The project flow, saved in the project database, or the packaged default. Edit it in the Flow tab to change future runs, or use a custom flow for one run below.';
   const open = node('button', 'Open Flow editor', 'ghost sm'); open.type = 'button'; open.id = 'generation-open-flow';
   open.onclick = () => { container.closest('dialog')?.close(); showView('flow-view'); };
   summary.append(info, open);
@@ -85,7 +85,7 @@ export async function renderFlowPanel(container, api) {
   const yaml = node('textarea'); yaml.id = 'generation-flow-yaml'; yaml.spellcheck = false; yaml.setAttribute('aria-label', 'Flow YAML for this run');
   yaml.value = toYaml(flow) + '\n';
   yaml.oninput = () => { use.checked = true; };
-  customBody.append(useLabel, yaml, node('p', 'Sent as instructions.flow_yaml and validated before any attempt is reserved. flow.yaml on disk is not changed.', 'small muted'));
+  customBody.append(useLabel, yaml, node('p', 'Sent as instructions.flow_yaml and validated before any attempt is reserved. The saved project flow is not changed.', 'small muted'));
   custom.append(customBody);
 
   container.append(summary, outline, custom);

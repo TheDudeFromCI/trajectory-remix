@@ -1,24 +1,21 @@
-"""Read, check and save a project's flow.yaml for the visual Flow editor.
+"""Read, check and save a project's Flow for the visual Flow editor.
 
-The editor works on the same normalized Flow the interpreter freezes into a run. Saving
-is guarded by a revision (a digest of the file text) so two tabs cannot silently
-overwrite each other. Diagnostics name the node and field they refer to so the editor
+The flow lives in the project database (see flow_store). The editor works on the same
+normalized Flow the interpreter freezes into a run. Saving is guarded by a revision (a
+digest of the saved text) so two tabs cannot silently overwrite each other. Diagnostics name the node and field they refer to so the editor
 can mark the right box on the chart.
 """
 
-import hashlib
-import os
-import threading
 from importlib.resources import files
-from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
 from .adaptive_flow import Flow, FlowLoader
+from .flow_store import PACKAGED, FlowConflict, project_text, revision, write
 from .models import digest
 
-PACKAGED = "packaged"
+__all__ = ["FlowConflict", "check", "read_document", "render", "save"]
 KINDS = ("select", "event", "branch", "end")
 # Fields the interpreter reads for each kind; others are defaults and are not written.
 FIELDS = {
@@ -30,38 +27,17 @@ FIELDS = {
 DEFAULTS = dict(next=None, path="finished", equals=True, then=None, otherwise=None)
 TOP = ("version", "start", "max_steps", "max_events", "actor_instruction", "nodes")
 SELECTION_FIELDS = {"finished", "reason", "windows", "task"}
-_lock = threading.Lock()
 
 
-class FlowConflict(ValueError):
-    code = "flow_conflict"
-
-    def __init__(self, expected, current):
-        super().__init__("flow.yaml changed since it was loaded; reload before saving")
-        self.expected_revision, self.current_revision = expected, current
-
-
-def flow_path(store):
-    return Path(store.path).parent / "flow.yaml"
-
-
-def _revision(path):
-    if not path.is_file():
-        return PACKAGED
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def read_document(path):
+def read_document(store):
     """The flow as runs will load it, plus its raw text and revision."""
-    origin = "project" if path.is_file() else PACKAGED
-    text = path.read_text() if path.is_file() else packaged_text()
-    result = check(text=text)
+    saved = project_text(store)
+    text = packaged_text() if saved is None else saved
     return dict(
-        result,
+        check(text=text),
         text=text,
-        origin=origin,
-        revision=_revision(path),
-        path=str(path),
+        origin=PACKAGED if saved is None else "project",
+        revision=revision(saved),
     )
 
 
@@ -305,18 +281,11 @@ def render(flow):
     return text
 
 
-def save(path, expected_revision, flow=None, text=None):
-    """Write after checking the revision. Raw text is kept verbatim (comments survive)."""
+def save(store, expected_revision, flow=None, text=None):
+    """Store after checking the revision. Raw text is kept verbatim (comments survive)."""
     result = check(flow=flow, text=text)
     if not result["valid"]:
         first = next(p for p in result["diagnostics"] if p["severity"] == "error")
         raise ValueError("Flow not saved: " + first["message"])
-    body = text if text is not None else result["yaml"]
-    with _lock:
-        current = _revision(path)
-        if current != expected_revision:
-            raise FlowConflict(expected_revision, current)
-        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temporary.write_text(body)
-        os.replace(temporary, path)
-    return read_document(path)
+    write(store, text if text is not None else result["yaml"], expected_revision)
+    return read_document(store)

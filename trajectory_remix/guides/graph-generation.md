@@ -29,8 +29,8 @@ explicit filtered/rejected outcomes. Prepared local-model checks are described
 in `docs/GRAPH-LOCAL-LLM.md`; do not run live models or benchmarks without task
 authorization.
 
-Empty instructions use the shared adaptive `flow.yaml` policy beside the project
-SQLite file, falling back to the packaged policy. `instructions.flow_yaml` supplies
+Empty instructions use the project's adaptive flow, stored in the project database
+(edit it in the dashboard's Flow tab), falling back to the packaged policy. `instructions.flow_yaml` supplies
 per-run YAML; `instructions.plan` retains explicit finite recipes. The complete
 policy freezes before admission. Selection and event content are separate Generator
 requests. Branch/loop state checkpoints with accepted events; limits preserve an

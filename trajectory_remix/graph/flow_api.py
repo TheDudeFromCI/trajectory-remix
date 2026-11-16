@@ -24,8 +24,8 @@ def _one(body):
 
 
 def add_flow_routes(app, router, studio, sampler, transport):
-    path = flow_document.flow_path(studio.store)
-    walker = app.state.walkthrough = Walkthrough(studio.store, sampler, transport, path)
+    store = studio.store
+    walker = app.state.walkthrough = Walkthrough(store, sampler, transport)
 
     @app.exception_handler(flow_document.FlowConflict)
     async def conflict(request, error):
@@ -42,11 +42,11 @@ def add_flow_routes(app, router, studio, sampler, transport):
     @router.get("/generation/flow")
     def generation_flow():
         # flow and flow_hash keep their original meaning for older clients.
-        return flow_document.read_document(path)
+        return flow_document.read_document(store)
 
     @router.put("/generation/flow")
     def save_flow(body: FlowSave):
-        return flow_document.save(path, body.expected_revision, **_one(body))
+        return flow_document.save(store, body.expected_revision, **_one(body))
 
     @router.post("/generation/flow/check")
     def check_flow(body: FlowDraft):

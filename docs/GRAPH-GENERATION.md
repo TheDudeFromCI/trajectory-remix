@@ -73,21 +73,24 @@ Each selection, local transition, event and echo commits with its interpreter ch
 Resume uses the frozen policy and accepted state. Loops have step and event limits;
 exhaustion retains the partial source as **Unfinished**, without a fabricated pass.
 
-### Edit flow.yaml
+### Edit the flow
 
 The easiest way to edit the flow is the **Flow** tab in the dashboard: a flowchart you
-can rearrange and connect, which saves `flow.yaml` for you. Its **Walkthrough** mode
+can rearrange and connect, which saves the flow into the project database for you. Its **Walkthrough** mode
 steps through one generation so you can see each prompt and reply. See
 [Edit the flow chart](DASHBOARD.md#edit-the-flow-chart) and
 [Walk through a generation step by step](DASHBOARD.md#walk-through-a-generation-step-by-step).
 
-Place `flow.yaml` beside the project's SQLite database to override the packaged
-[`flow.yaml`](../trajectory_remix/graph/flow.yaml). It is read when a new run starts;
-editing it never changes active runs. Alternatively pass YAML text as
-`instructions.flow_yaml`. Invalid configuration is rejected before reserving attempts.
+A project's flow is stored in its SQLite database, in the one-row `graph_flow` table,
+as the YAML text you saved. With nothing saved, the packaged
+[`flow.yaml`](../trajectory_remix/graph/flow.yaml) applies. The flow is read when a new
+run starts; saving never changes active runs. A `flow.yaml` beside the database, from
+older versions, is imported once the first time the flow is read and then ignored.
+Alternatively pass YAML text as `instructions.flow_yaml` to override it for one run.
+Invalid configuration is rejected before reserving attempts.
 The complete normalized Flow, hash, proposal and tool catalogue freeze into the run.
 
-The file declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
+The YAML declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
 `actor_instruction` and a `nodes` map. Nodes support:
 
 | Kind | Action and transitions |
@@ -271,7 +274,7 @@ request body. Empty `instructions` now selects the adaptive YAML Flow. Existing
 Do not send both `plan` and `flow_yaml`.
 
 New authenticated `GET /api/v1/generation/flow` returns `{flow, flow_hash}` for the
-current on-disk policy (or packaged default). Editing is through `flow.yaml`, the Flow
+project's saved policy (or packaged default). Editing is through the Flow
 editor's save route (see [Flow editor and walkthrough API](#flow-editor-and-walkthrough-api))
 or a per-run `instructions.flow_yaml` string.
 MCP `generate_graphs` accepts the same instructions through its existing service.
@@ -292,9 +295,9 @@ as the rest of `/api/v1`.
 
 | Route | Action |
 | --- | --- |
-| `GET /generation/flow` | `{flow, flow_hash}` as before, plus `text` (the file or packaged YAML), `origin` (`project` or `packaged`), `revision`, `path`, `valid` and `diagnostics`. |
+| `GET /generation/flow` | `{flow, flow_hash}` as before, plus `text` (the saved or packaged YAML), `origin` (`project` or `packaged`), `revision`, `valid` and `diagnostics`. |
 | `POST /generation/flow/check` | `{flow}` or `{yaml}`. Returns `valid`, `diagnostics` (each with `severity`, `code`, `message`, and `node`/`field` when it has a location), the normalized `flow`, `flow_hash` and rendered `yaml`. Never raises for a bad draft. |
-| `PUT /generation/flow` | `{flow}` or `{yaml}` with `expected_revision` from the last read. Writes `flow.yaml` atomically. `yaml` text is written verbatim; `flow` is rendered with only the fields each node kind uses. A stale revision returns 409 `flow_conflict` with `current_revision`; errors return 422 and leave the file untouched. |
+| `PUT /generation/flow` | `{flow}` or `{yaml}` with `expected_revision` from the last read. Stores the flow in the project database in one transaction. `yaml` text is written verbatim; `flow` is rendered with only the fields each node kind uses. A stale revision returns 409 `flow_conflict` with `current_revision`; errors return 422 and leave the saved flow untouched. |
 | `POST /walkthrough/start` | `{seed, overrides, flow?, flow_yaml?}`. Samples one proposal (not stored) and freezes a plan exactly as a run does. Returns `{state, next}`. |
 | `POST /walkthrough/step` | `{state, mode: "call" \| "manual", response?}`. Runs one transition and returns `{state, trace, next}`. |
 | `POST /walkthrough/describe` | `{...state}`. Returns `next` for a state without running it. |

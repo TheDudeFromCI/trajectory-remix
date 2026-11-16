@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import jsonschema
 
-from . import adaptive_driver, adaptive_flow, reviews
+from . import adaptive_driver, adaptive_flow, flow_store, reviews
 from .commands import merge_patch
 from .flow import append_event, causal_view, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
@@ -45,9 +45,11 @@ class GenerationService:
         if "_flow_snapshot" in instructions:
             raise ValueError("_flow_snapshot is reserved")
         if "plan" not in instructions:
-            instructions["_flow_snapshot"] = adaptive_flow.load_flow(
-                self.store.path.parent / "flow.yaml", instructions.get("flow_yaml")
-            )
+            # A per-run flow_yaml overrides the project flow stored in the database.
+            text = instructions.get("flow_yaml")
+            if "flow_yaml" not in instructions:
+                text = flow_store.project_text(self.store)
+            instructions["_flow_snapshot"] = adaptive_flow.load_flow(text=text)
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
         plans = {p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals}

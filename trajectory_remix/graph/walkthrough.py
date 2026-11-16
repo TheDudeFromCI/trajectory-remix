@@ -22,6 +22,7 @@ from pydantic import Field
 from . import adaptive_driver
 from . import adaptive_flow as interpreter
 from .flow import append_event, chat_echo
+from .flow_store import project_text
 from .models import DTO, GraphSource, JsonValue
 from .provider import context_budget, response_contract
 from .sampling import SamplerService
@@ -57,13 +58,13 @@ class WalkStep(DTO):
     response: JsonValue = None
 
 
-def _snapshot(path, flow, text):
+def _snapshot(store, flow, text):
     from .flow_document import check
 
     if flow is not None and text is not None:
         raise ValueError("Send flow or flow_yaml, not both")
     if flow is None:
-        return interpreter.load_flow(path, text)
+        return interpreter.load_flow(text=project_text(store) if text is None else text)
     result = check(flow=flow)
     if not result["valid"]:
         first = next(p for p in result["diagnostics"] if p["severity"] == "error")
@@ -76,19 +77,14 @@ def _errors(source, settings):
 
 
 class Walkthrough:
-    def __init__(self, store, sampler, transport, flow_path):
-        self.store, self.sampler, self.transport, self.flow_path = (
-            store,
-            sampler,
-            transport,
-            flow_path,
-        )
+    def __init__(self, store, sampler, transport):
+        self.store, self.sampler, self.transport = store, sampler, transport
         self.lock = asyncio.Lock()  # At most one walkthrough model call at a time.
 
     def start(self, seed=None, overrides=None, flow=None, flow_yaml=None):
         frozen = self.sampler.editor()
         settings = self.store.settings(frozen["settings_revision"]).settings
-        snapshot = _snapshot(self.flow_path, flow, flow_yaml)
+        snapshot = _snapshot(self.store, flow, flow_yaml)
         proposal = self.sampler.propose(
             seed=seed, overrides=overrides or {}, frozen=frozen, persist=False
         )

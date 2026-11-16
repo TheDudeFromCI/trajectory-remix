@@ -52,5 +52,5 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   if (process.env.UPDATE_SCREENSHOTS) await page.screenshot({path: process.env.UPDATE_SCREENSHOTS + '/flow-compact.png'});
   assert.deepEqual(errors, []);
-  console.log('Flow tab: walkthrough to finish, step history, save trajectory and flow.yaml edit passed.');
+  console.log('Flow tab: walkthrough to finish, step history, save trajectory and project flow edit passed.');
 } finally { await browser.close(); }
