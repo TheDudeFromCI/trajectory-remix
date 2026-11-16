@@ -84,6 +84,7 @@ async def test_native_and_arbitrary_output_contracts(monkeypatch, operation, sch
     assert (await OpenAITransport()(ticket))["output"] == {"content": "complete"}
     (body,) = captured
     assert body["model"] == "same-model" and body["stream"] is False
+    assert body["max_tokens"] == 4096
     assert body["response_format"]["type"] == mode
     assert messages == [{"role": "user", "content": "visible actor context"}]
     if mode == "json_object":

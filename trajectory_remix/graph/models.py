@@ -261,7 +261,7 @@ class Endpoint(DTO):
     retries: Annotated[int, Field(ge=0)] = 2
 
     context_window_tokens: Annotated[int, Field(ge=1024)] = 16384
-    max_output_tokens: Annotated[int, Field(ge=1)] = 2048
+    max_output_tokens: Annotated[int, Field(ge=1)] = 4096
 
     @model_validator(mode="after")
     def context_budget(self):

@@ -35,6 +35,8 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
     )
     budget = context_budget(payload, wire, messages)
     assert budget["input_bytes"] < budget["input_ceiling"]
+    assert budget["max_output_tokens"] == 4096
+    assert budget["input_ceiling"] == 11776
     assert len(json.dumps(source.metadata)) > 60000  # Storage unchanged.
 
 

@@ -269,7 +269,7 @@ including replacement and closure effects. These are references to the source, n
 summaries that can introduce new facts.
 
 Endpoint settings now accept `context_window_tokens` (default **16384**) and
-`max_output_tokens` (default **2048**). The transport sends the latter as `max_tokens`.
+`max_output_tokens` (default **4096**). The transport sends the latter as `max_tokens`.
 Configure these through endpoint JSON until frontend forms expose them. This is an
 additive endpoint-settings API change; the request and source schemas are unchanged.
 
@@ -288,3 +288,8 @@ converted into a quality failure. Frozen runs keep their endpoint settings: star
 new run to apply changed budgets or the narrower prompt recipe. Long episodes still
 need explicit context management; this change removes accidental duplication rather
 than claiming unlimited history fits a small model.
+
+The 4096 output default leaves a conservative input allowance of 11776 bytes for
+a 16384-token endpoint, after the 512-token framing reserve. Existing endpoints
+with an explicit `max_output_tokens: 2048` retain that override: change it to 4096
+in Project Settings and start a new run. Already-frozen jobs keep their old budget.
