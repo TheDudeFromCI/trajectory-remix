@@ -260,6 +260,15 @@ class Endpoint(DTO):
     concurrency: Annotated[int, Field(ge=1)] = 1
     retries: Annotated[int, Field(ge=0)] = 2
 
+    context_window_tokens: Annotated[int, Field(ge=1024)] = 16384
+    max_output_tokens: Annotated[int, Field(ge=1)] = 2048
+
+    @model_validator(mode="after")
+    def context_budget(self):
+        if self.max_output_tokens + 512 >= self.context_window_tokens:
+            raise ValueError("Reserve input space beyond output tokens and framing")
+        return self
+
 
 class SplitRatios(DTO):
     train: Weight = 0.8
