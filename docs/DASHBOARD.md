@@ -15,7 +15,7 @@ with the tabs at the top and reveal detail with tabs, menus and tooltips.
 | Area | What it does |
 | --- | --- |
 | **View tabs** | **Editor**, **Jobs**, **Metrics** and **Sampler**. A badge on Jobs counts running and paused jobs. |
-| **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), **Settings**, **Review & Repair** and **Generate**. |
+| **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings**, **Review & Repair** and **Generate**. |
 | **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. |
 
 Hover anything with an **ⓘ** for an explanation. Units, reasons and definitions live in
@@ -26,13 +26,28 @@ tooltips rather than in extra text on screen.
 | Panel | What it does |
 | --- | --- |
 | **Dataset** (left) | Search and filter trajectories by text, stage, split or tool. Each row shows a short ID, its stage and split, and a lock if a job owns it. Hover a row for the full ID. |
-| **Trajectory bar** (top) | The selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload, Delete and the panel toggles. |
-| **Windows** (centre) | One card per context window, as it looks at the current timeline position. Control tokens show as small labelled blocks. |
+| **Trajectory bar** (top) | The selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. |
+| **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
 | **Event editor** (right) | Tabs for the selected event: **Content**, **Links** (dependencies), **Options** (closing, masks, delivery, framing), **Windows**, **Problems** and **JSON**. |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
+
+#### Reading windows
+
+The readable view only changes how a window looks. The tokens, masks and training data
+are untouched, and **Raw** on any card switches back to the exact token stream.
+
+| You see | What it is |
+| --- | --- |
+| **Chat bubbles** | Messages in a `chatroom` window. The agent's messages sit on the right; each other speaker keeps one colour. |
+| **Formatted JSON** | Tool calls, tool results and other JSON, indented and colour-coded even while it is still streaming. |
+| **Context** line | The window's header, such as its purpose and reasoning effort. |
+| **Streaming** tag, dashed border | A message, call or result whose end marker hasn't arrived at this position. |
+| **NOOP ×N** | In Tick history, an open window the agent can write to predicts NOOP on every tick it has nothing to say. NOOP is a training label ("wait"), not window content: it never enters the context. A run of them is shown as one chip with a count. |
+
+![Readable windows: chat bubbles and formatted tool JSON](images/dashboard/windows.png)
 
 ### The Jobs view
 
@@ -65,16 +80,17 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
    including credentials, are in [Project settings](PROJECT-SETTINGS.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
    standard flow produces a chatroom reply. Removing it is your choice.
-3. **Open Generate.** The left side shows which endpoint fills each role and any pins
-   from the Sampler. The right side holds automatic review and repair options and the
-   Core and Critical checklists. Click **Save review settings** if you change them.
+3. **Open Generate.** The left side shows which endpoint fills each role, any pins from
+   the Sampler, and the **Flow** that will build the trajectories. The right side holds
+   automatic review and repair options and the Core and Critical checklists. Click
+   **Save review settings** if you change them.
 4. **Tune the sampler (optional).** **Open Sampler** jumps to the weights and pins.
 5. **Start.** Set the number of attempts and a starting seed, then click
    **Start generation**. The new job opens in the Jobs view.
 
 ![The Generate dialog](images/dashboard/generate.png)
 
-A run **freezes** its settings, matrix and pins when it starts, so later edits only
+A run **freezes** its settings, matrix, pins and flow when it starts, so later edits only
 affect future runs. Generated trajectories are never automatically Ready.
 
 ## Tutorials
@@ -130,6 +146,48 @@ Broken drafts always save. Problems show up as you edit:
    window fill tick by tick.
 
 ![Tick history](images/graph-studio-ticks.png)
+
+### Read a conversation or a tool call
+
+1. Scrub the timeline to the position you want.
+2. Chatroom windows show the conversation as bubbles; tool windows show calls and results
+   as formatted JSON.
+3. Click the **expand** button (two outward arrows) on a window card to read it in a large
+   panel. The panel follows the timeline, and its own arrows step backward and forward.
+4. Click **shrink** (or press **Esc**) to return to the grid.
+5. Need the exact tokens? Click **Raw** on the card. Click it again for the readable view.
+
+![An expanded chatroom window](images/dashboard/popout.png)
+
+### Rearrange the editor
+
+Open the **View** menu and choose **Hide dataset panel**, **Hide timeline panel** or
+**Hide event panel**; the same items read **Show …** to bring a panel back, and
+**Show all panels** restores everything. The windows grow into the freed space. Your
+layout is remembered in this browser.
+
+### Choose how trajectories are built
+
+On a backend with **adaptive flows**, the Generate dialog's **Flow** section shows the
+policy that builds each trajectory: its version, a hash, its limits and an outline of its
+nodes (hover a node for its instruction).
+
+![The Flow outline in the Generate dialog](images/dashboard/flow.png)
+
+- **For every future run**, edit `flow.yaml` beside the project database. The studio has
+  no file editor for it; the next run picks it up. See
+  [Event generation](GRAPH-GENERATION.md).
+- **For one run**, open **Custom flow for this run**. It starts as the current flow written
+  as YAML. Edit it, make sure **Use this YAML for the next run only** is ticked, and start
+  the run. Invalid YAML is rejected before any attempt is reserved, and `flow.yaml` on disk
+  is not changed.
+
+Trajectories finished by the flow show a **Flow finished** tag in the trajectory bar. Hover
+it for the generation controller's own finish explanation. It describes intent, not
+measured coverage.
+
+On an older backend, the section says the server uses its built-in recipe and runs
+behave as before.
 
 ### Import and export
 
@@ -247,6 +305,8 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |
 | `jobs-view.js` | `JobsView`: the job list and detail panel (`StudioUI.dialogs` maps job IDs to detail panels). |
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
+| `window-render.js` | Readable window view: header fields, chat bubbles, tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
+| `flow-panel.js` | The Generate dialog's Flow section: `GET /generation/flow`, the node outline, and a lossless YAML writer for per-run `instructions.flow_yaml`. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use

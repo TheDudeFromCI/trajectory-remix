@@ -10,13 +10,16 @@ npm ci --prefix tests
 python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
+node tests/window_render_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 ```
 
 Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations
-when nothing changed, which is what keeps the dashboard from flickering. Sampler and
+when nothing changed, which is what keeps the dashboard from flickering. `window_render_frontend.mjs`
+covers the readable window view (NOOP folding, chat bubbles, JSON formatting) and checks
+that the Flow YAML writer folds long text losslessly. Sampler and
 generation browser checks use optional Node `playwright` and Chromium (`CHROMIUM_PATH`, default `/usr/bin/chromium`).
 Browser screenshots are opt-in with `UPDATE_SCREENSHOTS=1`; ordinary verification
 does not rewrite documentation images. No frontend runtime packages are required.

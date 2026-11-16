@@ -53,6 +53,12 @@ timer and discard stale responses, so an old result can't replace a newer draft.
 server caches up to 16 entries / 8 MiB, and the browser reuses up to four responses. The
 export profile never depends on the preview preference.
 
+Window cards render the previewed tokens in a readable view (chat bubbles, formatted JSON,
+one `NOOP ×N` chip per run of idle predictions) or, with **Raw**, as the exact token
+stream. Both views read the same tokens; neither changes the source or compiled output.
+NOOP rows are model emissions, never context, so they don't add to a window's text. See
+[Reading windows](DASHBOARD.md#reading-windows).
+
 ## Import, export and jobs
 
 - **Import** accepts graph JSON, an array, or JSONL, up to 40 MB per request. It runs as
