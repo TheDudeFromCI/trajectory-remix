@@ -173,7 +173,10 @@ def service(tmp_path, fake=None, **opts):
 
 
 async def finish(gen, job):
-    await asyncio.wait_for(gen.run(gen.jobs, job), 5)
+    # This deadline catches hangs; it is not a performance acceptance threshold.
+    # Adaptive episodes make many durable transitions and deliberately poll
+    # between them. Shared CI runners can exceed five seconds (notably 3.13).
+    await asyncio.wait_for(gen.run(gen.jobs, job), 30)
     assert gen.jobs.inspect(job)["state"] in {"completed", "paused", "cancelled"}
 
 
