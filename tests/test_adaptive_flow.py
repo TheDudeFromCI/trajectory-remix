@@ -275,3 +275,17 @@ async def test_yaml_custom_branch_extends_event_authoring(tmp_path):
 def test_duplicate_yaml_keys_are_rejected():
     with pytest.raises(ValueError, match="Duplicate"):
         load_flow(text="start: a\nstart: b")
+
+
+@pytest.mark.asyncio
+async def test_browser_fake_supports_default_adaptive_generation(tmp_path):
+    # The browser launchers import this same provider. Rejecting flow_select used
+    # to pause their jobs before any event and time out the live-update check.
+    gen, fake = service(tmp_path, fast=False, critical=False)
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+    assert gen.jobs.inspect(job)["state"] == "completed"
+    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
+    assert source.metadata["stage"] == 0
+    assert "reply:echo" in source.events
+    assert any(call.payload["operation"] == "flow_select" for call in fake.calls)
