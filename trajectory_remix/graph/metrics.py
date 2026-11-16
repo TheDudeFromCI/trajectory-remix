@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from .bulk import BulkService
+from .derived_labels import DerivedLabelCounts
 from .sampling import CALCULATORS, original
 
 
@@ -119,7 +120,7 @@ class MetricService:
         where, args = BulkService._where(query or {})
         unavailable = dict.fromkeys(c["definitions"], 0)
         stale = dict.fromkeys(c["definitions"], 0)
-        total = 0
+        total, derived = 0, DerivedLabelCounts()
         with self.store.connect() as db:
             db.execute("BEGIN")
 
@@ -149,6 +150,7 @@ class MetricService:
                     proposal = r.source.metadata.get("proposal", {}).get("proposal")
                     if not proposal:
                         continue
+                    derived.add(proposal)
                     proposal = deepcopy(proposal)
                     proposal["status"] = "accepted" if accepted else "proposed"
                     proposal["metrics"]["actual"] = actual
@@ -158,6 +160,7 @@ class MetricService:
         return dict(
             total=total,
             proposal_coverage=report,
+            derived_labels=derived.report(),
             unavailable=unavailable,
             stale=stale,
             definitions=c["definitions"],

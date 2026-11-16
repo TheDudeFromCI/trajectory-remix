@@ -142,8 +142,8 @@ export function renderGenerationSettings(container, initial, options = {}) {
     let draft = copy(initial); const notify = options.onChange;
     return renderGenerationSettings(container, draft, {...options, getSettings: () => draft, onChange: value => { draft = copy(value); notify?.(copy(value)); }});
   }
-  const {current, write, input, status, error} = editor(container, initial, options);
-  const render = () => renderGenerationSettings(container, current(), options.getSettings ? options : {...options, getSettings: current});
+  const {current, write, input, status, error, report} = editor(container, initial, options);
+  const render = notice => renderGenerationSettings(container, current(), {...(options.getSettings ? options : {...options, getSettings: current}), notice});
   const column = name => node('div', undefined, `review-column review-column-${name}`);
   const settingsColumn = column('settings'), coreColumn = column('core'), criticalColumn = column('critical');
   container.classList.add('review-columns'); container.append(settingsColumn, coreColumn, criticalColumn);
@@ -174,6 +174,16 @@ export function renderGenerationSettings(container, initial, options = {}) {
       write(d => { d.review_checklists ||= {}; d.review_checklists[group] ||= {}; d.review_checklists[group][key] = {text:'New criterion', allow_not_applicable:false}; }); render();
     })); target.append(section);
   }
+  if (options.loadDefaultChecklists) {
+    const reset = node('div', undefined, 'settings-limits'); reset.append(node('h4', 'Review checklists'));
+    reset.append(button('Reset review checklists to defaults', async () => {
+      let defaults;
+      try { defaults = await options.loadDefaultChecklists(); } catch (cause) { return error('Could not load the default checklists: ' + cause.message); }
+      if (!confirm('Replace the Core and Critical review checklists with the defaults? Your added, edited and removed criteria in this draft will be lost. Nothing is saved until you choose Save settings.')) return;
+      write(d => { d.review_checklists = copy(defaults); }); render('Review checklists reset to the defaults. Choose Save settings to keep them.');
+    }), node('p', 'Replaces both lists with the packaged defaults. Saving changed checklists marks affected sign-offs stale.', 'settings-help')); settingsColumn.append(reset);
+  }
   settingsColumn.append(status);
+  if (options.notice) report(options.notice);
   if (options.footer) settingsColumn.append(options.footer);
 }

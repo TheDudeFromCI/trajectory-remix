@@ -2,8 +2,8 @@
 
 **Settings** (in the header) holds the things shared by everyone using a project: model
 endpoints and roles, tokenizer profiles, tools and defaults, on the **Models & defaults**,
-**Tools**, **Storage** and **Advanced JSON** tabs. The **Generate** dialog holds review and
-repair options and the review checklists, next to the controls for starting a run.
+**Tools**, **Storage** and **Advanced JSON** tabs. The **Review Settings** tab holds review and
+repair options and the review checklists.
 
 ![Project settings](images/dashboard/settings.png)
 
@@ -72,10 +72,43 @@ custom schemas. Removing a tool keeps the existing calls that use it. See
 
 ## Review criteria
 
-In the **Generate** dialog, each criterion is a line of text with an optional
+In the **Review Settings** tab, each criterion is a line of text with an optional
 **not-applicable** allowance. Add or remove criteria in the **Core** and **Critical**
 lists. Fast review checks Core, and Critical review checks Core plus Critical.
 
 Changing a checklist marks affected sign-offs **stale**. Their stages are kept, and you
 re-review manually. Form edits preserve unrelated fields, and the advanced project
 JSON remains for unusual settings.
+
+### Default criteria
+
+A new project starts with these. The coordinator items are the studio's default standard
+for the multi-agent coordinator the data is written for.
+
+| List | Criterion | What the reviewer checks |
+| --- | --- | --- |
+| Core | `objective_alignment`, `causal_evidence`, `actor_and_supervision`, `world_consistency`, `coherent_reasoning`, `truthful_episode_outcome` | The general quality of the episode: objective, causal evidence, supervision, consistency, reasoning and honest outcomes. |
+| Core | `coordinator_role` | The agent coordinates specialized work rather than personally doing substantial implementation or research, and delegation fits the task size. |
+| Core | `authorization_respected` | Consequential actions stay within the user's stated authority or follow an observed approval; otherwise the agent asks or escalates. |
+| Critical | `decision_quality`, `long_horizon_continuity`, `exploration_and_recovery`, `training_value` | Decisions, continuity, recovery and teaching value. |
+| Critical | `delegation_discipline` | No repeated delegation of an unchanged failed task, no recursive or excessive agent creation, no unbounded planning, and budgets respected. |
+| Critical | `strategic_investment_judgment` | Automation or infrastructure decisions weigh reuse, savings, build and maintenance cost and uncertainty from visible evidence, and are revisited when things change. Not-applicable is allowed, because many episodes have no such decision. |
+| Critical | `execution_progress` | When execution is available, the episode advances real work, not only plans. |
+
+### Reset to the defaults
+
+Press **Reset review checklists to defaults** in the Review Settings tab to replace both
+lists with the packaged criteria. A confirmation asks first, because your added,
+edited and removed criteria in the draft are lost. Declining changes nothing. The
+reset stays in the draft until you press **Save review settings**, and saving marks affected
+sign-offs stale like any other checklist change.
+
+### Projects that already saved checklists
+
+Only new projects get new defaults. A project that already saved its checklists keeps
+them exactly as they are, so existing sign-offs do not become stale on upgrade. To adopt
+the coordinator criteria in an existing project, either press **Reset review checklists
+to defaults** (this replaces your custom criteria too), or add the criteria you want by
+hand with **Add core criterion** and **Add critical criterion**, using the IDs and
+wording in the table above. There is no merge action that adds only the missing
+recommended criteria.

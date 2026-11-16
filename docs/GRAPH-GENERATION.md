@@ -57,10 +57,34 @@ phase has its own selector prompt, and each kind of event has its own writer pro
 
 | Phase | Nodes | What happens |
 | --- | --- | --- |
-| Set the scene | `set_scene` → `write_opening` | Define the windows and the concrete world (persona, artifacts, budget, acceptance criteria, hidden facts), then write the opening request or trigger. |
-| First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans. A direct reply or clarifying question takes the general route instead. |
-| Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. |
-| Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives. If anything is missing, the verifier picks the event that fixes it and work continues. |
+| Set the scene | `set_scene` → `write_opening` | Define the windows and the concrete world (persona, artifacts, a roster with observable capabilities, costs and context limits, budget, acceptance criteria, what the user has and has not authorized, hidden facts), then write the opening request or trigger. |
+| First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans, delegating specialist work and weighing any automation choice. A direct reply, a clarifying question or an approval request takes the general route instead. |
+| Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. The agent's own events are planning, delegation, review and communication; specialist output arrives as tool results or reports. |
+| Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives and the coordinator checks below. If anything is missing or violated, the verifier picks the event that fixes it and work continues. |
+
+### Coordinator behavior in the default flow
+
+Trajectory Remix authors data for a multi-agent coordinator, so the packaged flow treats
+that role as the default standard. It never mentions voice or personality; that stays
+opt-in.
+
+| Topic | What the prompts ask for |
+| --- | --- |
+| Role | The agent plans, delegates, verifies and keeps continuity. When a suitable agent or tool is visible, it does not personally write production code, run extensive research or do bulk repetitive work. Delegation is proportional: a small job needs no team. |
+| Strategic investment | When work recurs, demand is uncertain, or the proposal has an automation decision, the reasoning compares build cost, expected frequency, savings per use, maintenance, opportunity cost, reliability, uncertainty and reuse from visible evidence, then invests, defers or declines, and revisits the choice when new information changes the return. Neither automation nor manual delegation is preferred by default (a script suits 1,000 files, a cheap agent suits five). |
+| Authorization | The scene defines what the user has and has not authorized. A consequential step outside that authority needs an approval request and a wait, not the action. |
+| Prohibited patterns | Re-delegating an unchanged failed task, creating agents recursively or excessively, planning without moving to execution, and ignoring visible budgets. |
+
+The authorization limits live in `task.world`, which only external authors see. The
+agent learns them from visible evidence (the user's words, a policy document, a tool
+contract), so the actor prompt stays generic. The `verify` step audits all of the above
+and sends a violation back for a fix instead of passing it.
+
+These defaults apply to projects with no saved flow. A project that already saved its
+own flow keeps it; copy what you want from the packaged
+[`flow.yaml`](../trajectory_remix/graph/flow.yaml) in the Flow tab. Tests use scripted
+providers, so they show the structure is delivered, not that the prompts improve live
+model output.
 
 Routing is a chain of branches on `task.envelope.kind` (`is_tool_call`,
 `is_tool_result`, `is_chat`, `is_external`) that sends each event to its writer:
