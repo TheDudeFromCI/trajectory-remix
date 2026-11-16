@@ -13,7 +13,13 @@ REQUIRED = [
     "static/graph.js",
     "static/graph.css",
     "static/shell.js",
+    "static/views.js",
+    "static/ui-kit.js",
+    "static/jobs-view.js",
+    "static/metrics-view.js",
     "static/style.css",
+    "static/ibm-plex-sans-latin-400-normal.woff2",
+    "static/fonts-LICENSE.txt",
     "Skill.md",
 ]
 

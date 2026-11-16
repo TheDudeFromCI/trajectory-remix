@@ -8,11 +8,12 @@ const response = await fetch(base), html = await response.text();
 const window = new Window({url: base});
 globalThis.window = window;
 window.document.write(html.replace(/<script[^>]*>.*?<\/script>/gs, ''));
-for (const key of ['document', 'localStorage', 'HTMLElement', 'Event', 'MouseEvent']) globalThis[key] = window[key];
+for (const key of ['document', 'localStorage', 'HTMLElement', 'Event', 'MouseEvent', 'CustomEvent']) globalThis[key] = window[key];
 const nativeFetch = globalThis.fetch;
 const paths = [];
 globalThis.fetch = (path, init) => { paths.push(String(path)); return nativeFetch(new URL(path, base), init); };
-const code = (await fs.readFile(new URL('../trajectory_remix/static/graph.js', import.meta.url), 'utf8')).replace("'./project-settings.js'", JSON.stringify(new URL('../trajectory_remix/static/project-settings.js', import.meta.url).href));
+// graph.js is loaded from a data: URL, so resolve its relative module imports to files.
+const code = (await fs.readFile(new URL('../trajectory_remix/static/graph.js', import.meta.url), 'utf8')).replace(/'\.\/([\w-]+\.js)'/g, (_, name) => JSON.stringify(new URL('../trajectory_remix/static/' + name, import.meta.url).href));
 const module = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const ui = globalThis.graphStudio, $ = id => document.getElementById(id);
 const until = async predicate => { for(let i=0;i<300;i++){ if(await predicate()) return; await new Promise(r=>setTimeout(r,10)); } throw new Error('DOM state did not settle: ' + $('status').textContent); };
@@ -89,7 +90,7 @@ const j2=await module.api('/exports','POST',{options:{compiled:false,minimum_sta
 await ui.inspectJob(j1.job_id); await ui.inspectJob(j2.job_id); await ui.pollJobs();
 assert.equal(ui.dialogs.size,2); assert.equal(ui.id,selected); assert.equal(ui.event,selectedEvent); assert.equal($('event-content').value,'unsaved');
 // Reuse the existing metrics panel and frozen-search calculation job.
-$('metrics-button').click(); await until(()=>$('metrics-dialog').open);
+$('metrics-button').click(); await until(()=>!$('metrics-view').hidden && $('metrics-values').textContent);
 assert.ok($('metrics-values').textContent.includes('proposal_coverage'));
 assert.ok($('metrics-values').textContent.includes('unavailable'));
 $('metrics-calculate').click(); await until(()=>ui.dialogs.size===3);
@@ -115,6 +116,8 @@ const ack = await module.api('/trajectories', 'POST', {format:'kidra-trajectory-
  windows:{a:{purpose:'reasoning',agent_writable:true},b:{purpose:'tool',agent_writable:true}},
  events:{a:{kind:'agent_text',window:'a',content:'open'},b:{kind:'agent_text',window:'b',content:'open'}}});
 await ui.select(ack.source.id);
+// Switching to a source with other windows must not leave a stale dirty badge.
+assert.equal(ui.isDirty(),false); assert.match($('dirty-indicator').textContent,/^Saved/);
 assert.equal(ui.diagnostics.filter(d=>d.code==='open_window').length,2);
 $('window-id').value='a'; $('window-id').dispatchEvent(new Event('change'));
 assert.equal($('window-left-open').checked,false);

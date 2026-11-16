@@ -53,7 +53,7 @@ try {
   for (const viewport of [{width:1440,height:1000},{width:1024,height:768}]) {
     await page.setViewportSize(viewport);
     await page.evaluate(()=>[...document.querySelectorAll('dialog[open]')].forEach(d=>d.close()));
-    await page.locator('summary').filter({hasText:/^Windows$/}).click();
+    await page.getByRole('tab',{name:'Windows',exact:true}).click();
     await page.locator('#window-id').fill(openWindow); await page.locator('#window-id').dispatchEvent('change');
     const acknowledgment=page.getByLabel('Intentionally left open (acknowledge warning)',{exact:true});
     await acknowledgment.scrollIntoViewIfNeeded();
@@ -64,7 +64,6 @@ try {
     await page.waitForFunction(id=>graphStudio.record.source.windows[id]?.intentionally_left_open===true && !graphStudio.isDirty(),openWindow);
     assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source.events,reviewed.source.events);
     assert.equal(await page.evaluate(id=>graphStudio.diagnostics.some(d=>d.code==='open_window'&&graphStudio.draft.events[d.event_id].window===id),openWindow),false);
-    await page.evaluate(()=>document.querySelector('#window-id').closest('details').open=false);
   }
   assert.deepEqual(errors,[]);
   console.log('Generation pins, saved weights, frozen run and Review & Repair browser checks passed');
