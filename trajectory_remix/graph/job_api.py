@@ -143,6 +143,12 @@ def job_router(jobs, bulk, artifacts, worker):
             worker.kick(job)
         return result
 
+    @router.delete("/jobs/{job}")
+    def clear(job: str):
+        from .job_cleanup import clear_job
+
+        return clear_job(jobs, artifacts.artifacts, job)
+
     @router.post("/jobs/{job}/detach/{trajectory}")
     def detach(job: str, trajectory: str):
         jobs.detach(job, trajectory)
