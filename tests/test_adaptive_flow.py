@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from flow_fixtures import MINIMAL_FLOW
 from test_graph_generation import finish, service
 
 from trajectory_remix.graph.adaptive_flow import accept_selection, branch, load_flow
@@ -39,7 +40,8 @@ class Episode:
         p = ticket.payload
         self.calls.append(copy.deepcopy(p))
         if p["operation"] == "flow_select":
-            body = self.choices.pop(0)
+            # The final finish is repeated when a verification step asks again.
+            body = self.choices.pop(0) if len(self.choices) > 1 else self.choices[0]
         else:
             body = {"content": self.contents[p["task"]["id"]]}
         return {"output": body, "model": "scripted-offline"}
@@ -113,7 +115,34 @@ async def test_default_adapts_with_parallel_results_join_and_causal_actor_contex
         }:
             prompt = json.loads(p["messages"][1]["content"])
             assert "proposal" not in prompt and "world" not in prompt
-    assert len([p for p in fake.calls if p["operation"] == "flow_select"]) == 9
+    # Eight events, one proposed finish and one confirmed finish after verification.
+    selects = [p for p in fake.calls if p["operation"] == "flow_select"]
+    assert len(selects) == 10
+    assert selects[-1]["messages"][0]["content"] != selects[-2]["messages"][0]["content"]
+    assert "Audit the committed events" in selects[-1]["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_default_flow_routes_each_event_kind_to_its_own_writer(tmp_path):
+    fake = episode()
+    gen, _ = service(tmp_path, fake, fast=False)
+    await finish(gen, gen.start([{"seed": 137}], {}))
+    flow = load_flow()["flow"]["nodes"]
+    writers = {
+        "opening": "write_opening",
+        "think": "write_plan",
+        "assign-a": "write_tool_call",
+        "result-a": "write_tool_result",
+        "integrate": "write_thought",
+    }
+    events = {p["task"]["id"]: p for p in fake.calls if p["operation"] == "event"}
+    for ident, node in writers.items():
+        assert events[ident]["task"]["instruction"].endswith(flow[node]["instruction"])
+    # Each phase has its own selector prompt.
+    systems = [p["messages"][0]["content"] for p in fake.calls if p["operation"] == "flow_select"]
+    assert systems[0] == flow["set_scene"]["instruction"]
+    assert systems[1] == flow["first_move"]["instruction"]
+    assert systems[2] == flow["work"]["instruction"]
 
 
 @pytest.mark.asyncio
@@ -159,7 +188,7 @@ def test_yaml_api_and_invalid_configuration_no_job(tmp_path):
         client.headers["X-Remix-Token"] = app.state.csrf
         response = client.get("/api/v1/generation/flow")
         assert response.status_code == 200
-        assert response.json()["flow"]["nodes"]["choose"]["kind"] == "select"
+        assert response.json()["flow"]["nodes"]["set_scene"]["kind"] == "select"
     with pytest.raises(ValueError):
         gen.start([{"seed": 137}], {"flow_yaml": "nodes: ["})
     assert gen.jobs.listing() == []
@@ -254,7 +283,7 @@ def test_invalid_flow_options_do_not_reserve_attempts(tmp_path, instructions):
 async def test_yaml_custom_branch_extends_event_authoring(tmp_path):
     fake = episode()
     gen, _ = service(tmp_path, fake, fast=False)
-    config = load_flow()["flow"]
+    config = copy.deepcopy(MINIMAL_FLOW)
     config["nodes"]["finished"]["otherwise"] = "is_call"
     config["nodes"]["is_call"] = dict(
         kind="branch", path="task.envelope.kind", equals="tool_call", then="call", otherwise="write"

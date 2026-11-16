@@ -1,8 +1,11 @@
 """Flow editor document API: located diagnostics, lossless YAML and guarded saves."""
 
+import copy
+
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from flow_fixtures import MINIMAL_FLOW
 from test_graph_generation import service
 
 from trajectory_remix.graph import flow_document
@@ -36,30 +39,30 @@ def test_packaged_flow_round_trips_through_rendered_yaml():
 )
 def test_rendered_strings_are_lossless(text):
     flow = load_flow()["flow"]
-    flow["nodes"]["choose"]["instruction"] = text
+    flow["nodes"]["set_scene"]["instruction"] = text
     rendered = flow_document.render(flow)
-    assert yaml.safe_load(rendered)["nodes"]["choose"]["instruction"] == text
+    assert yaml.safe_load(rendered)["nodes"]["set_scene"]["instruction"] == text
 
 
 def test_get_reports_origin_and_revision(client):
     packaged = client.get("/api/v1/generation/flow").json()
     assert packaged["origin"] == "packaged" and packaged["revision"] == "packaged"
-    assert packaged["flow"]["start"] == "choose" and packaged["text"].startswith("version")
+    assert packaged["flow"]["start"] == "set_scene" and packaged["text"].startswith("version")
 
 
 def test_check_locates_problems_on_nodes(client):
     flow = client.get("/api/v1/generation/flow").json()["flow"]
-    flow["nodes"]["write"]["next"] = "nowhere"
+    flow["nodes"]["write_thought"]["next"] = "nowhere"
     flow["nodes"]["lonely"] = {"kind": "end"}
     result = client.post("/api/v1/generation/flow/check", json={"flow": flow}).json()
     assert not result["valid"] and result["flow"] is None
     problem = result["diagnostics"][0]
     assert (problem["node"], problem["field"], problem["code"]) == (
-        "write",
+        "write_thought",
         "next",
         "missing_target",
     )
-    flow["nodes"]["write"]["next"] = "choose"
+    flow["nodes"]["write_thought"]["next"] = "work"
     warned = client.post("/api/v1/generation/flow/check", json={"flow": flow}).json()
     assert warned["valid"]
     assert {(d["node"], d["code"]) for d in warned["diagnostics"]} >= {("lonely", "unreachable")}
@@ -67,14 +70,22 @@ def test_check_locates_problems_on_nodes(client):
     assert syntax["diagnostics"][0]["code"] == "yaml_syntax" and "line 1" in str(syntax)
 
 
+def test_packaged_default_has_no_warnings_and_guards_its_end():
+    nodes = load_flow()["flow"]["nodes"]
+    assert flow_document.check(flow=load_flow()["flow"])["diagnostics"] == []
+    kinds = {n["kind"] for n in nodes.values()}
+    assert kinds == {"select", "event", "branch", "end"}
+    assert sum(n["kind"] == "select" for n in nodes.values()) >= 3
+
+
 def test_graph_warnings_catch_flows_that_would_misbehave():
-    flow = load_flow()["flow"]
+    flow = copy.deepcopy(MINIMAL_FLOW)
     flow["nodes"]["write"]["next"] = "write"  # Event loops onto itself without a selection.
     flow["nodes"]["finished"]["then"] = "write"
     flow["nodes"]["choose"]["next"] = "done"  # End reached without the finished branch.
     codes = {(d["node"], d["code"]) for d in flow_document.check(flow=flow)["diagnostics"]}
     assert ("write", "stale_task") in codes and ("done", "unguarded_end") in codes
-    flow = load_flow()["flow"]
+    flow = copy.deepcopy(MINIMAL_FLOW)
     flow["nodes"]["finished"].update(path="task.id", then="finished", otherwise="finished")
     codes = {d["code"] for d in flow_document.check(flow=flow)["diagnostics"]}
     assert "branch_cycle" in codes and "no_end" in codes
@@ -100,7 +111,7 @@ def test_save_writes_the_project_file_and_rejects_stale_revisions(client):
         "/api/v1/generation/flow", json={"flow": flow, "expected_revision": document["revision"]}
     )
     assert invalid.status_code == 422
-    assert load_flow(client.flow_path)["flow"]["start"] == "choose"
+    assert load_flow(client.flow_path)["flow"]["start"] == "set_scene"
 
 
 def test_raw_yaml_save_keeps_comments(client):

@@ -50,6 +50,25 @@ and joins; it cannot rewrite committed events or reopen closed windows. Structur
 validation checks its choices before content generation. Targets guide construction;
 a model's finish decision is not proof of semantic coverage or training readiness.
 
+### The default flow
+
+The packaged flow works in phases, much like the scenarios that came before it. Each
+phase has its own selector prompt, and each kind of event has its own writer prompt:
+
+| Phase | Nodes | What happens |
+| --- | --- | --- |
+| Set the scene | `set_scene` → `write_opening` | Define the windows and the concrete world (persona, artifacts, budget, acceptance criteria, hidden facts), then write the opening request or trigger. |
+| First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans. A direct reply or clarifying question takes the general route instead. |
+| Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. |
+| Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives. If anything is missing, the verifier picks the event that fixes it and work continues. |
+
+Routing is a chain of branches on `task.envelope.kind` (`is_tool_call`,
+`is_tool_result`, `is_chat`, `is_external`) that sends each event to its writer:
+`write_tool_call`, `write_tool_result`, `write_chat`, `write_external` or
+`write_thought`. A writer's instruction is appended to the task, so it tells the event's
+author how that kind of event should read. For actor events it follows the
+`actor_instruction`, and it never carries private facts.
+
 Each selection, local transition, event and echo commits with its interpreter checkpoint.
 Resume uses the frozen policy and accepted state. Loops have step and event limits;
 exhaustion retains the partial source as **Unfinished**, without a fabricated pass.

@@ -63,6 +63,6 @@ def test_fresh_projects_include_editable_chat_for_default_flow(tmp_path):
     sampler = SamplerService(JobService(store))
     plan = default_plan(sampler.propose(seed=137)["proposal"], settings)
     assert "chat" in plan["tools"]
-    assert plan["flow"]["nodes"]["choose"]["kind"] == "select"
+    assert plan["flow"]["nodes"]["set_scene"]["kind"] == "select"
     # Authors can deliberately remove or replace the default catalog.
     assert ProjectSettings(tools={}).tools == {}

@@ -10,8 +10,10 @@ try {
   const get = path => page.evaluate(async url => (await fetch(url, {headers: {'X-Remix-Token': document.querySelector('meta[name=remix-token]').content}})).json(), '/api/v1' + path);
   await page.goto(process.argv[2]);
   await page.locator('#flow-tab').click();
-  await page.locator('[data-node="choose"]').waitFor();
-  assert.equal(await page.locator('.flow-node').count(), 4);
+  await page.locator('[data-node="set_scene"]').waitFor();
+  assert.ok(await page.locator('.flow-node').count() >= 15, 'the default flow has distinct phases and writers');
+  // The chart opens zoomed to fit the canvas.
+  assert.ok(await page.evaluate(() => flowView.canvas.scale) < 1);
   // Cards sit inside the canvas and do not overlap.
   const boxes = await page.locator('.flow-node').evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().toJSON()));
   for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, 'cards overlap');
@@ -39,12 +41,12 @@ try {
 
   // Edit: change the event instruction, save, and confirm the server has it.
   await page.locator('[data-mode="edit"]').click();
-  await page.locator('[data-node="write"]').click();
+  await page.locator('[data-node="write_thought"]').click();
   await page.locator('#flow-tab-body textarea').fill('Write it plainly.');
   await page.locator('#flow-save:not([disabled])').click();
   await page.waitForFunction(() => document.querySelector('#flow-dirty').textContent === 'Saved');
   const saved = await get('/generation/flow');
-  assert.equal(saved.origin, 'project'); assert.equal(saved.flow.nodes.write.instruction, 'Write it plainly.');
+  assert.equal(saved.origin, 'project'); assert.equal(saved.flow.nodes.write_thought.instruction, 'Write it plainly.');
   // The panel and canvas fit the compact layout without horizontal page overflow.
   await page.setViewportSize({width: 860, height: 900});
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

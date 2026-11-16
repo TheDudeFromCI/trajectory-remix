@@ -52,7 +52,7 @@ async def test_walkthrough_matches_a_real_run_and_stores_nothing(tmp_path):
         jobs, proposals = gen.jobs.listing(), proposal_count(gen)
         started = client.post("/api/v1/walkthrough/start", json={"seed": 137}).json()
         first = started["next"]
-        assert first["action"] == "model" and first["node"] == "choose"
+        assert first["action"] == "model" and first["node"] == "set_scene"
         assert first["request"]["operation"] == "flow_select"
         assert first["request"]["wire"]["model"] == "g"  # Generator endpoint, no credentials.
         assert "Authorization" not in json.dumps(first)
@@ -74,13 +74,17 @@ def test_branch_steps_report_the_value_they_read(tmp_path):
     _, client = client_for(tmp_path, episode())
     with client:
         state = client.post("/api/v1/walkthrough/start", json={"seed": 1}).json()["state"]
-        state = walk(client, state)["state"]  # choose -> finished (branch)
-        result = walk(client, state)
-    trace = result["trace"]
-    assert trace["action"] == "branch" and trace["path"] == "finished"
-    assert trace["value"] is False and trace["matched"] is False and trace["to"] == "write"
+        for _ in range(10):
+            result = walk(client, state)
+            state = result["state"]
+            if result["trace"]["action"] == "branch":
+                break
+    trace = result["trace"]  # first_move chose agent text, so the plan writer runs.
+    assert trace["node"] == "plan_is_thought" and trace["path"] == "task.envelope.kind"
+    assert trace["value"] == "agent_text" and trace["matched"] is True
+    assert trace["to"] == "write_plan"
     assert result["next"]["request"]["operation"] == "event"
-    assert result["next"]["knows"]["pending_task"]["id"] == "opening"
+    assert result["next"]["knows"]["pending_task"]["id"] == "think"
 
 
 def test_manual_reply_rejection_keeps_state_and_sends_correction(tmp_path):
@@ -135,10 +139,10 @@ def test_walkthrough_can_use_an_unsaved_flow_draft(tmp_path):
     _, client = client_for(tmp_path, episode())
     with client:
         flow = client.get("/api/v1/generation/flow").json()["flow"]
-        flow["nodes"]["choose"]["instruction"] = "DRAFT SELECTOR PROMPT"
+        flow["nodes"]["set_scene"]["instruction"] = "DRAFT SELECTOR PROMPT"
         started = client.post("/api/v1/walkthrough/start", json={"seed": 3, "flow": flow}).json()
         system = started["next"]["request"]["messages"][0]["content"]
         assert system == "DRAFT SELECTOR PROMPT"
-        flow["nodes"]["choose"]["next"] = "missing"
+        flow["nodes"]["set_scene"]["next"] = "missing"
         rejected = client.post("/api/v1/walkthrough/start", json={"seed": 3, "flow": flow})
     assert rejected.status_code == 422 and "invalid" in rejected.json()["message"]

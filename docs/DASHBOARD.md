@@ -234,7 +234,9 @@ save without touching the chart afterwards, your exact text is kept, comments in
 Once you edit the chart, the file is rewritten from the chart and old comments are lost.
 
 Drag nodes to arrange them; your layout is remembered in this browser. **Tidy layout**
-arranges them by distance from the start node. If someone else saves `flow.yaml` while
+arranges them again: each phase runs down the page, a chain of branches joined by
+*otherwise* sits in one row like a switch, and links that loop back run along the sides.
+**Fit** zooms to show the whole chart, which is how it opens. If someone else saves `flow.yaml` while
 you edit, saving tells you so and keeps your draft until you **Reload**.
 
 ### Walk through a generation step by step
@@ -242,7 +244,7 @@ you edit, saving tells you so and keeps your draft until you **Reload**.
 Use a walkthrough to debug generation settings: you see exactly what the Generator is
 asked at each step, what it replied, and what the flow knows afterwards.
 
-![A walkthrough paused after the first written event](images/dashboard/flow-walkthrough.png)
+![A walkthrough showing the prompt the work selector sent](images/dashboard/flow-walkthrough.png)
 
 1. Open the **Flow** tab and choose **Walkthrough**.
 2. Enter a **Seed** (0 picks one at random) and choose **Sample & start**. Pins set on the
@@ -394,7 +396,9 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `window-render.js` | Readable window view: header fields, chat bubbles, tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
 | `flow-panel.js` | The Generate dialog's Flow section: `GET /generation/flow`, the node outline, and a lossless YAML writer for per-run `instructions.flow_yaml`. |
 | `flow-view.js` | `FlowView`, the Flow tab controller: draft, checks, save with revision, YAML tab and mode switch. |
-| `flow-model.js` | Pure flow helpers: node kinds, links, rename/delete/kind changes and the layered layout. |
+| `flow-model.js` | Pure flow helpers: node kinds, links, rename/delete/kind changes and card subtitles. |
+| `flow-layout.js` | Automatic layout: rows by longest forward path, switch rows for *otherwise* chains, and ordering under parents. |
+| `flow-routes.js` | Link geometry: short drops, sideways links within a row, and shared side lanes for loops and long links. |
 | `flow-canvas.js` | The flowchart: node cards over an SVG link layer, dragging, port connections, zoom and walkthrough highlighting. |
 | `flow-inspector.js` | The Node, Flow settings and Problems forms. Typing does not rebuild the form. |
 | `flow-walkthrough.js` | `WalkthroughPanel`: sampling, stepping, history, and the Prompt, Reply, Flow knows, Trajectory and Proposal views. |
