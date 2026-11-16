@@ -106,7 +106,52 @@ class Fake:
             if callable(value):
                 value = value(ticket)
             return {"output": value, "model": "actual-fixture"}
-        if p["operation"] == "event":
+        if p["operation"] == "flow_select":
+            source = json.loads(p["messages"][1]["content"])["source"]
+            if "reply" in source["events"]:
+                body = dict(
+                    finished=True, reason="Delivered the fixture reply", windows={}, task=None
+                )
+            else:
+                steps = [
+                    (
+                        "opening",
+                        dict(kind="chat_message", window="chatroom", chat={"speaker": "user"}),
+                    ),
+                    ("decision", dict(kind="agent_text", window="reasoning", after=["opening"])),
+                    (
+                        "reply",
+                        dict(
+                            kind="tool_call",
+                            window="reply",
+                            after=["decision"],
+                            tool="chat",
+                            call_id="reply",
+                            close_window=True,
+                        ),
+                    ),
+                ]
+                ident, envelope = next(
+                    (key, event) for key, event in steps if key not in source["events"]
+                )
+                body = dict(
+                    finished=False,
+                    reason="Continue the fixture episode",
+                    windows={}
+                    if source["windows"]
+                    else {
+                        "chatroom": dict(purpose="chatroom", agent_writable=False),
+                        "reasoning": dict(purpose="reasoning", agent_writable=True),
+                        "reply": dict(purpose="tool", agent_writable=True),
+                    },
+                    task=dict(
+                        id=ident,
+                        envelope=envelope,
+                        instruction="Author the fixture event",
+                        arguments="json" if ident == "reply" else "text",
+                    ),
+                )
+        elif p["operation"] == "event":
             body = (
                 {"arguments": {"content": "Supported reply"}}
                 if "arguments" in p["schema"]["properties"]
