@@ -25,12 +25,15 @@
 .settings-feedback { color: var(--ink-muted); font-size: 12px; }
 .settings-feedback.error { color: var(--danger); }
 .settings-criterion { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2) var(--space-3); align-items: end; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.settings-card > .settings-criterion:first-child { padding-top: 0; border-top: 0; }
 .settings-criterion > label:first-child { grid-column: 1 / -1; }
 .settings-criterion textarea { min-height: 56px; font: 400 14px/20px var(--font-sans); }
 .settings-criterion > button { justify-self: end; height: 26px; padding: 0 var(--space-2); font-size: 12px; color: var(--danger); }
 .settings-card > label:has(> input[aria-label^='New ']) + button { align-self: flex-start; color: var(--ink); }
 #review-settings-editor.review-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); align-items: start; }
 .review-column { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.settings-limits { display: flex; flex-direction: column; gap: var(--space-3); }
+.settings-limits .settings-help { margin-top: 0; }
 .review-column > label { width: max-content; }
 @media (max-width: 650px) {
   .settings-grid { grid-template-columns: 1fr; }
