@@ -11,6 +11,7 @@ from .commands import merge_patch
 from .flow import append_event, causal_view, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
+from .progress import label
 from .sampling import SamplerService
 from .storage import RevisionConflict
 from .validation import diagnose
@@ -111,7 +112,7 @@ class GenerationService:
         cp.pop("_revision", None)
         step = ticket.step if ticket else f"{source.id}:{cp['serial']}:local"
         cp["serial"] += 1
-        return self.jobs.accept(
+        accepted = self.jobs.accept(
             job,
             epoch,
             source.id,
@@ -123,6 +124,12 @@ class GenerationService:
             outcome=outcome,
             bulk_position=cp.get("bulk_position"),
         )
+        if outcome is not None:
+            self.jobs.progress(
+                job,
+                f"Trajectory settled: {label(source.id)} outcome={label(outcome)} events={len(source.events)}",
+            )
+        return accepted
 
     def _phase(self, job, source, cp, phase, tier=None, *, outcome=None):
         cp.update(phase=phase, tier=tier, errors=0)
@@ -132,6 +139,11 @@ class GenerationService:
                 "messages"
             ]
         self._save(job, source, cp, outcome=outcome)
+        self.jobs.progress(
+            job,
+            f"Trajectory {label(source.id)} entered {label(phase)}"
+            + (f" ({label(tier)})" if tier else ""),
+        )
 
     def _after_generation(self, job, source, cp):
         settings = self.settings_for(job)
@@ -170,6 +182,10 @@ class GenerationService:
                 try:
                     self.jobs.start_attempt(
                         job, attempt["ordinal"], data, expected_epoch=j["epoch"]
+                    )
+                    self.jobs.progress(
+                        job,
+                        f"Trajectory admitted: {label(attempt['trajectory_id'])} ({attempt['ordinal'] + 1}/{j['total']})",
                     )
                 except OwnershipConflict:
                     return  # Attached cap includes paused sources; no replacement.
@@ -351,8 +367,22 @@ class GenerationService:
             source_revision=record.revision,
             source_hash=source.intrinsic_hash,
         )
-        self.jobs.enqueue(
+        request_id = self.jobs.enqueue(
             job, ident, endpoint, f"{ident}:{cp['serial']}", payload, expected_epoch=epoch
+        )
+        with self.store.connect() as db:
+            paused = db.execute(
+                "SELECT paused FROM graph_endpoints WHERE id=?", (endpoint,)
+            ).fetchone()[0]
+        self.jobs.progress(
+            job,
+            f"Request queued: {label(request_id)} trajectory={label(ident)} "
+            f"operation={label(payload['operation'])} endpoint={label(endpoint)}"
+            + (
+                "; endpoint paused, manual Resume required"
+                if paused
+                else "; awaiting endpoint slot"
+            ),
         )
 
     def _repair_failure(self, job, source, cp, reason, ticket=None):
@@ -367,6 +397,10 @@ class GenerationService:
     def _invalid(self, ticket, source, cp):
         settings = self.settings_for(ticket.job_id)
         cp["errors"] += 1
+        self.jobs.progress(
+            ticket.job_id,
+            f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
+        )
         if cp["errors"] > settings.generation.format_retries:
             if cp["phase"] == "event":
                 data = source.to_dict()
@@ -465,7 +499,7 @@ class GenerationService:
             cp["flow"].update(output=selection, task=selected_task)
             adaptive_driver.advance(cp, ticket.payload["flow_plan"])
             self._save(ticket.job_id, selected_source, cp, ticket=ticket)
-            self.jobs.append_log(
+            self.jobs.progress(
                 ticket.job_id,
                 "Flow selected: " + (selected_task["id"] if selected_task else "finish"),
             )
@@ -482,6 +516,10 @@ class GenerationService:
                 adaptive_driver.advance(cp, ticket.payload["flow_plan"])
             cp["echo"] = task["id"]
             self._save(ticket.job_id, source, cp, ticket=ticket)
+            self.jobs.progress(
+                ticket.job_id,
+                f"Event committed: {label(task['id'])} trajectory={label(source.id)} total_events={len(source.events)}",
+            )
             return
         if cp["phase"] == "repair" and body["action"] != "verdict":
             self._repair_action(ticket, source, cp, body)
@@ -497,6 +535,10 @@ class GenerationService:
             ticket.endpoint,
             complete.get("model"),
             settings.endpoints[ticket.endpoint].model,
+        )
+        self.jobs.progress(
+            ticket.job_id,
+            f"{label(cp['tier'])} {label(cp['phase'])} verdict: {label(result)} trajectory={label(source.id)}",
         )
         if cp["phase"] == "repair":
             if result == "fail":

@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from .models import GraphSource, canonical, digest
+from .progress import observed_request, request_label
 from .storage import GraphStore
 
 TERMINAL = {"completed", "cancelled", "failed"}
@@ -100,6 +101,8 @@ class JobService:
     expensive preparation happen outside transactions. Multi-process startup must
     be coordinated by the host (recovery intentionally invalidates old workers).
     """
+
+    heartbeat_interval = 10.0
 
     def __init__(self, store: GraphStore, *, active_limit=20, recover=True, clock=time.time):
         if type(active_limit) is not int or active_limit < 1:
@@ -729,15 +732,11 @@ class JobService:
         ticket = self.claim(endpoint)
         if ticket is None:
             return None
+        attempt = 0
         while True:
+            attempt += 1
             try:
-                task = asyncio.create_task(driver(deepcopy(ticket)))
-                key = (ticket.job_id, ticket.trajectory_id, ticket.id, ticket.endpoint)
-                self._calls[key] = task
-                try:
-                    result = await task
-                finally:
-                    self._calls.pop(key, None)
+                result, elapsed = await observed_request(self, ticket, driver, attempt)
             except asyncio.CancelledError:
                 # Host shutdown/pause fences this item; never log response text.
                 try:
@@ -747,12 +746,43 @@ class JobService:
                     pass
                 else:
                     self.control(ticket.job_id, "pause")
+                self.progress(
+                    ticket.job_id,
+                    "Request interrupted; no response accepted: " + request_label(ticket),
+                )
                 raise
-            except Exception:
-                if self.retry(ticket):
+            except Exception as error:
+                retrying = self.retry(ticket)
+                status = getattr(getattr(error, "response", None), "status_code", None)
+                detail = f" HTTP {status}" if type(status) is int else ""
+                self.progress(
+                    ticket.job_id,
+                    f"Request failed ({type(error).__name__}{detail}); "
+                    + (
+                        "retrying in the same queue slot: "
+                        if retrying
+                        else "endpoint paused after retry exhaustion; manual Resume required: "
+                    )
+                    + request_label(ticket),
+                )
+                if retrying:
                     continue
                 return None
             self.request_result(ticket, result)
+            usage = result.get("usage") if isinstance(result, dict) else None
+            counts = ""
+            if isinstance(usage, dict):
+                counts = " ".join(
+                    f"{key}={usage[key]}"
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                    if type(usage.get(key)) is int
+                )
+            self.progress(
+                ticket.job_id,
+                f"Response received ({elapsed:.1f}s); validation pending: "
+                + request_label(ticket)
+                + (" " + counts if counts else ""),
+            )
             return ticket
 
     @staticmethod
@@ -835,6 +865,10 @@ class JobService:
                     )
                 ],
             )
+
+    def progress(self, job, text):
+        stamp = datetime.fromtimestamp(self.clock(), UTC).isoformat(timespec="seconds")
+        return self.append_log(job, f"[{stamp}] {text}")
 
     def append_log(self, job, text, *, budget=None):
         if not isinstance(text, str):
