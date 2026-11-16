@@ -6,9 +6,11 @@
 <link rel="stylesheet" href="/static/graph.css">
 <link rel="stylesheet" href="/static/sampler.css">
 <link rel="stylesheet" href="/static/project-settings.css">
+<link rel="stylesheet" href="/static/flow-view.css">
 <script type="module" src="/static/shell.js"></script>
 <script type="module" src="/static/graph.js"></script>
 <script type="module" src="/static/sampler.js"></script>
+<script type="module" src="/static/flow-view.js"></script>
 </head>
 <body class="graph-studio">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -36,6 +38,7 @@
     <button id="jobs-button" role="tab" aria-selected="false" aria-controls="jobs-view">Jobs <span id="jobs-running-badge" class="badge accent" hidden></span></button>
     <button id="metrics-button" role="tab" aria-selected="false" aria-controls="metrics-view">Metrics</button>
     <button id="sampler-tab" role="tab" aria-selected="false" aria-controls="sampler-workbench">Sampler</button>
+    <button id="flow-tab" role="tab" aria-selected="false" aria-controls="flow-view">Flow</button>
     <button id="review-tab" role="tab" aria-selected="false" aria-controls="review-view">Review Settings</button>
   </nav>
   <div class="header-actions">
@@ -286,6 +289,8 @@
 
 <!-- ===== Sampler ===== -->
 <section class="view" id="sampler-workbench" aria-label="Sampler Matrix workbench" hidden></section>
+<!-- ===== Flow ===== -->
+<section class="view flow-view" id="flow-view" aria-label="Flow editor and walkthrough" hidden></section>
 <!-- ===== Review Settings ===== -->
 <section class="view review-view" id="review-view" aria-label="Review settings" hidden>
   <section class="review-settings">

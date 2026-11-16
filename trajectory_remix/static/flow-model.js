@@ -1,0 +1,146 @@
+/* Pure Flow helpers for the visual editor: node kinds, edges, edits and layout. No DOM. */
+
+export const KINDS = {
+  select: {
+    label: 'Select', tone: 'sky', ports: ['next'],
+    help: 'Asks the Generator to choose the next event, or to finish. Its instruction is the system prompt. Output: a Selection (finished, reason, windows, task).',
+    instruction: 'System prompt for the selector'
+  },
+  event: {
+    label: 'Write event', tone: 'mint', ports: ['next'],
+    help: 'Asks the Generator to write the content of the task chosen by the last Select. The instruction is appended to that task. Output: one event added to the trajectory.',
+    instruction: 'Extra instruction appended to the selected task'
+  },
+  branch: {
+    label: 'Branch', tone: 'lilac', ports: ['then', 'otherwise'],
+    help: 'Reads one field of the last Selection and routes without calling a model. Then is taken when the value equals the expected value exactly (same JSON type).'
+  },
+  end: {
+    label: 'End', tone: 'peach', ports: [],
+    help: 'Finishes the trajectory and hands it to the configured reviews. The last Selection must have finished: true.'
+  }
+};
+
+/** Fields each kind uses, in YAML order. Matches flow_document.FIELDS on the server. */
+export const FIELDS = {
+  select: ['kind', 'instruction', 'next'], event: ['kind', 'instruction', 'next'],
+  branch: ['kind', 'path', 'equals', 'then', 'otherwise'], end: ['kind']
+};
+
+/** Branch paths worth suggesting: the Selection fields a selector returns. */
+export const PATHS = ['finished', 'reason', 'task.id', 'task.envelope.kind', 'task.envelope.window', 'task.envelope.tool', 'task.arguments'];
+
+const DEFAULTS = {instruction: '', next: null, path: 'finished', equals: true, then: null, otherwise: null};
+
+/** Only the fields a node's kind uses; keeps edits and YAML free of stale defaults. */
+export function compactNode(node) {
+  const kind = KINDS[node.kind] ? node.kind : 'select';
+  const result = {};
+  for (const key of FIELDS[kind]) result[key] = key in node ? node[key] : DEFAULTS[key];
+  if (kind === 'end' && node.instruction) result.instruction = node.instruction;
+  result.kind = kind;
+  return result;
+}
+
+export function compactFlow(flow) {
+  const {nodes = {}, ...rest} = flow;
+  return {...rest, nodes: Object.fromEntries(Object.entries(nodes).map(([id, n]) => [id, compactNode(n)]))};
+}
+
+export function portLabel(node, port) {
+  if (port === 'then') return `= ${JSON.stringify(node.equals)}`;
+  if (port === 'otherwise') return 'otherwise';
+  return node.kind === 'select' ? 'Selection' : 'event written';
+}
+
+/** Every transition, including dangling ones (to: null or an unknown ID). */
+export function edges(flow) {
+  const list = [];
+  for (const [from, node] of Object.entries(flow.nodes || {})) {
+    for (const port of KINDS[node.kind]?.ports || []) list.push({from, port, to: node[port] ?? null, label: portLabel(node, port)});
+  }
+  return list;
+}
+
+export function uniqueId(flow, base) {
+  const clean = String(base || 'node').trim().replace(/\s+/g, '_') || 'node';
+  if (!(clean in (flow.nodes || {}))) return clean;
+  let n = 2; while (`${clean}_${n}` in flow.nodes) n++;
+  return `${clean}_${n}`;
+}
+
+export function addNode(flow, kind, id) {
+  const ident = uniqueId(flow, id || kind);
+  const node = compactNode({kind});
+  if (kind === 'event') node.instruction = 'Author the selected event using its causal context.';
+  flow.nodes = {...flow.nodes, [ident]: node};
+  if (!flow.start || !(flow.start in flow.nodes)) flow.start = ident;
+  return ident;
+}
+
+/** Rename keeping key order, and repoint start and every transition. */
+export function renameNode(flow, from, to) {
+  to = String(to).trim();
+  if (!to) throw new Error('Node IDs cannot be empty');
+  if (to === from) return from;
+  if (to in flow.nodes) throw new Error(`A node named ${to} already exists`);
+  flow.nodes = Object.fromEntries(Object.entries(flow.nodes).map(([id, n]) => [id === from ? to : id, n]));
+  for (const node of Object.values(flow.nodes)) for (const port of ['next', 'then', 'otherwise']) if (node[port] === from) node[port] = to;
+  if (flow.start === from) flow.start = to;
+  return to;
+}
+
+/** Delete a node; transitions into it become unset so the problem is visible, not hidden. */
+export function removeNode(flow, id) {
+  const {[id]: _removed, ...rest} = flow.nodes; flow.nodes = rest;
+  for (const node of Object.values(flow.nodes)) for (const port of ['next', 'then', 'otherwise']) if (node[port] === id) node[port] = null;
+  if (flow.start === id) flow.start = Object.keys(flow.nodes)[0] || '';
+}
+
+export function setKind(flow, id, kind) {
+  const old = flow.nodes[id];
+  const next = compactNode({...old, kind});
+  // Carry a single outgoing target across kinds so the chart stays connected.
+  const target = old.next ?? old.then ?? null;
+  for (const port of KINDS[kind].ports) next[port] = next[port] ?? target;
+  flow.nodes[id] = next;
+}
+
+export const NODE_W = 210, NODE_H = 78, GAP_X = 60, GAP_Y = 84;
+
+/**
+ * Layered layout: depth by shortest path from start, so loops become back edges.
+ * Unreachable nodes go in a final row. Returns {id: {x, y}} in canvas pixels.
+ */
+export function layout(flow) {
+  const nodes = flow.nodes || {}, depth = {}, order = [];
+  const queue = flow.start in nodes ? [flow.start] : [];
+  if (queue.length) depth[flow.start] = 0;
+  while (queue.length) {
+    const id = queue.shift(); order.push(id);
+    for (const port of KINDS[nodes[id].kind]?.ports || []) {
+      const to = nodes[id][port];
+      if (to in nodes && !(to in depth)) { depth[to] = depth[id] + 1; queue.push(to); }
+    }
+  }
+  // Discovery order puts a branch's "then" left of its "otherwise", so links don't cross.
+  const last = Math.max(-1, ...Object.values(depth)) + 1;
+  const rows = [];
+  for (const id of [...order, ...Object.keys(nodes).filter(id => !(id in depth))]) (rows[depth[id] ?? last] ||= []).push(id);
+  const widest = Math.max(1, ...rows.filter(Boolean).map(r => r.length));
+  const span = widest * NODE_W + (widest - 1) * GAP_X, positions = {};
+  rows.forEach((row, level) => {
+    if (!row) return;
+    const width = row.length * NODE_W + (row.length - 1) * GAP_X, left = (span - width) / 2;
+    row.forEach((id, i) => { positions[id] = {x: 40 + left + i * (NODE_W + GAP_X), y: 40 + level * (NODE_H + GAP_Y)}; });
+  });
+  return positions;
+}
+
+/** First line of a node's instruction, or its branch condition, for the card subtitle. */
+export function subtitle(node) {
+  if (node.kind === 'branch') return `if ${node.path} = ${JSON.stringify(node.equals)}`;
+  if (node.kind === 'end') return 'Finish, then review';
+  const text = String(node.instruction || '').trim();
+  return text ? (text.length > 70 ? text.slice(0, 69) + '…' : text) : 'No instruction';
+}

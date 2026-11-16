@@ -1,6 +1,7 @@
 /* Adaptive generation Flow in the Generate dialog: outline, hash and per-run YAML.
    Reads GET /generation/flow; sends YAML only as instructions.flow_yaml for one run. */
 import {node, tag} from './ui-kit.js';
+import {showView} from './views.js';
 
 const KIND_TONES = {select: 'sky', event: 'mint', branch: 'lilac', end: 'peach'};
 
@@ -58,8 +59,10 @@ export async function renderFlowPanel(container, api) {
   summary.append(tag(flow.version || 'flow', 'muted'), hashTag,
     node('span', `${Object.keys(flow.nodes || {}).length} nodes · ≤ ${flow.max_events} events · ≤ ${flow.max_steps} steps`, 'small muted'));
   const info = node('span', undefined, 'info'); info.tabIndex = 0;
-  info.dataset.tip = 'Loaded from flow.yaml beside the project database, or the packaged default. Edit that file to change future runs, or use a custom flow for one run below.';
-  summary.append(info);
+  info.dataset.tip = 'Loaded from flow.yaml beside the project database, or the packaged default. Edit it in the Flow tab to change future runs, or use a custom flow for one run below.';
+  const open = node('button', 'Open Flow editor', 'ghost sm'); open.type = 'button'; open.id = 'generation-open-flow';
+  open.onclick = () => { container.closest('dialog')?.close(); showView('flow-view'); };
+  summary.append(info, open);
 
   const outline = node('details', undefined, 'collapsible flow-outline');
   outline.append(node('summary', 'Flow outline'));
