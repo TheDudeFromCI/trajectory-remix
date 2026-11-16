@@ -78,6 +78,7 @@ python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
+node tests/run_inputs_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
