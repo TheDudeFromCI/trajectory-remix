@@ -306,3 +306,32 @@ The transport still receives whole responses rather than streaming tokens. The
 existing log endpoint and job dialog need no API changes; polling an open job's
 log shows new entries even while the model is busy. Existing log-cache retention
 and Clear Log Cache apply; a zero-size cache retains no entries.
+
+### Endpoint sampling and timeout controls
+
+Add these fields to `settings.endpoints[id]` through the existing settings GET/PUT
+API. The settings JSON Schema exposes them at `GET /api/v1/schema/settings`.
+
+| Field | Default | Valid values |
+| --- | --- | --- |
+| `temperature` | `null` | Number from 0 to 2, or `null` |
+| `top_p` | `null` | Number from 0 to 1, or `null` |
+| `presence_penalty` | `null` | Number from -2 to 2, or `null` |
+| `timeout_seconds` | `120` | Finite number greater than zero |
+
+A blank sampling control should save as `null`: the transport omits it so the
+provider/model chooses its default. Zero is an explicit setting and is sent.
+Use the canonical `temperature` field, not `temp`. These are standard
+[OpenAI Chat Completions parameters](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create);
+some individual models restrict them. Leave unsupported controls blank rather
+than relying on automatic detection or a hidden retry with different settings.
+`top_k`, `min_p` and `rep_penalty` are not exposed because they are not standard
+OpenAI Chat Completions request parameters. Repetition penalty is not mapped to
+frequency penalty.
+
+Timeout is a client setting, never part of the JSON sent to the model. It bounds
+each complete request attempt and individual network operations. Timeouts follow
+the existing endpoint retry/exhaustion behavior; each retry gets a fresh deadline.
+It does not limit the whole generation job. All four fields freeze into new run
+settings and apply to selection, content, review and repair requests using that
+endpoint. Edits do not alter an active run. No frontend files or routes changed.

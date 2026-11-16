@@ -1,5 +1,6 @@
 """Stateless OpenAI-compatible transport. Queue owns all retries and ordering."""
 
+import asyncio
 import json
 import os
 
@@ -115,18 +116,26 @@ class OpenAITransport:
         budget = context_budget(payload, response_format, messages)
         if budget["input_bytes"] > budget["input_ceiling"]:
             return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
-        async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
-            response = await client.post(
-                endpoint["url"].rstrip("/") + "/chat/completions",
-                headers=headers,
-                json=dict(
-                    model=endpoint["model"],
-                    messages=messages,
-                    stream=False,
-                    max_tokens=budget["max_output_tokens"],
-                    response_format=response_format,
-                ),
-            )
+        body = dict(
+            model=endpoint["model"],
+            messages=messages,
+            stream=False,
+            max_tokens=budget["max_output_tokens"],
+            response_format=response_format,
+        )
+        for key in ("temperature", "top_p", "presence_penalty"):
+            if endpoint.get(key) is not None:
+                body[key] = endpoint[key]
+        timeout = endpoint.get("timeout_seconds", 120.0)
+        # Bound the whole attempt as well as individual network operations.
+        # Queue-owned retries each get their own deadline.
+        async with asyncio.timeout(timeout):
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                response = await client.post(
+                    endpoint["url"].rstrip("/") + "/chat/completions",
+                    headers=headers,
+                    json=body,
+                )
         if response.status_code == 400 and any(
             s in response.text.lower()
             for s in ("context_length_exceeded", "maximum context length", "context window")

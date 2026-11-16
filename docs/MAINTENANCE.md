@@ -117,3 +117,7 @@ repeated per frontier, and oversized requests are intercepted before HTTP.
 Generation progress: `python -m pytest -q tests/test_generation_progress.py tests/test_graph_jobs.py` verifies first-request visibility, heartbeats before a
 response, stage/event progress, retry reporting and cancellation fencing without
 copying model or exception bodies to logs.
+
+Endpoint controls: `python -m pytest -q tests/test_endpoint_sampling.py` checks
+wire omission versus explicit zeros, timeout cancellation, accepted ranges,
+settings API/schema and frozen run configuration with fake HTTP responses.
