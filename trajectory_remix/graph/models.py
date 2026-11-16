@@ -259,6 +259,10 @@ class Endpoint(DTO):
     model: Identifier
     concurrency: Annotated[int, Field(ge=1)] = 1
     retries: Annotated[int, Field(ge=0)] = 2
+    timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    temperature: Annotated[float, Field(ge=0, le=2)] | None = None
+    top_p: Annotated[float, Field(ge=0, le=1)] | None = None
+    presence_penalty: Annotated[float, Field(ge=-2, le=2)] | None = None
 
     context_window_tokens: Annotated[int, Field(ge=1024)] = 16384
     max_output_tokens: Annotated[int, Field(ge=1)] = 2048
