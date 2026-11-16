@@ -1,6 +1,6 @@
 # Sampler Matrix workbench
 
-The **Sampler Matrix** is where you tune *what kinds of trajectories get generated*: how likely each
+The **Sampler Matrix** (the **Sampler** tab) is where you tune *what kinds of trajectories get generated*: how likely each
 domain, lifecycle stage, user trait or behavior is, and which combinations are allowed. This page is the
 workflow guide. The sampler itself and the linked metrics are described in
 [Sampler and metrics](GRAPH-SAMPLER-METRICS.md), and generation in
@@ -10,7 +10,7 @@ workflow guide. The sampler itself and the linked metrics are described in
 
 ## Tune the matrix
 
-1. **Open Sampler Matrix.** Search names, descriptions or serialized constraints, and filter navigation to
+1. **Open the Sampler tab.** Search names, descriptions or serialized constraints, and filter navigation to
    Dimensions, Behaviors, Decisions, Rules or Metrics.
 2. **Pick a group** and compare its choices: numeric weights and base shares line up in a table you can edit
    with the keyboard. To change several at once, tick the choices and use **Set selected**. It affects only

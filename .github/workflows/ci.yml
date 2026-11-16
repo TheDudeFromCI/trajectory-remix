@@ -85,6 +85,9 @@ jobs:
       - run: python -m pip install -e ".[test,mcp,export]"
       - run: npm ci --prefix tests
       - run: python tests/run_graph_frontend.py
+      - run: node tests/project_settings_frontend.mjs
+      - run: node tests/studio_ui_frontend.mjs
+      - run: node tests/window_render_frontend.mjs
 
   browser:
     name: Browser workflow tests

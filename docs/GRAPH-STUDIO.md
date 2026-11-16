@@ -10,7 +10,8 @@ The studio sits on top of the [source format](GRAPH-SOURCE.md), the
 
 ## Editing a trajectory
 
-Create a trajectory, add windows and events, and press **Save trajectory**.
+Create a trajectory, add windows and events, and press **Save**. The
+[Dashboard tutorials](DASHBOARD.md#tutorials) walk through it step by step.
 
 - **Drafts can be broken.** Diagnostics point to stable event IDs and source paths, and
   saving is never blocked. Deleting an event leaves any references to it in place, and
@@ -35,12 +36,12 @@ content. Form mode edits a complete JSON object and keeps unknown argument field
 text that doesn't parse stays untouched when you switch between raw and form modes.
 
 **Metadata** is separate from the intrinsic source. A missing split warns, while an
-explicit **Auto** is intentional. The sidebar's JSON editor keeps arbitrary nested
+explicit **Auto** is intentional. The event editor's **JSON** tab keeps arbitrary nested
 annotations. Changing stage or split doesn't change a trajectory's identity.
 
 ## Preview modes
 
-- **Graph mode** (default) needs no tokenizer or scheduler. Scrubbing walks a stable
+- **Dependency graph** mode (default) needs no tokenizer or scheduler. Scrubbing walks a stable
   dependency order. It is **not authored time**.
 - **Tick history** is opt-in. It runs the real compiler scheduler with the tokenizer
   profile you choose in Preferences, after a trailing debounce (default 500 ms,
@@ -52,6 +53,12 @@ timer and discard stale responses, so an old result can't replace a newer draft.
 server caches up to 16 entries / 8 MiB, and the browser reuses up to four responses. The
 export profile never depends on the preview preference.
 
+Window cards render the previewed tokens in a readable view (chat bubbles, formatted JSON,
+one `NOOP ×N` chip per run of idle predictions) or, with **Raw**, as the exact token
+stream. Both views read the same tokens; neither changes the source or compiled output.
+NOOP rows are model emissions, never context, so they don't add to a window's text. See
+[Reading windows](DASHBOARD.md#reading-windows).
+
 ## Import, export and jobs
 
 - **Import** accepts graph JSON, an array, or JSONL, up to 40 MB per request. It runs as
@@ -62,9 +69,10 @@ export profile never depends on the preview preference.
 - **Export** starts a real, pinned job: Ready is the default minimum stage, stale is
   included, and you choose shard size, split handling and metadata projection. Finished
   jobs list the manifest, shards, profile files and a ZIP. Details in [Export](EXPORT.md).
-- **Job dialogs** are independent. They page logs 100 at a time, keep up to 200,000
-  characters of text in the browser, and clear or export from the server's retained logs.
-  The status bar shows the newest 50 jobs, and the API pages through older ones.
+- **The Jobs view** lists jobs 50 per page and keeps one detail panel per inspected job.
+  Logs page 100 lines at a time, keep up to 200,000 characters of text in the browser, and
+  clear or export from the server's retained logs. The status bar shows a chip for each
+  active job among the newest 50.
 
 ## Search, bulk actions and history
 

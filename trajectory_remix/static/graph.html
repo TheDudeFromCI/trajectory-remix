@@ -2,60 +2,370 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="remix-token" content="__REMIX_TOKEN__"><title>Trajectory Remix</title>
-<link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/graph.css">
-<script type="module" src="/static/graph.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/graph.css">
 <link rel="stylesheet" href="/static/sampler.css">
 <link rel="stylesheet" href="/static/project-settings.css">
 <script type="module" src="/static/shell.js"></script>
-<script type="module" src="/static/sampler.js"></script></head>
+<script type="module" src="/static/graph.js"></script>
+<script type="module" src="/static/sampler.js"></script>
+</head>
 <body class="graph-studio">
-<header class="toolbar">
-<nav class="menu-bar" aria-label="Application menu">
-<details class="app-menu"><summary>File</summary><div class="app-menu-popup"><button id="import-button">Import trajectories…</button><button id="export-button">Export dataset…</button></div></details>
-<details class="app-menu"><summary>Edit</summary><div class="app-menu-popup"><button id="undo-edit" disabled>Undo</button><button id="redo-edit" disabled>Redo</button><hr><button id="preferences-button">Preferences…</button></div></details>
-<details class="app-menu"><summary>View</summary><div class="app-menu-popup"><button id="metrics-button">Dataset Metrics</button><button id="toggle-dataset-panel">Toggle dataset panel</button><button id="toggle-editor-panel">Toggle event editor</button></div></details>
-<span class="app-title">Trajectory Remix</span>
-</nav>
-<div class="toolbar-actions"><button id="settings-button">Project Settings</button><button id="generation-settings-button">Generation Settings</button><button id="review-button">Review &amp; Repair</button><button id="jobs-button" class="primary">Jobs</button></div>
-<input id="file-input" type="file" accept=".json,.jsonl" hidden>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+<symbol id="i-trash" viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5"/></symbol>
+<symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 3.5 3 6l2.5 2.5"/><path d="M3 6h6.5a3.5 3.5 0 0 1 0 7H7"/></symbol>
+<symbol id="i-redo" viewBox="0 0 16 16"><path d="M10.5 3.5 13 6l-2.5 2.5"/><path d="M13 6H6.5a3.5 3.5 0 0 0 0 7H9"/></symbol>
+<symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+<symbol id="i-panel-left" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6.5 3v10"/></symbol>
+<symbol id="i-panel-right" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M9.5 3v10"/></symbol>
+<symbol id="i-first" viewBox="0 0 16 16"><path d="M4 3.5v9M12 3.5 7 8l5 4.5"/></symbol>
+<symbol id="i-prev" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
+<symbol id="i-next" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
+<symbol id="i-last" viewBox="0 0 16 16"><path d="M12 3.5v9M4 3.5 9 8l-5 4.5"/></symbol>
+<symbol id="i-expand" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></symbol>
+<symbol id="i-shrink" viewBox="0 0 16 16"><path d="M13.5 6.5h-4v-4M9.5 6.5l4-4M2.5 9.5h4v4M6.5 9.5l-4 4"/></symbol>
+<symbol id="i-timeline" viewBox="0 0 16 16"><path d="M2.5 4.5h7M2.5 8h11M2.5 11.5h5"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 3v3.5H9.5"/><path d="M12.6 6.5A5 5 0 1 0 13 9"/></symbol>
+</svg>
+
+<header class="app-header">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Trajectory Remix</span></div>
+  <nav class="view-nav" role="tablist" aria-label="Studio views">
+    <button id="trajectory-tab" role="tab" aria-selected="true" aria-controls="workspace">Editor</button>
+    <button id="jobs-button" role="tab" aria-selected="false" aria-controls="jobs-view">Jobs <span id="jobs-running-badge" class="badge accent" hidden></span></button>
+    <button id="metrics-button" role="tab" aria-selected="false" aria-controls="metrics-view">Metrics</button>
+    <button id="sampler-tab" role="tab" aria-selected="false" aria-controls="sampler-workbench">Sampler</button>
+  </nav>
+  <div class="header-actions">
+    <div class="btn-group">
+      <button id="undo-edit" class="ghost icon" disabled aria-label="Undo" data-tip="Undo the last saved change (yours, this session)"><svg class="ico"><use href="#i-undo"/></svg></button>
+      <button id="redo-edit" class="ghost icon" disabled aria-label="Redo" data-tip="Redo"><svg class="ico"><use href="#i-redo"/></svg></button>
+    </div>
+    <details class="menu app-menu" id="project-menu"><summary>Project</summary><div class="menu-list end">
+      <button id="import-button">Import trajectories…</button>
+      <button id="export-button">Export dataset…</button>
+      <hr>
+      <button id="preferences-button">Preferences…</button>
+    </div></details>
+    <details class="menu app-menu" id="view-menu"><summary>View</summary><div class="menu-list end">
+      <span class="menu-label">Editor panels</span>
+      <button id="toggle-dataset-panel" data-panel="dataset"><svg class="ico"><use href="#i-panel-left"/></svg><span>Hide dataset panel</span></button>
+      <button id="toggle-timeline-panel" data-panel="timeline"><svg class="ico"><use href="#i-timeline"/></svg><span>Hide timeline panel</span></button>
+      <button id="toggle-editor-panel" data-panel="editor"><svg class="ico"><use href="#i-panel-right"/></svg><span>Hide event panel</span></button>
+      <hr>
+      <button id="show-all-panels">Show all panels</button>
+    </div></details>
+    <button id="settings-button" class="ghost">Settings</button>
+    <button id="review-button">Review &amp; Repair</button>
+    <button id="generation-settings-button" class="primary">Generate</button>
+  </div>
+  <input id="file-input" type="file" accept=".json,.jsonl" hidden>
 </header>
-<dialog id="review-dialog"><h2>Review &amp; Repair</h2><label>Scope<select id="review-scope"><option value="selected">Selected saved trajectory</option><option value="query">All search matches, across all pages</option></select></label><label>Mode<select id="review-mode"><option value="standard">Standard · stage based</option><option value="force_fast">Force Fast</option><option value="force_critical">Force Critical</option></select></label><label><input id="review-repair" type="checkbox" checked>Attempt repair after failure</label><p>Pending → Fast only; Candidate → Critical. Failed stages repair at their tier. Standard skips other stages. Locked sources are skipped.</p><button id="review-start">Start</button><p id="review-progress" role="status"></p><button data-close>Close</button></dialog>
-<div id="status" role="status" aria-live="polite"></div>
-<nav class="studio-tabs" aria-label="Studio views"><button id="trajectory-tab" aria-selected="true">Trajectory editor</button><button id="sampler-tab" aria-selected="false">Sampler Matrix</button></nav>
-<section id="sampler-workbench" hidden aria-label="Sampler Matrix workbench"></section>
-<div class="workspace" id="workspace">
-<aside class="sidebar"><div class="side-heading">DATASET <span id="sample-count" class="badge">0</span><button id="new-sample" title="Create trajectory" aria-label="Create trajectory">+</button></div>
-<input id="sample-search" class="search" placeholder="Search source text" aria-label="Search source text">
-<label>Stage <select id="search-stage"><option value="">All stages</option><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
-<label>Split <select id="search-split"><option value="">All splits</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
-<label>Tool ID <input id="search-tool"></label><div id="sample-list"></div>
-<div class="sample-pagination"><button id="sample-page-prev">Previous</button><span id="sample-page-label"></span><button id="sample-page-next">Next</button></div>
-<details><summary>Apply to all search matches</summary><select id="bulk-action"><option value="stage">Stage</option><option value="split">Split</option><option value="delete">Delete</option></select><input id="bulk-value" value="3" aria-label="Bulk value"><button id="bulk-start">Apply</button></details>
-<section class="metadata-panel"><h2 class="side-heading">TRAJECTORY METADATA</h2><label>Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
-<label>Split <select id="split"><option value="">Missing — automatic assignment warns</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label><details class="advanced-metadata"><summary>All properties · advanced</summary><textarea id="metadata-json" aria-label="Metadata JSON" spellcheck="false"></textarea><button id="metadata-apply">Apply metadata to draft</button></details><small id="split-warning"></small><small id="review-stale"></small></section>
-</aside>
-<main><section class="view replay-view"><div class="replay-toolbar"><b>WINDOWS</b><span id="dirty-indicator"></span><span class="view-note">Visible windows at the selected execution block</span></div><div id="window-grid" class="window-grid"></div></section>
-<section class="timeline-section"><div class="timeline-controls"><div class="transport"><button id="first-tick">|◀</button><button id="prev-tick">◀</button><button id="play">Play</button><button id="next-tick">▶</button><button id="last-tick">▶|</button><input id="tick-number" type="number" min="0" value="0" aria-label="Timeline position"><span id="max-tick"></span></div><label>View <select id="view-mode"><option value="graph">Graph</option><option value="ticks">Tick history</option></select></label><span id="preview-status"></span></div>
-<input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Scrub timeline"><div id="timeline"></div><small>Hover events to inspect dependencies. Shift-click an event to add it as a dependency of the selected event.</small></section>
-</main><section class="editor editor-panel" id="event-editor-panel" aria-label="Event editor"><div class="editor-toolbar"><b>EVENT EDITOR</b><button class="primary" id="save-source">Save trajectory</button><button id="reload-source">Reload saved source</button><button id="delete-sample">Delete trajectory</button></div>
-<div id="diagnostics"></div><div class="event-selection"><label>Event <select id="event-picker"></select></label><button id="new-event">Add event</button><button id="delete-event">Delete event</button>
-</div><div class="event-context"><label>Kind <select id="event-kind"><option value="agent_text">Agent text</option><option value="external_text">External input</option><option value="tool_call">Tool call</option><option value="tool_response">Tool result</option><option value="chat_message">Chat message</option></select></label>
-<label>Window <select id="event-window"></select></label><label>Call ID <input id="call-id"></label><label>Tool <select id="tool-id"></select></label><label>Chat speaker <input id="chat-speaker" value="User"></label>
-</div><div class="graph-editor-grid"><div><details class="event-options"><summary>Advanced event identity</summary><label>New event ID <input id="new-event-id" placeholder="Generated automatically"></label></details>
-<label><input type="checkbox" id="close-window"> Close window</label><label><input type="checkbox" id="masked"> Mask entire event</label><details class="event-options"><summary>Delivery, framing &amp; loss</summary><label>Delivery <select id="delivery"><option>instant</option><option>streamed</option></select></label>
-<label><input type="checkbox" id="chain" checked> Instant chaining</label><label><input type="checkbox" id="replace-body"> Replace body</label>
-<label>Loss weight <input id="weight" type="number" min="0" step="any" value="1"></label>
-<label><input type="checkbox" id="begin" checked> Insert begin</label><label><input type="checkbox" id="end" checked> Insert end</label><label><input type="checkbox" id="echo-chat" checked> Allow chat echo</label></details>
-</div><div><label>Content mode <select id="content-mode"><option value="text">Text</option><option value="form">Tool argument form</option><option value="json">Raw JSON / typed pieces</option></select></label>
-<textarea id="event-content" spellcheck="false" aria-label="Event content"></textarea><div id="argument-form"></div><button id="event-apply">Apply event to draft</button>
-<label>Dependency picker <input id="dependency-picker" list="dependency-options" placeholder="Search stable event IDs"></label><datalist id="dependency-options"></datalist><button id="dependency-add">Add dependency</button><div id="dependencies"></div>
-<details><summary>Windows</summary><label>Window ID <input id="window-id" list="window-options"></label><datalist id="window-options"></datalist><label>Purpose <input id="window-purpose" value="reasoning"></label><label><input type="checkbox" id="window-writable" checked> Agent writable</label><label>Reasoning effort <input id="window-effort" list="effort-options"></label><datalist id="effort-options"></datalist><label><input type="checkbox" id="window-left-open"> Intentionally left open (acknowledge warning)</label><button id="window-save">Add / update window</button><button id="window-delete">Delete window</button></details>
-</div></div><details id="source-details"><summary>Advanced Source JSON</summary><textarea id="source-json" spellcheck="false" aria-label="Source JSON"></textarea><button id="source-apply">Apply JSON to draft</button></details>
-</section></div>
-<footer id="job-status-bar" aria-label="Independent jobs"></footer>
-<dialog id="preferences-dialog"><h2>Preferences</h2><label>Preview tokenizer <select id="preview-profile"></select></label><label>Trailing debounce (ms)<input id="preview-debounce" type="number" min="0" max="10000" value="500"></label><button id="preferences-save">Save locally</button><button data-close>Close</button></dialog>
-<dialog id="settings-dialog"><h2>Project Settings</h2><p>Tools, tokenizer definitions and dedicated control maps, endpoint roles, split ratios and log cap belong to this project. A tokenizer is optional.</p><section id="endpoint-settings-editor"></section><section id="tool-schema-editor"></section><details><summary>Advanced project JSON</summary><textarea id="settings-json" aria-label="Project settings JSON" spellcheck="false"></textarea></details><button id="settings-save">Save settings</button><button id="logs-clear">Clear Log Cache</button><span id="log-usage"></span><button data-close>Close</button></dialog>
-<dialog id="generation-settings-dialog"><h2>Generation Settings</h2><p>Configure review and repair for future runs. Each run keeps the settings and sampler choices it started with.</p><section id="generation-settings-editor"></section><section id="generation-run-controls"></section><div class="dialog-actions"><button id="generation-sampler-button">Open Sampler Matrix</button><button id="generation-settings-save" class="primary">Save generation settings</button><button data-close>Close</button></div></dialog>
-<dialog id="export-dialog"><h2>Export</h2><label>Format <select id="export-format"><option value="raw">Raw JSONL</option><option value="compiled">Compiled KTREMIX</option></select></label><label>Export tokenizer <select id="export-profile"></select></label><label>Minimum stage <select id="export-stage"><option value="3">Ready</option><option value="2">Validated</option><option value="1">Candidate</option><option value="0">Pending</option><option value="">All</option></select></label><label>Trajectories per file <input id="export-shard" type="number" min="1" value="256"></label><label>Metadata <select id="export-metadata"><option value="all_metrics">All metrics</option><option value="measured_metrics">Measured metrics only</option><option value="remove_all">Remove all</option><option value="full">Keep full metadata</option></select></label><label><input id="export-stale" type="checkbox" checked> Include stale</label><label><input id="export-exclude" type="checkbox"> Exclude missing split</label><p>Missing splits warn and assign automatically; intentional Auto does not warn. Family conflicts block export. Completed files expire after 24 hours.</p><button id="export-start">Start export job</button><button data-close>Close</button></dialog>
-<dialog id="metrics-dialog"><h2>Dataset Metrics</h2><p>Saved source observations, unavailable/stale values and frozen proposal coverage for the current search. Accepted coverage uses Candidate or higher.</p><button id="metrics-calculate">Calculate Missing Metrics for search</button><pre id="metrics-values"></pre><button data-close>Close</button></dialog>
+
+<main class="views">
+<!-- ===== Editor ===== -->
+<section class="view editor-view" id="workspace" aria-label="Trajectory editor">
+  <aside class="widget dataset-panel" id="dataset-panel" aria-label="Dataset">
+    <div class="widget-head"><h2>Dataset</h2><span id="sample-count" class="badge">0</span>
+      <div class="widget-actions"><button id="new-sample" class="ghost icon sm" aria-label="Create trajectory" data-tip="Create an empty trajectory"><svg class="ico"><use href="#i-plus"/></svg></button></div>
+    </div>
+    <div class="dataset-filters">
+      <input id="sample-search" type="search" placeholder="Search source text" aria-label="Search source text">
+      <div class="filter-row">
+        <select id="search-stage" aria-label="Filter by stage"><option value="">All stages</option><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select>
+        <select id="search-split" aria-label="Filter by split"><option value="">All splits</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select>
+      </div>
+      <input id="search-tool" placeholder="Tool ID" aria-label="Filter by tool ID">
+    </div>
+    <div id="sample-list" class="sample-list" role="listbox" aria-label="Trajectories"></div>
+    <div class="widget-foot sample-pagination">
+      <button id="sample-page-prev" class="ghost icon sm" aria-label="Previous page"><svg class="ico"><use href="#i-prev"/></svg></button>
+      <span id="sample-page-label" class="grow num small muted"></span>
+      <button id="sample-page-next" class="ghost icon sm" aria-label="Next page"><svg class="ico"><use href="#i-next"/></svg></button>
+    </div>
+    <details class="bulk-edit"><summary>Bulk edit all matches <span class="info" tabindex="0" data-tip="Applies to every trajectory matching the current search and filters, across all pages. Runs as an undoable job; locked trajectories are skipped."></span></summary>
+      <div class="inline-form">
+        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="delete">Delete</option></select></label>
+        <label>Value<input id="bulk-value" value="3" aria-label="Bulk value"></label>
+        <button id="bulk-start" class="sm">Apply</button>
+      </div>
+    </details>
+  </aside>
+
+  <div class="editor-center">
+    <section class="widget trajectory-bar" id="metadata-panel" aria-label="Trajectory">
+      <div class="bar-row">
+        <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
+        <span id="dirty-indicator" class="tag"></span>
+        <button id="diagnostics-summary" class="sm ghost" hidden></button>
+        <span class="grow"></span>
+        <button class="primary sm" id="save-source">Save</button>
+        <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
+          <button id="reload-source">Reload saved source</button>
+          <hr>
+          <button id="delete-sample" class="danger">Delete trajectory</button>
+        </div></details>
+      </div>
+      <div class="bar-row meta-row">
+        <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
+        <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
+        <small id="split-warning" class="tag tone-warning"></small><small id="flow-outcome" class="tag tone-mint" tabindex="0"></small><small id="review-stale" class="tag tone-warning"></small>
+        <span id="lock-slot" class="row"></span>
+      </div>
+    </section>
+
+    <section class="widget windows-widget replay-view" aria-label="Windows">
+      <div class="widget-head"><h2>Windows <span class="info" tabindex="0" data-tip="Context windows as they look at the selected timeline position. Each window keeps one colour everywhere in the editor."></span></h2></div>
+      <div id="window-grid" class="window-grid widget-body"></div>
+    </section>
+
+    <section class="widget timeline-widget timeline-section" aria-label="Timeline">
+      <div class="widget-head timeline-controls">
+        <h2 class="timeline-title">Timeline <span class="info" tabindex="0" data-tip="Click an event to edit it. Shift-click an event to add it as a dependency of the selected event. Hover to see what it depends on."></span></h2>
+        <div class="transport btn-group">
+          <button id="first-tick" class="ghost icon sm" aria-label="First position"><svg class="ico"><use href="#i-first"/></svg></button>
+          <button id="prev-tick" class="ghost icon sm" aria-label="Previous position"><svg class="ico"><use href="#i-prev"/></svg></button>
+          <button id="play" class="sm">Play</button>
+          <button id="next-tick" class="ghost icon sm" aria-label="Next position"><svg class="ico"><use href="#i-next"/></svg></button>
+          <button id="last-tick" class="ghost icon sm" aria-label="Last position"><svg class="ico"><use href="#i-last"/></svg></button>
+          <input id="tick-number" type="number" min="0" value="0" aria-label="Timeline position"><span id="max-tick" class="num small muted"></span>
+        </div>
+        <span id="preview-status" class="grow small muted truncate"></span>
+        <select id="view-mode" aria-label="Timeline view"><option value="graph">Dependency graph</option><option value="ticks">Tick history</option></select>
+      </div>
+      <div class="timeline-body">
+        <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Scrub timeline">
+        <div id="timeline"></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="window-popout widget" id="window-popout" aria-label="Expanded window" hidden>
+    <div class="popout-bar">
+      <span class="small muted">Timeline</span>
+      <button class="ghost icon sm" data-step="first-tick" aria-label="First position"><svg class="ico"><use href="#i-first"/></svg></button>
+      <button class="ghost icon sm" data-step="prev-tick" aria-label="Previous position"><svg class="ico"><use href="#i-prev"/></svg></button>
+      <span id="popout-position" class="num small"></span>
+      <button class="ghost icon sm" data-step="next-tick" aria-label="Next position"><svg class="ico"><use href="#i-next"/></svg></button>
+      <button class="ghost icon sm" data-step="last-tick" aria-label="Last position"><svg class="ico"><use href="#i-last"/></svg></button>
+    </div>
+    <div id="window-popout-body" class="popout-body"></div>
+  </section>
+
+  <aside class="widget event-panel editor-panel" id="event-editor-panel" aria-label="Event editor">
+    <div class="widget-head">
+      <h2 class="event-heading">Event</h2>
+      <select id="event-picker" aria-label="Event"></select>
+      <div class="widget-actions">
+        <button id="new-event" class="ghost icon sm" aria-label="Add event" data-tip="Add an event to this trajectory"><svg class="ico"><use href="#i-plus"/></svg></button>
+        <button id="delete-event" class="ghost icon sm" aria-label="Delete event" data-tip="Delete the selected event"><svg class="ico"><use href="#i-trash"/></svg></button>
+      </div>
+    </div>
+    <div class="tabs event-tabs" id="graph-editor-fields">
+      <div class="tab-list" role="tablist" aria-label="Event editor sections">
+        <button role="tab" id="tab-content" aria-controls="panel-content" aria-selected="true">Content</button>
+        <button role="tab" id="tab-links" aria-controls="panel-links" aria-selected="false">Links <span id="links-count" class="badge"></span></button>
+        <button role="tab" id="tab-options" aria-controls="panel-options" aria-selected="false">Options</button>
+        <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false">Windows</button>
+        <button role="tab" id="tab-problems" aria-controls="panel-problems" aria-selected="false">Problems <span id="problems-count" class="badge"></span></button>
+        <button role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON</button>
+      </div>
+
+      <div role="tabpanel" id="panel-content" aria-labelledby="tab-content" class="panel-body">
+        <div id="event-empty" class="empty">No event selected. Add one with + above.</div>
+        <div class="form-grid two event-context">
+          <label>Kind <select id="event-kind"><option value="agent_text">Agent text</option><option value="external_text">External input</option><option value="tool_call">Tool call</option><option value="tool_response">Tool result</option><option value="chat_message">Chat message</option></select></label>
+          <label>Window <select id="event-window"></select></label>
+          <label>Call ID <input id="call-id"></label>
+          <label>Tool <select id="tool-id"></select></label>
+          <label>Chat speaker <input id="chat-speaker" value="User"></label>
+        </div>
+        <div class="content-head"><label class="inline-label">Content <select id="content-mode" aria-label="Content mode"><option value="text">Text</option><option value="form">Tool argument form</option><option value="json">Raw JSON / typed pieces</option></select></label></div>
+        <textarea id="event-content" spellcheck="false" aria-label="Event content"></textarea>
+        <div id="argument-form" class="form-grid"></div>
+        <div class="panel-actions"><button id="event-apply" class="sm">Apply event to draft</button></div>
+      </div>
+
+      <div role="tabpanel" id="panel-links" aria-labelledby="tab-links" class="panel-body" hidden>
+        <p class="muted small">This event runs after:</p>
+        <div id="dependencies" class="chip-list"></div>
+        <div class="inline-form">
+          <label>Add dependency <input id="dependency-picker" list="dependency-options" placeholder="Search event IDs"></label><datalist id="dependency-options"></datalist>
+          <button id="dependency-add" class="sm">Add</button>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="panel-options" aria-labelledby="tab-options" class="panel-body" hidden>
+        <div class="option-group">
+          <h3>Window</h3>
+          <label><input type="checkbox" id="close-window"> Close window after this event</label>
+          <label><input type="checkbox" id="masked"> Mask entire event from loss</label>
+        </div>
+        <div class="option-group">
+          <h3>Delivery, framing &amp; loss</h3>
+          <div class="form-grid two">
+            <label>Delivery <select id="delivery"><option>instant</option><option>streamed</option></select></label>
+            <label>Loss weight <input id="weight" type="number" min="0" step="any" value="1"></label>
+          </div>
+          <label><input type="checkbox" id="chain" checked> Instant chaining</label>
+          <label><input type="checkbox" id="replace-body"> Replace window body</label>
+          <label><input type="checkbox" id="begin" checked> Insert begin marker</label>
+          <label><input type="checkbox" id="end" checked> Insert end marker</label>
+          <label><input type="checkbox" id="echo-chat" checked> Allow chat echo</label>
+        </div>
+        <div class="option-group">
+          <h3>New events</h3>
+          <label>ID for the next added event <input id="new-event-id" placeholder="Generated automatically"></label>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="panel-windows" aria-labelledby="tab-windows" class="panel-body" hidden>
+        <div class="form-grid two">
+          <label>Window ID <input id="window-id" list="window-options"></label><datalist id="window-options"></datalist>
+          <label>Purpose <input id="window-purpose" value="reasoning"></label>
+          <label>Reasoning effort <input id="window-effort" list="effort-options"></label><datalist id="effort-options"></datalist>
+        </div>
+        <label><input type="checkbox" id="window-writable" checked> Agent writable</label>
+        <label><input type="checkbox" id="window-left-open"> Intentionally left open (acknowledge warning)</label>
+        <div class="panel-actions"><button id="window-delete" class="sm danger">Delete window</button><button id="window-save" class="sm">Add / update window</button></div>
+      </div>
+
+      <div role="tabpanel" id="panel-problems" aria-labelledby="tab-problems" class="panel-body" hidden>
+        <div id="diagnostics" class="diagnostic-list"></div>
+      </div>
+
+      <div role="tabpanel" id="panel-json" aria-labelledby="tab-json" class="panel-body" hidden>
+        <details class="collapsible advanced-metadata"><summary>Metadata JSON</summary><div class="collapsible-body">
+          <textarea id="metadata-json" aria-label="Metadata JSON" spellcheck="false"></textarea>
+          <div class="panel-actions"><button id="metadata-apply" class="sm">Apply metadata to draft</button></div>
+        </div></details>
+        <details class="collapsible" id="source-details" open><summary>Source JSON</summary><div class="collapsible-body">
+          <textarea id="source-json" spellcheck="false" aria-label="Source JSON"></textarea>
+          <div class="panel-actions"><button id="source-apply" class="sm">Apply JSON to draft</button></div>
+        </div></details>
+      </div>
+    </div>
+  </aside>
+</section>
+
+<!-- ===== Jobs ===== -->
+<section class="view jobs-view" id="jobs-view" aria-label="Jobs" hidden>
+  <aside class="widget jobs-list-widget">
+    <div class="widget-head"><h2>Jobs</h2>
+      <div class="widget-actions"><button id="jobs-refresh" class="ghost icon sm" aria-label="Refresh jobs" data-tip="Refresh"><svg class="ico"><use href="#i-refresh"/></svg></button></div>
+    </div>
+    <div id="jobs-list" class="jobs-list" role="listbox" aria-label="Jobs"></div>
+    <div class="widget-foot">
+      <button id="jobs-prev" class="ghost icon sm" aria-label="Previous jobs"><svg class="ico"><use href="#i-prev"/></svg></button>
+      <span id="jobs-page-label" class="grow small muted num"></span>
+      <button id="jobs-next" class="ghost icon sm" aria-label="Next jobs"><svg class="ico"><use href="#i-next"/></svg></button>
+    </div>
+  </aside>
+  <section class="widget job-detail" id="job-detail" aria-label="Job detail">
+    <div class="empty" id="job-empty">Select a job to see its progress, logs and files.</div>
+  </section>
+</section>
+
+<!-- ===== Metrics ===== -->
+<section class="view metrics-view" id="metrics-view" aria-label="Dataset metrics" hidden>
+  <div class="metrics-toolbar">
+    <h1>Dataset metrics</h1>
+    <span id="metrics-scope" class="tag tone-muted"></span>
+    <span class="info" tabindex="0" data-tip="Saved records matching the current Editor search and filters. Unsaved drafts are excluded. Unmeasured values stay unavailable, never zero."></span>
+    <span class="grow"></span>
+    <button id="metrics-refresh" class="ghost sm">Refresh</button>
+    <button id="metrics-calculate">Calculate missing metrics</button>
+  </div>
+  <div id="metrics-content" class="metrics-content"></div>
+  <details class="collapsible metrics-raw"><summary>Raw metrics JSON</summary><div class="collapsible-body"><pre id="metrics-values"></pre></div></details>
+</section>
+
+<!-- ===== Sampler ===== -->
+<section class="view" id="sampler-workbench" aria-label="Sampler Matrix workbench" hidden></section>
+</main>
+
+<footer class="status-bar">
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="job-status-bar" aria-label="Active jobs"></div>
+</footer>
+<div id="tooltip" role="tooltip"></div>
+
+<!-- ===== Dialogs ===== -->
+<dialog id="review-dialog" aria-labelledby="review-title">
+  <div class="dialog-head"><h2 id="review-title">Review &amp; Repair</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="dialog-body">
+    <div class="form-grid two">
+      <label>Scope<select id="review-scope"><option value="selected">Selected saved trajectory</option><option value="query">All search matches, across all pages</option></select></label>
+      <label>Mode<select id="review-mode"><option value="standard">Standard · stage based</option><option value="force_fast">Force Fast</option><option value="force_critical">Force Critical</option></select></label>
+    </div>
+    <label><input id="review-repair" type="checkbox" checked>Attempt repair after failure</label>
+    <p class="note">Standard mode reviews Pending trajectories with Fast and Candidate trajectories with Critical. Failed stages repair at their own tier. Other stages and locked sources are skipped.</p>
+  </div>
+  <div class="dialog-foot"><p id="review-progress" role="status" class="status-line" data-status></p><button id="review-start" class="primary">Start review</button></div>
+</dialog>
+
+<dialog id="preferences-dialog" aria-labelledby="preferences-title">
+  <div class="dialog-head"><h2 id="preferences-title">Preferences</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="dialog-body">
+    <div class="form-grid two">
+      <label>Preview tokenizer <select id="preview-profile"></select></label>
+      <label>Preview delay (ms) <input id="preview-debounce" type="number" min="0" max="10000" value="500"></label>
+    </div>
+    <p class="note">Stored in this browser only. Tick history uses the preview tokenizer; graph authoring never needs one.</p>
+  </div>
+  <div class="dialog-foot"><p class="status-line" data-status></p><button id="preferences-save" class="primary">Save</button></div>
+</dialog>
+
+<dialog id="settings-dialog" class="wide" aria-labelledby="settings-title">
+  <div class="dialog-head"><h2 id="settings-title">Project settings</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="tabs settings-tabs">
+    <div class="tab-list" role="tablist" aria-label="Settings sections">
+      <button role="tab" id="settings-tab-models" aria-controls="settings-panel-models" aria-selected="true">Models &amp; defaults</button>
+      <button role="tab" id="settings-tab-tools" aria-controls="settings-panel-tools" aria-selected="false">Tools</button>
+      <button role="tab" id="settings-tab-storage" aria-controls="settings-panel-storage" aria-selected="false">Storage</button>
+      <button role="tab" id="settings-tab-json" aria-controls="settings-panel-json" aria-selected="false">Advanced JSON</button>
+    </div>
+    <div role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" class="dialog-body"><section id="endpoint-settings-editor"></section></div>
+    <div role="tabpanel" id="settings-panel-tools" aria-labelledby="settings-tab-tools" class="dialog-body" hidden><section id="tool-schema-editor"></section></div>
+    <div role="tabpanel" id="settings-panel-storage" aria-labelledby="settings-tab-storage" class="dialog-body" hidden>
+      <h3>Log cache</h3>
+      <div id="log-usage" class="stat-row"></div>
+      <div><button id="logs-clear" class="danger sm">Clear log cache</button></div>
+    </div>
+    <div role="tabpanel" id="settings-panel-json" aria-labelledby="settings-tab-json" class="dialog-body" hidden>
+      <p class="note">The complete settings draft. Form edits on the other tabs write here too; changes apply when you save.</p>
+      <textarea id="settings-json" aria-label="Project settings JSON" spellcheck="false"></textarea>
+    </div>
+  </div>
+  <div class="dialog-foot"><p class="status-line" data-status>Settings apply to future jobs. Running jobs keep their frozen configuration.</p><button id="settings-save" class="primary">Save settings</button></div>
+</dialog>
+
+<dialog id="generation-settings-dialog" class="wide" aria-labelledby="generation-title">
+  <div class="dialog-head"><h2 id="generation-title">Generate trajectories</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="generation-layout">
+    <section id="generation-run-controls" class="generation-run"></section>
+    <section class="generation-settings">
+      <div id="generation-settings-editor"></div>
+    </section>
+  </div>
+  <div class="dialog-foot"><button id="generation-sampler-button" class="ghost">Open Sampler</button><span class="grow"></span><span class="status-line">Review settings apply to future runs.</span><button id="generation-settings-save">Save review settings</button></div>
+</dialog>
+
+<dialog id="export-dialog" aria-labelledby="export-title">
+  <div class="dialog-head"><h2 id="export-title">Export dataset</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="dialog-body">
+    <div class="form-grid two">
+      <label>Format <select id="export-format"><option value="raw">Raw JSONL</option><option value="compiled">Compiled KTREMIX</option></select></label>
+      <label>Export tokenizer <select id="export-profile"></select></label>
+      <label>Minimum stage <select id="export-stage"><option value="3">Ready</option><option value="2">Validated</option><option value="1">Candidate</option><option value="0">Pending</option><option value="">All</option></select></label>
+      <label>Trajectories per file <input id="export-shard" type="number" min="1" value="256"></label>
+      <label>Metadata <select id="export-metadata"><option value="all_metrics">All metrics</option><option value="measured_metrics">Measured metrics only</option><option value="remove_all">Remove all</option><option value="full">Keep full metadata</option></select></label>
+    </div>
+    <label><input id="export-stale" type="checkbox" checked> Include trajectories with stale reviews</label>
+    <label><input id="export-exclude" type="checkbox"> Exclude trajectories with no split</label>
+    <p class="note">Missing splits are assigned automatically with a warning; an intentional Auto split does not warn. Family conflicts block export. Files expire after 24 hours.</p>
+  </div>
+  <div class="dialog-foot"><p class="status-line" data-status></p><button id="export-start" class="primary">Start export</button></div>
+</dialog>
 </body></html>

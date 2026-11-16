@@ -1,6 +1,6 @@
 # Examples
 
-Start with the first two. Both are importable through **File → Import** in the studio.
+Start with the first two. Both are importable through **Project → Import trajectories…** in the studio.
 
 | File | What it is |
 | --- | --- |

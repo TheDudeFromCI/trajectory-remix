@@ -21,20 +21,27 @@ try {
  await page.getByLabel('Endpoint fixture model',{exact:true}).fill('fake-browser');
  await page.getByLabel('Generator endpoint',{exact:true}).selectOption('fixture');
  // Editing a tool after endpoint forms must not overwrite the shared settings draft.
+ await page.getByRole('tab',{name:'Tools',exact:true}).click();
  await page.getByLabel('New tool ID',{exact:true}).fill('notes');await page.getByRole('button',{name:'Add tool to settings draft',exact:true}).click();
  assert.equal(await page.evaluate(()=>JSON.parse(document.getElementById('settings-json').value).endpoints.fixture.model),'fake-browser');
  await page.locator('#settings-dialog').evaluate(n=>n.scrollTop=0);await screenshot('settings');await page.locator('#settings-save').click();await page.waitForFunction(()=>!document.getElementById('settings-dialog').open);
  const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.generator,'fixture');assert.ok(saved.settings.tools.notes);
- await page.locator('#generation-settings-button').click();await page.locator('#generation-attempts').fill('1');
+ await page.locator('#generation-settings-button').click();
+ // The Generate dialog shows the adaptive Flow when the backend serves one, or says it uses the built-in recipe.
+ const flowServed=await page.evaluate(async()=>(await fetch('/api/v1/generation/flow',{headers:{'X-Remix-Token':document.querySelector('meta[name=remix-token]').content}})).ok);
+ if(flowServed){await page.locator('.flow-summary').waitFor();assert.equal(await page.locator('#generation-flow-custom').isChecked(),false);}
+ else{await page.locator('.flow-section p').waitFor();assert.match(await page.locator('.flow-section').textContent(),/built-in recipe/);}
+ await page.locator('#generation-attempts').fill('1');
  await page.locator('#generation-start').click();await page.waitForFunction(()=>graphStudio.dialogs.size===1);
  const jobs=await api('/job-summaries'),job=jobs[0].id;
- await page.getByRole('button',{name:'pause',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('dialog[open] pre')].some(n=>n.textContent.includes('run · paused')));
+ await page.waitForFunction(()=>!document.getElementById('jobs-view').hidden);
+ await page.getByRole('button',{name:'Pause',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#job-detail .job-panel')?.dataset.state==='run · paused');
  await screenshot('jobs');await close();
  const attempt=(await api(`/jobs/${job}/attempts`))[0];
  await page.evaluate(async id=>await graphStudio.select(id,true),attempt.trajectory_id);
  assert.equal(await page.locator('#event-content').isDisabled(),true);
- await page.locator('#jobs-button').click();await page.getByRole('button',{name:'Inspect job',exact:true}).click();
- await page.getByRole('button',{name:'resume',exact:true}).click();await close();
+ await page.locator('#jobs-button').click();await page.locator('.job-row').first().click();
+ await page.getByRole('button',{name:'Resume',exact:true}).click();await page.locator('#trajectory-tab').click();
  // No manual reload: the original blank attached snapshot must grow on server changes.
  await page.waitForFunction(()=>Object.keys(graphStudio.draft.events).length>0,{},{timeout:10000});
  await page.waitForFunction(()=>graphStudio.record.owner===null,{},{timeout:10000});
@@ -43,6 +50,11 @@ try {
  assert.equal((await api('/jobs/'+job)).state,'completed');
  assert.equal(await page.evaluate(()=>graphStudio.isDirty()),false);
  await page.locator('#scrubber').evaluate(n=>{n.value='2';n.dispatchEvent(new Event('input'));});await screenshot('desktop');
+ // View menu hides and restores editor panels.
+ await page.locator('#view-menu summary').click();await page.locator('#toggle-timeline-panel').click();
+ assert.equal(await page.locator('.timeline-widget').isVisible(),false);
+ await page.locator('#view-menu summary').click();assert.equal(await page.locator('#toggle-timeline-panel').textContent(),'Show timeline panel');
+ await page.locator('#show-all-panels').click();assert.equal(await page.locator('.timeline-widget').isVisible(),true);
  // Clean changes refresh, while genuinely typed (not yet applied) editor text survives.
  const id=attempt.trajectory_id;
  // Follow appended server events when already at the live edge; preserve an
