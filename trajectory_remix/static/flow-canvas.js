@@ -2,6 +2,7 @@
    port onto a card to connect it, click a card to select it. No network access. */
 import {node, tag} from './ui-kit.js';
 import {KINDS, NODE_H, NODE_W, edges, subtitle} from './flow-model.js';
+import {lanesFor, route} from './flow-routes.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const svg = (name, attrs = {}) => {
@@ -13,18 +14,6 @@ const svg = (name, attrs = {}) => {
 function portPoint(pos, kind, port) {
   const ports = KINDS[kind]?.ports || [], i = Math.max(0, ports.indexOf(port));
   return {x: pos.x + NODE_W * (i + 1) / (ports.length + 1), y: pos.y + NODE_H};
-}
-
-/** Path and label point for one transition. Upward or sideways links route round the right. */
-export function edgePath(from, to, lane = 0, right = 0) {
-  const {x: sx, y: sy} = from, tx = to.x + NODE_W / 2, ty = to.y;
-  if (ty > sy + 20) {
-    return {d: `M ${sx} ${sy} C ${sx} ${sy + 40}, ${tx} ${ty - 40}, ${tx} ${ty}`, x: (sx + tx) / 2, y: (sy + ty) / 2};
-  }
-  // Loops run up a lane right of every card, so they never cross one.
-  const rx = Math.max(sx, to.x + NODE_W, right) + 40 + lane * 26;
-  const d = `M ${sx} ${sy} C ${sx} ${sy + 56}, ${rx} ${sy + 56}, ${rx} ${(sy + ty) / 2} S ${tx} ${ty - 56}, ${tx} ${ty}`;
-  return {d, x: rx, y: (sy + ty) / 2};
 }
 
 export class FlowCanvas {
@@ -40,6 +29,14 @@ export class FlowCanvas {
     this.edgeLayer.append(defs); this.edgeGroup = svg('g'); this.edgeLayer.append(this.edgeGroup);
     this.plane.append(this.edgeLayer); root.replaceChildren(this.plane);
     this.cards = new Map();
+  }
+
+  /** Zoom so the whole chart fits the visible area (never above 100%). */
+  fit() {
+    const width = parseFloat(this.plane.style.width) || 0, height = parseFloat(this.plane.style.height) || 0;
+    const room = {w: this.root.clientWidth - 16, h: this.root.clientHeight - 16};
+    if (!width || !height || room.w <= 0 || room.h <= 0) return this.scale;
+    return this.setZoom(Math.min(1, room.w / width, room.h / height));
   }
 
   setZoom(scale) {
@@ -110,8 +107,7 @@ export class FlowCanvas {
 
   drawEdges() {
     const group = this.edgeGroup; group.replaceChildren();
-    const lanes = new Map(), active = this.trail?.edge;
-    const right = Math.max(0, ...Object.values(this.positions).map(p => p.x + NODE_W));
+    const lanes = lanesFor(this.positions), active = this.trail?.edge;
     for (const edge of edges(this.flow)) {
       const fromPos = this.positions[edge.from]; if (!fromPos) continue;
       const start = portPoint(fromPos, this.flow.nodes[edge.from].kind, edge.port);
@@ -122,9 +118,7 @@ export class FlowCanvas {
         const label = svg('text', {x: start.x + 6, y: start.y + 30, class: 'flow-edge-label is-dangling'}); label.textContent = edge.to ? `missing: ${edge.to}` : 'not connected';
         group.append(label); continue;
       }
-      const back = target.y <= start.y + 20;
-      const lane = back ? (lanes.set('all', (lanes.get('all') ?? -1) + 1), lanes.get('all')) : 0;
-      const path = edgePath(start, target, lane, right);
+      const path = route(start, target, lanes, edge.to);
       const cls = `flow-edge port-${edge.port}` + (isActive ? ' is-active' : '');
       const line = svg('path', {d: path.d, class: cls, 'marker-end': `url(#flow-${isActive ? 'arrow-active' : 'arrow'})`});
       line.dataset.from = edge.from; line.dataset.port = edge.port;
@@ -132,10 +126,10 @@ export class FlowCanvas {
     }
   }
 
-  /** Branch labels sit beside their port (then left, otherwise right); others mid-edge. */
+  /** Labels sit beside the port (then left, others right), except on short straight drops. */
   label(edge, start, path, active) {
-    const branch = edge.port === 'then' || edge.port === 'otherwise';
-    const at = branch ? {x: start.x + (edge.port === 'then' ? -8 : 8), y: start.y + 18} : {x: path.x + 6, y: path.y};
+    const besidePort = edge.port === 'then' || edge.port === 'otherwise' || path.kind !== 'down';
+    const at = besidePort ? {x: start.x + (edge.port === 'then' ? -8 : 8), y: start.y + 18} : {x: path.x + 6, y: path.y};
     const text = svg('text', {x: at.x, y: at.y, class: 'flow-edge-label' + (active ? ' is-active' : '')});
     if (edge.port === 'then') text.setAttribute('text-anchor', 'end');
     text.textContent = edge.label.length > 30 ? edge.label.slice(0, 29) + '…' : edge.label;

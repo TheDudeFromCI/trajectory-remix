@@ -3,7 +3,8 @@
 import {node, tag} from './ui-kit.js';
 import {FlowCanvas} from './flow-canvas.js';
 import {renderFlowForm, renderNodeForm, renderProblems} from './flow-inspector.js';
-import {KINDS, NODE_H, addNode, compactFlow, layout, removeNode, renameNode, setKind} from './flow-model.js';
+import {KINDS, NODE_H, addNode, compactFlow, removeNode, renameNode, setKind} from './flow-model.js';
+import {layout} from './flow-layout.js';
 import {WalkthroughPanel} from './flow-walkthrough.js';
 
 const LAYOUT_KEY = 'flow-layout';
@@ -38,7 +39,7 @@ export class FlowView {
         <div class="seg" role="tablist" aria-label="Flow mode"><button type="button" role="tab" data-mode="edit">Edit</button><button type="button" role="tab" data-mode="walk">Walkthrough</button></div>
         <span class="grow"></span>
         <details class="menu" id="flow-add-menu"><summary>Add node</summary><div class="menu-list end"></div></details>
-        <div class="btn-group"><button id="flow-zoom-out" class="ghost icon sm" type="button" aria-label="Zoom out">−</button><button id="flow-zoom-reset" class="ghost sm num" type="button" aria-label="Reset zoom">100%</button><button id="flow-zoom-in" class="ghost icon sm" type="button" aria-label="Zoom in">+</button></div>
+        <div class="btn-group"><button id="flow-zoom-out" class="ghost icon sm" type="button" aria-label="Zoom out">−</button><button id="flow-zoom-reset" class="ghost sm num" type="button" aria-label="Reset zoom">100%</button><button id="flow-zoom-in" class="ghost icon sm" type="button" aria-label="Zoom in">+</button><button id="flow-zoom-fit" class="ghost sm" type="button" data-tip="Zoom to show the whole chart">Fit</button></div>
         <button id="flow-tidy" class="ghost sm" type="button" data-tip="Arrange nodes by distance from the start node">Tidy layout</button>
         <button id="flow-reload" class="ghost sm" type="button">Reload</button>
         <button id="flow-discard" class="sm" type="button">Discard</button>
@@ -74,6 +75,7 @@ export class FlowView {
     $('#flow-zoom-in').onclick = () => this.zoom(this.canvas.scale + 0.1);
     $('#flow-zoom-out').onclick = () => this.zoom(this.canvas.scale - 0.1);
     this.el.zoom.onclick = () => this.zoom(1);
+    $('#flow-zoom-fit').onclick = () => this.fit();
     $('#flow-tidy').onclick = () => { this.positions = layout(this.draft); this.persistLayout(); this.render(); };
     $('#flow-reload').onclick = () => this.reload();
     this.el.discard.onclick = () => { if (this.dirty() && confirm('Discard your unsaved flow changes?')) { this.adopt(this.doc); this.status('Draft discarded.'); } };
@@ -96,6 +98,7 @@ export class FlowView {
     this.positions = Object.fromEntries(Object.keys(this.draft.nodes).map(id => [id, stored[id] || auto[id]]));
     if (!(this.selected in this.draft.nodes)) this.selected = this.draft.start;
     this.render();
+    if (!this.fitted) { this.fitted = true; this.fit(); }
   }
 
   dirty() { return !!this.draft && JSON.stringify(this.draft) !== this.saved; }
@@ -161,6 +164,7 @@ export class FlowView {
   }
 
   zoom(scale) { this.el.zoom.textContent = Math.round(this.canvas.setZoom(scale) * 100) + '%'; }
+  fit() { this.el.zoom.textContent = Math.round(this.canvas.fit() * 100) + '%'; }
 
   setMode(mode) {
     this.mode = mode;

@@ -109,38 +109,16 @@ export function setKind(flow, id, kind) {
 export const NODE_W = 210, NODE_H = 78, GAP_X = 60, GAP_Y = 84;
 
 /**
- * Layered layout: depth by shortest path from start, so loops become back edges.
- * Unreachable nodes go in a final row. Returns {id: {x, y}} in canvas pixels.
+ * Card subtitle: a branch's condition, or the start of the instruction's last paragraph
+ * (YAML folds a blank line between paragraphs into one newline).
+ * Selectors often share a long preamble, so the last paragraph is what tells them apart.
+ * A leading capitalised label such as "THIS STEP:" is dropped.
  */
-export function layout(flow) {
-  const nodes = flow.nodes || {}, depth = {}, order = [];
-  const queue = flow.start in nodes ? [flow.start] : [];
-  if (queue.length) depth[flow.start] = 0;
-  while (queue.length) {
-    const id = queue.shift(); order.push(id);
-    for (const port of KINDS[nodes[id].kind]?.ports || []) {
-      const to = nodes[id][port];
-      if (to in nodes && !(to in depth)) { depth[to] = depth[id] + 1; queue.push(to); }
-    }
-  }
-  // Discovery order puts a branch's "then" left of its "otherwise", so links don't cross.
-  const last = Math.max(-1, ...Object.values(depth)) + 1;
-  const rows = [];
-  for (const id of [...order, ...Object.keys(nodes).filter(id => !(id in depth))]) (rows[depth[id] ?? last] ||= []).push(id);
-  const widest = Math.max(1, ...rows.filter(Boolean).map(r => r.length));
-  const span = widest * NODE_W + (widest - 1) * GAP_X, positions = {};
-  rows.forEach((row, level) => {
-    if (!row) return;
-    const width = row.length * NODE_W + (row.length - 1) * GAP_X, left = (span - width) / 2;
-    row.forEach((id, i) => { positions[id] = {x: 40 + left + i * (NODE_W + GAP_X), y: 40 + level * (NODE_H + GAP_Y)}; });
-  });
-  return positions;
-}
-
-/** First line of a node's instruction, or its branch condition, for the card subtitle. */
 export function subtitle(node) {
   if (node.kind === 'branch') return `if ${node.path} = ${JSON.stringify(node.equals)}`;
   if (node.kind === 'end') return 'Finish, then review';
-  const text = String(node.instruction || '').trim();
+  const paragraphs = String(node.instruction || '').split(/\n+/).map(p => p.trim()).filter(Boolean);
+  const rest = (paragraphs.at(-1) || '').replace(/^[A-Z][A-Z ]*:\s*/, '');
+  const text = rest.charAt(0).toUpperCase() + rest.slice(1);
   return text ? (text.length > 70 ? text.slice(0, 69) + '…' : text) : 'No instruction';
 }

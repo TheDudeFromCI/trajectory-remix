@@ -7,6 +7,8 @@ for (const key of ['document', 'CustomEvent', 'Event', 'MutationObserver']) glob
 globalThis.confirm = () => true;
 const settle = () => new Promise(resolve => setTimeout(resolve, 5));
 const model = await import('../trajectory_remix/static/flow-model.js');
+const {layout} = await import('../trajectory_remix/static/flow-layout.js');
+const routes = await import('../trajectory_remix/static/flow-routes.js');
 const {FlowView} = await import('../trajectory_remix/static/flow-view.js');
 const {WalkthroughPanel, replyTemplate} = await import('../trajectory_remix/static/flow-walkthrough.js');
 
@@ -25,10 +27,35 @@ const base = () => ({
   const flow = model.compactFlow(base());
   assert.deepEqual(flow.nodes.done, {kind: 'end'}, 'defaults are dropped');
   assert.deepEqual(Object.keys(flow.nodes.finished), ['kind', 'path', 'equals', 'then', 'otherwise']);
-  const at = model.layout(flow);
+  const at = layout(flow);
   assert.ok(at.choose.y < at.finished.y && at.finished.y < at.done.y, 'layers follow distance from start');
   assert.ok(at.done.x < at.write.x, 'then is placed left of otherwise so links do not cross');
   assert.equal(new Set(Object.values(at).map(p => `${p.x},${p.y}`)).size, 4, 'no overlapping cards');
+
+  // Loops do not push nodes down: the writer sits one row below its branch, and the
+  // link back to the selector is routed up a side lane instead of through cards.
+  assert.equal(at.write.y, at.done.y);
+  const back = routes.route({x: at.write.x + model.NODE_W / 2, y: at.write.y + model.NODE_H}, at.choose, routes.lanesFor(at), 'choose');
+  assert.equal(back.kind, 'lane');
+
+  // A chain of branches joined by "otherwise" shares one row, like a switch.
+  const switchFlow = {start: 'pick', nodes: {
+    pick: {kind: 'select', next: 'a'},
+    a: {kind: 'branch', path: 'task.envelope.kind', equals: 'x', then: 'wa', otherwise: 'b'},
+    b: {kind: 'branch', path: 'task.envelope.kind', equals: 'y', then: 'wb', otherwise: 'wc'},
+    wa: {kind: 'event', next: 'pick'}, wb: {kind: 'event', next: 'pick'}, wc: {kind: 'event', next: 'pick'}
+  }};
+  const sw = layout(switchFlow);
+  assert.equal(sw.a.y, sw.b.y, 'switch branches share a row');
+  assert.ok(sw.a.x < sw.b.x);
+  assert.ok(sw.wa.y > sw.a.y && sw.wa.y === sw.wb.y && sw.wb.y === sw.wc.y, 'writers sit one row below');
+  assert.ok(Math.abs(sw.wa.x - sw.a.x) < Math.abs(sw.wa.x - sw.b.x), 'each writer sits under its branch');
+  const lanes = routes.lanesFor(sw), from = id => ({x: sw[id].x + model.NODE_W / 2, y: sw[id].y + model.NODE_H});
+  assert.equal(routes.route(from('a'), sw.b, lanes, 'b').kind, 'across');
+  const first = routes.route(from('wa'), sw.pick, lanes, 'pick'), second = routes.route(from('wb'), sw.pick, lanes, 'pick');
+  if (first.side === second.side) assert.equal(first.x, second.x, 'links into one node share a lane');
+  // Subtitles skip a shared preamble and a leading "THIS STEP:" label.
+  assert.equal(model.subtitle({kind: 'select', instruction: 'Shared rules.\nTHIS STEP: pick the opening.'}), 'Pick the opening.');
 
   model.renameNode(flow, 'choose', 'pick');
   assert.equal(flow.start, 'pick'); assert.equal(flow.nodes.write.next, 'pick');
