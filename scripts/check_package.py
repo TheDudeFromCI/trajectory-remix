@@ -23,6 +23,7 @@ REQUIRED = [
     "static/ibm-plex-sans-latin-400-normal.woff2",
     "static/fonts-LICENSE.txt",
     "Skill.md",
+    "graph/flow.yaml",
 ]
 
 

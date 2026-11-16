@@ -382,4 +382,21 @@ def diagnose(source: GraphSource, settings: ProjectSettings | None = None) -> li
                     ident,
                     "call_id",
                 )
+            else:
+                # Repairs must preserve exact linked automatic deliveries.
+                fragment_ids = sorted(calls[event.call_id], key=lambda key: len(ancestors[key]))
+                fragments = [events[key] for key in fragment_ids]
+                if fragments[-1].tool != "chat":
+                    continue
+                try:
+                    arguments = json.loads("".join(fragment.content for fragment in fragments))
+                except (ValueError, TypeError):
+                    continue  # Submission diagnostics handle malformed arguments.
+                if isinstance(arguments, dict) and arguments.get("content") != event.content:
+                    emit(
+                        "chat_echo_mismatch",
+                        "Chat echo differs from submitted content",
+                        ident,
+                        "content",
+                    )
     return sorted(diagnostics, key=lambda d: (str(d.path), d.code))
