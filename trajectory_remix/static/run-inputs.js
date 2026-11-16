@@ -2,11 +2,13 @@
 const KEY = 'generation-run-inputs';
 const DEFAULTS = {attempts: 100, seed: 0};
 
-export function loadRunInputs() {
+/** Saved inputs; `defaults` overrides the fallback for fields that were never saved. */
+export function loadRunInputs(defaults = {}) {
+  const fallback = {...DEFAULTS, ...defaults};
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch { saved = {}; }
   const pick = (v, fallback) => (Number.isSafeInteger(v) ? v : fallback);
-  return {attempts: pick(saved.attempts, DEFAULTS.attempts), seed: pick(saved.seed, DEFAULTS.seed)};
+  return {attempts: pick(saved.attempts, fallback.attempts), seed: pick(saved.seed, fallback.seed)};
 }
 
 /** Merge a partial update into the stored inputs. */

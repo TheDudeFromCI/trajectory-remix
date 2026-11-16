@@ -20,3 +20,7 @@ input.value = ''; listeners.input(); assert.equal(loadRunInputs().attempts, 7, '
 assert.equal(resolveSeed(5), 5);
 for (let i = 0; i < 20; i++) { const s = resolveSeed(0); assert.ok(Number.isSafeInteger(s) && s > 0); }
 console.log('run inputs ok');
+store.clear();
+assert.deepEqual(loadRunInputs({attempts: 1}), {attempts: 1, seed: 0}, 'caller default applies when nothing is saved');
+saveRunInputs({attempts: 9});
+assert.equal(loadRunInputs({attempts: 1}).attempts, 9, 'saved value wins over caller default');

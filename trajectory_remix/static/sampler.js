@@ -52,7 +52,7 @@ export class SamplerWorkbench {
     $('sampler-reset').onclick = () => { if (!this.dirty() || confirm('Discard all unsaved matrix and metric changes?')) { this.adopt(this.record); this.renderPins(); this.renderNav(); this.renderDetail(); this.update(); this.report('Draft discarded.'); } };
     $('sampler-preview').onclick = () => this.preview();
     $('sampler-generate').onclick = () => this.generate();
-    const saved = loadRunInputs();
+    const saved = loadRunInputs({attempts: 1});
     $('sampler-seed').value = saved.seed; $('sampler-attempts').value = saved.attempts;
     persistInput($('sampler-seed'), 'seed'); persistInput($('sampler-attempts'), 'attempts');
     this.renderPins();
