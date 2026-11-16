@@ -112,3 +112,7 @@ They establish interpreter correctness, not live-model semantic coverage.
 Prompt-scope regressions: `python -m pytest -q tests/test_prompt_scope.py` checks
 real stored sampler snapshots stay out of model prompts, review bodies aren't
 repeated per frontier, and oversized requests are intercepted before HTTP.
+
+Generation progress: `python -m pytest -q tests/test_generation_progress.py tests/test_graph_jobs.py` verifies first-request visibility, heartbeats before a
+response, stage/event progress, retry reporting and cancellation fencing without
+copying model or exception bodies to logs.

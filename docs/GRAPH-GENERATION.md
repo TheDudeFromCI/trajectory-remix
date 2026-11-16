@@ -288,3 +288,21 @@ converted into a quality failure. Frozen runs keep their endpoint settings: star
 new run to apply changed budgets or the narrower prompt recipe. Long episodes still
 need explicit context management; this change removes accidental duplication rather
 than claiming unlimited history fits a small model.
+
+### Watch a running job
+
+The existing job log shows timestamped admission, request queue/start, response,
+event commit, review verdict and trajectory outcome messages. Requests that are
+still pending a complete model response emit an elapsed-time heartbeat every ten
+seconds. A heartbeat means the request is still awaiting a response; it does not
+claim tokens are being generated. Queue messages identify paused endpoints, and
+retry messages distinguish another attempt from exhausted retries requiring Resume.
+Responses report provider token counts when supplied, and input sizes are bytes,
+not estimated token counts.
+
+Logs contain operation, endpoint and trajectory/request/event IDs, timings and
+counts. They do not include prompts, model output, provider error bodies or keys.
+The transport still receives whole responses rather than streaming tokens. The
+existing log endpoint and job dialog need no API changes; polling an open job's
+log shows new entries even while the model is busy. Existing log-cache retention
+and Clear Log Cache apply; a zero-size cache retains no entries.

@@ -190,7 +190,11 @@ async def test_driver_retry_discards_partial_and_original_inputs(runtime):
         assert r["retries"] == 1
         assert json.loads(r["result"]) == {"text": "whole response"}
         assert "incomplete-secret-body" not in json.dumps(dict(r))
-    assert jobs.logs(job)["items"] == []
+    log = "\n".join(item["text"] for item in jobs.logs(job)["items"])
+    assert "incomplete-secret-body" not in log
+    assert "whole response" not in log
+    assert "retrying in the same queue slot" in log
+    assert "attempt 2" in log
 
 
 def test_endpoint_caps_and_single_trajectory_slot(runtime):
@@ -463,7 +467,9 @@ async def test_cancel_interrupts_active_driver_and_fences_ignored_cancellation(r
         await task
     assert jobs.inspect(job)["state"] == "cancelled"
     assert store.read(a.source.id).revision == 1
-    assert jobs.logs(job)["items"] == []
+    log = "\n".join(item["text"] for item in jobs.logs(job)["items"])
+    assert "Request started" in log
+    assert "Response received" not in log
 
 
 def test_checkpoint_per_source_idempotency_and_no_transaction_around_driver(runtime):
