@@ -1,8 +1,11 @@
 # Project settings
 
-**Project Settings** holds the things shared by everyone using a project: model
-endpoints and roles, tokenizer profiles, tools and defaults. **Generation Settings**
-holds review and repair options and the review checklists.
+**Settings** (in the header) holds the things shared by everyone using a project: model
+endpoints and roles, tokenizer profiles, tools and defaults, on the **Models & defaults**,
+**Tools**, **Storage** and **Advanced JSON** tabs. The **Generate** dialog holds review and
+repair options and the review checklists, next to the controls for starting a run.
+
+![Project settings](images/dashboard/settings.png)
 
 Both are a shared local draft until you press **Save**. Closing a dialog or editing a
 field never starts a model request, and running jobs keep the configuration they
@@ -14,14 +17,14 @@ You bring your own OpenAI-compatible server. Remix doesn't launch, probe or down
 models.
 
 1. Start your server.
-2. In Project Settings, enter a unique endpoint ID and click **Add endpoint**.
+2. In **Settings → Models & defaults**, enter a unique endpoint ID and click **Add endpoint**.
 3. Fill in the **base URL** (for example `http://127.0.0.1:8000/v1`; Remix adds
    `/chat/completions`), the exact **model** name, a **concurrent-request limit** and a
    **retry count** for transport errors.
 4. Assign the **Generator**, **Fast Review** and **Critical Review** roles from the
    dropdowns. One endpoint can fill all three. Leave a review role empty to skip that
    review.
-5. **Save**, then open Generation Settings to choose review and repair options.
+5. **Save settings**, then open **Generate** to choose review and repair options.
 
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
 future work.
@@ -48,8 +51,8 @@ authoring, generation, review and metrics never touch a tokenizer.
 The twelve controls are `bos`, `eos`, `noop`, `ctx_begin`, `ctx_end`, `tool_begin`,
 `tool_end`, `response_begin`, `response_end`, `msg_begin`, `msg_end` and `window_ref`.
 
-Pick the preview profile in your browser **Preferences** and the export profile in the
-Export dialog. They are chosen independently.
+Pick the preview profile in **Project → Preferences…** (stored in your browser) and the
+export profile in the Export dialog. They are chosen independently.
 
 ## Tools
 
@@ -69,7 +72,7 @@ custom schemas. Removing a tool keeps the existing calls that use it. See
 
 ## Review criteria
 
-In **Generation Settings**, each criterion is a line of text with an optional
+In the **Generate** dialog, each criterion is a line of text with an optional
 **not-applicable** allowance. Add or remove criteria in the **Core** and **Critical**
 lists. Fast review checks Core, and Critical review checks Core plus Critical.
 

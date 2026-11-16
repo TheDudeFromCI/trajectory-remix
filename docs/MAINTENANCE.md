@@ -18,7 +18,7 @@ Paths below are relative to `trajectory_remix/`.
 | Generation/review | `graph/flow.py`, `graph/generation.py`, `graph/reviews.py`, `graph/provider.py` | Frozen inputs, actor context, checklist evidence, stage transitions and single repair sessions |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `static/graph.js`, `graph.html`, `graph.css`, `shell.js`, `project-settings.js`, `sampler.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -75,9 +75,12 @@ regression, then run relevant shared suites. A typical bounded check is:
 python -m pytest -q tests/test_graph*.py tests/test_ktremix_format.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py
+node tests/project_settings_frontend.mjs
+node tests/studio_ui_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
-node --check trajectory_remix/static/graph.js
+python tests/run_dashboard_frontend.py
+for f in trajectory_remix/static/*.js; do node --check "$f"; done
 ruff check . && ruff format --check .
 git diff --check
 ```

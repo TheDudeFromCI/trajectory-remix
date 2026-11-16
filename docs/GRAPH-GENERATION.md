@@ -21,7 +21,7 @@ never executed.
 
 ## Run a generation
 
-1. In Project Settings, add endpoints and assign the **Generator** role (and optionally
+1. In **Settings**, add endpoints and assign the **Generator** role (and optionally
    **Fast** and **Critical** review roles). See [Project settings](PROJECT-SETTINGS.md).
 2. Open **Sampler Matrix → Proposal preview → Generate trajectories**.
 3. Choose any **pins**, a **seed** and an **attempt count**, then **Start generation**.
@@ -31,8 +31,8 @@ request only. They don't change weights or dirty the matrix. Save matrix or metr
 **before** starting, because the run freezes its inputs at admission, and later edits to
 settings or pins don't change its remaining attempts.
 
-The job dialog shows pending, active and finished outcome counts, and manual endpoint Resume
-controls. A run of N attempts reserves N identities and ends with N outcomes, including
+The job's page in the **Jobs** view shows pending, active and finished outcome counts, and manual
+endpoint Resume controls. A run of N attempts reserves N identities and ends with N outcomes, including
 failures. There are no automatic replacements.
 
 ## How a trajectory is built
@@ -139,7 +139,7 @@ pages.
 | **Force Fast / Critical** | Ignores stage limits. A pass keeps a higher existing stage, and failures follow normal transitions. |
 
 Ownership is always enforced, and a locked source is skipped. Closing the dialog doesn't stop the
-job.
+job; follow it in the **Jobs** view.
 
 ### Stale reviews
 

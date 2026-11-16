@@ -9,10 +9,10 @@ still does not establish content quality or training convergence.
 
 ## Dashboard restoration and final review
 
-The original desktop workflow is restored over the graph REST services:
-File/Edit/View menus, dataset/sidebar, central windows/timeline and right event
-inspector. Project Settings has endpoint/role/tokenizer forms; Generation Settings
-and Jobs are persistent actions. Clean sources update live and unlock on completion;
+The desktop workflow runs over the graph REST services: Editor, Jobs, Metrics and
+Sampler views; a dataset panel, central windows/timeline and a tabbed event editor.
+Settings has endpoint/role/tokenizer/tool forms; Generate, Review & Repair and the
+Jobs view are persistent actions. Clean sources update live and unlock on completion;
 real unsaved drafts survive changes. See [Dashboard](DASHBOARD.md) and
 [Project Settings](PROJECT-SETTINGS.md).
 

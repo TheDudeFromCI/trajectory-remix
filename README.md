@@ -27,7 +27,7 @@ python -m trajectory_remix graph-init --dataset project.sqlite
 python -m trajectory_remix graph-studio --dataset project.sqlite
 ```
 
-Open **http://127.0.0.1:8765**, choose **File → Import**, and load
+Open **http://127.0.0.1:8765**, choose **Project → Import trajectories…**, and load
 [`examples/graph_minimal.json`](examples/graph_minimal.json). Select an event to edit
 its window and dependencies, and scrub the timeline to see the trajectory build up.
 New projects need no tokenizer.

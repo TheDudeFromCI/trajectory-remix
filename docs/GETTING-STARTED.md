@@ -31,18 +31,20 @@ specific features, listed below.
 
 ## A first ten minutes
 
-1. **Import an example.** Choose **File → Import** and pick
+1. **Import an example.** Choose **Project → Import trajectories…** and pick
    [`examples/graph_minimal.json`](../examples/graph_minimal.json). The
    [`graph_tools.json`](../examples/graph_tools.json) example shows a tool call split
    into fragments.
-2. **Look around.** The left sidebar lists trajectories, the centre shows windows and
-   a timeline, and the right inspector edits the selected event.
-3. **Scrub the timeline.** In the default *Graph* mode, scrubbing steps through the
+2. **Look around.** The **Dataset** panel on the left lists trajectories, the centre
+   shows windows and a timeline, and the **event editor** on the right edits the selected
+   event. The tabs at the top switch between the Editor, Jobs, Metrics and Sampler views.
+3. **Scrub the timeline.** In the default *Dependency graph* mode, scrubbing steps through the
    dependency order. It is not authored time.
 4. **Edit.** Change an event's text, window or dependencies. Add a dependency with the
    picker, or Shift-click a predecessor in the timeline. Save the trajectory.
-5. **Create your own.** Make a new trajectory from the sidebar, add windows, then add
-   events and say which events each depends on.
+5. **Create your own.** Click **+** in the Dataset panel, add windows on the event
+   editor's **Windows** tab, then add events and link them on the **Links** tab. The
+   [Dashboard tutorials](DASHBOARD.md#tutorials) walk through this step by step.
 
 Structural errors, such as a missing reference or two unordered writers to one
 window, never block saving. They show as diagnostics, keep the draft editable, and

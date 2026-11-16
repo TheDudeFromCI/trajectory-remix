@@ -1,6 +1,6 @@
 # Metrics
 
-**View → Dataset Metrics** shows how your dataset compares with what the sampler intended to produce, without
+The **Metrics** tab shows how your dataset compares with what the sampler intended to produce, without
 guessing at anything it can't measure.
 
 ## What you see
