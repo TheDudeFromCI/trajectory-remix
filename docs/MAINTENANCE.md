@@ -108,3 +108,7 @@ Adaptive Flow backend regressions: `python -m pytest -q tests/test_adaptive_flow
 These scripted-provider tests exercise loops, independent tool branches and joins,
 causal actor prompts, frozen YAML/resume, typed conditions and bounded failure.
 They establish interpreter correctness, not live-model semantic coverage.
+
+Prompt-scope regressions: `python -m pytest -q tests/test_prompt_scope.py` checks
+real stored sampler snapshots stay out of model prompts, review bodies aren't
+repeated per frontier, and oversized requests are intercepted before HTTP.

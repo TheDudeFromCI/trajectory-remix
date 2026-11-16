@@ -258,3 +258,33 @@ consumers should treat it as opaque. Job logs report successful selections and l
 exhaustion without copying private prompts or response bodies. `flow_outcome` metadata
 records the controller's finish explanation; it is not measured coverage. Compilation
 and semantic acceptance remain separate. No frontend files are changed by this feature.
+
+### Context scope and local-model budgets
+
+The controller receives the **sampled proposal**, not the entire sampling matrix.
+Source metadata (including its frozen matrix, provenance snapshots and review history)
+is retained in storage but excluded from controller prompts. Reviewers receive each
+source body once; their per-decision causal views list surviving event IDs by window,
+including replacement and closure effects. These are references to the source, not
+summaries that can introduce new facts.
+
+Endpoint settings now accept `context_window_tokens` (default **16384**) and
+`max_output_tokens` (default **2048**). The transport sends the latter as `max_tokens`.
+Configure these through endpoint JSON until frontend forms expose them. This is an
+additive endpoint-settings API change; the request and source schemas are unchanged.
+
+Before HTTP, the transport measures the serialized messages and response schema in
+UTF-8 bytes and reserves output tokens plus 512 framing tokens. It uses one byte per
+input token as a conservative ceiling for byte-backed tokenizers. This is deliberately
+stricter than a model-specific tokenizer: a request that could fit may be rejected.
+It is not an exact Qwen chat-template count. No training tokenizer is loaded and no
+model endpoint is probed. Configure the actual model context size, rather than inflating
+it to bypass this check. Exact serving-tokenizer accounting is a future extension.
+
+Over-budget requests return a context-limit result before contacting the model. A
+non-repair operation pauses with operation/input-size/allowance in its job log; repair
+retains the existing context-limit failure behavior. Nothing is silently truncated or
+converted into a quality failure. Frozen runs keep their endpoint settings: start a
+new run to apply changed budgets or the narrower prompt recipe. Long episodes still
+need explicit context management; this change removes accidental duplication rather
+than claiming unlimited history fits a small model.

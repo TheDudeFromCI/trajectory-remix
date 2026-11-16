@@ -125,7 +125,7 @@ def selection_payload(source, plan, current, correction=""):
                     dict(
                         proposal=plan["proposal"],
                         tools=plan["tools"],
-                        source=source.to_dict(),
+                        source=source.model_dump(mode="json", exclude={"metadata"}),
                         previous=current.get("output"),
                         remaining_events=plan["flow"]["max_events"] - len(source.events),
                         correction=correction,

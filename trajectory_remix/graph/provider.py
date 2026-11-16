@@ -81,6 +81,29 @@ def response_contract(payload):
     return {"type": "json_object"}, messages
 
 
+def context_budget(payload, response_format, messages):
+    """Conservative byte-token ceiling, independent of training tokenizers.
+
+    UTF-8 bytes bound byte-backed BPE input tokens; reserve additional template
+    overhead. This deliberately rejects some requests that a model tokenizer
+    could fit. Never truncate evidence to make a request appear to fit.
+    """
+    endpoint = payload["endpoint_config"]
+    limit = endpoint.get("context_window_tokens", 16384)
+    output = endpoint.get("max_output_tokens", 2048)
+    size = len(
+        json.dumps(
+            dict(messages=messages, response_format=response_format), ensure_ascii=False
+        ).encode()
+    )
+    return dict(
+        input_bytes=size,
+        input_ceiling=limit - output - 512,
+        context_window_tokens=limit,
+        max_output_tokens=output,
+    )
+
+
 class OpenAITransport:
     async def __call__(self, ticket):
         payload = ticket.payload
@@ -89,6 +112,9 @@ class OpenAITransport:
         key = os.environ.get("REMIX_API_KEY_" + ticket.endpoint.upper().replace("-", "_"))
         headers = {"Authorization": "Bearer " + key} if key else {}
         response_format, messages = response_contract(payload)
+        budget = context_budget(payload, response_format, messages)
+        if budget["input_bytes"] > budget["input_ceiling"]:
+            return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
         async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
             response = await client.post(
                 endpoint["url"].rstrip("/") + "/chat/completions",
@@ -97,6 +123,7 @@ class OpenAITransport:
                     model=endpoint["model"],
                     messages=messages,
                     stream=False,
+                    max_tokens=budget["max_output_tokens"],
                     response_format=response_format,
                 ),
             )
