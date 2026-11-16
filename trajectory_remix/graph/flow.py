@@ -72,105 +72,21 @@ def causal_view(source, after):
 
 
 def default_plan(proposal, settings):
-    """Shared branching recipe, including user/autonomous phase changes.
+    """Load the shared adaptive policy, retaining the public Python helper."""
+    from .adaptive_flow import frozen_plan, load_flow
 
-    Targets guide the initial observation author, never the actor. Custom plans
-    use the same tasks/driver for more involved tool/window topologies.
-    """
-    scenario = proposal["scenario"]
-    user = scenario.get("user", {})
-    state = scenario.get("project_state", {})
-    autonomous = user.get("involvement") in {
-        "hands_off",
-        "absent",
-        "unavailable",
-        "none",
-    } or state.get("entry_state") in {"idle", "heartbeat", "external_wakeup"}
-    windows = {
-        "chatroom": dict(purpose="chatroom", agent_writable=False),
-        "reasoning": dict(purpose="reasoning", agent_writable=True),
-        "reply": dict(purpose="tool", agent_writable=True),
-        "world": dict(purpose="context", agent_writable=False),
-    }
-    initial = (
-        dict(kind="external_text", window="world")
-        if autonomous
-        else dict(kind="chat_message", window="chatroom", chat={"speaker": "user"})
-    )
-    tasks = [
-        dict(
-            id="opening",
-            envelope=initial,
-            instruction="Author a concrete observable starting situation. Include needed constraints, never disclose target labels or prescribed answers.",
-            world={
-                "domain": scenario.get("domain"),
-                "state": state,
-                "user": user,
-                "condition": proposal["learning_objective"]["condition_making_decision_valid"],
-            },
-        ),
-        dict(
-            id="consider",
-            envelope=dict(kind="agent_text", window="reasoning", after=["opening"]),
-            instruction="Consider the visible situation and decide a supported next action. Do not claim unobserved execution.",
-        ),
-    ]
-    # Collaboration and external tags select branches in this one Flow.
-    tags = {x["id"] for x in scenario.get("additional_event_tags", [])}
-    previous = "consider"
-    if user.get("involvement") == "collaborative" or "multi_user" in tags:
-        tasks.append(
-            dict(
-                id="participant",
-                envelope=dict(
-                    kind="chat_message",
-                    window="chatroom",
-                    chat={"speaker": "collaborator"},
-                    after=[previous],
-                ),
-                instruction="Add a relevant participant clarification, grounded in the visible facts.",
-            )
-        )
-        previous = "participant"
-    if autonomous or tags & {"external_approval", "failed_acceptance", "external_wakeup"}:
-        tasks.append(
-            dict(
-                id="wakeup",
-                envelope=dict(kind="external_text", window="world", after=[previous]),
-                instruction="Author a concrete external update or alarm grounded in the episode so far. No fabricated tool request is needed.",
-            )
-        )
-        previous = "wakeup"
-    tasks.append(
-        dict(
-            id="decision",
-            envelope=dict(
-                kind="agent_text", window="reasoning", after=[previous], close_window=True
-            ),
-            instruction="Choose a proportionate action using current evidence. State uncertainty and truthful episode progress.",
-        )
-    )
-    if "chat" in settings.tools:
-        tasks.append(
-            dict(
-                id="reply",
-                envelope=dict(
-                    kind="tool_call",
-                    window="reply",
-                    after=["decision"],
-                    tool="chat",
-                    call_id="reply",
-                    close_window=True,
-                ),
-                arguments="json",
-                instruction="Send a concise truthful message using the chat tool input schema.",
-            )
-        )
-    return dict(windows=windows, tasks=tasks)
+    return frozen_plan(proposal, settings, load_flow())
 
 
 def prepare_plan(proposal, settings, instructions):
-    raw = instructions.get("plan") or default_plan(proposal, settings)
+    if "plan" not in instructions:
+        from .adaptive_flow import frozen_plan, load_flow
+
+        snapshot = instructions.get("_flow_snapshot") or load_flow(
+            text=instructions.get("flow_yaml")
+        )
+        return frozen_plan(proposal, settings, snapshot)
+    raw = instructions["plan"]
     plan = Plan.model_validate(raw)
     tasks = []
     for task in plan.tasks:
@@ -250,6 +166,8 @@ def event_payload(source, task, settings, correction=False):
                     dict(
                         task=task["instruction"],
                         kind=envelope["kind"],
+                        window_purpose=source.windows[envelope["window"]].purpose,
+                        **({"tool": envelope["tool"]} if tool else {}),
                         visible=causal_view(source, envelope.get("after", [])),
                         **({"world": task["world"]} if not actor else {}),
                         **({"input_schema": tool.input_schema} if tool else {}),

@@ -15,6 +15,7 @@ REQUIRED = [
     "static/shell.js",
     "static/style.css",
     "Skill.md",
+    "graph/flow.yaml",
 ]
 
 

@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import jsonschema
 
-from . import reviews
+from . import adaptive_driver, adaptive_flow, reviews
 from .commands import merge_patch
 from .flow import append_event, causal_view, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
@@ -38,6 +38,15 @@ class GenerationService:
             reviews.review_schema(settings, "fast")
             if settings.generation.critical and "critical" in settings.endpoint_roles:
                 reviews.review_schema(settings, "critical")
+        instructions = deepcopy(instructions)
+        if "plan" in instructions and "flow_yaml" in instructions:
+            raise ValueError("Choose plan or flow_yaml, not both")
+        if "_flow_snapshot" in instructions:
+            raise ValueError("_flow_snapshot is reserved")
+        if "plan" not in instructions:
+            instructions["_flow_snapshot"] = adaptive_flow.load_flow(
+                self.store.path.parent / "flow.yaml", instructions.get("flow_yaml")
+            )
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
         plans = {p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals}
@@ -302,17 +311,23 @@ class GenerationService:
                         "SELECT proposal FROM graph_attempts WHERE trajectory_id=?", (ident,)
                     ).fetchone()[0]
                 )
-            tasks = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]["tasks"]
-            if cp["index"] >= len(tasks):
-                self._after_generation(job, source, cp)
-                return
-            task = deepcopy(tasks[cp["index"]])
-            task["envelope"]["after"] = [
-                dep + ":echo" if dep + ":echo" in source.events else dep
-                for dep in task["envelope"].get("after", [])
-            ]
-            payload = event_payload(source, task, settings, cp["errors"] > 0)
-            payload["task"] = task  # Driver-only envelope, not a provider message.
+            plan = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
+            if "flow" in plan:
+                payload = adaptive_driver.prepare(self, job, source, cp, plan, settings)
+                if payload is None:
+                    return
+            else:
+                tasks = plan["tasks"]
+                if cp["index"] >= len(tasks):
+                    self._after_generation(job, source, cp)
+                    return
+                task = deepcopy(tasks[cp["index"]])
+                task["envelope"]["after"] = [
+                    dep + ":echo" if dep + ":echo" in source.events else dep
+                    for dep in task["envelope"].get("after", [])
+                ]
+                payload = event_payload(source, task, settings, cp["errors"] > 0)
+                payload["task"] = task
             tier = "generator"
         else:
             tier = cp["tier"]
@@ -417,6 +432,10 @@ class GenerationService:
         body = complete.get("output")
         try:
             jsonschema.Draft202012Validator(ticket.payload["schema"]).validate(body)
+            if ticket.payload["operation"] == "flow_select":
+                selected_source, selected_task, selection = adaptive_flow.accept_selection(
+                    source, body, ticket.payload["flow_plan"], settings
+                )
             if cp["phase"] == "review":
                 quality = reviews.verdict(body, source)
                 if quality == "pass" and any(
@@ -429,10 +448,20 @@ class GenerationService:
                     d.severity == "error" for d in diagnose(source, settings)
                 ):
                     raise ValueError("Repair must resolve structural errors before passing")
-        except (jsonschema.ValidationError, ValueError, TypeError, KeyError):
+        except (jsonschema.ValidationError, ValueError, TypeError, KeyError) as error:
+            cp["flow_error"] = str(error)[:2000]
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
+        if ticket.payload["operation"] == "flow_select":
+            cp["flow"].update(output=selection, task=selected_task)
+            adaptive_driver.advance(cp, ticket.payload["flow_plan"])
+            self._save(ticket.job_id, selected_source, cp, ticket=ticket)
+            self.jobs.append_log(
+                ticket.job_id,
+                "Flow selected: " + (selected_task["id"] if selected_task else "finish"),
+            )
+            return
         if cp["phase"] == "event":
             task = ticket.payload["task"]
             source = append_event(source, task, body, settings)
@@ -441,6 +470,8 @@ class GenerationService:
             if errors:
                 raise ValueError("Flow wrapper structural error: " + errors[0].code)
             cp["index"] += 1
+            if "flow_plan" in ticket.payload:
+                adaptive_driver.advance(cp, ticket.payload["flow_plan"])
             cp["echo"] = task["id"]
             self._save(ticket.job_id, source, cp, ticket=ticket)
             return

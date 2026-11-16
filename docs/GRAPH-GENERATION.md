@@ -37,19 +37,50 @@ failures. There are no automatic replacements.
 
 ## How a trajectory is built
 
-The sampler picks a **proposal**: a scenario with domain, lifecycle, complexity, user traits
-and so on. A **Flow** then builds the trajectory one event at a time, and each provider call
-writes exactly one event's content. The Flow, not the model, owns IDs, dependencies, masks,
-delivery and closing, so the model never has to copy them correctly.
+The sampler picks a **proposal**. One adaptive Flow reads the entire proposal, including
+custom matrix dimensions, and builds a bounded episode with branches, loops, tools,
+authored specialist outcomes, verification and continuation as appropriate.
 
-The default Flow is a compact baseline. It branches on the scenario: hands-off work can start
-with external context, collaborative work includes another participant, relevant tags add
-external updates, and then reasoning and an optional chat submission follow. It does **not**
-claim that every sampled target has been achieved, and targets are kept separate from measured
-results. Iterate on prompts with a local model before using output as training data.
+The private controller chooses one event envelope at a time. A separate content call
+writes that event using its causal context. This separation keeps private objectives
+out of the actor's prompt. New matrix fields reach the controller without a
+competency-name switch in Python. The project tool catalogue still defines available
+operations; matrix edits do not silently grant new tools. The controller can add new windows, independent branches
+and joins; it cannot rewrite committed events or reopen closed windows. Structural
+validation checks its choices before content generation. Targets guide construction;
+a model's finish decision is not proof of semantic coverage or training readiness.
 
-Each finished event and its checkpoint commit together, so interrupted work resumes from the
-last whole event.
+Each selection, local transition, event and echo commits with its interpreter checkpoint.
+Resume uses the frozen policy and accepted state. Loops have step and event limits;
+exhaustion retains the partial source as **Unfinished**, without a fabricated pass.
+
+### Edit flow.yaml
+
+Place `flow.yaml` beside the project's SQLite database to override the packaged
+[`flow.yaml`](../trajectory_remix/graph/flow.yaml). It is read when a new run starts;
+editing it never changes active runs. Alternatively pass YAML text as
+`instructions.flow_yaml`. Invalid configuration is rejected before reserving attempts.
+The complete normalized Flow, hash, proposal and tool catalogue freeze into the run.
+
+The file declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
+`actor_instruction` and a `nodes` map. Nodes support:
+
+| Kind | Action and transitions |
+| --- | --- |
+| `select` | Ask the private authoring controller for the next event or a finish decision; continue at `next`. |
+| `event` | Generate the selected event's content; continue at `next`. |
+| `branch` | Compare dotted `path` in the last selection with `equals`; take `then` or `otherwise`. Missing paths take `otherwise`; booleans are distinct from integers. |
+| `end` | Finish construction after a validated finish selection, then run configured reviews. |
+
+Transitions can point backward to loop or forward to join branches. Step limits bound
+all cycles, including cycles without provider calls. Edit node instructions and add
+conditional branches to extend behavior. The last selection exposes `finished`,
+`reason`, `task` and `windows` to conditions. Controller instructions are trusted author
+configuration; generated actor instructions are replaced with `actor_instruction` to
+prevent private solution leakage. External authors may receive scoped `task.world`.
+
+The default keeps decision windows open through their consumers. Closing a window
+removes it from later actor prompts; choose closure only after its final use.
 
 ### Custom recipes
 
@@ -71,7 +102,8 @@ script's `smoke_plan` has examples.
 
 ## What the model sees
 
-For each event, the prompt contains only **causal ancestors**, folded into the windows that are
+The private selection controller sees the full proposal and committed source. It is an
+authoring role, never supervised actor output. For each content event, the actor prompt contains only **causal ancestors**, folded into the windows that are
 currently visible, with replacements applied and closed windows removed. Parallel and future
 events, metadata, the full proposal, hidden world data and review history are all excluded. There
 is no rolling chat history that could smuggle lost context back in.
@@ -82,7 +114,10 @@ is no rolling chat history that could smuggle lost context back in.
   independent begin/end, instant or streamed delivery, and closing flags.
 - A completed `chat` call with `echo_chat=true` produces a masked `chat_message` from the call's
   parsable `content`, linked by `call_id`. A pending-helper checkpoint makes restarts safe.
-  Later tasks that depend on the call resolve through its echo.
+  Legacy explicit-plan tasks resolve call dependencies through its echo; adaptive
+  selections refer to the committed echo ID when delivery must precede an action.
+  A linked chat echo that differs from submitted content is a structural error,
+  including after repair.
 - With `echo_chat=false`, the Flow lets you filter, reject or skip delivery through explicit tasks.
 - Malformed chat arguments only warn, and no echo is invented. Multiple fragments assemble in
   causal order.
@@ -200,3 +235,24 @@ Checks: `python -m pytest -q tests/test_graph_generation.py tests/test_graph_job
 tests/test_graph_sampling.py tests/test_graph_studio.py tests/test_graph_export.py` and
 `python tests/run_generation_frontend.py`. They use tiny fake-provider sources. Model quality,
 tool coherence, schema compatibility and context limits need the user-machine checks.
+
+### Backend API changes: adaptive Flow
+
+Frontend integration can continue using `POST /api/v1/generation/runs` with the same
+request body. Empty `instructions` now selects the adaptive YAML Flow. Existing
+`instructions.plan` recipes and already-frozen runs retain their original behavior.
+Do not send both `plan` and `flow_yaml`.
+
+New authenticated `GET /api/v1/generation/flow` returns `{flow, flow_hash}` for the
+current on-disk policy (or packaged default). Editing is through `flow.yaml` or a
+per-run `instructions.flow_yaml` string; there is no filesystem-write endpoint.
+MCP `generate_graphs` accepts the same instructions through its existing service.
+There are no source-format, settings-schema, stage or ownership changes.
+
+Provider request history now includes `operation: flow_select`, separate from
+`event`, `review` and `repair`. It uses the Generator role and ordinary FIFO limits.
+The checkpoint has an additional `flow` object with node, steps, output and task;
+consumers should treat it as opaque. Job logs report successful selections and limit
+exhaustion without copying private prompts or response bodies. `flow_outcome` metadata
+records the controller's finish explanation; it is not measured coverage. Compilation
+and semantic acceptance remain separate. No frontend files are changed by this feature.

@@ -99,3 +99,8 @@ product files, without secrets, including process/session details and next steps
 Verify that `/tmp` artifacts and processes survived before resuming them. Open or
 update a focused PR; merge only when the current user has authorized it. A green
 suite is evidence of covered behavior, not proof of exhaustive correctness.
+
+Adaptive Flow backend regressions: `python -m pytest -q tests/test_adaptive_flow.py`.
+These scripted-provider tests exercise loops, independent tool branches and joins,
+causal actor prompts, frozen YAML/resume, typed conditions and bounded failure.
+They establish interpreter correctness, not live-model semantic coverage.

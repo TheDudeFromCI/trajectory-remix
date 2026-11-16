@@ -28,3 +28,10 @@ see only causal open windows. Automatic chat echo can be disabled per call for
 explicit filtered/rejected outcomes. Prepared local-model checks are described
 in `docs/GRAPH-LOCAL-LLM.md`; do not run live models or benchmarks without task
 authorization.
+
+Empty instructions use the shared adaptive `flow.yaml` policy beside the project
+SQLite file, falling back to the packaged policy. `instructions.flow_yaml` supplies
+per-run YAML; `instructions.plan` retains explicit finite recipes. The complete
+policy freezes before admission. Selection and event content are separate Generator
+requests. Branch/loop state checkpoints with accepted events; limits preserve an
+Unfinished partial source. See `docs/GRAPH-GENERATION.md` for YAML nodes and API changes.
