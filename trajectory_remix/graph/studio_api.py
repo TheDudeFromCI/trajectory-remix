@@ -208,11 +208,9 @@ def create_studio_app(
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
-    @router.get("/generation/flow")
-    def generation_flow():
-        from .adaptive_flow import load_flow
+    from .flow_api import add_flow_routes
 
-        return load_flow(studio.store.path.parent / "flow.yaml")
+    add_flow_routes(app, router, studio, sampler, generation.transport)
 
     @router.post("/generation/runs", status_code=202)
     async def generation_run(body: SamplerRun):

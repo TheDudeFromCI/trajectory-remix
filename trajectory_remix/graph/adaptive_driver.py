@@ -7,12 +7,36 @@ from .flow import event_payload
 from .models import GraphSource
 
 
+def limit_reached(source, current, plan):
+    """A run stops at max_steps, or at max_events unless it is already ending."""
+    node = plan["flow"]["nodes"][current["node"]]
+    return current["steps"] >= plan["flow"]["max_steps"] or (
+        node["kind"] != "end" and len(source.events) >= plan["flow"]["max_events"]
+    )
+
+
+def request_payload(source, cp, plan, settings):
+    """The provider request for the current select or event node.
+
+    Shared by durable runs and the interactive walkthrough so both send the same prompt.
+    """
+    current = cp["flow"]
+    node = plan["flow"]["nodes"][current["node"]]
+    if node["kind"] == "select":
+        return flow.selection_payload(source, plan, current, cp.get("flow_error", ""))
+    if not current.get("task"):
+        raise ValueError("Flow event node requires a selected task")
+    task = deepcopy(current["task"])
+    task["instruction"] += "\n" + node["instruction"]
+    payload = event_payload(source, task, settings, cp["errors"] > 0)
+    payload["task"] = task
+    return payload
+
+
 def prepare(driver, job, source, cp, plan, settings):
     current = cp.setdefault("flow", flow.state(plan))
     node = plan["flow"]["nodes"][current["node"]]
-    if current["steps"] >= plan["flow"]["max_steps"] or (
-        node["kind"] != "end" and len(source.events) >= plan["flow"]["max_events"]
-    ):
+    if limit_reached(source, current, plan):
         data = source.to_dict()
         data["metadata"]["generation_failure"] = dict(kind="flow_limit", node=current["node"])
         data["metadata"]["stage"] = -3
@@ -34,15 +58,7 @@ def prepare(driver, job, source, cp, plan, settings):
         current["steps"] += 1
         driver._save(job, source, cp)
         return None
-    if node["kind"] == "select":
-        payload = flow.selection_payload(source, plan, current, cp.get("flow_error", ""))
-    else:
-        if not current.get("task"):
-            raise ValueError("Flow event node requires a selected task")
-        task = deepcopy(current["task"])
-        task["instruction"] += "\n" + node["instruction"]
-        payload = event_payload(source, task, settings, cp["errors"] > 0)
-        payload["task"] = task
+    payload = request_payload(source, cp, plan, settings)
     payload["flow_plan"] = plan  # Frozen author-only inputs, never provider messages.
     return payload
 
