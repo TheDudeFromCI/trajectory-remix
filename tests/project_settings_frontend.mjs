@@ -33,6 +33,7 @@ assert.ok(cols[0].querySelector('[aria-label="Enable Fast Review"]'));
 assert.ok(cols[1].querySelector('[aria-label="core criterion evidence"]'));
 assert.ok(!cols[2].querySelector('[aria-label^="core criterion"]'));
 assert.ok(cols[0].querySelector('[aria-label="Repair transcript byte limit"]')&&!cols[0].querySelector('details'));
+assert.deepEqual(cols.map(c=>!!c.querySelector(':scope > h3[data-tip]')),[true,true,true]);assert.ok(!generation.querySelector('.settings-help + .settings-help, h3 + p.settings-help'));
 const repair=byLabel(generation,'Attempt repair after review failure');repair.checked=false;repair.dispatchEvent(new window.Event('change'));
 enter(byLabel(generation,'core criterion evidence'),'Require exact supporting events');
 enter(byLabel(generation,'New critical criterion ID'),'quality');btn(generation,'Add critical criterion').click();

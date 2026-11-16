@@ -4,6 +4,7 @@ const node = (tag, text, cls) => { const n = document.createElement(tag); if (te
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
 const field = (text, control) => { const n = node('label', text); n.append(control); return n; };
 const heading = (box, title, help) => { box.append(node('h3', title)); if (help) box.append(node('p', help, 'settings-help')); };
+const tipHeading = (box, title, tip) => { const n = node('h3', title, 'has-tip'); n.tabIndex = 0; n.dataset.tip = tip; box.append(n); };
 const controls = ['bos', 'eos', 'noop', 'ctx_begin', 'ctx_end', 'tool_begin', 'tool_end', 'response_begin', 'response_end', 'msg_begin', 'msg_end', 'window_ref'];
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
 function editor(container, initial, options) {
@@ -127,7 +128,7 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const column = name => node('div', undefined, `review-column review-column-${name}`);
   const settingsColumn = column('settings'), coreColumn = column('core'), criticalColumn = column('critical');
   container.classList.add('review-columns'); container.append(settingsColumn, coreColumn, criticalColumn);
-  heading(settingsColumn, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
+  tipHeading(settingsColumn, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
   const toggle = (key, title) => {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
@@ -139,8 +140,8 @@ export function renderGenerationSettings(container, initial, options = {}) {
   limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), node('p', 'Repair keeps one continuing session. This transcript bound and provider context exhaustion end that attempt; it is not a spending cap.', 'settings-help')); settingsColumn.append(limits);
   const checklistHelp = 'Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
   for (const [group, target] of [['core', coreColumn], ['critical', criticalColumn]]) {
-    if (group === 'core') heading(target, 'Core checklist', `Applied in both Fast and Critical Review. ${checklistHelp}`); else heading(target, 'Critical checklist', 'Additional criteria applied only during Critical Review, on top of the core checklist.');
-    const section = node('section', undefined, 'settings-card'); 
+    if (group === 'core') tipHeading(target, 'Core checklist', `Applied in both Fast and Critical Review. ${checklistHelp}`); else tipHeading(target, 'Critical checklist', 'Additional criteria applied only during Critical Review, on top of the core checklist.');
+    const section = node('section', undefined, 'settings-card');
     for (const [id, criterion] of Object.entries(current().review_checklists?.[group] || {})) {
       const row = node('div', undefined, 'settings-criterion'), text = node('textarea'); text.value = criterion.text; text.setAttribute('aria-label', `${group} criterion ${id}`);
       text.oninput = () => write(d => { d.review_checklists[group][id].text = text.value; });
