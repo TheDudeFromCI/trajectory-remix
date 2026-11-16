@@ -6,9 +6,13 @@ from typing import Literal
 from pydantic import Field
 
 from .models import DTO, GraphSource, JsonValue, canonical
+from .prompt_order import ordered
 from .validation import diagnose
 
 VERSION = "graph-event-flow/1"
+CORRECTION = (
+    "Previous output did not match the output contract. Return the complete requested JSON."
+)
 
 
 class ProposalInput(DTO):
@@ -162,19 +166,22 @@ def event_payload(source, task, settings, correction=False):
             ),
             dict(
                 role="user",
-                content=canonical(
-                    dict(
-                        task=task["instruction"],
-                        kind=envelope["kind"],
-                        window_purpose=source.windows[envelope["window"]].purpose,
-                        **({"tool": envelope["tool"]} if tool else {}),
-                        visible=causal_view(source, envelope.get("after", [])),
-                        **({"world": task["world"]} if not actor else {}),
-                        **({"input_schema": tool.input_schema} if tool else {}),
-                        correction="Previous output did not match the output contract. Return the complete requested JSON."
-                        if correction
-                        else "",
-                    )
+                # Most stable first, so requests share a long cacheable prefix.
+                content=ordered(
+                    [
+                        *(
+                            [("tool", canonical(envelope["tool"]))]
+                            + [("input_schema", canonical(tool.input_schema))]
+                            if tool
+                            else []
+                        ),
+                        ("kind", canonical(envelope["kind"])),
+                        ("task", canonical(task["instruction"])),
+                        ("window_purpose", canonical(source.windows[envelope["window"]].purpose)),
+                        ("visible", canonical(causal_view(source, envelope.get("after", [])))),
+                        *([("world", canonical(task["world"]))] if not actor else []),
+                        ("correction", canonical(CORRECTION if correction else "")),
+                    ]
                 ),
             ),
         ],

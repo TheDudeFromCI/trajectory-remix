@@ -71,14 +71,17 @@ def response_contract(payload):
         )
     # This is a wire-format choice, not a retry, alternate model or endpoint.
     # JSON mode still receives the complete schema and is validated after return.
-    messages = [
-        *payload["messages"],
-        {
-            "role": "user",
-            "content": "Return one JSON object matching this complete output schema. "
-            "Do not include Markdown or explanations. Schema: " + json.dumps(payload["schema"]),
-        },
-    ]
+    # The schema never changes between calls, so it goes right after the system prompt,
+    # ahead of the per-call data, where a prefix cache can reuse it.
+    contract = {
+        "role": "user",
+        "content": "Return one JSON object matching this complete output schema. "
+        "Do not include Markdown or explanations. Schema: " + json.dumps(payload["schema"]),
+    }
+    leading = 0
+    while leading < len(payload["messages"]) and payload["messages"][leading]["role"] == "system":
+        leading += 1
+    messages = [*payload["messages"][:leading], contract, *payload["messages"][leading:]]
     return {"type": "json_object"}, messages
 
 

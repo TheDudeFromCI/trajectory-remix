@@ -141,3 +141,7 @@ conflicts, comment-preserving saves, and that a walkthrough sends the same promp
 real run while storing nothing. `node tests/flow_editor_frontend.mjs` covers the editor
 draft and walkthrough panel; `python tests/run_flow_frontend.py` drives the Flow tab in
 Chromium with a fake Generator.
+
+Prompt cache order: `python -m pytest -q tests/test_prompt_cache_order.py` checks that
+selector and event bodies run from stable to volatile fields, new events are appended,
+and the JSON-mode schema follows the system prompt, so prefix caches stay effective.

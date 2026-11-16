@@ -366,6 +366,27 @@ It is not an exact Qwen chat-template count. No training tokenizer is loaded and
 model endpoint is probed. Configure the actual model context size, rather than inflating
 it to bypass this check. Exact serving-tokenizer accounting is a future extension.
 
+#### Prompt order and prefix caching
+
+Requests are laid out so that an inference server with prefix (KV) caching can reuse as
+much of the previous request as possible. Caching saves prompt-processing time and
+cost; it does **not** enlarge the context window, because cached tokens still count
+toward `context_window_tokens`.
+
+- **Selector requests:** the node's system prompt, then (in JSON mode) the fixed output
+  schema, then the data from most to least stable: `tools`, `proposal`, `source`,
+  `remaining_events`, `previous`, `correction`. Inside `source`, events are listed in
+  causal order, so a newly committed event is usually appended at the end. Consecutive
+  requests from the same selector node typically share 85–95% of their bytes.
+- **Event requests:** the fixed system prompt, then `tool`, `input_schema`, `kind`,
+  `task`, `window_purpose`, `visible`, `world` and `correction`.
+
+Each selector node has its own system prompt, so the first request after a phase change
+starts a new prefix. Long episodes spend almost all their calls in the work loop, where
+reuse is high. The JSON content is unchanged; only its byte order is, and the
+walkthrough's **Prompt** tab shows the exact order sent. Keep this order when changing
+prompt builders; `tests/test_prompt_cache_order.py` checks it.
+
 Over-budget requests return a context-limit result before contacting the model. A
 non-repair operation pauses with operation/input-size/allowance in its job log; repair
 retains the existing context-limit failure behavior. Nothing is silently truncated or

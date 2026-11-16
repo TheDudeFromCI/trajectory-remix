@@ -8,6 +8,7 @@ from pydantic import Field, model_validator
 
 from .flow import EventTask
 from .models import DTO, GraphSource, JsonValue, Window, canonical, digest
+from .prompt_order import ordered, source_json
 from .validation import diagnose
 
 
@@ -113,6 +114,7 @@ def branch(node, output):
 
 def selection_payload(source, plan, current, correction=""):
     node = plan["flow"]["nodes"][current["node"]]
+    remaining = plan["flow"]["max_events"] - len(source.events)
     return dict(
         operation="flow_select",
         prompt_version="adaptive-flow/1",
@@ -121,15 +123,16 @@ def selection_payload(source, plan, current, correction=""):
             dict(role="system", content=node["instruction"]),
             dict(
                 role="user",
-                content=canonical(
-                    dict(
-                        proposal=plan["proposal"],
-                        tools=plan["tools"],
-                        source=source.model_dump(mode="json", exclude={"metadata"}),
-                        previous=current.get("output"),
-                        remaining_events=plan["flow"]["max_events"] - len(source.events),
-                        correction=correction,
-                    )
+                # Most stable first, so requests share a long cacheable prefix.
+                content=ordered(
+                    [
+                        ("tools", canonical(plan["tools"])),
+                        ("proposal", canonical(plan["proposal"])),
+                        ("source", source_json(source)),
+                        ("remaining_events", canonical(remaining)),
+                        ("previous", canonical(current.get("output"))),
+                        ("correction", canonical(correction)),
+                    ]
                 ),
             ),
         ],
