@@ -541,7 +541,7 @@ export class StudioUI {
     const settings = JSON.parse($('settings-json').value);
     const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
-    if ($('generation-settings-editor')) renderGenerationSettings($('generation-settings-editor'), settings, opts);
+    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, opts);
   }
   async openSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();
@@ -554,7 +554,13 @@ export class StudioUI {
   }
   async saveSettings(dialog) {
     await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
-    await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
+    await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
+  }
+  async openReview() {
+    // Keep unsaved review-settings edits when returning to the tab; otherwise show the saved settings.
+    const dirty = $('settings-json').value && JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings));
+    if (dirty) return;
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
   }
   async openGenerationSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
@@ -564,7 +570,7 @@ export class StudioUI {
     for (const [role, name] of [['generator', 'Generator'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
       const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'generator' ? 'danger' : 'faint')); roleList.append(row);
     }
-    box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved generation settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
+    box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
     const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); grid.append(label); return input; };
     const count = field('Attempts', 'generation-attempts', 100); count.min = '1'; count.max = '1000'; count.step = '1';
@@ -578,7 +584,7 @@ export class StudioUI {
     this.flowPanel = await renderFlowPanel(flowBox, api);
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
-      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save generation settings before starting a run.');
+      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
       if (sampler?.dirty()) throw new Error('Save or discard the Workbench matrix draft before generating.');
       const n = Number(count.value), first = Number(seed.value);
       if (!count.value || !Number.isInteger(n) || n < 1 || n > 1000 || !seed.value || !Number.isSafeInteger(first) || !Number.isSafeInteger(first + n - 1)) throw new Error('Supply 1–1000 attempts and a safe integer seed.');
@@ -626,7 +632,7 @@ export class StudioUI {
         const fullJob = await api(`/jobs/${job.id}?include_config=false`);
         const skipped = (fullJob.result_states || []).find(r => r.state === 'skipped')?.count || 0;
         $('review-progress').textContent = `${job.state} · ${job.progress}/${job.total} complete · ${skipped} skipped`;
-        if (['completed', 'cancelled'].includes(job.state)) { $('review-dialog').close(); this.reviewJob = null; message('Review ' + $('review-progress').textContent); }
+        if (['completed', 'cancelled'].includes(job.state)) { $('review-start').disabled = false; this.reviewJob = null; message('Review ' + $('review-progress').textContent); }
         else if (job.state === 'paused') message('Review paused. Open it from the Jobs view to resume.');
       }
       if (this.ownedBulk.has(job.id) && job.kind === 'bulk' && ['completed', 'cancelled'].includes(job.state) && !this.recorded.has(job.id)) {
@@ -707,6 +713,7 @@ export class StudioUI {
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
+      if (e.detail === 'review-view') this.openReview().catch(message);
     });
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('preview-debounce').value = this.prefs.debounce;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
@@ -744,7 +751,7 @@ export class StudioUI {
     on('settings-button', 'click', () => this.openSettings());
     if ($('generation-settings-button')) on('generation-settings-button', 'click', () => this.openGenerationSettings());
     if ($('generation-sampler-button')) on('generation-sampler-button', 'click', () => { $('generation-settings-dialog').close(); $('sampler-tab').click(); });
-    if ($('generation-settings-save')) on('generation-settings-save', 'click', () => this.saveSettings('generation-settings-dialog'));
+    on('review-settings-save', 'click', () => this.saveSettings());
     on('settings-json', 'change', () => { this.renderToolSettings(); this.renderSettingsForms(); });
     on('settings-save', 'click', () => this.saveSettings('settings-dialog'));
     on('logs-clear', 'click', async () => { await api('/logs', 'DELETE'); await this.renderLogUsage(); message('Log cache cleared.'); });
@@ -754,13 +761,15 @@ export class StudioUI {
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
-    on('review-button', 'click', () => { $('review-start').disabled = false; $('review-progress').textContent = ''; $('review-dialog').showModal(); });
     on('review-start', 'click', async () => {
       const selected = $('review-scope').value === 'selected';
       if (selected && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
-      const r = await api('/reviews', 'POST', {mode:$('review-mode').value, repair:$('review-repair').checked,
-        ...(selected ? {trajectory:this.id, expected_revision:this.record.revision} : {query:this.query()})});
-      this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id); $('review-start').disabled = true;
+      $('review-progress').textContent = 'Starting review…'; $('review-start').disabled = true;
+      let r; try {
+        r = await api('/reviews', 'POST', {mode:$('review-mode').value, repair:$('review-repair').checked,
+          ...(selected ? {trajectory:this.id, expected_revision:this.record.revision} : {query:this.query()})});
+      } catch (e) { $('review-start').disabled = false; $('review-progress').textContent = ''; throw e; }
+      this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
       $('review-progress').textContent = 'Review running… Progress also appears in Jobs.';
     });
     on('metrics-refresh', 'click', () => this.loadMetrics());
