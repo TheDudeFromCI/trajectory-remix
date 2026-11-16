@@ -36,7 +36,7 @@
     <button id="jobs-button" role="tab" aria-selected="false" aria-controls="jobs-view">Jobs <span id="jobs-running-badge" class="badge accent" hidden></span></button>
     <button id="metrics-button" role="tab" aria-selected="false" aria-controls="metrics-view">Metrics</button>
     <button id="sampler-tab" role="tab" aria-selected="false" aria-controls="sampler-workbench">Sampler</button>
-    <button id="review-tab" role="tab" aria-selected="false" aria-controls="review-view">Review &amp; Repair</button>
+    <button id="review-tab" role="tab" aria-selected="false" aria-controls="review-view">Review Settings</button>
   </nav>
   <div class="header-actions">
     <div class="btn-group">
@@ -86,8 +86,8 @@
     </div>
     <details class="bulk-edit"><summary>Bulk edit all matches <span class="info" tabindex="0" data-tip="Applies to every trajectory matching the current search and filters, across all pages. Runs as an undoable job; locked trajectories are skipped."></span></summary>
       <div class="inline-form">
-        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="delete">Delete</option></select></label>
-        <label>Value<input id="bulk-value" value="3" aria-label="Bulk value"></label>
+        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="review_repair">Review &amp; Repair</option><option value="delete">Delete</option></select></label>
+        <label id="bulk-value-label">Value<input id="bulk-value" value="3" aria-label="Bulk value"></label>
         <button id="bulk-start" class="sm">Apply</button>
       </div>
     </details>
@@ -102,6 +102,9 @@
         <span class="grow"></span>
         <button class="primary sm" id="save-source">Save</button>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
+          <button id="review-source">Review</button>
+          <button id="review-repair-source">Review &amp; Repair</button>
+          <hr>
           <button id="reload-source">Reload saved source</button>
           <hr>
           <button id="delete-sample" class="danger">Delete trajectory</button>
@@ -283,18 +286,8 @@
 
 <!-- ===== Sampler ===== -->
 <section class="view" id="sampler-workbench" aria-label="Sampler Matrix workbench" hidden></section>
-<!-- ===== Review & Repair ===== -->
-<section class="view review-view" id="review-view" aria-label="Review and Repair" hidden>
-  <section class="review-run settings-card">
-    <h2>Review a batch</h2>
-    <div class="form-grid two">
-      <label>Scope<select id="review-scope"><option value="selected">Selected saved trajectory</option><option value="query">All search matches, across all pages</option></select></label>
-      <label>Mode<select id="review-mode"><option value="standard">Standard · stage based</option><option value="force_fast">Force Fast</option><option value="force_critical">Force Critical</option></select></label>
-    </div>
-    <label><input id="review-repair" type="checkbox" checked>Attempt repair after failure</label>
-    <p class="note">Standard mode reviews Pending trajectories with Fast and Candidate trajectories with Critical. Failed stages repair at their own tier. Other stages and locked sources are skipped.</p>
-    <div class="review-run-foot"><p id="review-progress" role="status" class="status-line" data-status></p><button id="review-start" class="primary">Start review</button></div>
-  </section>
+<!-- ===== Review Settings ===== -->
+<section class="view review-view" id="review-view" aria-label="Review settings" hidden>
   <section class="review-settings">
     <div id="review-settings-editor"></div>
     <div class="review-settings-foot"><span class="status-line">Review settings apply to future runs.</span><button id="review-settings-save">Save review settings</button></div>
