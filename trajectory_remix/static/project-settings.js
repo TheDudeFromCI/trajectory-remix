@@ -7,6 +7,14 @@ const heading = (box, title, help) => { box.append(node('h3', title)); if (help)
 const tipHeading = (box, title, tip) => { const n = node('h3', title, 'has-tip'); n.tabIndex = 0; n.dataset.tip = tip; box.append(n); };
 const controls = ['bos', 'eos', 'noop', 'ctx_begin', 'ctx_end', 'tool_begin', 'tool_end', 'response_begin', 'response_end', 'msg_begin', 'msg_end', 'window_ref'];
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
+/** Mirrors the server's Endpoint rules; returns an error message or ''. */
+export function tokenBudgetProblem(context, output) {
+  const whole = v => Number.isInteger(v) && v > 0;
+  if (!whole(context) || !whole(output)) return 'Context limit and max output tokens must be positive whole numbers.';
+  if (context < 1024) return 'Context limit must be at least 1024 tokens.';
+  if (output + 512 >= context) return 'Max output tokens + 512 must be less than the context limit.';
+  return '';
+}
 function editor(container, initial, options) {
   // Read the shared draft on EVERY edit: tools, advanced JSON and both dialogs
   // all edit the same record without overwriting each other's unsaved changes.
@@ -45,9 +53,20 @@ export function renderProjectSettings(container, initial, options = {}) {
     const edit = (key, value) => write(d => { d.endpoints[id][key] = value; });
     grid.append(field('Base URL', input(`Endpoint ${id} URL`, endpoint.url, v => edit('url', v), 'url')),
       field('Model identifier', input(`Endpoint ${id} model`, endpoint.model, v => edit('model', v))));
-    for (const [key, name, min] of [['concurrency', 'Concurrent requests', 1], ['retries', 'Transport retries', 0]]) {
-      const n = input(`Endpoint ${id} ${key}`, endpoint[key], v => edit(key, v), 'number'); n.min = min; n.step = 1; grid.append(field(name, n));
+    const budget = node('p', '', 'settings-help'); budget.setAttribute('role', 'alert');
+    const checkBudget = () => {
+      const {context_window_tokens: ctx, max_output_tokens: out} = current().endpoints[id], problem = tokenBudgetProblem(ctx, out);
+      budget.textContent = problem; budget.classList.toggle('error', Boolean(problem));
+      for (const n of budget.fields || []) n.setAttribute('aria-invalid', problem ? 'true' : 'false');
+    };
+    const tokenFields = [];
+    for (const [key, name, min] of [['concurrency', 'Concurrent requests', 1], ['retries', 'Transport retries', 0],
+      ['context_window_tokens', 'Context limit (tokens)', 1024], ['max_output_tokens', 'Max output tokens', 1]]) {
+      const n = input(`Endpoint ${id} ${key}`, endpoint[key], v => { edit(key, v); checkBudget(); }, 'number'); n.min = min; n.step = 1; grid.append(field(name, n));
+      if (key.endsWith('_tokens')) tokenFields.push(n);
     }
+    budget.fields = tokenFields; checkBudget();
+    grid.append(budget);
     const env = 'REMIX_API_KEY_' + id.toUpperCase().replaceAll('-', '_');
     card.append(grid, node('p', `Authentication, if required: set ${env} in the server environment before launch. Keys are never stored in the project.`, 'settings-help'), button(`Remove endpoint ${id}`, () => {
       const cleared = Object.entries(current().endpoint_roles || {}).filter(([, assigned]) => assigned === id).map(([role]) => role);
@@ -61,7 +80,7 @@ export function renderProjectSettings(container, initial, options = {}) {
   addition.append(field('New endpoint ID', ident), button('Add endpoint', () => {
     const id = ident.value.trim();
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
-    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2}; }); render();
+    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:16384, max_output_tokens:2048}; }); render();
   })); container.append(addition);
   heading(container, 'Endpoint roles', 'Generator writes event content. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');

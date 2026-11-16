@@ -68,8 +68,16 @@ export class JobsView {
       b.onclick = () => this.guard(async () => { await this.deps.api(`/jobs/${id}/${action}`, 'POST'); await this.refresh(id); });
       v.buttons[action] = b; v.controls.append(b);
     }
+    v.clear = node('button', 'Clear job', 'sm danger'); v.clear.type = 'button'; v.clear.hidden = true;
+    v.clear.dataset.tip = 'Remove this finished job, its logs and its files from the list.';
+    v.clear.onclick = () => this.guard(async () => {
+      if (!confirm('Clear this job? Its record, logs and downloadable files will be removed.')) return;
+      await this.deps.api(`/jobs/${id}`, 'DELETE'); this.panels.delete(id);
+      if (this.selected === id) { this.selected = null; $('job-detail')?.replaceChildren(); }
+      await this.renderList();
+    });
     v.started = node('span', '', 'small faint truncate');
-    head.append(v.kindDot, v.title, idTag, v.stateTag, v.started, v.controls);
+    head.append(v.kindDot, v.title, idTag, v.stateTag, v.started, v.controls, v.clear);
 
     const summary = node('div', undefined, 'job-summary');
     v.progress = progressBar('Progress');
@@ -109,6 +117,7 @@ export class JobsView {
     setAttr(v.buttons.pause, 'disabled', j.state !== 'running'); setAttr(v.buttons.resume, 'disabled', j.state !== 'paused');
     setAttr(v.buttons.cancel, 'disabled', !['running', 'paused'].includes(j.state));
     setAttr(v.controls, 'hidden', !ACTIVE.has(j.state));
+    setAttr(v.clear, 'hidden', ACTIVE.has(j.state));
     if (j.created) setText(v.started, 'Started ' + new Date(j.created * 1000).toLocaleString());
     v.progress.update({value: j.progress, total: j.total, state: j.state, status: stateWord(j.state)});
     this.renderStats(v, j);

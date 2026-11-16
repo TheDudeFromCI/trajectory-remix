@@ -90,6 +90,7 @@ try {
   await page.locator('.sw-table input[type=number]').first().fill('3.5');
   // Same seed/pins -> same payload; pins don't alter weights.
   await page.locator('.sw-preview > summary').click(); await page.getByLabel('Pin domain',{exact:true}).selectOption('software_engineering');
+  await page.locator('#sampler-seed').fill('137'); // seed 0 is random, so pin one for the determinism check
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>document.getElementById('sampler-proposal').textContent.length>10);
   const first=JSON.parse(await page.locator('#sampler-proposal').textContent());
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>!document.getElementById('sampler-preview').disabled);

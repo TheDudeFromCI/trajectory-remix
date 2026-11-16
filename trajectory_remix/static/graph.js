@@ -2,6 +2,7 @@ import {renderProjectSettings, renderGenerationSettings} from './project-setting
 import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
+import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
 import {renderFlowPanel} from './flow-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
@@ -580,8 +581,10 @@ export class StudioUI {
     box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
     const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); grid.append(label); return input; };
-    const count = field('Attempts', 'generation-attempts', 100); count.min = '1'; count.max = '1000'; count.step = '1';
-    const seed = field('Starting seed', 'generation-seed', 137); seed.step = '1';
+    const saved = loadRunInputs();
+    const count = field('Attempts', 'generation-attempts', saved.attempts); count.min = '1'; count.max = '1000'; count.step = '1';
+    const seed = field('Starting seed', 'generation-seed', saved.seed); seed.step = '1'; seed.title = '0 picks a random seed';
+    persistInput(count, 'attempts'); persistInput(seed, 'seed');
     const pins = sampler?.pins || {}, pinBox = node('div', undefined, 'pin-list');
     pinBox.append(node('span', 'Pins', 'muted small'));
     if (Object.keys(pins).length) for (const [k, v] of Object.entries(pins)) pinBox.append(tag(`${k}: ${v}`, 'lilac'));
@@ -593,8 +596,9 @@ export class StudioUI {
     const start = button('Start generation', async () => {
       if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
       if (sampler?.dirty()) throw new Error('Save or discard the Workbench matrix draft before generating.');
-      const n = Number(count.value), first = Number(seed.value);
+      const n = Number(count.value); let first = Number(seed.value);
       if (!count.value || !Number.isInteger(n) || n < 1 || n > 1000 || !seed.value || !Number.isSafeInteger(first) || !Number.isSafeInteger(first + n - 1)) throw new Error('Supply 1–1000 attempts and a safe integer seed.');
+      first = resolveSeed(first);
       start.disabled = true;
       try {
         const requests = Array.from({length:n}, (_, i) => ({seed:first+i, overrides:{...(sampler?.pins || {})}}));
