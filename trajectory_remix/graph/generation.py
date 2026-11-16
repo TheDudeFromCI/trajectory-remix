@@ -426,7 +426,15 @@ class GenerationService:
                 self.jobs.control(ticket.job_id, "pause")
                 self.jobs.append_log(
                     ticket.job_id,
-                    "Provider context limit; no quality verdict. Manual Resume required.",
+                    (
+                        f"Local context guard ({ticket.payload['operation']}): "
+                        f"{complete['local_budget']['input_bytes']} input bytes exceed conservative "
+                        f"{complete['local_budget']['input_ceiling']}-byte allowance. "
+                        "No provider call made. Reduce prompt scope or change the endpoint budget; "
+                        "active runs keep frozen settings."
+                        if complete.get("local_budget")
+                        else "Provider context limit; no quality verdict. Manual Resume required."
+                    ),
                 )
             return
         body = complete.get("output")
