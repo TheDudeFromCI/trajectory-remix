@@ -198,10 +198,10 @@ td.faint { color: var(--ink-faint); }
 .settings-tabs .dialog-body { flex: 1; }
 .generation-layout { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 0; }
 .generation-run { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); overflow: auto; }
-.review-view { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: var(--space-4); align-items: start; overflow: auto; }
+.review-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); align-items: start; overflow: auto; }
 .review-run { display: flex; flex-direction: column; gap: var(--space-3); }
 .review-run-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.review-settings-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-3); }
+.review-settings-foot { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--space-3); }
 .role-list { display: flex; flex-direction: column; gap: var(--space-1); }
 .role-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: 13px; }
 .pin-list { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
