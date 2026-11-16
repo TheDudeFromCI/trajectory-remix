@@ -7,6 +7,10 @@ guessing at anything it can't measure.
 
 - **Proposal coverage** summarizes the sampler's *targets* across your saved trajectories. These are
   intentions, not proof of behavior.
+- **Derived labels**, such as `strategic_investment` (proposals weighing an automation or
+  infrastructure choice, in any family), are counted from the same targets. They are available
+  through the API and are not shown on the Metrics tab yet. See
+  [Derived labels](GRAPH-SAMPLER-METRICS.md#derived-labels).
 - **Observations** are saved measurements of finished sources, each with its origin and the revision it was
   made at. Out-of-date ones are flagged **stale**.
 - **Unavailable** values stay unavailable. A missing measurement is never shown as zero.

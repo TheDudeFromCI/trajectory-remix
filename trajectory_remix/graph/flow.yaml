@@ -6,8 +6,15 @@ max_events: 128
 actor_instruction: >-
   Write exactly this next action from the visible evidence and tool contract only.
   Keep private reasoning concise; use chat for user-facing communication.
-  Coordinate proportionately, select resources using observed capabilities and costs,
-  preserve task ownership and dependencies, verify claims and replan on failures.
+  Kidra coordinates complex, long-running multi-agent work: she plans, delegates,
+  verifies and keeps continuity. When a suitable agent or tool is visible she does not
+  personally write production code, run extensive research or do bulk repetitive work.
+  Delegate in proportion to the task; a small job needs no team. Select resources using
+  observed capabilities and costs, preserve task ownership and dependencies, verify
+  claims and replan on failures. Do not re-delegate an unchanged failed task, create
+  agents recursively or excessively, or keep planning instead of moving to execution.
+  Respect visible budgets and the user's visible authority: for a consequential action
+  outside it, request approval and wait.
   Do not claim execution, inspection or completion without visible supporting results.
   Distinguish intentions, reported results, verified outcomes and remaining blockers.
   Never use hidden author targets or predict an unobserved tool outcome.
@@ -32,9 +39,13 @@ nodes:
       alert, schedule or document for autonomous work. Put the concrete world in
       task.world for its author: who the user is (match the proposal's competence,
       patience, involvement and tone), what they want and why, the actual source
-      artifacts, roster, capabilities and costs, budget, acceptance criteria, and the
-      hidden facts later tool results must stay consistent with. Supply the evidence
-      itself, never a statement that access exists. Do not finish.
+      artifacts, a roster whose agents and tools carry observable capabilities, costs
+      and context limits, budget, acceptance criteria, what the user has and has not
+      authorized (and which actions need their consent), and the hidden facts later tool
+      results must stay consistent with. Supply the evidence itself, never a statement
+      that access exists. These boundaries go in task.world for external authors only;
+      the agent learns them only from visible evidence such as the user's words, a
+      policy document or a tool contract. Do not finish.
   write_opening:
     kind: event
     next: first_move
@@ -62,8 +73,17 @@ nodes:
       agent_text in the writable reasoning window, depending on the opening, in which the
       agent restates the goal, separates facts from assumptions and plans
       proportionately. A trivial request may deserve a direct, grounded chat reply; a
-      genuinely ambiguous one deserves a clarifying question through the chat tool. Add
-      any windows the plan needs now. Do not finish.
+      genuinely ambiguous one deserves a clarifying question through the chat tool. The
+      agent coordinates, so the plan delegates specialist work instead of doing it. If
+      the work recurs, demand is uncertain, or the proposal carries an automation
+      decision (invest_in_automation, perform_manually or defer_investment), the plan
+      compares build cost, expected frequency, savings per use, maintenance,
+      opportunity cost, reliability, uncertainty and reuse using only visible evidence,
+      then chooses to invest now, defer or decline, and says what would change that
+      choice. Prefer neither automation nor manual delegation by default: a script
+      suits 1,000 files, a cheap agent suits five. If a first step would be
+      consequential beyond the user's visible authority, choose an approval request
+      instead. Add any windows the plan needs now. Do not finish.
   plan_is_thought:
     kind: branch
     path: task.envelope.kind
@@ -76,8 +96,10 @@ nodes:
     instruction: >-
       This is the agent's first reasoning in the episode. Restate the goal and what
       would count as done, separate known facts from assumptions, name the unknowns and
-      how to resolve them, and choose a proportionate first step. Keep it brief and claim
-      no results that are not visible yet.
+      how to resolve them, and choose a proportionate first step that delegates rather
+      than performs specialist work. Where work recurs or demand is uncertain, weigh the
+      cost of automating against its expected reuse using visible evidence. Keep it
+      brief and claim no results that are not visible yet.
 
   # ---- Phase 3: the work loop ------------------------------------------------------
   work:
@@ -93,7 +115,17 @@ nodes:
       private facts in an actor's task.world or task instruction. External authors may
       receive private world facts in task.world; keep them consistent with the opening.
 
-      THIS STEP: choose the next event of the execution slice, or finish. Let the work
+      THIS STEP: choose the next event of the execution slice, or finish. The agent's
+      own events are planning, delegation, review and communication; specialist output
+      arrives as tool results or external reports, never as the agent's own work. A
+      consequential step outside the user's visible authority needs an approval request
+      and a wait for the answer, not the action. Do not choose another delegation of a
+      task that failed unchanged, recursive or excessive agent creation, or more
+      planning when execution is available. When work recurs, demand is uncertain, or
+      the proposal carries an automation decision, have the agent compare build cost,
+      expected frequency, savings per use, maintenance, opportunity cost, reliability,
+      uncertainty and reuse from visible evidence, choose invest, defer or decline, and
+      revisit that choice when new information changes the expected return. Let the work
       unfold as competent work does: reasoning before consequential actions,
       proportionate tool requests from the configured catalogue (never invent tools),
       authored tool results, specialist assignments and follow-ups, independent review,
@@ -133,10 +165,18 @@ nodes:
       before ending. Compare them with every proposal objective, behaviour, required
       event tag and target. Check that the user received a grounded delivery or an
       explicit blocked handoff, that every tool_call has its result, that every claim is
-      backed by a visible result, and that no window is left open without reason. If it
-      all holds, finish again with a reason that cites the event IDs demonstrating each
-      objective. If anything is missing or unsupported, do not finish: choose the single
-      next event that fixes it.
+      backed by a visible result, and that no window is left open without reason. Also
+      audit the agent's role. Coordinator role: it did not perform substantial
+      specialist work itself when a suitable agent or tool was visible. Authorization:
+      no consequential action ran without visible authority or an observed approval.
+      Investment: any automation or infrastructure decision is justified by visible
+      evidence and was revisited when circumstances changed. Delegation: no unchanged
+      failed task was re-delegated, agents were not created recursively or excessively,
+      budgets were respected and planning moved on to execution. If it all holds,
+      finish again with a reason that cites the event IDs demonstrating each objective.
+      If anything is missing, unsupported or violates the audit above, do not finish:
+      choose the single next event that fixes it, and never pass an item you cannot
+      support with event IDs.
   verified:
     kind: branch
     path: finished
@@ -206,6 +246,9 @@ nodes:
     instruction: >-
       Write the agent's reasoning for this step from the visible evidence: what changed,
       what it means, and what to do next and why. Track hypotheses, verification and
-      remaining blockers. Keep it concise and never claim an outcome that is not visible.
+      remaining blockers. When an automation or infrastructure choice is open, weigh
+      cost, expected reuse, maintenance and uncertainty from visible evidence and
+      revisit it when new information changes the return. Keep it concise and never
+      claim an outcome that is not visible.
   done:
     kind: end

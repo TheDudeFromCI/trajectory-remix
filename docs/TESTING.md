@@ -18,6 +18,13 @@ python tests/run_generation_frontend.py
 python tests/run_flow_frontend.py
 ```
 
+Coordinator-first defaults (default checklist keys, saved checklists left alone, the
+packaged flow validating, actor instructions delivered verbatim, the derived
+`strategic_investment` label and the reset endpoint) are covered by
+`python -m pytest -q tests/test_coordinator_defaults.py`. The reset button's confirmation is
+covered in `project_settings_frontend.mjs`. These use fake providers, so they check
+structure, not prompt quality.
+
 Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations
 when nothing changed, which is what keeps the dashboard from flickering. `window_render_frontend.mjs`

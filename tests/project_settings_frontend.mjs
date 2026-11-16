@@ -69,5 +69,29 @@ renderProjectSettings(standalone,draft,{onChange:v=>result=v});
 enter(byLabel(standalone,'New endpoint ID'),'one');btn(standalone,'Add endpoint').click();
 enter(byLabel(standalone,'Endpoint one model'),'first');enter(byLabel(standalone,'Endpoint one concurrency'),'2');
 assert.equal(result.endpoints.one.model,'first');assert.equal(result.endpoints.one.concurrency,2);
+// Resetting review checklists asks first and replaces both lists only when confirmed.
+const packaged={core:{causal_evidence:{text:'Packaged core',allow_not_applicable:false}},critical:{execution_progress:{text:'Packaged critical',allow_not_applicable:true}}};
+let reviewDraft={generation:{},review_checklists:{core:{mine:{text:'Custom',allow_not_applicable:false}},critical:{extra:{text:'Extra',allow_not_applicable:false}}}};
+let loads=0,asked=[],answer=false;
+globalThis.confirm=message=>{asked.push(message);return answer;};
+const resetBox=document.createElement('div');document.body.append(resetBox);
+const resetOptions={getSettings:()=>reviewDraft,onChange:value=>{reviewDraft=value;},loadDefaultChecklists:async()=>{loads++;return structuredClone(packaged);}};
+renderGenerationSettings(resetBox,reviewDraft,resetOptions);
+await btn(resetBox,'Reset review checklists to defaults').onclick();
+assert.equal(loads,1);assert.equal(asked.length,1);assert.match(asked[0],/Replace the Core and Critical review checklists/);
+assert.deepEqual(Object.keys(reviewDraft.review_checklists.core),['mine']);assert.deepEqual(Object.keys(reviewDraft.review_checklists.critical),['extra']);
+answer=true;
+await btn(resetBox,'Reset review checklists to defaults').onclick();
+assert.equal(asked.length,2);assert.deepEqual(reviewDraft.review_checklists,packaged);
+assert.ok(byLabel(resetBox,'core criterion causal_evidence')&&!byLabel(resetBox,'core criterion mine'));
+assert.match(resetBox.textContent,/reset to the defaults\. Choose Save settings/);
+// A failed default lookup changes nothing and does not ask.
+reviewDraft={generation:{},review_checklists:{core:{mine:{text:'Custom',allow_not_applicable:false}},critical:{}}};asked=[];
+renderGenerationSettings(resetBox,reviewDraft,{...resetOptions,loadDefaultChecklists:async()=>{throw new Error('offline');}});
+await btn(resetBox,'Reset review checklists to defaults').onclick();
+assert.equal(asked.length,0);assert.deepEqual(Object.keys(reviewDraft.review_checklists.core),['mine']);assert.match(resetBox.textContent,/Could not load the default checklists: offline/);
+// Without a loader the control is not offered (standalone use keeps its old layout).
+const plain=document.createElement('div');document.body.append(plain);renderGenerationSettings(plain,reviewDraft,{});
+assert.equal(btn(plain,'Reset review checklists to defaults'),undefined);
 console.log('Project/generation settings forms: endpoint CRUD, roles, shared drafts, checklists, tokenizer import and callback state passed.');
 window.happyDOM.abort();

@@ -542,7 +542,7 @@ export class StudioUI {
     const settings = JSON.parse($('settings-json').value);
     const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
-    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, footer: this.reviewFoot ||= $('review-settings-foot')});
+    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, footer: this.reviewFoot ||= $('review-settings-foot')});
   }
   async openSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();

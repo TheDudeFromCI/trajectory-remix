@@ -17,7 +17,7 @@ from starlette.routing import Route
 
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
-from .models import DTO, GraphSource, JsonValue, ProjectSettings
+from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checklists
 from .reviews import ReviewInput
 from .studio import Studio
 from .validation import diagnose
@@ -264,6 +264,16 @@ def create_studio_app(
     @router.put("/settings")
     def settings_update(body: SettingsEdit):
         return studio.update_settings(body.settings, body.expected_revision)
+
+    @router.get("/settings/default-review-checklists")
+    def default_review_checklists():
+        """The packaged Core and Critical criteria, for the dashboard's reset action."""
+        return dict(
+            review_checklists={
+                group: {key: item.model_dump(mode="json") for key, item in items.items()}
+                for group, items in default_checklists().items()
+            }
+        )
 
     @router.get("/schema/{kind}")
     def schema(kind: Literal["source", "settings"]):

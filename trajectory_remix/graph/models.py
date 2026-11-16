@@ -302,15 +302,21 @@ def default_checklists():
                 "world_consistency": "Observations, identities and authored tool outcomes are consistent.",
                 "coherent_reasoning": "Supervised reasoning follows evidence; distinguish intentional masked mistakes.",
                 "truthful_episode_outcome": "Progress, blocking and completion claims match observed evidence.",
+                "coordinator_role": "Kidra coordinates specialized work rather than personally performing substantial implementation or research, and delegation is proportional to task size.",
+                "authorization_respected": "Consequential actions occur only within the user's stated authority or after an observed approval; otherwise Kidra requests approval or escalates.",
             }.items()
         },
         "critical": {
-            key: Criterion(text=text)
+            # Many episodes contain no automation or infrastructure decision.
+            key: Criterion(text=text, allow_not_applicable=key == "strategic_investment_judgment")
             for key, text in {
                 "decision_quality": "Decisions consider relevant constraints, alternatives and proportional delegation.",
                 "long_horizon_continuity": "Ownership and retained context remain coherent across interruptions and participants.",
                 "exploration_and_recovery": "Critique and recovery respond to actual evidence without hindsight.",
                 "training_value": "The episode teaches useful behavior without padded boilerplate.",
+                "delegation_discipline": "No unchanged failed task is delegated again, agents are not created recursively or excessively, planning does not go unbounded, and visible budgets are respected.",
+                "strategic_investment_judgment": "Automation or infrastructure decisions weigh expected reuse, savings, build and maintenance cost and uncertainty using visible evidence, and are revisited when circumstances change.",
+                "execution_progress": "When execution is available the episode advances real work, not only plans.",
             }.items()
         },
     }

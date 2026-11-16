@@ -115,6 +115,14 @@ These scripted-provider tests exercise loops, independent tool branches and join
 causal actor prompts, frozen YAML/resume, typed conditions and bounded failure.
 They establish interpreter correctness, not live-model semantic coverage.
 
+Coordinator defaults: `python -m pytest -q tests/test_coordinator_defaults.py` checks the
+default checklist keys, that saved checklists are not rewritten, that the packaged flow
+validates and delivers `actor_instruction` verbatim to actor events, and the derived
+`strategic_investment` label. Changing a default prompt or checklist changes the checklist
+hash and marks existing sign-offs stale, so keep existing keys and update
+[PROJECT-SETTINGS](PROJECT-SETTINGS.md) and [GRAPH-GENERATION](GRAPH-GENERATION.md) together.
+It shows structure, not live-model quality.
+
 Prompt-scope regressions: `python -m pytest -q tests/test_prompt_scope.py` checks
 real stored sampler snapshots stay out of model prompts, review bodies aren't
 repeated per frontier, and oversized requests are intercepted before HTTP.
