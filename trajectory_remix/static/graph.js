@@ -562,6 +562,13 @@ export class StudioUI {
     if (dirty) return;
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
   }
+  async startReview({repair, bulk = false}) {
+    if (!bulk && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
+    $('trajectory-menu')?.removeAttribute('open');
+    const r = await api('/reviews', 'POST', {mode: 'standard', repair, ...(bulk ? {query: this.query()} : {trajectory: this.id, expected_revision: this.record.revision})});
+    this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
+    message('Review running… Progress also appears in Jobs.');
+  }
   async openGenerationSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
     const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
@@ -631,8 +638,7 @@ export class StudioUI {
       if (this.reviewJob === job.id) {
         const fullJob = await api(`/jobs/${job.id}?include_config=false`);
         const skipped = (fullJob.result_states || []).find(r => r.state === 'skipped')?.count || 0;
-        $('review-progress').textContent = `${job.state} · ${job.progress}/${job.total} complete · ${skipped} skipped`;
-        if (['completed', 'cancelled'].includes(job.state)) { $('review-start').disabled = false; this.reviewJob = null; message('Review ' + $('review-progress').textContent); }
+        if (['completed', 'cancelled'].includes(job.state)) { this.reviewJob = null; message(`Review ${job.state} · ${job.progress}/${job.total} complete · ${skipped} skipped`); }
         else if (job.state === 'paused') message('Review paused. Open it from the Jobs view to resume.');
       }
       if (this.ownedBulk.has(job.id) && job.kind === 'bulk' && ['completed', 'cancelled'].includes(job.state) && !this.recorded.has(job.id)) {
@@ -759,19 +765,11 @@ export class StudioUI {
     on('import-button', 'click', () => $('file-input').click()); on('file-input', 'change', async () => { const file = $('file-input').files[0]; if (!file) return; const r = await api('/imports', 'POST', {text: await file.text()}); await this.inspectJob(r.job_id); $('file-input').value = ''; });
     on('export-button', 'click', () => $('export-dialog').showModal());
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
-    on('bulk-start', 'click', async () => { const action = $('bulk-action').value; const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
+    on('bulk-action', 'change', () => { $('bulk-value-label').hidden = !['stage', 'split'].includes($('bulk-action').value); });
+    on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'review' || action === 'review_repair') return this.startReview({repair: action === 'review_repair', bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
-    on('review-start', 'click', async () => {
-      const selected = $('review-scope').value === 'selected';
-      if (selected && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
-      $('review-progress').textContent = 'Starting review…'; $('review-start').disabled = true;
-      let r; try {
-        r = await api('/reviews', 'POST', {mode:$('review-mode').value, repair:$('review-repair').checked,
-          ...(selected ? {trajectory:this.id, expected_revision:this.record.revision} : {query:this.query()})});
-      } catch (e) { $('review-start').disabled = false; $('review-progress').textContent = ''; throw e; }
-      this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
-      $('review-progress').textContent = 'Review running… Progress also appears in Jobs.';
-    });
+    on('review-source', 'click', () => this.startReview({repair: false}));
+    on('review-repair-source', 'click', () => this.startReview({repair: true}));
     on('metrics-refresh', 'click', () => this.loadMetrics());
     on('metrics-calculate', 'click', async () => {
       const r = await api('/metrics/calculate-missing', 'POST', {query: this.query()});

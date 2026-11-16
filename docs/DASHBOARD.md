@@ -15,7 +15,7 @@ with the tabs at the top and reveal detail with tabs, menus and tooltips.
 | Area | What it does |
 | --- | --- |
 | **View tabs** | **Editor**, **Jobs**, **Metrics** and **Sampler**. A badge on Jobs counts running and paused jobs. |
-| **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings** and **Generate**. **Review & Repair** is a tab next to **Sampler**. |
+| **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings** and **Generate**. **Review Settings** is a tab next to **Sampler**. |
 | **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. |
 
 Hover anything with an **ⓘ** for an explanation. Units, reasons and definitions live in
@@ -80,7 +80,7 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
    including credentials, are in [Project settings](PROJECT-SETTINGS.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
    standard flow produces a chatroom reply. Removing it is your choice.
-3. **Set up review (optional).** Open the **Review & Repair** tab to choose automatic
+3. **Set up review (optional).** Open the **Review Settings** tab to choose automatic
    review and repair options and edit the Core and Critical checklists. Click
    **Save review settings** if you change them.
 4. **Open Generate.** It shows which endpoint fills each role, any pins from the
@@ -205,21 +205,24 @@ behave as before.
 
 1. Save the trajectory you want reviewed, or set up a search that matches the ones you
    want.
-2. Open the **Review & Repair** tab. Choose the **Scope** (the selected trajectory, or every
-   search match across all pages) and the **Mode**.
-3. Click **Start review**. The tab shows progress until the review ends. The job also
-   appears in Jobs.
+2. For one trajectory, open **More** in the trajectory header and choose **Review** or
+   **Review & Repair**. For every search match, open **Bulk edit all matches**, pick
+   **Review** or **Review & Repair** as the action, and click **Apply**.
+3. Follow the job in Jobs. A message appears when it finishes.
 
-The same tab holds the automatic review and repair settings and the review checklists.
+**Review** only records a verdict. **Review & Repair** also attempts a repair after a
+failure. Both use standard mode: Pending trajectories get the Fast review and Candidate
+trajectories get the Critical review.
 
-![The Review & Repair tab](images/dashboard/review.png)
+The **Review Settings** tab holds the automatic review and repair settings and the review
+checklists.
 
 ### Change many trajectories at once
 
 1. Filter the dataset to the trajectories you want.
 2. Open **Bulk edit all matches** at the bottom of the Dataset panel.
-3. Choose **Set stage**, **Set split** or **Delete**, enter the value (a stage number such
-   as `3` for Ready, or a split name), and click **Apply**.
+3. Choose **Set stage**, **Set split**, **Review**, **Review & Repair** or **Delete**, enter the value (a stage number such
+   as `3` for Ready, or a split name; review and delete need none), and click **Apply**.
 
 Bulk edits skip locked trajectories and can be undone with **Undo** once they finish.
 

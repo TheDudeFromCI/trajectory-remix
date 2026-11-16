@@ -165,8 +165,10 @@ compaction, second attempt or extra confirmation pass.
 
 ### Manual review
 
-**Review & Repair** works on a selected saved revision, or on every match of a search across all
-pages.
+**Review** and **Review & Repair** run from the trajectory header's **More** menu on the selected saved
+revision, or from the dataset's bulk actions on every match of a search across all pages.
+
+The dashboard always uses Standard mode. Force modes are available through the REST API and MCP.
 
 | Mode | Behavior |
 | --- | --- |
