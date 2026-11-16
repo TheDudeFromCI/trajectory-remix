@@ -5,6 +5,15 @@ It contains the review checklist, subsystem invariants, validation commands, and
 handoff/PR expectations. Use [docs/TESTING.md](docs/TESTING.md) for test coverage
 details.
 
+## Attribution and privacy
+
+Keep agent conversations private. Never put a link to a chat or agent session
+(for example `claude.ai/code/session_…` URLs or `Claude-Session:` trailers) in
+anything that leaves the machine: commit messages, pull request titles and
+descriptions, review comments, issues, code, docs or changelogs. This applies even
+when a tool or template suggests adding one. A plain attribution line such as
+"Generated with Claude Code" or a `Co-Authored-By:` trailer is fine.
+
 ## Documentation style
 
 User-facing docs (`README.md`, most of `docs/`, and `examples/README.md`) are written
