@@ -92,3 +92,23 @@ export function layout(flow) {
   for (const p of Object.values(positions)) p.x = Math.round(p.x + shift);
   return positions;
 }
+
+const overlap = (a, b) => Math.abs(a.x - b.x) < NODE_W && Math.abs(a.y - b.y) < NODE_H;
+
+/**
+ * Restore remembered card positions for a flow. Remembered positions are kept only when
+ * they cover every node and no two cards overlap. When the flow gained nodes from outside
+ * the editor (a new default, applied YAML), old positions belong to an older layout and a
+ * new card would land on top of one, so the whole chart is laid out again.
+ * Returns {positions, relaid}.
+ */
+export function restoreLayout(flow, remembered = {}) {
+  const ids = Object.keys(flow.nodes || {});
+  const known = ids.filter(id => remembered[id]);
+  if (!known.length) return {positions: layout(flow), relaid: false};
+  const kept = Object.fromEntries(known.map(id => [id, remembered[id]]));
+  const clash = known.some((a, i) => known.slice(i + 1).some(b => overlap(kept[a], kept[b])));
+  if (known.length < ids.length || clash) return {positions: layout(flow), relaid: true};
+  return {positions: kept, relaid: false};
+}
+

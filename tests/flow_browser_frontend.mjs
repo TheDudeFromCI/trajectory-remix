@@ -18,6 +18,18 @@ try {
   const boxes = await page.locator('.flow-node').evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().toJSON()));
   for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, 'cards overlap');
 
+  // A layout saved before choose_tools existed: write_opening remembered where choose_tools
+  // now goes. Reopening must not stack the new card on the old one.
+  await page.evaluate(() => {
+    const stale = structuredClone(flowView.positions);
+    stale.write_opening = stale.choose_tools; delete stale.choose_tools;
+    localStorage.setItem('flow-layout', JSON.stringify(stale));
+  });
+  await page.reload(); await page.locator('#flow-tab').click(); await page.locator('[data-node="choose_tools"]').waitFor();
+  const reboxes = await page.locator('.flow-node').evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().toJSON()));
+  for (const [i, a] of reboxes.entries()) for (const b of reboxes.slice(i + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, 'cards overlap after a stale layout');
+  assert.match(await page.locator('#flow-status').textContent(), /arranged again/);
+
   // The wheel zooms around the pointer: the card under it stays put.
   const canvas = page.locator('#flow-canvas'), card = page.locator('[data-node="work"]');
   await card.scrollIntoViewIfNeeded();

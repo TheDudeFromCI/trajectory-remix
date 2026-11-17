@@ -4,7 +4,7 @@ import {node, tag} from './ui-kit.js';
 import {FlowCanvas} from './flow-canvas.js';
 import {renderFlowForm, renderNodeForm, renderProblems} from './flow-inspector.js';
 import {KINDS, NODE_H, addNode, compactFlow, removeNode, renameNode, setKind} from './flow-model.js';
-import {layout} from './flow-layout.js';
+import {layout, restoreLayout} from './flow-layout.js';
 import {WalkthroughPanel} from './flow-walkthrough.js';
 
 const LAYOUT_KEY = 'flow-layout';
@@ -95,8 +95,9 @@ export class FlowView {
     this.rawText = doc.text; this.yamlText = doc.text; this.diagnostics = doc.diagnostics || []; this.hash = doc.flow_hash;
     let stored = {};
     try { stored = JSON.parse(this.storage?.getItem(LAYOUT_KEY) || '{}'); } catch { stored = {}; }
-    const auto = layout(this.draft);
-    this.positions = Object.fromEntries(Object.keys(this.draft.nodes).map(id => [id, stored[id] || auto[id]]));
+    const restored = restoreLayout(this.draft, stored);
+    this.positions = restored.positions;
+    if (restored.relaid) { this.persistLayout(); this.status('The flow has nodes your saved layout did not, so the chart was arranged again.'); }
     if (!(this.selected in this.draft.nodes)) this.selected = this.draft.start;
     this.render();
     if (!this.fitted) { this.fitted = true; this.fit(); }
@@ -255,8 +256,7 @@ export class FlowView {
       this.diagnostics = result.diagnostics;
       if (!result.valid) { this.status('YAML not applied: ' + (result.diagnostics.find(d => d.severity === 'error')?.message || 'invalid'), true); this.refreshTabs(); return; }
       this.draft = compactFlow(result.flow); this.rawText = area.value; this.yamlText = area.value; this.hash = result.flow_hash;
-      const auto = layout(this.draft);
-      this.positions = Object.fromEntries(Object.keys(this.draft.nodes).map(id => [id, this.positions[id] || auto[id]]));
+      this.positions = restoreLayout(this.draft, this.positions).positions; this.persistLayout();
       if (!(this.selected in this.draft.nodes)) this.selected = this.draft.start;
       this.status('YAML applied to the chart. Save to store it in the project.'); this.render();
     };

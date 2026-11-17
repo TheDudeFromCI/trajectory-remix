@@ -7,7 +7,7 @@ for (const key of ['document', 'CustomEvent', 'Event', 'MutationObserver']) glob
 globalThis.confirm = () => true;
 const settle = () => new Promise(resolve => setTimeout(resolve, 5));
 const model = await import('../trajectory_remix/static/flow-model.js');
-const {layout} = await import('../trajectory_remix/static/flow-layout.js');
+const {layout, restoreLayout} = await import('../trajectory_remix/static/flow-layout.js');
 const routes = await import('../trajectory_remix/static/flow-routes.js');
 const {FlowView} = await import('../trajectory_remix/static/flow-view.js');
 const {WalkthroughPanel, replyTemplate, messageBody} = await import('../trajectory_remix/static/flow-walkthrough.js');
@@ -56,6 +56,20 @@ const base = () => ({
   if (first.side === second.side) assert.equal(first.x, second.x, 'links into one node share a lane');
   // Subtitles skip a shared preamble and a leading "THIS STEP:" label.
   assert.equal(model.subtitle({kind: 'select', instruction: 'Shared rules.\nTHIS STEP: pick the opening.'}), 'Pick the opening.');
+
+  // Restoring a remembered layout: kept when complete and clear, re-laid when the flow
+  // gained a node from outside (it would land on an old card) or cards overlap.
+  {
+    const kept = restoreLayout(flow, at);
+    assert.equal(kept.relaid, false); assert.deepEqual(kept.positions, at);
+    const grown = structuredClone(flow); grown.nodes.added = {kind: 'event', next: 'choose'}; grown.nodes.choose.next = 'added';
+    const relaid = restoreLayout(grown, at);
+    assert.equal(relaid.relaid, true);
+    const cards = Object.values(relaid.positions);
+    assert.ok(cards.every((a, i) => cards.slice(i + 1).every(b => Math.abs(a.x - b.x) >= model.NODE_W || Math.abs(a.y - b.y) >= model.NODE_H)), 'no card sits on another');
+    assert.equal(restoreLayout(flow, {...at, done: at.write}).relaid, true, 'overlapping cards are re-arranged');
+    assert.deepEqual(restoreLayout(flow, {}).relaid, false);
+  }
 
   model.renameNode(flow, 'choose', 'pick');
   assert.equal(flow.start, 'pick'); assert.equal(flow.nodes.write.next, 'pick');
