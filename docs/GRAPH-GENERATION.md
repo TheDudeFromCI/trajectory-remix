@@ -60,8 +60,24 @@ kind of event has its own writer prompt:
 | --- | --- | --- |
 | Set the scene | `set_scene` → `choose_tools` → `write_opening` | Define the windows and the concrete world (persona, artifacts, a roster with observable capabilities, costs and context limits, budget, acceptance criteria, what the user has and has not authorized, hidden facts), choose and list the episode's tools (see [Show tools](#show-tools)), then write the opening request or trigger. |
 | First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans, delegating specialist work and weighing any automation choice. A direct reply, a clarifying question or an approval request takes the general route instead. |
-| Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. The agent's own events are planning, delegation, review and communication; specialist output arrives as tool results or reports. |
+| Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. The agent's own events are planning, delegation, review and communication; specialist output arrives as tool results or reports. Work happens in short-lived windows (see below). |
 | Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives and the coordinator checks below. If anything is missing or violated, the verifier picks the event that fixes it and work continues. |
+
+#### Short-lived windows
+
+Windows are the agent's working memory, so the default flow keeps them short-lived and
+parallel rather than writing one long transcript:
+
+| Window | Lifetime |
+| --- | --- |
+| Chatroom and document windows | Open all episode. |
+| `notes` (purpose `notes`, writable) | Open all episode. Holds the short conclusions later steps need. |
+| A reasoning window per step (`w_plan`, `w_tests`, …) | Opens for one step. The agent reasons, makes that step's tool calls, and the last call closes the window. |
+| A window for the results | Opens when results arrive, in whatever order they finish. The agent reads them, reasons, copies what matters into `notes`, makes the next calls and closes it. Results it handles separately go to separate windows, worked on in parallel. |
+
+Each request to the selector also lists `open_windows` (purpose, event count and
+characters for every open window), so it can wrap up windows that grow large. A closing
+agent event is told that its text won't be seen again, so it stays to a line.
 
 ### Coordinator behavior in the default flow
 
@@ -176,8 +192,11 @@ script's `smoke_plan` has examples.
 
 ## What the model sees
 
-The private selection controller sees the full proposal and committed source. It is an
-authoring role, never supervised actor output. For each content event, the actor prompt contains only **causal ancestors**, folded into the windows that are
+The private selection controller sees the full proposal and the committed source, except
+that events in **closed windows** appear as outlines: their ID, kind, window and
+dependencies, without content (marked `content_dropped`). That text is gone for the agent,
+and dropping it keeps the controller's prompt from growing with every event ever written.
+The controller is an authoring role, never supervised actor output. For each content event, the actor prompt contains only **causal ancestors**, folded into the windows that are
 currently visible, with replacements applied and closed windows removed. Parallel and future
 events, metadata, the full proposal, hidden world data and review history are all excluded. There
 is no rolling chat history that could smuggle lost context back in.
@@ -406,8 +425,10 @@ toward `context_window_tokens`.
   (the same for every selector node and every trajectory), then one user message. In
   JSON mode it starts with the fixed output schema, followed by the data from most to
   least stable: `tools`, `proposal`, `source`, `current_step` (this node's ID and
-  instruction), `remaining_events`, `previous`, `correction`. Inside `source`, events are
-  listed in causal order, so a newly committed event is usually appended at the end.
+  instruction), `open_windows`, `remaining_events`, `previous`, `correction`. Inside
+  `source`, events are listed in causal order, so a newly committed event is usually
+  appended at the end. When a window closes, its events lose their content, so the next
+  request misses the cache once from that point; later requests share the shorter prefix.
 - **Event requests:** the fixed system prompt, then `tool`, `input_schema`, `kind`,
   `task`, `window_purpose`, `visible`, `world` and `correction`.
 

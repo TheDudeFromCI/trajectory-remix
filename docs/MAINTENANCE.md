@@ -151,6 +151,14 @@ Prompt cache order: `python -m pytest -q tests/test_prompt_cache_order.py` check
 selector and event bodies run from stable to volatile fields, new events are appended,
 and the JSON-mode schema follows the system prompt, so prefix caches stay effective.
 
+Short-lived windows: `python -m pytest -q tests/test_selector_view.py` checks that the
+selector sees closed windows' events as outlines without content, that `open_windows`
+lists only open windows, that closed work does not grow the selector prompt, that a closing
+agent event is told its text won't be seen again, and that the default flow teaches the
+window lifecycle. Keep the first `set_scene` request under the default 16k context guard
+(bytes per token 1): put step-specific guidance in the step's instruction, not in
+`selector_instruction`.
+
 Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
 tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra
 request fields and their reserved names, sticky `session_id`, usage kept for cut-off and

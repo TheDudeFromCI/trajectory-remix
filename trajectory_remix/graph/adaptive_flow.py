@@ -8,8 +8,9 @@ from pydantic import Field, model_validator
 
 from . import tool_listing
 from .models import DTO, GraphSource, JsonValue, canonical, digest
-from .prompt_order import ordered, source_json
+from .prompt_order import ordered
 from .selection_schema import Selection, prompt_schema
+from .selector_view import open_windows, source_view
 from .validation import diagnose
 
 
@@ -134,12 +135,13 @@ def selection_payload(source, plan, current, correction=""):
     pairs = [
         ("tools", canonical(tool_listing.selector_tools(plan, current))),
         ("proposal", canonical(plan["proposal"])),
-        ("source", source_json(source)),
+        ("source", source_view(source)),
     ]
     if shared:
         step = dict(node=node_id, instruction=node["instruction"])
         pairs.append(("current_step", canonical(step)))
     pairs += [
+        ("open_windows", canonical(open_windows(source))),
         ("remaining_events", canonical(remaining)),
         ("previous", canonical(previous_notes(current.get("output")))),
         ("correction", canonical(correction)),

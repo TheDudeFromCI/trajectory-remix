@@ -23,9 +23,9 @@ KINDS = (
 class NewWindow(DTO):
     purpose: Identifier = Field(
         description=(
-            "chatroom: where people chat (needed for chat_message). reasoning: the agent's"
-            " thinking. tool: one tool call and its result. Otherwise a short word such as"
-            " document."
+            "chatroom: where people chat (needed for chat_message). reasoning: one step of"
+            " the agent's work. notes: its lasting conclusions. Otherwise a short word such"
+            " as document."
         )
     )
     agent_writable: bool = Field(

@@ -7,6 +7,12 @@ from . import tool_listing
 from .flow import event_payload
 from .models import GraphSource
 
+# Text in a closing event is never seen again, by the agent or anyone else.
+CLOSING = (
+    "This is the last event in its window: the window closes after it and none of its text"
+    " is seen again. Keep it to a line; what later steps need is already in notes."
+)
+
 
 def limit_reached(source, current, plan):
     """A run stops at max_steps, or at max_events unless it is already ending."""
@@ -31,6 +37,8 @@ def request_payload(source, cp, plan, settings):
         raise ValueError("Flow event node requires a selected task")
     task = deepcopy(current["task"])
     task["instruction"] += "\n" + node["instruction"]
+    if task["envelope"].get("close_window") and task["envelope"]["kind"] == "agent_text":
+        task["instruction"] += "\n" + CLOSING
     payload = event_payload(source, task, settings, cp["errors"] > 0)
     payload["task"] = task
     return payload

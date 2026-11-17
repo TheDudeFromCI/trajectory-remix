@@ -38,6 +38,7 @@ async def test_selector_body_runs_from_stable_to_volatile_with_same_content(call
         "proposal",
         "source",
         "current_step",
+        "open_windows",
         "remaining_events",
         "previous",
         "correction",
@@ -52,7 +53,16 @@ async def test_work_loop_requests_reuse_everything_before_the_newest_event(calls
     work = [p for p in selects if p["checkpoint"]["flow"]["node"] == "work"]
     assert len(work) >= 4
     step = json.loads(work[0]["messages"][1]["content"])["current_step"]["instruction"]
+
+    def closed(payload):
+        windows = json.loads(payload["messages"][1]["content"])["source"]["windows"]
+        return {key for key, window in windows.items() if window.get("closed")}
+
+    compared = 0
     for before, after in zip(work, work[1:]):
+        if closed(after) != closed(before):
+            continue  # A window just closed: its content drops out once, by design.
+        compared += 1
         new = set(json.loads(after["messages"][1]["content"])["source"]["events"])
         new -= set(json.loads(before["messages"][1]["content"])["source"]["events"])
         a, b = wire(before), wire(after)
@@ -65,6 +75,7 @@ async def test_work_loop_requests_reuse_everything_before_the_newest_event(calls
         )
         assert uncached < newest + len(json.dumps(step)) + 1500, (uncached, newest)
         assert b.index('"current_step"') > b.index('"events"')
+    assert compared >= 3
 
 
 def test_unchanged_flows_keep_their_node_instruction_as_system_prompt():
