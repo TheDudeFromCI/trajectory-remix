@@ -108,6 +108,11 @@ export function renderReply(trace) {
   }
   if ('output' in r) box.append(node('h4', 'Reply'), pre(pretty(r.output)));
   if (trace.selection) box.append(disclosure('Accepted Selection', pre(pretty(trace.selection)), true));
+  if (trace.listing) {
+    const l = trace.listing, list = node('div', undefined, 'stack small');
+    list.append(node('p', `Chosen: ${l.chosen.join(', ') || 'none'}`), node('p', `Added at random: ${l.added.join(', ') || 'none'}`), node('p', `Listed in event ${l.event}: ${l.shown.join(', ')}`, 'muted'));
+    box.append(disclosure('Tools listed for the agent', list, true));
+  }
   if (trace.event) box.append(disclosure('Event added', pre(pretty(trace.event)), true));
   if (!trace.response && !trace.error) box.append(node('p', trace.summary || 'No model call.', 'muted'));
   return box;

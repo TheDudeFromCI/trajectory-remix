@@ -16,15 +16,16 @@ from .flow_store import PACKAGED, FlowConflict, project_text, revision, write
 from .models import digest
 
 __all__ = ["FlowConflict", "check", "read_document", "render", "save"]
-KINDS = ("select", "event", "branch", "end")
+KINDS = ("select", "event", "branch", "end", "tools")
 # Fields the interpreter reads for each kind; others are defaults and are not written.
 FIELDS = {
     "select": ("kind", "instruction", "next"),
     "event": ("kind", "instruction", "next"),
     "branch": ("kind", "path", "equals", "then", "otherwise"),
     "end": ("kind",),
+    "tools": ("kind", "instruction", "next", "extra_tools"),
 }
-DEFAULTS = dict(next=None, path="finished", equals=True, then=None, otherwise=None)
+DEFAULTS = dict(next=None, path="finished", equals=True, then=None, otherwise=None, extra_tools=0.5)
 TOP = (
     "version",
     "start",
@@ -140,19 +141,29 @@ def _node_problems(ident, node, nodes):
     if kind not in KINDS:
         return [_diag("error", "kind", f"Unknown node kind: {kind}", node=ident, field="kind")]
     problems = []
-    known = {"kind", "instruction", "next", "path", "equals", "then", "otherwise"}
+    known = {"kind", "instruction", "next", "path", "equals", "then", "otherwise", "extra_tools"}
     for key in set(node) - known:
         problems.append(_diag("error", "unknown_field", f"Unknown field {key}", ident, key))
     for key in sorted(set(node) & known - set(FIELDS[kind]) - {"instruction"}):
         default = DEFAULTS[key]
         if type(node[key]) is not type(default) or node[key] != default:
             problems.append(_diag("warning", "ignored_field", f"{kind} ignores {key}", ident, key))
-    targets = {"select": ("next",), "event": ("next",), "branch": ("then", "otherwise")}
+    targets = {
+        "select": ("next",),
+        "event": ("next",),
+        "tools": ("next",),
+        "branch": ("then", "otherwise"),
+    }
     for key in targets.get(kind, ()):
         if node.get(key) not in nodes:
             text = f"{key} must point to an existing node"
             problems.append(_diag("error", "missing_target", text, ident, key))
-    if kind == "select" and not str(node.get("instruction", "")).strip():
+    if kind == "tools":
+        chance = node.get("extra_tools", 0.5)
+        if type(chance) not in (int, float) or not 0 <= chance <= 1:
+            text = "Use a chance from 0 to 1 for adding unchosen tools"
+            problems.append(_diag("error", "extra_tools", text, ident, "extra_tools"))
+    if kind in ("select", "tools") and not str(node.get("instruction", "")).strip():
         text = "The selector has no system prompt"
         problems.append(_diag("warning", "empty_instruction", text, ident, "instruction"))
     if kind == "branch":
@@ -166,7 +177,7 @@ def _node_problems(ident, node, nodes):
 
 
 def _edges(node):
-    if node["kind"] in ("select", "event"):
+    if node["kind"] in ("select", "event", "tools"):
         return [node.get("next")]
     if node["kind"] == "branch":
         return [node.get("then"), node.get("otherwise")]

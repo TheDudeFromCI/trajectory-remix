@@ -49,7 +49,7 @@ nodes:
   # ---- Phase 1: set the scene and open the episode --------------------------------
   set_scene:
     kind: select
-    next: write_opening
+    next: choose_tools
     instruction: >-
       Set the scene. Nothing is committed yet. Define the windows the episode
       will need: a read-only chatroom when a user converses, a writable reasoning window,
@@ -65,6 +65,22 @@ nodes:
       that access exists. These boundaries go in task.world for external authors only;
       the agent learns them only from visible evidence such as the user's words, a
       policy document or a tool contract. Do not finish.
+  choose_tools:
+    kind: tools
+    next: write_opening
+    # Each tool not chosen is still listed with this chance, so the agent learns to
+    # ignore tools it does not need.
+    extra_tools: 0.5
+    instruction: >-
+      You choose the tools for ONE synthetic training episode before it starts. You get
+      the tool catalogue as tool ID and description, the sampled proposal, and the
+      upcoming opening event with its private world facts. Return JSON with tools (IDs
+      from the catalogue) and reason. Choose every tool the agent will plausibly need to
+      do this episode's work and demonstrate its objectives: delegation tools when it
+      coordinates specialists, task notes when it tracks work, and file, web or memory
+      tools only when the work involves them. Include chat whenever the agent talks to a
+      person. Leave out tools the episode will not use; other tools are added at random
+      so the agent learns to ignore irrelevant ones.
   write_opening:
     kind: event
     next: first_move

@@ -106,6 +106,9 @@ class Fake:
             if callable(value):
                 value = value(ticket)
             return {"output": value, "model": "actual-fixture"}
+        if p["operation"] == "flow_tools":  # Show tools: choose every tool offered.
+            ids = p["schema"]["properties"]["tools"]["items"]["enum"]
+            return {"output": {"tools": ids, "reason": "Fixture tools"}, "model": "actual-fixture"}
         if p["operation"] == "flow_select":
             source = json.loads(p["messages"][1]["content"])["source"]
             if "reply" in source["events"]:

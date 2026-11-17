@@ -174,7 +174,7 @@ async def test_job_usage_totals_and_per_trajectory_average(tmp_path):
     assert report["per_trajectory"]["cost"] == pytest.approx(0.00012 * calls)
     assert report["wall_seconds"] is not None and report["wall_seconds"] >= 0
     assert report["per_trajectory"]["seconds"] == report["total"]["seconds"]  # One trajectory.
-    assert set(report["operations"]) == {"flow_select", "event"}
+    assert set(report["operations"]) == {"flow_select", "flow_tools", "event"}
     app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
     with TestClient(app) as client:
         client.headers["X-Remix-Token"] = app.state.csrf
@@ -257,7 +257,9 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
         if text.startswith("Return one JSON object"):
             text = text.split("\n\n", 1)[1]
         data = json.loads(text)
-        if "current_step" in data:  # A selector request.
+        if "upcoming_event" in data:  # The Show tools step: choose every tool.
+            output = {"tools": sorted(data["tools"]), "reason": "Fixture tools"}
+        elif "current_step" in data:  # A selector request.
             ticket = SimpleNamespace(
                 payload=dict(operation="flow_select", messages=[system, dict(content=text)])
             )

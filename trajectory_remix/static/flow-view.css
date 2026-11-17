@@ -55,6 +55,7 @@
 .flow-node.kind-event { --tone: var(--pastel-mint); }
 .flow-node.kind-branch { --tone: var(--pastel-lilac); }
 .flow-node.kind-end { --tone: var(--pastel-peach); }
+.flow-node.kind-tools { --tone: var(--pastel-butter); }
 .flow-node:hover { border-color: var(--accent); }
 .flow-node.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-subtle), 0 2px 8px rgba(0, 0, 0, 0.35); }
 .flow-node.is-dragging { cursor: grabbing; opacity: 0.85; z-index: 2; }

@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from pydantic import Field
 
-from . import adaptive_driver
+from . import adaptive_driver, tool_listing
 from . import adaptive_flow as interpreter
 from .flow import append_event, chat_echo
 from .flow_store import project_text
@@ -168,6 +168,8 @@ class Walkthrough:
             summary=(
                 "Ask the Generator to choose the next event"
                 if node["kind"] == "select"
+                else "Ask the Generator which tools this episode needs"
+                if node["kind"] == "tools"
                 else f"Ask the Generator to write event {payload['task']['id']}"
             ),
             request=self.request(payload, settings, source.id),
@@ -322,6 +324,8 @@ class Walkthrough:
         try:
             if payload["operation"] == "flow_select":
                 return self._select(source, state, settings, body, trace)
+            if payload["operation"] == tool_listing.OPERATION:
+                return self._list_tools(source, state, settings, body, trace)
             return self._write(source, state, settings, payload["task"], body, trace)
         except WrapperError as error:
             trace.update(accepted=False, error=str(error) + "; a run would pause here")
@@ -395,7 +399,9 @@ class Walkthrough:
     @staticmethod
     def _select(source, state, settings, body, trace):
         cp, plan = state["checkpoint"], state["plan"]
-        selected, task, selection = interpreter.accept_selection(source, body, plan, settings)
+        selected, task, selection = interpreter.accept_selection(
+            source, body, plan, settings, shown=cp["flow"].get("shown_tools")
+        )
         cp["errors"] = 0
         cp["flow"].update(output=selection, task=task)
         adaptive_driver.advance(cp, plan)
@@ -405,6 +411,23 @@ class Walkthrough:
             summary="Chose to finish" if task is None else f"Chose event {task['id']}",
         )
         return selected
+
+    @staticmethod
+    def _list_tools(source, state, settings, body, trace):
+        cp, plan = state["checkpoint"], state["plan"]
+        current = deepcopy(cp["flow"])
+        listed, listing = tool_listing.accept(source, body, plan, settings, current)
+        cp["flow"] = current
+        cp["errors"] = 0
+        adaptive_driver.advance(cp, plan)
+        trace.update(
+            listing=listing,
+            summary=(
+                f"Listed {len(listing['shown'])} tools ({len(listing['chosen'])} chosen,"
+                f" {len(listing['added'])} added at random)"
+            ),
+        )
+        return listed
 
     @staticmethod
     def _write(source, state, settings, task, body, trace):

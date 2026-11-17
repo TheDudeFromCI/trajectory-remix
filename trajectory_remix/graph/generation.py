@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import jsonschema
 
-from . import adaptive_driver, adaptive_flow, flow_store, reviews
+from . import adaptive_driver, adaptive_flow, flow_store, reviews, tool_listing
 from .commands import merge_patch
 from .flow import append_event, causal_view, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
@@ -486,7 +486,16 @@ class GenerationService:
                 raise ValueError(problem)
             if ticket.payload["operation"] == "flow_select":
                 selected_source, selected_task, selection = adaptive_flow.accept_selection(
-                    source, body, ticket.payload["flow_plan"], settings
+                    source,
+                    body,
+                    ticket.payload["flow_plan"],
+                    settings,
+                    shown=cp["flow"].get("shown_tools"),
+                )
+            if ticket.payload["operation"] == tool_listing.OPERATION:
+                listed_flow = deepcopy(cp["flow"])
+                listed_source, listing = tool_listing.accept(
+                    source, body, ticket.payload["flow_plan"], settings, listed_flow
                 )
             if cp["phase"] == "review":
                 quality = reviews.verdict(body, source)
@@ -505,6 +514,15 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
+        if ticket.payload["operation"] == tool_listing.OPERATION:
+            cp["flow"] = listed_flow
+            adaptive_driver.advance(cp, ticket.payload["flow_plan"])
+            self._save(ticket.job_id, listed_source, cp, ticket=ticket)
+            self.jobs.progress(
+                ticket.job_id,
+                f"Tools listed: {len(listing['shown'])} shown, {len(listing['chosen'])} chosen",
+            )
+            return
         if ticket.payload["operation"] == "flow_select":
             cp["flow"].update(output=selection, task=selected_task)
             adaptive_driver.advance(cp, ticket.payload["flow_plan"])

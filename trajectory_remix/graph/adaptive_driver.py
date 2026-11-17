@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from . import adaptive_flow as flow
+from . import tool_listing
 from .flow import event_payload
 from .models import GraphSource
 
@@ -24,6 +25,8 @@ def request_payload(source, cp, plan, settings):
     node = plan["flow"]["nodes"][current["node"]]
     if node["kind"] == "select":
         return flow.selection_payload(source, plan, current, cp.get("flow_error", ""))
+    if node["kind"] == "tools":
+        return tool_listing.payload(source, plan, current, cp.get("flow_error", ""))
     if not current.get("task"):
         raise ValueError("Flow event node requires a selected task")
     task = deepcopy(current["task"])

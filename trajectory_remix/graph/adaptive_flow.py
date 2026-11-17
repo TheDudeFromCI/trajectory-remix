@@ -6,6 +6,7 @@ from importlib.resources import files
 import yaml
 from pydantic import Field, model_validator
 
+from . import tool_listing
 from .models import DTO, GraphSource, JsonValue, canonical, digest
 from .prompt_order import ordered, source_json
 from .selection_schema import Selection, prompt_schema
@@ -41,6 +42,8 @@ class Node(DTO):
     equals: JsonValue = True
     then: str | None = None
     otherwise: str | None = None
+    # tools nodes: chance that each tool the Generator did not choose is listed anyway.
+    extra_tools: float = Field(default=0.5, ge=0, le=1)
 
 
 class Flow(DTO):
@@ -59,10 +62,10 @@ class Flow(DTO):
         if self.version != "adaptive-flow/1" or self.start not in self.nodes:
             raise ValueError("Unsupported Flow version or missing start node")
         for node in self.nodes.values():
-            if node.kind not in {"select", "event", "branch", "end"}:
+            if node.kind not in {"select", "event", "branch", "end", "tools"}:
                 raise ValueError("Unknown Flow node kind")
             targets = []
-            if node.kind in {"select", "event"}:
+            if node.kind in {"select", "event", "tools"}:
                 targets = [node.next]
             elif node.kind == "branch":
                 targets = [node.then, node.otherwise]
@@ -129,7 +132,7 @@ def selection_payload(source, plan, current, correction=""):
     # Most stable first, so requests share a long cacheable prefix. With a shared
     # selector instruction the step instruction comes last, nearest the answer.
     pairs = [
-        ("tools", canonical(plan["tools"])),
+        ("tools", canonical(tool_listing.selector_tools(plan, current))),
         ("proposal", canonical(plan["proposal"])),
         ("source", source_json(source)),
     ]
@@ -152,7 +155,7 @@ def selection_payload(source, plan, current, correction=""):
     )
 
 
-def accept_selection(source, body, plan, settings):
+def accept_selection(source, body, plan, settings, shown=None):
     selection = Selection.model_validate(body)
     if selection.finished:
         if selection.task is not None or selection.windows or not source.events:
@@ -165,6 +168,7 @@ def accept_selection(source, body, plan, settings):
     if selection.task is None:
         raise ValueError("Choose the next event as task, or set finished to true")
     task = selection.task.as_event_task()
+    tool_listing.check_tool_call(task.model_dump(mode="json"), shown)
     if task.id in source.events or task.id.endswith(":echo"):
         raise ValueError(f"Event ID {task.id} is already used; choose a new, unique ID")
     data = source.to_dict()

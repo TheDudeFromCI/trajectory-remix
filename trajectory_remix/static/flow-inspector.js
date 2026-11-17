@@ -46,11 +46,17 @@ export function renderNodeForm(box, flow, id, hooks, diagnostics = []) {
   const parts = [head, node('p', info.help, 'note'), startLabel];
   const mine = diagnostics.filter(d => d.node === id);
   if (mine.length) parts.push(problemList(mine));
-  if (n.kind === 'select' || n.kind === 'event') {
+  if (n.kind === 'select' || n.kind === 'event' || n.kind === 'tools') {
     const text = node('textarea'); text.value = n.instruction || ''; text.spellcheck = true; text.className = 'flow-instruction';
     text.oninput = () => hooks.change(f => { f.nodes[id].instruction = text.value; }, false);
     parts.push(field(info.instruction, text));
     parts.push(field('Then go to', select(targets(flow, n.next), n.next, v => hooks.change(f => { f.nodes[id].next = v || null; }), 'Next node')));
+  }
+  if (n.kind === 'tools') {
+    const chance = node('input'); chance.type = 'number'; chance.min = '0'; chance.max = '1'; chance.step = '0.05'; chance.value = n.extra_tools ?? 0.5;
+    chance.setAttribute('aria-label', 'Chance to add each unchosen tool');
+    chance.oninput = () => { const value = Number(chance.value); if (chance.value !== '' && value >= 0 && value <= 1) hooks.change(f => { f.nodes[id].extra_tools = value; }, false); };
+    parts.push(field('Chance to add each unchosen tool (0–1)', chance, 'Tools the Generator did not choose are still listed this often, chosen at random but the same for a given trajectory, so the agent learns to ignore irrelevant tools. 0 lists only chosen tools.'));
   }
   if (n.kind === 'branch') parts.push(...branchFields(flow, id, n, hooks));
   const remove = node('button', 'Delete node', 'sm danger'); remove.type = 'button'; remove.onclick = () => hooks.remove();

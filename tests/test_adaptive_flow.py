@@ -39,6 +39,12 @@ class Episode:
     async def __call__(self, ticket):
         p = ticket.payload
         self.calls.append(copy.deepcopy(p))
+        if p["operation"] == "flow_tools":  # Show tools: choose every tool offered.
+            ids = p["schema"]["properties"]["tools"]["items"]["enum"]
+            return {
+                "output": {"tools": ids, "reason": "All offered tools"},
+                "model": "scripted-offline",
+            }
         if p["operation"] == "flow_select":
             # The final finish is repeated when a verification step asks again.
             body = self.choices.pop(0) if len(self.choices) > 1 else self.choices[0]

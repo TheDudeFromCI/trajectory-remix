@@ -15,6 +15,11 @@ export const KINDS = {
     label: 'Branch', tone: 'lilac', ports: ['then', 'otherwise'],
     help: 'Reads one field of the last Selection and routes without calling a model. Then is taken when the value equals the expected value exactly (same JSON type).'
   },
+  tools: {
+    label: 'Show tools', tone: 'butter', ports: ['next'],
+    help: 'Asks the Generator once which tools the episode needs, from tool names and descriptions. Remix then lists those tools, plus each other tool at the chance below, as a masked event in a tools window placed before the next event. Afterwards selectors see only the listed tools, and calls to unlisted tools are refused. Place it between the first Select and the opening event.',
+    instruction: 'Instruction for choosing tools (its system prompt)'
+  },
   end: {
     label: 'End', tone: 'peach', ports: [],
     help: 'Finishes the trajectory and hands it to the configured reviews. The last Selection must have finished: true.'
@@ -24,13 +29,14 @@ export const KINDS = {
 /** Fields each kind uses, in YAML order. Matches flow_document.FIELDS on the server. */
 export const FIELDS = {
   select: ['kind', 'instruction', 'next'], event: ['kind', 'instruction', 'next'],
-  branch: ['kind', 'path', 'equals', 'then', 'otherwise'], end: ['kind']
+  branch: ['kind', 'path', 'equals', 'then', 'otherwise'], end: ['kind'],
+  tools: ['kind', 'instruction', 'next', 'extra_tools']
 };
 
 /** Branch paths worth suggesting: the Selection fields a selector returns. */
 export const PATHS = ['finished', 'reason', 'task.id', 'task.envelope.kind', 'task.envelope.window', 'task.envelope.tool', 'task.arguments'];
 
-const DEFAULTS = {instruction: '', next: null, path: 'finished', equals: true, then: null, otherwise: null};
+const DEFAULTS = {instruction: '', next: null, path: 'finished', equals: true, then: null, otherwise: null, extra_tools: 0.5};
 
 /** Only the fields a node's kind uses; keeps edits and YAML free of stale defaults. */
 export function compactNode(node) {
@@ -117,6 +123,7 @@ export const NODE_W = 210, NODE_H = 78, GAP_X = 60, GAP_Y = 84;
 export function subtitle(node) {
   if (node.kind === 'branch') return `if ${node.path} = ${JSON.stringify(node.equals)}`;
   if (node.kind === 'end') return 'Finish, then review';
+  if (node.kind === 'tools') return `Choose tools; add others at ${Math.round((node.extra_tools ?? 0.5) * 100)}%`;
   const paragraphs = String(node.instruction || '').split(/\n+/).map(p => p.trim()).filter(Boolean);
   const rest = (paragraphs.at(-1) || '').replace(/^[A-Z][A-Z ]*:\s*/, '');
   const text = rest.charAt(0).toUpperCase() + rest.slice(1);

@@ -80,7 +80,7 @@ def test_packaged_default_has_no_warnings_and_guards_its_end():
     nodes = load_flow()["flow"]["nodes"]
     assert flow_document.check(flow=load_flow()["flow"])["diagnostics"] == []
     kinds = {n["kind"] for n in nodes.values()}
-    assert kinds == {"select", "event", "branch", "end"}
+    assert kinds == {"select", "event", "branch", "end", "tools"}
     assert sum(n["kind"] == "select" for n in nodes.values()) >= 3
 
 
