@@ -78,8 +78,13 @@ class SelectedTask(DTO):
         default_factory=dict,
         description="External events: private facts for their author. {} for agent events.",
     )
-    arguments: Literal["text", "json"] = Field(
-        default="text", description="json: write a complete tool_call as a JSON arguments object."
+    # Called "arguments" internally; small models put the arguments themselves there.
+    call_format: Literal["text", "json"] = Field(
+        default="text",
+        description=(
+            'tool_call only, a setting: "json" if its author writes the call\'s arguments as'
+            ' one JSON object, else "text". Never the arguments themselves.'
+        ),
     )
 
     def as_event_task(self):
@@ -87,6 +92,7 @@ class SelectedTask(DTO):
         from .flow import EventTask
 
         data = self.model_dump(mode="json")
+        data["arguments"] = data.pop("call_format")
         envelope = self.envelope.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
         data["envelope"] = dict(envelope, kind=self.envelope.kind, window=self.envelope.window)
         return EventTask.model_validate(data)

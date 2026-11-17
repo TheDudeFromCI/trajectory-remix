@@ -14,6 +14,7 @@ from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
 from .provider import invalid_reason
 from .sampling import SamplerService
+from .schema_errors import explain
 from .storage import RevisionConflict
 from .validation import diagnose
 
@@ -480,7 +481,9 @@ class GenerationService:
         try:
             if complete.get("invalid_output"):
                 raise ValueError(invalid_reason(complete))
-            jsonschema.Draft202012Validator(ticket.payload["schema"]).validate(body)
+            problem = explain(ticket.payload["schema"], body)
+            if problem:
+                raise ValueError(problem)
             if ticket.payload["operation"] == "flow_select":
                 selected_source, selected_task, selection = adaptive_flow.accept_selection(
                     source, body, ticket.payload["flow_plan"], settings

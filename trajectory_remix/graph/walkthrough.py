@@ -16,7 +16,6 @@ from types import SimpleNamespace
 from typing import Literal
 from uuid import uuid4
 
-import jsonschema
 from pydantic import Field
 
 from . import adaptive_driver
@@ -26,6 +25,7 @@ from .flow_store import project_text
 from .models import DTO, GraphSource, JsonValue
 from .provider import invalid_reason, request_body
 from .sampling import SamplerService
+from .schema_errors import explain
 from .validation import diagnose
 
 VERSION = "flow-walkthrough/1"
@@ -316,10 +316,9 @@ class Walkthrough:
         if result.get("invalid_output"):
             return self._reject(source, state, settings, invalid_reason(result), trace)
         body = result.get("output")
-        try:
-            jsonschema.Draft202012Validator(payload["schema"]).validate(body)
-        except jsonschema.ValidationError as error:
-            return self._reject(source, state, settings, error.message, trace)
+        problem = explain(payload["schema"], body)
+        if problem:
+            return self._reject(source, state, settings, problem, trace)
         try:
             if payload["operation"] == "flow_select":
                 return self._select(source, state, settings, body, trace)

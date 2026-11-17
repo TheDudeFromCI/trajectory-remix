@@ -80,6 +80,7 @@ def test_the_corrected_reply_is_accepted(tmp_path):
     fixed = json.loads(json.dumps(INVENTED))
     task = fixed["task"]
     task.pop("when")
+    task["call_format"] = task.pop("arguments")
     task["id"] = "opening"
     task["envelope"] = dict(kind="chat_message", window="chatroom", chat={"speaker": "user"})
     fixed["windows"]["chatroom"]["purpose"] = "chatroom"  # The second thing the model guessed.
@@ -94,3 +95,42 @@ def test_the_corrected_reply_is_accepted(tmp_path):
     assert accepted["world"]["user"]["name"] == "Dr. Aris Thorne"  # World facts survive.
     assert selection["task"]["envelope"]["kind"] == "chat_message"  # Branches read this.
     assert set(source.windows) == {"chatroom", "reasoning", "task_board", "agent_reports"}
+
+
+def test_corrections_name_each_problem_instead_of_repeating_the_reply():
+    from trajectory_remix.graph.schema_errors import explain
+
+    invented = explain(prompt_schema(), INVENTED)
+    assert (
+        "task: Additional properties are not allowed ('arguments', 'when' were unexpected)"
+        in invented
+    )
+    assert "task.envelope: 'kind' is a required property" in invented
+    assert "Dr. Aris Thorne" not in invented  # The reply itself is not echoed back.
+    assert "is not valid under any of the given schemas" not in invented
+    assert explain(prompt_schema(), {"finished": True, "reason": "done", "task": None}) is None
+
+
+def test_arguments_put_in_the_format_field_get_a_precise_correction():
+    from trajectory_remix.graph.schema_errors import explain
+
+    # A real reply: the tool call's arguments written into the old "arguments" setting.
+    reply = json.loads(
+        (Path(__file__).parent / "fixtures" / "selector_arguments_in_format_field.json").read_text()
+    )
+    correction = explain(prompt_schema(), reply)
+    assert correction.startswith(
+        "task: Additional properties are not allowed ('arguments' was unexpected)"
+    )
+    assert len(correction) < 400
+    renamed = json.loads(json.dumps(reply))
+    renamed["task"]["call_format"] = renamed["task"].pop("arguments")
+    correction = explain(prompt_schema(), renamed)
+    assert (
+        correction.startswith("task.call_format: ")
+        and "is not one of ['text', 'json']" in correction
+    )
+    description = prompt_schema()["$defs"]["SelectedTask"]["properties"]["call_format"][
+        "description"
+    ]
+    assert "Never the arguments themselves" in description

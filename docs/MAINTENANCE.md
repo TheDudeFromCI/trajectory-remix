@@ -171,3 +171,9 @@ Selection schema: `python -m pytest -q tests/test_selection_schema.py` replays a
 model's first reply (invented envelope fields, a recipe-only `when`, a descriptive chatroom
 purpose) and checks the selector schema describes every envelope and window field, rejects
 that reply with a correction naming the problem, and accepts the corrected form.
+
+Schema corrections: `graph/schema_errors.py` turns a schema violation into a short
+correction naming each failing field (it looks inside "object or null" alternatives and
+shortens quoted values) for both runs and the walkthrough. The selector's tool-call format
+setting is `call_format` in its schema (internally `arguments`), because small models put
+the arguments themselves into a field named `arguments`.

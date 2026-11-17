@@ -148,7 +148,7 @@ class Fake:
                         id=ident,
                         envelope=envelope,
                         instruction="Author the fixture event",
-                        arguments="json" if ident == "reply" else "text",
+                        call_format="json" if ident == "reply" else "text",
                     ),
                 )
         elif p["operation"] == "event":
