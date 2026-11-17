@@ -111,4 +111,3 @@ export function restoreLayout(flow, remembered = {}) {
   if (known.length < ids.length || clash) return {positions: layout(flow), relaid: true};
   return {positions: kept, relaid: false};
 }
-
