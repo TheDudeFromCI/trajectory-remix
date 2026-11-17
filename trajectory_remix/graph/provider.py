@@ -57,8 +57,16 @@ def strict_schema_supported(schema):
 
 
 def response_contract(payload):
+    """(response_format, messages) for a request. response_format None means omit it.
+
+    The endpoint's output_mode chooses: "auto" uses native strict JSON schema when the
+    schema allows it and JSON mode otherwise; "json_object" always uses JSON mode with the
+    schema in the prompt; "prompt" puts the schema in the prompt and sends no
+    response_format, for servers that support neither.
+    """
+    mode = (payload.get("endpoint_config") or {}).get("output_mode", "auto")
     schema = decoding_schema(payload["schema"])
-    if strict_schema_supported(schema):
+    if mode == "auto" and strict_schema_supported(schema):
         return (
             {
                 "type": "json_schema",
@@ -87,7 +95,7 @@ def response_contract(payload):
     else:
         at = messages.index(first) if first is not None else len(messages)
         messages.insert(at, {"role": "user", "content": contract})
-    return {"type": "json_object"}, messages
+    return (None if mode == "prompt" else {"type": "json_object"}), messages
 
 
 def context_budget(payload, response_format, messages):
@@ -116,6 +124,32 @@ def context_budget(payload, response_format, messages):
     )
 
 
+def request_body(payload, trajectory_id):
+    """The exact HTTP body for a request (no credentials) and its context budget.
+
+    Shared by the transport and the walkthrough, so what the walkthrough shows is what
+    is sent.
+    """
+    endpoint = payload["endpoint_config"]
+    response_format, messages = response_contract(payload)
+    budget = context_budget(payload, response_format, messages)
+    body = dict(
+        # Provider options first; validation stops them replacing the fields below.
+        **endpoint.get("extra_body", {}),
+        model=endpoint["model"],
+        messages=messages,
+        stream=False,
+        max_tokens=budget["max_output_tokens"],
+        **({"response_format": response_format} if response_format else {}),
+    )
+    for key in ("temperature", "top_p", "presence_penalty"):
+        if endpoint.get(key) is not None:
+            body[key] = endpoint[key]
+    if endpoint.get("sticky_sessions"):
+        body["session_id"] = trajectory_id
+    return body, budget
+
+
 class OpenAITransport:
     async def __call__(self, ticket):
         payload = ticket.payload
@@ -123,24 +157,9 @@ class OpenAITransport:
         # Credentials are process configuration; never put them in jobs/source.
         key = os.environ.get("REMIX_API_KEY_" + ticket.endpoint.upper().replace("-", "_"))
         headers = {"Authorization": "Bearer " + key} if key else {}
-        response_format, messages = response_contract(payload)
-        budget = context_budget(payload, response_format, messages)
+        body, budget = request_body(payload, ticket.trajectory_id)
         if budget["input_tokens_estimate"] > budget["input_ceiling"]:
             return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
-        body = dict(
-            # Provider options first; validation stops them replacing the fields below.
-            **endpoint.get("extra_body", {}),
-            model=endpoint["model"],
-            messages=messages,
-            stream=False,
-            max_tokens=budget["max_output_tokens"],
-            response_format=response_format,
-        )
-        for key in ("temperature", "top_p", "presence_penalty"):
-            if endpoint.get(key) is not None:
-                body[key] = endpoint[key]
-        if endpoint.get("sticky_sessions"):
-            body["session_id"] = ticket.trajectory_id
         timeout = endpoint.get("timeout_seconds", 120.0)
         # Bound the whole attempt as well as individual network operations.
         # Queue-owned retries each get their own deadline.

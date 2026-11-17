@@ -29,7 +29,7 @@ export function parseExtraBody(text) {
 /** Options for hosted routers such as OpenRouter: token estimate, sticky sessions, extra fields. */
 function providerOptions(id, endpoint, edit, input) {
   const box = node('details', undefined, 'settings-subsection'); box.append(node('summary', 'Provider options'));
-  box.open = (endpoint.bytes_per_token ?? 1) !== 1 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0;
+  box.open = (endpoint.bytes_per_token ?? 1) !== 1 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0 || (endpoint.output_mode ?? 'auto') !== 'auto';
   const grid = node('div', undefined, 'settings-grid');
   const ratio = input(`Endpoint ${id} bytes_per_token`, endpoint.bytes_per_token ?? 1, v => edit('bytes_per_token', v), 'number');
   ratio.min = 1; ratio.max = 6; ratio.step = 0.1;
@@ -38,7 +38,14 @@ function providerOptions(id, endpoint, edit, input) {
   const sticky = node('input'); sticky.type = 'checkbox'; sticky.checked = !!endpoint.sticky_sessions; sticky.setAttribute('aria-label', `Endpoint ${id} sticky sessions`);
   sticky.onchange = () => edit('sticky_sessions', sticky.checked);
   const stickyField = node('label', undefined, 'checkbox'); stickyField.append(sticky, ' Sticky sessions (send the trajectory ID as session_id)');
-  grid.append(ratioField, stickyField);
+  const mode = node('select'); mode.setAttribute('aria-label', `Endpoint ${id} structured output`);
+  for (const [value, text] of [['auto', 'Auto: native JSON schema where possible'], ['json_object', 'JSON object: schema in the prompt'], ['prompt', 'Prompt only: no response_format']]) {
+    const option = node('option', text); option.value = value; mode.append(option);
+  }
+  mode.value = endpoint.output_mode || 'auto'; mode.onchange = () => edit('output_mode', mode.value);
+  const modeField = field('Structured output', mode);
+  modeField.append(node('span', 'Use JSON object or Prompt only if the server ignores or rejects JSON-schema output. Prompt only suits servers with no JSON mode at all.', 'settings-help'));
+  grid.append(ratioField, modeField, stickyField);
   const extra = node('textarea'); extra.spellcheck = false; extra.setAttribute('aria-label', `Endpoint ${id} extra request fields`);
   extra.value = JSON.stringify(endpoint.extra_body || {}, null, 2);
   const problem = node('p', '', 'settings-help'); problem.setAttribute('role', 'alert');

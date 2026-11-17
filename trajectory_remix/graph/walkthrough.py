@@ -24,7 +24,7 @@ from . import adaptive_flow as interpreter
 from .flow import append_event, chat_echo
 from .flow_store import project_text
 from .models import DTO, GraphSource, JsonValue
-from .provider import context_budget, invalid_reason, response_contract
+from .provider import invalid_reason, request_body
 from .sampling import SamplerService
 from .validation import diagnose
 
@@ -143,30 +143,19 @@ class Walkthrough:
                 if node["kind"] == "select"
                 else f"Ask the Generator to write event {payload['task']['id']}"
             ),
-            request=self.request(payload, settings),
+            request=self.request(payload, settings, source.id),
         )
 
     @staticmethod
-    def request(payload, settings):
+    def request(payload, settings, trajectory_id=""):
         endpoint_id = settings.endpoint_roles.get("generator")
         shown = {k: v for k, v in payload.items() if k != "flow_plan"}
         if endpoint_id is None:
             return dict(shown, endpoint=None, wire=None)
         endpoint = settings.endpoints[endpoint_id].model_dump(mode="json")
-        response_format, messages = response_contract(payload)
-        budget = context_budget(dict(payload, endpoint_config=endpoint), response_format, messages)
-        wire = dict(
-            url=endpoint["url"].rstrip("/") + "/chat/completions",
-            model=endpoint["model"],
-            messages=messages,
-            max_tokens=budget["max_output_tokens"],
-            response_format=response_format,
-            **{
-                key: endpoint[key]
-                for key in ("temperature", "top_p", "presence_penalty")
-                if endpoint.get(key) is not None
-            },
-        )
+        sent = {k: v for k, v in payload.items() if k != "flow_plan"}
+        body, budget = request_body(dict(sent, endpoint_config=endpoint), trajectory_id)
+        wire = dict(url=endpoint["url"].rstrip("/") + "/chat/completions", **body)
         return dict(shown, endpoint=endpoint_id, wire=wire, budget=budget)
 
     def knows(self, state):
@@ -280,7 +269,7 @@ class Walkthrough:
         cp, plan = state["checkpoint"], state["plan"]
         payload = adaptive_driver.request_payload(source, cp, plan, settings)
         trace.update(action="model", operation=payload["operation"])
-        trace["request"] = self.request(payload, settings)
+        trace["request"] = self.request(payload, settings, source.id)
         if mode == "manual":
             result = dict(output=response, model="manual")
         else:

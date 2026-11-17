@@ -155,3 +155,8 @@ non-JSON replies, per-job usage totals (missing values stay missing), the provid
 shown in the walkthrough, the example settings and the model checker. All HTTP is mocked;
 `scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
 `graph/usage.py` stores counts only, never prompts, responses or credentials.
+
+Output modes: `python -m pytest -q tests/test_output_modes.py` checks that `auto`,
+`json_object` and `prompt` endpoints send the right `response_format` (or none) and always
+state the schema in the prompt when the server does not enforce it, and that the
+walkthrough shows the exact body the transport sends (`provider.request_body`).

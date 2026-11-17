@@ -37,6 +37,7 @@ hosted routers such as OpenRouter. For a full walk-through, see [OpenRouter](OPE
 | Option | What it does |
 | --- | --- |
 | **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. The default, 1, can never undercount but rejects prompts that would fit. English and JSON average about 3.5 bytes per token, so **3** keeps a margin while letting you use the model's real window. |
+| **Structured output** | How replies are held to the JSON schema. **Auto** uses native JSON-schema output where possible. **JSON object** always uses JSON mode with the schema written into the prompt. **Prompt only** sends no `response_format`, for servers that support neither. |
 | **Sticky sessions** | Sends the trajectory ID as `session_id`, so a router keeps each trajectory on one provider and its prompt stays cached. |
 | **Extra request fields** | A JSON object added to every request, for example `{"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}`. Fields Remix sets itself (model, messages, response format, output limit, sampling and `session_id`) cannot be overridden. |
 

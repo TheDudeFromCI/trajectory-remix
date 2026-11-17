@@ -292,6 +292,10 @@ class Endpoint(DTO):
     # Extra request-body fields for this provider, such as OpenRouter's reasoning or
     # provider routing options. Fields the transport controls cannot be replaced.
     extra_body: dict[str, JsonValue] = Field(default_factory=dict)
+    # How replies are kept to the JSON schema. "auto" uses native strict JSON schema
+    # where possible. "json_object" always uses JSON mode with the schema in the prompt.
+    # "prompt" sends no response_format at all, for servers that support neither.
+    output_mode: Literal["auto", "json_object", "prompt"] = "auto"
 
     @model_validator(mode="after")
     def context_budget(self):

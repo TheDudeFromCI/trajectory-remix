@@ -84,49 +84,70 @@ negative quality verdicts.
 The default prompts and free-form response construction are a baseline to iterate on. The separate 25k-stored /
 20-active and full-training gates are outside this guide, and nothing here starts them.
 
-## Generate from the studio with a local llama.cpp server
+## Generate from the studio with a local server
 
 Use this to check a flow end to end on your own hardware before paying for hosted
-models: it costs nothing but runs slowly. It assumes `llama-server` from llama.cpp
-serving a GGUF model such as a Qwen3.6 35B-A3B quantization.
+models: it costs nothing but runs slowly. Any OpenAI-compatible server works. Notes for
+PolyStrata and llama.cpp follow; the steps after them are the same for both.
 
-1. **Start the server** with the model's own chat template and enough context per slot:
+### PolyStrata
 
-   ```bash
-   llama-server -m /path/to/model.gguf --jinja -c 65536 -np 2 --port 8000
-   ```
+[PolyStrata](https://github.com/VecSzn/PolyStrata) serves mixture-of-experts GGUF models
+through an OpenAI-compatible API at `http://127.0.0.1:8080/v1`. Locally it accepts any
+API key and any model name. Its README does not document three things Remix relies on,
+so check them with a walkthrough step (see below) before a run:
 
-   `-c` is shared between the `-np` parallel slots, so this gives each request 32,768
-   tokens. Prompt caching is on by default and works per slot, which suits Remix's
-   cache-friendly prompt order.
+| Not documented | What to set in Remix |
+| --- | --- |
+| JSON-schema output (`response_format`) | Start with **Structured output: Auto**. If replies come back in the wrong shape or the request is refused, switch to **JSON object**, then **Prompt only**. Both put the schema in the prompt. |
+| The request field for reasoning effort | The README names reasoning levels off, low, medium and high. Try `{"reasoning_effort": "none"}` in **Extra request fields**, or `"low"` if `none` is refused, and check the **Reasoning** column in **Usage**. |
+| Parallel requests | Only models configured with `"parallel"` in their `strata-<model>.json` answer more than one request at a time. Otherwise set **Concurrent requests** to 1. |
 
-2. **Add an endpoint** in **Settings → Models & defaults**:
+Use the context size chosen when the model was installed as the **Context limit**.
+
+### llama.cpp
+
+Start `llama-server` with the model's own chat template:
+
+```bash
+llama-server -m /path/to/model.gguf --jinja -c 65536 -np 2 --port 8000
+```
+
+`-c` is shared between the `-np` parallel slots, so this gives each request 32,768
+tokens: use that as the **Context limit** and `-np` as **Concurrent requests**. For
+Qwen3-family hybrid models, `{"chat_template_kwargs": {"enable_thinking": false}}` in
+**Extra request fields** turns thinking off.
+
+### Set up and run
+
+1. **Add an endpoint** in **Settings → Models & defaults**:
 
    | Field | Value |
    | --- | --- |
-   | Base URL | `http://127.0.0.1:8000/v1` |
-   | Model identifier | The name the server reports, for example the GGUF file name |
-   | Concurrent requests | The same as `-np` (2 above) |
-   | Context limit (tokens) | Context per slot: `-c` ÷ `-np` (32768 above) |
+   | Base URL | `http://127.0.0.1:8080/v1` (PolyStrata) or `http://127.0.0.1:8000/v1` (llama.cpp above) |
+   | Model identifier | The model's name, for example its GGUF file name; it is recorded with each response |
+   | Concurrent requests | What the server can answer at once (see above) |
+   | Context limit (tokens) | The server's context per request |
    | Max output tokens | `2048` |
    | Provider options → Bytes per token | `3` |
+   | Provider options → Structured output | **Auto** to start (see above) |
    | Provider options → Sticky sessions | Off (a single local server needs no routing) |
-   | Provider options → Extra request fields | `{"chat_template_kwargs": {"enable_thinking": false}}` for Qwen3-family hybrid models |
+   | Provider options → Extra request fields | The server's setting that turns thinking off (see above) |
 
-   Qwen3-family models think before answering by default. Turning thinking off matches
-   the hosted pilot and avoids replies cut off at the output limit. If your server rejects
-   the field, remove it and raise **Max output tokens** instead.
+   Turning thinking off matches the hosted pilot and avoids replies cut off at the output
+   limit. If you leave it on, raise **Max output tokens**.
 
-3. **Assign the Generator role** to the endpoint, leave the review roles empty, and save.
+2. **Assign the Generator role** to the endpoint, leave the review roles empty, and save.
 
-4. **Check one trajectory first.** In **Flow → Walkthrough**, sample a seed and run a few
-   steps with **Call the Generator**, then **Run to end**. A failed request shows the
-   server's own error message.
+3. **Check one trajectory first.** In **Flow → Walkthrough**, sample a seed and run a few
+   steps with **Call the Generator**. The first selection and the first written event should
+   both be accepted. A refused request shows the server's own error message; a reply in the
+   wrong shape shows why it was rejected on the **Reply** tab. Then choose **Run to end**.
 
-5. **Run a few trajectories** from **Generate** (for example 5 attempts). In **Jobs**, the
-   **Usage** tab shows tokens and time: a local server reports no cost, so that column shows
-   "—". **Model time** adds up every request's wait; the wall time line shows how long the
-   run took from first to last response.
+4. **Run a few trajectories** from **Generate** (for example 5 attempts). In **Jobs**, the
+   **Usage** tab shows tokens and time. A local server reports no cost, so that column
+   shows "—". **Model time** adds up every request's wait; the wall time line shows how long
+   the run took from first to last response.
 
 What to look at before moving to a hosted model: whether trajectories finish, how many
 format corrections and pauses the logs show, typical events per trajectory and prompt

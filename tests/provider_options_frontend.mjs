@@ -18,6 +18,10 @@ assert.equal(draft.endpoints.openrouter.bytes_per_token, 3);
 const sticky = byLabel('Endpoint openrouter sticky sessions'); sticky.checked = true; sticky.dispatchEvent(new window.Event('change'));
 assert.equal(draft.endpoints.openrouter.sticky_sessions, true);
 
+const mode = byLabel('Endpoint openrouter structured output');
+assert.equal(mode.value, 'auto');
+mode.value = 'prompt'; mode.dispatchEvent(new window.Event('change'));
+assert.equal(draft.endpoints.openrouter.output_mode, 'prompt');
 const extra = byLabel('Endpoint openrouter extra request fields');
 enter(extra, '{"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}');
 assert.deepEqual(draft.endpoints.openrouter.extra_body, {reasoning: {effort: 'none'}, provider: {require_parameters: true}});

@@ -13,7 +13,7 @@ implementation team: treat it as a checklist to follow and report on.
   model checker below rather than picking by price alone.
 
 To check a flow for free first, run a few trajectories on a local server: see
-[Generate from the studio with a local llama.cpp server](GRAPH-LOCAL-LLM.md#generate-from-the-studio-with-a-local-llamacpp-server).
+[Generate from the studio with a local server](GRAPH-LOCAL-LLM.md#generate-from-the-studio-with-a-local-server).
 
 ## 1. Choose a model
 
