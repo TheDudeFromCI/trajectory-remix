@@ -43,6 +43,11 @@ try {
   await page.locator('#trajectory-menu summary').click(); await page.locator('#review-repair-source').click();
   await page.waitForFunction(()=>[...graphStudio.jobs.values()].filter(j=>j.kind==='bulk'&&j.state==='completed').length>=2);
   assert.equal((await get(`/trajectories/${record.source.id}`)).source.metadata.stage,2);
+  // More → Export downloads the open trajectory's source as JSON.
+  await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
+  await page.locator('#trajectory-menu summary').click();
+  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#export-source').click()]);
+  assert.equal(download.suggestedFilename(),`${record.source.id}.json`);
   // Two distinct review jobs, independent logs and settled history records.
   assert.equal((await get('/job-summaries')).filter(j=>j.kind==='bulk').length,2);
   await page.locator('#trajectory-tab').click();
