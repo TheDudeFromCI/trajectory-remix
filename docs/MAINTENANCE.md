@@ -88,6 +88,7 @@ node tests/usage_view_frontend.mjs
 node tests/walkthrough_controls_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/show_tools_frontend.mjs
+node tests/flow_default_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
@@ -151,13 +152,16 @@ Prompt cache order: `python -m pytest -q tests/test_prompt_cache_order.py` check
 selector and event bodies run from stable to volatile fields, new events are appended,
 and the JSON-mode schema follows the system prompt, so prefix caches stay effective.
 
+Immediate response and Load default: `python -m pytest -q tests/test_immediate_response.py`
+checks `flow.` branch paths, the default flow's reply-first route, the flag's validation,
+`GET /generation/flow/default` saving nothing, and the 65k/8k endpoint defaults.
+
 Short-lived windows: `python -m pytest -q tests/test_selector_view.py` checks that the
 selector sees closed windows' events as outlines without content, that `open_windows`
 lists only open windows, that closed work does not grow the selector prompt, that a closing
 agent event is told its text won't be seen again, and that the default flow teaches the
-window lifecycle. Keep the first `set_scene` request under the default 16k context guard
-(bytes per token 1): put step-specific guidance in the step's instruction, not in
-`selector_instruction`.
+window lifecycle. Keep the shared `selector_instruction` short and put step-specific
+guidance in the step's own instruction: every selector request carries the shared text.
 
 Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
 tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra

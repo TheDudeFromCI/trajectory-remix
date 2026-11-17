@@ -31,6 +31,7 @@ TOP = (
     "start",
     "max_steps",
     "max_events",
+    "immediate_response",
     "actor_instruction",
     "selector_instruction",
     "nodes",
@@ -48,6 +49,12 @@ def read_document(store):
         origin=PACKAGED if saved is None else "project",
         revision=revision(saved),
     )
+
+
+def packaged_document():
+    """The default flow that ships with Remix, checked, for the editor to load as a draft."""
+    text = packaged_text()
+    return dict(check(text=text), text=text, origin=PACKAGED)
 
 
 def packaged_text():
@@ -112,6 +119,9 @@ def structure(flow):
         value = flow.get(key, 1)
         if type(value) is not int or not 1 <= value <= top:
             problems.append(_diag("error", "limit", f"{key} must be 1–{top}", field=key))
+    if not isinstance(flow.get("immediate_response", True), bool):
+        text = "immediate_response must be true or false"
+        problems.append(_diag("error", "immediate_response", text, field="immediate_response"))
     actor = flow.get("actor_instruction")
     if not isinstance(actor, str) or not actor.strip():
         text = "Actor instruction is required"
@@ -170,8 +180,11 @@ def _node_problems(ident, node, nodes):
         path = node.get("path", "finished")
         if not isinstance(path, str) or not path or any(not p for p in path.split(".")):
             problems.append(_diag("error", "path", "Use a dotted path", ident, "path"))
-        elif path.split(".")[0] not in SELECTION_FIELDS:
-            text = "Selections only have finished, reason, windows and task; this always fails"
+        elif path.split(".")[0] not in SELECTION_FIELDS | {"flow"}:
+            text = (
+                "Paths start with finished, reason, windows or task (the last selection),"
+                " or flow (flow settings); this always fails"
+            )
             problems.append(_diag("warning", "path_root", text, ident, "path"))
     return problems
 

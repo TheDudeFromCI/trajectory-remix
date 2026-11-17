@@ -52,6 +52,9 @@ class Flow(DTO):
     start: str
     max_steps: int = Field(default=600, ge=1, le=10000)
     max_events: int = Field(default=128, ge=1, le=2000)
+    # The agent replies to the person at once, before it starts reasoning. Branch nodes
+    # read it as flow.immediate_response.
+    immediate_response: bool = True
     actor_instruction: str = Field(min_length=1)
     # Shared system prompt for every select node. When set, each node's instruction is
     # sent after the data as current_step, so all selectors share one cached prefix.
@@ -99,17 +102,27 @@ def state(plan):
     return dict(node=plan["flow"]["start"], steps=0, output=None, task=None)
 
 
-def branch(node, output):
+def lookup(node, output, flow=None):
+    """The value a branch tests, and whether it was found.
+
+    Paths read the last selection; a path starting with "flow." reads the flow's own
+    settings, such as flow.immediate_response.
+    """
+    parts = node["path"].split(".")
     value = output
-    for part in node["path"].split("."):
+    if parts[0] == "flow":
+        value, parts = flow or {}, parts[1:]
+    for part in parts:
         if not isinstance(value, dict) or part not in value:
-            return node["otherwise"]
+            return None, False
         value = value[part]
-    return (
-        node["then"]
-        if type(value) is type(node["equals"]) and value == node["equals"]
-        else node["otherwise"]
-    )
+    return value, True
+
+
+def branch(node, output, flow=None):
+    value, found = lookup(node, output, flow)
+    matched = found and type(value) is type(node["equals"]) and value == node["equals"]
+    return node["then"] if matched else node["otherwise"]
 
 
 def previous_notes(output):

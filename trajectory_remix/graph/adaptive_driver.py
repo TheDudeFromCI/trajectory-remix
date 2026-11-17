@@ -65,7 +65,7 @@ def prepare(driver, job, source, cp, plan, settings):
         driver._after_generation(job, GraphSource.model_validate(data), cp)
         return None
     if node["kind"] == "branch":
-        current["node"] = flow.branch(node, current.get("output"))
+        current["node"] = flow.branch(node, current.get("output"), plan["flow"])
         current["steps"] += 1
         driver._save(job, source, cp)
         return None

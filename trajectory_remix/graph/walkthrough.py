@@ -236,7 +236,7 @@ class Walkthrough:
         elif node["kind"] == "end":
             source = self._end(source, state, trace)
         elif node["kind"] == "branch":
-            self._branch(node, current, trace)
+            self._branch(node, current, trace, plan["flow"])
         else:
             source = await self._model(source, state, settings, mode, response, trace, call_id)
         trace["to"] = cp["flow"]["node"]
@@ -280,14 +280,9 @@ class Walkthrough:
         return GraphSource.model_validate(data)
 
     @staticmethod
-    def _branch(node, current, trace):
-        value, found = current.get("output"), True
-        for part in node["path"].split("."):
-            if not isinstance(value, dict) or part not in value:
-                value, found = None, False
-                break
-            value = value[part]
-        target = interpreter.branch(node, current.get("output"))
+    def _branch(node, current, trace, flow):
+        value, found = interpreter.lookup(node, current.get("output"), flow)
+        target = interpreter.branch(node, current.get("output"), flow)
         current["node"] = target
         current["steps"] += 1
         trace.update(

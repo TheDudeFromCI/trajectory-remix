@@ -97,6 +97,11 @@ export function renderFlowForm(box, flow, hooks, diagnostics = []) {
   grid.append(field('Start node', start), node('span'),
     field('Max steps', number('max_steps', 10000), 'Every node visit counts, including branches'),
     field('Max events', number('max_events', 2000), 'Runs stop as Unfinished when reached'));
+  const reply = node('input'); reply.type = 'checkbox'; reply.checked = flow.immediate_response !== false;
+  reply.setAttribute('aria-label', 'Immediate response');
+  reply.onchange = () => hooks.change(f => { f.immediate_response = reply.checked; }, false);
+  const replyLabel = node('label', undefined, 'checkbox'); replyLabel.append(reply, ' Immediate response');
+  grid.append(field('', replyLabel, 'The agent answers a person at once ("Sure, let me look into this.") before it reasons. Branch nodes read it as flow.immediate_response.'));
   const selector = node('textarea'); selector.value = flow.selector_instruction || ''; selector.className = 'flow-instruction';
   selector.oninput = () => hooks.change(f => { f.selector_instruction = selector.value; }, false);
   const actor = node('textarea'); actor.value = flow.actor_instruction || ''; actor.className = 'flow-instruction';

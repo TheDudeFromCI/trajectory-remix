@@ -280,8 +280,8 @@ class Endpoint(DTO):
     top_p: Annotated[float, Field(ge=0, le=1)] | None = None
     presence_penalty: Annotated[float, Field(ge=-2, le=2)] | None = None
 
-    context_window_tokens: Annotated[int, Field(ge=1024)] = 16384
-    max_output_tokens: Annotated[int, Field(ge=1)] = 2048
+    context_window_tokens: Annotated[int, Field(ge=1024)] = 65536
+    max_output_tokens: Annotated[int, Field(ge=1)] = 8192
     # The context guard estimates input tokens as UTF-8 bytes / bytes_per_token. 1.0 can
     # never undercount; English and compact JSON average about 3.5 bytes per token, so
     # 3.0 keeps a margin while letting a model's real window be used.

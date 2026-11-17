@@ -125,7 +125,7 @@ export function renderProjectSettings(container, initial, options = {}) {
   addition.append(field('New endpoint ID', ident), button('Add endpoint', () => {
     const id = ident.value.trim();
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
-    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:16384, max_output_tokens:2048}; }); render();
+    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:65536, max_output_tokens:8192}; }); render();
   })); container.append(addition);
   heading(container, 'Endpoint roles', 'Generator writes event content. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');

@@ -59,9 +59,15 @@ kind of event has its own writer prompt:
 | Phase | Nodes | What happens |
 | --- | --- | --- |
 | Set the scene | `set_scene` → `choose_tools` → `write_opening` | Define the windows and the concrete world (persona, artifacts, a roster with observable capabilities, costs and context limits, budget, acceptance criteria, what the user has and has not authorized, hidden facts), choose and list the episode's tools (see [Show tools](#show-tools)), then write the opening request or trigger. |
+| Immediate reply | `reply_first` → `opening_is_chat` → `acknowledge` → `write_reply` | When the flow's `immediate_response` is on and a person opened the episode in chat, the agent answers at once ("Sure, let me look into this.") through the chat tool, before any reasoning. A trivial request may get its full answer here. Otherwise this phase is skipped. |
 | First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans, delegating specialist work and weighing any automation choice. A direct reply, a clarifying question or an approval request takes the general route instead. |
 | Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. The agent's own events are planning, delegation, review and communication; specialist output arrives as tool results or reports. Work happens in short-lived windows (see below). |
 | Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives and the coordinator checks below. If anything is missing or violated, the verifier picks the event that fixes it and work continues. |
+
+Reasoning windows are private thinking: the actor instruction tells the agent never to
+address anyone there and to speak to people only through chat calls, including short
+progress updates as the work goes on. So a typical episode reads: request, immediate
+reply, reasoning, a plan, tool calls, a progress update, and so on.
 
 #### Short-lived windows
 
@@ -149,7 +155,8 @@ Invalid configuration is rejected before reserving attempts.
 The complete normalized Flow, hash, proposal and tool catalogue freeze into the run.
 
 The YAML declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
-`actor_instruction`, an optional `selector_instruction` and a `nodes` map. With
+`immediate_response` (default `true`), `actor_instruction`, an optional
+`selector_instruction` and a `nodes` map. With
 `selector_instruction` set, it is the system prompt of every `select` node and each
 node's own `instruction` is sent as `current_step` after the data (see
 [Prompt order and prefix caching](#prompt-order-and-prefix-caching)). Nodes support:
@@ -158,7 +165,7 @@ node's own `instruction` is sent as `current_step` after the data (see
 | --- | --- |
 | `select` | Ask the private authoring controller for the next event or a finish decision; continue at `next`. |
 | `event` | Generate the selected event's content; continue at `next`. |
-| `branch` | Compare dotted `path` in the last selection with `equals`; take `then` or `otherwise`. Missing paths take `otherwise`; booleans are distinct from integers. |
+| `branch` | Compare dotted `path` in the last selection with `equals`; take `then` or `otherwise`. A path starting with `flow.` reads the flow's own settings instead, such as `flow.immediate_response`. Missing paths take `otherwise`; booleans are distinct from integers. |
 | `end` | Finish construction after a validated finish selection, then run configured reviews. |
 | `tools` | Show tools: ask which tools the episode needs, from tool IDs and descriptions, then list them for the agent; continue at `next`. See [Show tools](#show-tools). |
 
@@ -360,6 +367,7 @@ as the rest of `/api/v1`.
 
 | Route | Action |
 | --- | --- |
+| `GET /generation/flow/default` | The packaged default flow in the same shape, with `origin: packaged`. Reading it saves nothing; the editor's **Load default** shows it as an unsaved draft. |
 | `GET /generation/flow` | `{flow, flow_hash}` as before, plus `text` (the saved or packaged YAML), `origin` (`project` or `packaged`), `revision`, `valid` and `diagnostics`. |
 | `POST /generation/flow/check` | `{flow}` or `{yaml}`. Returns `valid`, `diagnostics` (each with `severity`, `code`, `message`, and `node`/`field` when it has a location), the normalized `flow`, `flow_hash` and rendered `yaml`. Never raises for a bad draft. |
 | `PUT /generation/flow` | `{flow}` or `{yaml}` with `expected_revision` from the last read. Stores the flow in the project database in one transaction. `yaml` text is written verbatim; `flow` is rendered with only the fields each node kind uses. A stale revision returns 409 `flow_conflict` with `current_revision`; errors return 422 and leave the saved flow untouched. |
@@ -399,8 +407,8 @@ source body once; their per-decision causal views list surviving event IDs by wi
 including replacement and closure effects. These are references to the source, not
 summaries that can introduce new facts.
 
-Endpoint settings now accept `context_window_tokens` (default **16384**) and
-`max_output_tokens` (default **2048**). The transport sends the latter as `max_tokens`.
+Endpoint settings now accept `context_window_tokens` (default **65536**) and
+`max_output_tokens` (default **8192**). The transport sends the latter as `max_tokens`.
 Configure these through endpoint JSON until frontend forms expose them. This is an
 additive endpoint-settings API change; the request and source schemas are unchanged.
 

@@ -234,6 +234,14 @@ behave as before.
 6. **Save flow** stores the flow in the project database. Runs already in progress keep
    the flow they started with. **Discard** drops your draft; **Reload** loads the saved
    flow again.
+7. To go back to the flow that ships with Remix, click **Load default** and confirm. It
+   replaces the chart with the default as an unsaved draft; click **Save flow** to use
+   it, or **Discard** to keep your own. This is how a project with a saved flow picks up
+   improvements to the default.
+
+The **Flow** tab holds settings for the whole flow: the start node, step and event
+limits, the shared prompts, and **Immediate response**. With it on, the agent answers a
+person at once ("Sure, let me look into this.") before it starts reasoning.
 
 You can also edit the text on the **YAML** tab and choose **Apply YAML to chart**. If you
 save without touching the chart afterwards, your exact text is kept, comments included.

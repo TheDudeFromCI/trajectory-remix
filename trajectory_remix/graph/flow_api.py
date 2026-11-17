@@ -51,6 +51,11 @@ def add_flow_routes(app, router, studio, sampler, transport):
         # flow and flow_hash keep their original meaning for older clients.
         return flow_document.read_document(store)
 
+    @router.get("/generation/flow/default")
+    def default_flow():
+        """The packaged default flow. Loading it changes nothing until it is saved."""
+        return flow_document.packaged_document()
+
     @router.put("/generation/flow")
     def save_flow(body: FlowSave):
         return flow_document.save(store, body.expected_revision, **_one(body))

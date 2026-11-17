@@ -34,7 +34,7 @@ export const FIELDS = {
 };
 
 /** Branch paths worth suggesting: the Selection fields a selector returns. */
-export const PATHS = ['finished', 'reason', 'task.id', 'task.envelope.kind', 'task.envelope.window', 'task.envelope.tool', 'task.arguments'];
+export const PATHS = ['finished', 'reason', 'task.id', 'task.envelope.kind', 'task.envelope.window', 'task.envelope.tool', 'task.arguments', 'flow.immediate_response'];
 
 const DEFAULTS = {instruction: '', next: null, path: 'finished', equals: true, then: null, otherwise: null, extra_tools: 0.5};
 

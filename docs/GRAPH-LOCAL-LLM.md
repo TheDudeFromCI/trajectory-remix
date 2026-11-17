@@ -128,7 +128,7 @@ Qwen3-family hybrid models, `{"chat_template_kwargs": {"enable_thinking": false}
    | Model identifier | The model's name, for example its GGUF file name; it is recorded with each response |
    | Concurrent requests | What the server can answer at once (see above) |
    | Context limit (tokens) | The server's context per request |
-   | Max output tokens | `2048` |
+   | Max output tokens | `8192` (reasoning models need room to think before the JSON) |
    | Provider options → Bytes per token | `3` |
    | Provider options → Structured output | **Auto** to start (see above) |
    | Provider options → Sticky sessions | Off (a single local server needs no routing) |

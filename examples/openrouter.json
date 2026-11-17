@@ -6,8 +6,8 @@
       "concurrency": 8,
       "retries": 2,
       "timeout_seconds": 180,
-      "context_window_tokens": 32768,
-      "max_output_tokens": 2048,
+      "context_window_tokens": 65536,
+      "max_output_tokens": 8192,
       "bytes_per_token": 3.0,
       "sticky_sessions": true,
       "extra_body": {"provider": {"require_parameters": true}}

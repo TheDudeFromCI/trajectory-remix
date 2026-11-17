@@ -3,9 +3,13 @@ start: set_scene
 # Each written event costs one selection, up to five routing branches and one write.
 max_steps: 1500
 max_events: 128
+# The agent answers a person at once ("Sure, let me look into this."), before reasoning.
+immediate_response: true
 actor_instruction: >-
   Write exactly this next action from the visible evidence and tool contract only.
-  Keep private reasoning concise; use chat for user-facing communication.
+  Reasoning is private thinking, never addressed to anyone: no greetings, no "you", no
+  replies. Speak to people only through chat tool calls, including short progress
+  updates. Keep reasoning concise.
   Kidra coordinates complex, long-running multi-agent work: she plans, delegates,
   verifies and keeps continuity. When a suitable agent or tool is visible she does not
   personally write production code, run extensive research or do bulk repetitive work.
@@ -82,7 +86,7 @@ nodes:
       so the agent learns to ignore irrelevant ones.
   write_opening:
     kind: event
-    next: first_move
+    next: reply_first
     instruction: >-
       This event opens the episode. Write it in the speaker's or source's own voice from
       the world facts: a realistic request or trigger with the concrete details,
@@ -90,7 +94,37 @@ nodes:
       would have to ask about or discover. Do not hint at the solution or describe the
       agent.
 
-  # ---- Phase 2: the agent's first move ---------------------------------------------
+  # ---- Phase 2: an immediate reply, then the agent's first move --------------------
+  reply_first:
+    kind: branch
+    path: flow.immediate_response
+    equals: true
+    then: opening_is_chat
+    otherwise: first_move
+  opening_is_chat:
+    kind: branch
+    path: task.envelope.kind
+    equals: chat_message
+    then: acknowledge
+    otherwise: first_move
+  acknowledge:
+    kind: select
+    next: write_reply
+    instruction: >-
+      A person is waiting. Choose the agent's immediate reply, before any reasoning: a
+      tool_call of the chat tool with call_format json, depending on the opening, in a
+      NEW reasoning window w_reply that this call closes (close_window true). It
+      acknowledges the request and says what the agent will do first. A trivial request
+      may get its full, grounded answer here. Do not finish.
+  write_reply:
+    kind: event
+    next: first_move
+    instruction: >-
+      Write the agent's immediate reply to the person: one or two natural sentences in
+      the agent's voice that acknowledge the request and say what it will do first, such
+      as looking into it or checking with the team. Promise nothing it has not checked
+      and give no results; a trivial request may get its full answer.
+
   first_move:
     kind: select
     next: plan_is_thought
@@ -264,7 +298,8 @@ nodes:
     kind: event
     next: work
     instruction: >-
-      Write the agent's reasoning for this step from the visible evidence: what changed,
+      Write the agent's private reasoning for this step, addressed to no one, from the
+      visible evidence: what changed,
       what it means, and what to do next and why. Track hypotheses, verification and
       remaining blockers. When an automation or infrastructure choice is open, weigh
       cost, expected reuse, maintenance and uncertainty from visible evidence and

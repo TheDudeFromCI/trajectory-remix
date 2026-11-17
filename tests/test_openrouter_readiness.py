@@ -298,7 +298,7 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
         assert request.headers["authorization"] == "Bearer test-key"
         assert body["model"] == "mistralai/mistral-small-3.2-24b-instruct"
         assert body["session_id"] == ident and body["provider"] == {"require_parameters": True}
-        assert body["max_tokens"] == 2048 and body["stream"] is False
+        assert body["max_tokens"] == 8192 and body["stream"] is False
         assert "test-key" not in json.dumps(body)  # The key travels only in the header.
     report = usage.summary(gen.store, job)
     assert report["total"]["requests"] == len(requests)

@@ -63,6 +63,17 @@ def episode():
     }
     choices = [
         selection("opening", "chat_message", "room", windows=windows, chat={"speaker": "user"}),
+        # The default flow's immediate reply, before any reasoning.
+        selection(
+            "ack",
+            "tool_call",
+            "w_reply",
+            ["opening"],
+            windows={"w_reply": dict(purpose="reasoning", agent_writable=True)},
+            tool="chat",
+            call_id="ack",
+            close_window=True,
+        ),
         selection("think", "agent_text", "reason", ["opening"]),
         selection("assign-a", "tool_call", "a", ["think"], tool="read", call_id="a"),
         selection("assign-b", "tool_call", "b", ["think"], tool="read", call_id="b"),
@@ -87,6 +98,7 @@ def episode():
     ]
     contents = dict(
         opening="Compare the two supplied sources.",
+        ack=json.dumps({"content": "Sure, let me compare them."}),
         think="Inspect both before deciding.",
         **{
             "assign-a": "{}",
@@ -121,9 +133,9 @@ async def test_default_adapts_with_parallel_results_join_and_causal_actor_contex
         }:
             prompt = json.loads(p["messages"][1]["content"])
             assert "proposal" not in prompt and "world" not in prompt
-    # Eight events, one proposed finish and one confirmed finish after verification.
+    # Nine events, one proposed finish and one confirmed finish after verification.
     selects = [p for p in fake.calls if p["operation"] == "flow_select"]
-    assert len(selects) == 10
+    assert len(selects) == 11
     steps = [json.loads(p["messages"][1]["content"])["current_step"] for p in selects]
     assert [s["node"] for s in steps[-2:]] == ["work", "verify"]
     assert "Audit the committed events" in steps[-1]["instruction"]
@@ -137,6 +149,7 @@ async def test_default_flow_routes_each_event_kind_to_its_own_writer(tmp_path):
     flow = load_flow()["flow"]["nodes"]
     writers = {
         "opening": "write_opening",
+        "ack": "write_reply",
         "think": "write_plan",
         "assign-a": "write_tool_call",
         "result-a": "write_tool_result",
@@ -151,7 +164,7 @@ async def test_default_flow_routes_each_event_kind_to_its_own_writer(tmp_path):
     shared = load_flow()["flow"]["selector_instruction"]
     assert shared and {p["messages"][0]["content"] for p in selects} == {shared}
     steps = [json.loads(p["messages"][1]["content"])["current_step"] for p in selects]
-    for step, node in zip(steps, ["set_scene", "first_move", "work"]):
+    for step, node in zip(steps, ["set_scene", "acknowledge", "first_move", "work"]):
         assert step == {"node": node, "instruction": flow[node]["instruction"]}
 
 

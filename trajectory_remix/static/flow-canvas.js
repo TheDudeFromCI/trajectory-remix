@@ -60,8 +60,14 @@ export class FlowCanvas {
     const at = {x: clientX - box.left, y: clientY - box.top};
     const point = {x: (this.root.scrollLeft + at.x) / this.scale, y: (this.root.scrollTop + at.y) / this.scale};
     const applied = this.setZoom(scale);
-    this.root.scrollLeft = point.x * applied - at.x;
-    this.root.scrollTop = point.y * applied - at.y;
+    const want = {x: point.x * applied - at.x, y: point.y * applied - at.y};
+    // A chart narrower or shorter than the view would stop scrolling at its edge and slide
+    // away from the pointer, so the scroll area gets just enough room past it.
+    const w = (parseFloat(this.plane.style.width) || 0) * applied, h = (parseFloat(this.plane.style.height) || 0) * applied;
+    this.slack = {x: Math.max(0, want.x + this.root.clientWidth - w), y: Math.max(0, want.y + this.root.clientHeight - h)};
+    this.size();
+    this.root.scrollLeft = want.x;
+    this.root.scrollTop = want.y;
     return applied;
   }
 
@@ -70,6 +76,7 @@ export class FlowCanvas {
     const width = parseFloat(this.plane.style.width) || 0, height = parseFloat(this.plane.style.height) || 0;
     const room = {w: this.root.clientWidth - 16, h: this.root.clientHeight - 16};
     if (!width || !height || room.w <= 0 || room.h <= 0) return this.scale;
+    this.slack = null;
     return this.setZoom(Math.min(1, room.w / width, room.h / height));
   }
 
@@ -137,7 +144,8 @@ export class FlowCanvas {
     this.edgeLayer.setAttribute('width', w); this.edgeLayer.setAttribute('height', h);
     this.plane.style.width = w + 'px'; this.plane.style.height = h + 'px';
     // The scroll area follows the scaled size.
-    this.root.style.setProperty('--plane-w', w * this.scale + 'px'); this.root.style.setProperty('--plane-h', h * this.scale + 'px');
+    const slack = this.slack || {x: 0, y: 0};
+    this.root.style.setProperty('--plane-w', w * this.scale + slack.x + 'px'); this.root.style.setProperty('--plane-h', h * this.scale + slack.y + 'px');
   }
 
   drawEdges() {

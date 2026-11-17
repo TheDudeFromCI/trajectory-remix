@@ -48,16 +48,16 @@ async def test_latest_settings_apply_new_limits_to_the_next_step(tmp_path):
     state = walk.start(seed=4)["state"]
     first = state["settings_revision"]
     data = gen.store.settings().settings.model_dump(mode="json")
-    data["endpoints"]["g"]["max_output_tokens"] = 8192
+    data["endpoints"]["g"]["max_output_tokens"] = 4096
     data["endpoints"]["g"]["context_window_tokens"] = 32768
     gen.store.update_settings(data, gen.store.settings().revision)
     frozen = walk.describe(state)["request"]["wire"]
-    assert frozen["max_tokens"] == 2048  # Without the option, a walkthrough stays frozen.
+    assert frozen["max_tokens"] == 8192  # Without the option, a walkthrough stays frozen.
     described = walk.describe(state, latest=True)
-    assert described["request"]["wire"]["max_tokens"] == 8192
+    assert described["request"]["wire"]["max_tokens"] == 4096
     assert described["settings_revision"] > first
     result = await walk.step(state, latest_settings=True)
-    assert result["trace"]["request"]["wire"]["max_tokens"] == 8192
+    assert result["trace"]["request"]["wire"]["max_tokens"] == 4096
     assert result["trace"]["settings_revision"] == result["state"]["settings_revision"] > first
 
 

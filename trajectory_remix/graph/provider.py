@@ -106,8 +106,8 @@ def context_budget(payload, response_format, messages):
     could fit. Never truncate evidence to make a request appear to fit.
     """
     endpoint = payload["endpoint_config"]
-    limit = endpoint.get("context_window_tokens", 16384)
-    output = endpoint.get("max_output_tokens", 2048)
+    limit = endpoint.get("context_window_tokens", 65536)
+    output = endpoint.get("max_output_tokens", 8192)
     ratio = endpoint.get("bytes_per_token", 1.0)
     size = len(
         json.dumps(

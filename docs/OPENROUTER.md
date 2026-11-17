@@ -59,8 +59,8 @@ cache discount and a 256k window.
    | Base URL | `https://openrouter.ai/api/v1` |
    | Model identifier | The OpenRouter model ID, such as `mistralai/mistral-small-3.2-24b-instruct` |
    | Concurrent requests | `8` (lower it if you see HTTP 429 errors) |
-   | Context limit (tokens) | `32768` |
-   | Max output tokens | `2048` |
+   | Context limit (tokens) | `65536` |
+   | Max output tokens | `8192` |
    | Provider options → Bytes per token | `3` |
    | Provider options → Sticky sessions | On |
    | Provider options → Extra request fields | The `extra_body` the checker printed, for example `{"provider": {"require_parameters": true}}` |

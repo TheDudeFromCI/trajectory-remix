@@ -74,11 +74,19 @@ def test_branch_steps_report_the_value_they_read(tmp_path):
     _, client = client_for(tmp_path, episode())
     with client:
         state = client.post("/api/v1/walkthrough/start", json={"seed": 1}).json()["state"]
-        for _ in range(10):
+        branches = []
+        for _ in range(20):
             result = walk(client, state)
             state = result["state"]
             if result["trace"]["action"] == "branch":
-                break
+                branches.append(result["trace"])
+                if result["trace"]["node"] == "plan_is_thought":
+                    break
+    # The flow setting is read first: the agent replies at once to a chat opening.
+    first = branches[0]
+    assert first["node"] == "reply_first" and first["path"] == "flow.immediate_response"
+    assert first["value"] is True and first["found"] and first["to"] == "opening_is_chat"
+    assert branches[1]["value"] == "chat_message" and branches[1]["to"] == "acknowledge"
     trace = result["trace"]  # first_move chose agent text, so the plan writer runs.
     assert trace["node"] == "plan_is_thought" and trace["path"] == "task.envelope.kind"
     assert trace["value"] == "agent_text" and trace["matched"] is True

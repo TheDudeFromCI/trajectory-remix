@@ -42,6 +42,7 @@ export class FlowView {
         <div class="btn-group"><button id="flow-zoom-out" class="ghost icon sm" type="button" aria-label="Zoom out">−</button><button id="flow-zoom-reset" class="ghost sm num" type="button" aria-label="Reset zoom">100%</button><button id="flow-zoom-in" class="ghost icon sm" type="button" aria-label="Zoom in">+</button><button id="flow-zoom-fit" class="ghost sm" type="button" data-tip="Zoom to show the whole chart">Fit</button></div>
         <button id="flow-tidy" class="ghost sm" type="button" data-tip="Arrange nodes by distance from the start node">Tidy layout</button>
         <button id="flow-reload" class="ghost sm" type="button">Reload</button>
+        <button id="flow-default" class="ghost sm" type="button" data-tip="Replace the editor's flow with the default that ships with Remix. Nothing is saved until you click Save flow.">Load default</button>
         <button id="flow-discard" class="sm" type="button">Discard</button>
         <button id="flow-save" class="primary sm" type="button">Save flow</button>
       </header>
@@ -79,6 +80,7 @@ export class FlowView {
     $('#flow-zoom-fit').onclick = () => this.fit();
     $('#flow-tidy').onclick = () => { this.positions = layout(this.draft); this.persistLayout(); this.render(); };
     $('#flow-reload').onclick = () => this.reload();
+    $('#flow-default').onclick = () => this.loadDefault();
     this.el.discard.onclick = () => { if (this.dirty() && confirm('Discard your unsaved flow changes?')) { this.adopt(this.doc); this.status('Draft discarded.'); } };
     this.el.save.onclick = () => this.save().catch(error => this.status(error.message, true));
     this.walk = new WalkthroughPanel(this.el.walk, $('#flow-steps'), {
@@ -184,6 +186,21 @@ export class FlowView {
   async reload() {
     if (this.dirty() && !confirm('Discard your unsaved flow changes and load the saved flow?')) return;
     try { this.adopt(await this.api('/generation/flow')); this.status('Loaded the saved flow.'); } catch (error) { this.status(error.message, true); }
+  }
+
+  /** Load the packaged default as an unsaved draft, after the user confirms. */
+  async loadDefault() {
+    const replacing = this.doc?.origin === 'project' ? 'your project flow' : 'the flow in the editor';
+    if (!confirm(`Replace ${replacing} with the default flow? Your prompt and node edits are replaced. Nothing is saved until you click Save flow; Discard or Reload brings back the saved flow.`)) return;
+    try {
+      const doc = await this.api('/generation/flow/default');
+      this.draft = compactFlow(doc.flow); this.rawText = doc.text; this.yamlText = doc.text;
+      this.diagnostics = doc.diagnostics || []; this.hash = doc.flow_hash;
+      this.positions = restoreLayout(this.draft, this.positions).positions; this.persistLayout();
+      if (!(this.selected in this.draft.nodes)) this.selected = this.draft.start;
+      this.render(); this.fit();
+      this.status(this.dirty() ? 'Loaded the default flow as a draft. Save flow to use it.' : 'The project already uses the default flow.');
+    } catch (error) { this.status(error.message, true); }
   }
 
   async save() {
