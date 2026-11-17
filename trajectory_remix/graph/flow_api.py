@@ -3,9 +3,16 @@
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
-from . import flow_document
+from . import flow_document, tool_listing
 from .models import DTO, JsonValue
 from .walkthrough import WalkCancel, WalkStart, WalkState, WalkStep, Walkthrough
+
+
+class ToolListing(DTO):
+    trajectory_id: str = Field(min_length=1, max_length=128)
+    event_id: str = Field(min_length=1, max_length=128)
+    tools: list[str] = Field(min_length=1, max_length=500)
+    extra_tools: float = Field(default=0.0, ge=0, le=1)
 
 
 class FlowDraft(DTO):
@@ -51,6 +58,17 @@ def add_flow_routes(app, router, studio, sampler, transport):
     @router.post("/generation/flow/check")
     def check_flow(body: FlowDraft):
         return flow_document.check(**_one(body))
+
+    @router.post("/tools/listing")
+    def tool_listing_content(body: ToolListing):
+        """A Show tools listing for manual authoring, identical to the flow step's."""
+        tools = {
+            key: value.model_dump(mode="json")
+            for key, value in store.settings().settings.tools.items()
+        }
+        return tool_listing.listing(
+            tools, body.trajectory_id, body.event_id, body.tools, body.extra_tools
+        )
 
     @router.post("/walkthrough/start")
     def walkthrough_start(body: WalkStart):

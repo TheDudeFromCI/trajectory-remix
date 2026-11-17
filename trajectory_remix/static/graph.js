@@ -5,6 +5,7 @@ import {windowBody} from './window-render.js';
 import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
 import {renderFlowPanel} from './flow-panel.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
+import {openShowTools} from './show-tools.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
@@ -216,7 +217,7 @@ export class StudioUI {
   }
   applyLock() {
     const locked = !!this.record?.owner;
-    for (const id of ['save-source', 'delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
+    for (const id of ['save-source', 'delete-sample', 'new-event', 'show-tools', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
     for (const root of ['graph-editor-fields', 'metadata-panel']) {
       const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) input.disabled = locked;
     }
@@ -740,6 +741,12 @@ export class StudioUI {
       if (!this.draft) return; const id = $('new-event-id').value || 'event-' + crypto.randomUUID().slice(0, 8); if (this.draft.events[id]) throw new Error('Event ID exists');
       this.stashEditor(); this.draft.events[id] = {kind: 'agent_text', window: Object.keys(this.draft.windows)[0] || 'reasoning', after: [], content: '', close_window: false, supervision: {masked: false, weight: 1}};
       this.event = id; this.renderDraft(); this.renderEvent(); this.changed();
+    });
+    on('show-tools', 'click', async () => {
+      if (!this.draft) return; this.stashEditor(); await this.loadSettings();
+      openShowTools({api, draft: this.draft, tools: this.settings.tools || {}, report: message, onAdd: ({eventId}) => {
+        this.event = eventId; this.renderDraft(); this.renderEvent(); this.changed();
+      }});
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
     on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); });

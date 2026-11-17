@@ -126,18 +126,30 @@ def _unused(taken, base):
     return f"{base}_{number}"
 
 
+def listing(tools, trajectory_id, event_id, chosen, chance):
+    """The listing for one event: chosen tools always, others at the given chance.
+
+    Shared by the flow step and manual authoring, so both produce identical events.
+    Returns dict(chosen, added, shown, content).
+    """
+    catalogue = list(tools)
+    chosen = list(dict.fromkeys(chosen))
+    unknown = [ident for ident in chosen if ident not in tools]
+    if unknown:
+        raise ValueError("Unknown tool IDs: " + ", ".join(unknown) + "; use IDs from tools")
+    others = [ident for ident in catalogue if ident not in chosen]
+    added = extras(trajectory_id, event_id, others, chance)
+    shown = [ident for ident in catalogue if ident in chosen or ident in added]
+    return dict(chosen=chosen, added=added, shown=shown, content=render(tools, shown))
+
+
 def accept(source, body, plan, settings, current):
     """Commit the listing event and remember the shown tools. Returns (source, notes)."""
     node = plan["flow"]["nodes"][current["node"]]
     catalogue = list(plan["tools"])
-    chosen = list(dict.fromkeys(body["tools"]))
-    unknown = [ident for ident in chosen if ident not in plan["tools"]]
-    if unknown:
-        raise ValueError("Unknown tool IDs: " + ", ".join(unknown) + "; use IDs from tools")
     event_id = _unused(source.events, "tools")
-    others = [ident for ident in catalogue if ident not in chosen]
-    added = extras(source.id, event_id, others, node.get("extra_tools", 0.5))
-    shown = [ident for ident in catalogue if ident in chosen or ident in added]
+    built = listing(plan["tools"], source.id, event_id, body["tools"], node.get("extra_tools", 0.5))
+    chosen, added, shown = built["chosen"], built["added"], built["shown"]
     data = source.to_dict()
     window = next(
         (key for key, w in source.windows.items() if w.purpose == WINDOW_PURPOSE),
@@ -150,7 +162,7 @@ def accept(source, body, plan, settings, current):
         kind="external_text",
         window=window,
         after=[],
-        content=render(plan["tools"], shown),
+        content=built["content"],
     )
     listed = GraphSource.model_validate(data)
     errors = [d for d in diagnose(listed, settings) if d.severity == "error"]

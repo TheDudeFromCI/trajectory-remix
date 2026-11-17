@@ -132,7 +132,9 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    windows and timeline update as you type.
 4. Need another window? Open the **Windows** tab, type a new window ID and purpose, and
    click **Add / update window**.
-5. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
+5. Want the agent to see its tools? Click **Show tools…**, tick the tools, and add the
+   listing. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
+6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
    **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
 
 You can switch to another trajectory without saving. Your draft is kept and comes back

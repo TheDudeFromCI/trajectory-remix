@@ -94,6 +94,7 @@ jobs:
       - run: node tests/usage_view_frontend.mjs
       - run: node tests/walkthrough_controls_frontend.mjs
       - run: node tests/tool_import_frontend.mjs
+      - run: node tests/show_tools_frontend.mjs
 
   browser:
     name: Browser workflow tests

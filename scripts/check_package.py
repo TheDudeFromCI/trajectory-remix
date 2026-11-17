@@ -26,6 +26,7 @@ REQUIRED = [
     "static/flow-routes.js",
     "static/usage-view.js",
     "static/tool-import.js",
+    "static/show-tools.js",
     "static/flow-canvas.js",
     "static/flow-inspector.js",
     "static/flow-walkthrough.js",

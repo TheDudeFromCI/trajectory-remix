@@ -348,6 +348,7 @@ as the rest of `/api/v1`.
 | `POST /walkthrough/step` | `{state, mode: "call" \| "manual", response?, latest_settings?, call_id?}`. Runs one transition and returns `{state, trace, next}`. `latest_settings: true` uses the latest saved project settings instead of the walkthrough's own revision. |
 | `POST /walkthrough/describe` | `{...state}`, optional `?latest_settings=true`. Returns `next` for a state without running it, with the `settings_revision` it used. |
 | `POST /walkthrough/cancel` | `{call_id}`. Stops that step's waiting model call; the step returns with its state unchanged and `cancelled: true` is returned here. |
+| `POST /tools/listing` | `{trajectory_id, event_id, tools, extra_tools}`. Returns the Show tools listing (`chosen`, `added`, `shown`, `content`) for the Editor's **Show tools…** dialog, identical to the flow step's for the same IDs. Unknown tool IDs return 422. |
 
 Walkthrough calls (never job calls) also return the start of an unusable reply's text as
 `raw_content` and `raw_reasoning` in the trace's `response`, so a cut-off reply can be read.

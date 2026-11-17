@@ -17,6 +17,7 @@ node tests/provider_options_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/walkthrough_controls_frontend.mjs
 node tests/tool_import_frontend.mjs
+node tests/show_tools_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_flow_frontend.py
@@ -35,7 +36,7 @@ when nothing changed, which is what keeps the dashboard from flickering. `window
 covers the readable window view (NOOP folding, chat bubbles, JSON formatting) and checks
 that the Flow YAML writer folds long text losslessly. `flow_editor_frontend.mjs` covers the
 Flow tab's pure model (rename, delete, layout), draft/check/save and YAML handling, and the
-walkthrough panel's history, typed replies and canvas highlighting against a fake API. Sampler, Flow and
+walkthrough panel's history, typed replies and canvas highlighting against a fake API. `show_tools_frontend.mjs` covers the Editor's **Show tools…** dialog: the listing request, the masked event, window reuse and placement before the first events. Sampler, Flow and
 generation browser checks use optional Node `playwright` and Chromium (`CHROMIUM_PATH`, default `/usr/bin/chromium`).
 Browser screenshots are opt-in with `UPDATE_SCREENSHOTS=1`; ordinary verification
 does not rewrite documentation images. No frontend runtime packages are required.

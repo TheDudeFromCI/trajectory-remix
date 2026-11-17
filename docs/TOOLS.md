@@ -29,6 +29,23 @@ it:
 [Source format](GRAPH-SOURCE.md#tool-calls-and-fragments), and the short agent lesson is
 [`graph-tools-chat.md`](../trajectory_remix/guides/graph-tools-chat.md).
 
+### Show the agent its tools
+
+Before an agent calls a tool, a trajectory can show it which tools exist. In the Editor,
+click **Show tools…** next to the event editor's **+** button:
+
+1. Tick the tools to list. Each tool's description is shown beside its ID.
+2. Optionally tick **Randomly add additional tools** and set the chance for each. Unticked
+   tools are then added at random, so the agent also learns to ignore tools it doesn't need.
+3. Check the **Event ID** and **Window**. The listing goes in a window whose purpose is
+   `tools`; a new one is created if the trajectory has none.
+4. Leave **Place it before the first event** ticked so the agent sees the listing, then click
+   **Add listing to draft** and save.
+
+The listing is a masked `external_text` event with one JSON line per tool (name, description,
+parameters). It is exactly what the Flow's **Show tools** step writes during generation, and
+the random additions repeat: the same trajectory ID and event ID always add the same tools.
+
 ### Partial and abandoned calls
 
 Calls can be written in **fragments** (begin-only, middle, end-only) so the agent's request

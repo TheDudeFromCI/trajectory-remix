@@ -125,3 +125,24 @@ async def test_flows_without_a_tools_node_still_send_the_whole_catalogue(tmp_pat
     )
     assert "input_schema" in first["tools"]["chat"]
     assert not any(p["operation"] == "flow_tools" for p in fake.calls)
+
+
+def test_manual_listing_endpoint_matches_the_flow_step(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from trajectory_remix.graph.studio_api import create_studio_app
+
+    gen, _ = service(tmp_path)
+    settings = gen.store.settings().settings
+    tools = {k: v.model_dump(mode="json") for k, v in settings.tools.items()}
+    flow_built = tool_listing.listing(tools, "traj-1", "tools", ["read"], 0.5)
+    app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
+    with TestClient(app) as client:
+        client.headers["X-Remix-Token"] = app.state.csrf
+        body = dict(trajectory_id="traj-1", event_id="tools", tools=["read"], extra_tools=0.5)
+        served = client.post("/api/v1/tools/listing", json=body).json()
+        assert served == flow_built  # Same trajectory and event: the same listing.
+        none = client.post("/api/v1/tools/listing", json=dict(body, extra_tools=0)).json()
+        assert none["shown"] == ["read"] and none["added"] == []
+        bad = client.post("/api/v1/tools/listing", json=dict(body, tools=["nope"]))
+        assert bad.status_code == 422 and "Unknown tool IDs: nope" in bad.json()["message"]
