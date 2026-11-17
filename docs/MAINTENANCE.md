@@ -156,6 +156,11 @@ Immediate response and Load default: `python -m pytest -q tests/test_immediate_r
 checks `flow.` branch paths, the default flow's reply-first route, the flag's validation,
 `GET /generation/flow/default` saving nothing, and the 65k/8k endpoint defaults.
 
+Selector fixes: `python -m pytest -q tests/test_envelope_errors.py` checks the details the
+backend settles for selectors (call IDs, window order, JSON arguments, reasoning levels,
+repeated windows) and the corrections for reused IDs, closed windows and hand-written chat
+deliveries.
+
 Short-lived windows: `python -m pytest -q tests/test_selector_view.py` checks that the
 selector sees closed windows' events as outlines without content, that `open_windows`
 lists only open windows, that closed work does not grow the selector prompt, that a closing

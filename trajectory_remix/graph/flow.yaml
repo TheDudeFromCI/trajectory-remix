@@ -25,7 +25,7 @@ actor_instruction: >-
 selector_instruction: |-
   You are the private authoring controller of ONE synthetic training episode, not its
   actor. Each request gives you, in order: tools, the sampled proposal, the committed
-  source (closed windows' events without content), current_step, open_windows,
+  source (closed windows' events marked written, without their text), current_step, open_windows,
   remaining_events, your previous notes and any correction.
 
   Rules:
@@ -77,8 +77,8 @@ nodes:
     instruction: >-
       You choose the tools for ONE synthetic training episode before it starts. You get
       the tool catalogue as tool ID and description, the sampled proposal, and the
-      upcoming opening event with its private world facts. Return JSON with tools (IDs
-      from the catalogue) and reason. Choose every tool the agent will plausibly need to
+      upcoming opening event with its private world facts. Return JSON with reason, then
+      tools: every catalogue ID set to true or false. Set true every tool the agent will plausibly need to
       do this episode's work and demonstrate its objectives: delegation tools when it
       coordinates specialists, task notes when it tracks work, and file, web or memory
       tools only when the work involves them. Include chat whenever the agent talks to a
@@ -112,8 +112,8 @@ nodes:
     next: write_reply
     instruction: >-
       A person is waiting. Choose the agent's immediate reply, before any reasoning: a
-      tool_call of the chat tool with call_format json, depending on the opening, in a
-      NEW reasoning window w_reply that this call closes (close_window true). It
+      tool_call of the chat tool, depending on the opening, in a NEW reasoning window
+      w_reply that this call closes (close_window true in the envelope). It
       acknowledges the request and says what the agent will do first. A trivial request
       may get its full, grounded answer here. Do not finish.
   write_reply:
@@ -185,7 +185,9 @@ nodes:
       in parallel) that reads them, reasons, calls and closes in turn. Before a window
       closes, copy what later steps need into notes. Each event follows its window's
       previous event; a window's first agent event also follows the latest notes event.
-      Run independent calls and lines of work in parallel. Include reasoning before
+      Run independent calls and lines of work in parallel. Reason again only after
+      something new arrives (a result, a message, a report); while the agent waits, the
+      next event is that arrival, not another status check. Include reasoning before
       consequential actions,
       proportionate tool requests from the configured catalogue (never invent tools),
       authored tool results, specialist assignments and follow-ups, independent review,

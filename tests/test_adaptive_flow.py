@@ -40,7 +40,7 @@ class Episode:
         p = ticket.payload
         self.calls.append(copy.deepcopy(p))
         if p["operation"] == "flow_tools":  # Show tools: choose every tool offered.
-            ids = p["schema"]["properties"]["tools"]["items"]["enum"]
+            ids = {key: True for key in p["schema"]["properties"]["tools"]["required"]}
             return {
                 "output": {"tools": ids, "reason": "All offered tools"},
                 "model": "scripted-offline",
@@ -48,6 +48,8 @@ class Episode:
         if p["operation"] == "flow_select":
             # The final finish is repeated when a verification step asks again.
             body = self.choices.pop(0) if len(self.choices) > 1 else self.choices[0]
+        elif "arguments" in p["schema"]["properties"]:  # A complete call: JSON arguments.
+            body = {"arguments": json.loads(self.contents[p["task"]["id"]])}
         else:
             body = {"content": self.contents[p["task"]["id"]]}
         return {"output": body, "model": "scripted-offline"}
@@ -250,7 +252,9 @@ def test_actor_selection_cannot_supply_private_world_or_redefine_windows(tmp_pat
     body["task"]["instruction"] = "The private solution is 99"
     source, task, _ = accept_selection(source, body, plan, gen.store.settings().settings)
     assert "99" not in task["instruction"]
-    with pytest.raises(ValueError, match="redefine"):
+    # Repeating the window as it is defined is ignored; changing it is not allowed.
+    body["windows"]["r"]["agent_writable"] = False
+    with pytest.raises(ValueError, match="already exists"):
         accept_selection(source, body, plan, gen.store.settings().settings)
 
 

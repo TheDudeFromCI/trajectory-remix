@@ -54,7 +54,7 @@ async def test_selectors_get_an_index_first_and_only_shown_schemas_after(tmp_pat
     assert all(isinstance(value, str) for value in first.values())  # Descriptions only.
     assert set(later) == {"chat", "read"} and "input_schema" in later["chat"]
     choice = next(p for p in fake.calls if p["operation"] == "flow_tools")
-    assert choice["schema"]["properties"]["tools"]["items"]["enum"] == ["chat", "read"]
+    assert choice["schema"]["properties"]["tools"]["required"] == ["chat", "read"]
     assert "upcoming_event" in json.loads(choice["messages"][1]["content"])
 
 
@@ -146,3 +146,13 @@ def test_manual_listing_endpoint_matches_the_flow_step(tmp_path):
         assert none["shown"] == ["read"] and none["added"] == []
         bad = client.post("/api/v1/tools/listing", json=dict(body, tools=["nope"]))
         assert bad.status_code == 422 and "Unknown tool IDs: nope" in bad.json()["message"]
+
+
+def test_tool_choice_is_a_fixed_set_of_flags_so_strict_decoding_cannot_loop():
+    plan = dict(tools={"chat": {}, "read": {}})
+    tools = tool_listing.choice_schema(plan)["properties"]["tools"]
+    assert tools["type"] == "object" and tools["additionalProperties"] is False
+    assert tools["required"] == ["chat", "read"]
+    assert all(value == {"type": "boolean"} for value in tools["properties"].values())
+    assert tool_listing.chosen_ids({"chat": True, "read": False}) == ["chat"]
+    assert tool_listing.chosen_ids(["read"]) == ["read"]  # Manual replies may list IDs.

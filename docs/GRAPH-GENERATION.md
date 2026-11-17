@@ -116,6 +116,26 @@ Routing is a chain of branches on `task.envelope.kind` (`is_tool_call`,
 author how that kind of event should read. For actor events it follows the
 `actor_instruction`, and it never carries private facts.
 
+#### What the backend settles for the selector
+
+Small selectors get some mechanical details wrong. Rather than spend a correction on
+them, the backend settles these itself when it accepts a selection:
+
+| Detail | What happens |
+| --- | --- |
+| A tool call without `call_id` | It uses its own event ID. |
+| A result without `call_id` | It takes the ID of the call it follows. |
+| An event that does not follow the latest event in its window | That dependency is added. |
+| A complete call to a catalogue tool | Its writer always returns JSON arguments, whatever `call_format` says. |
+| A new window's reasoning level | Matched to the project's levels ignoring case, or dropped if it names none. |
+| A window repeated exactly as it is defined | Ignored. |
+
+Other mistakes get a correction that says what to do: a reused event ID suggests a free
+one, writing to a closed window suggests a new window, and a hand-written chat delivery
+(`…:echo`) is refused because the backend writes it. The Show tools step asks for one
+true or false per tool rather than a list of IDs, because strict decoding of a list let
+models repeat IDs until the output limit.
+
 ### Show tools
 
 A `tools` node asks the Generator once which catalogue tools the episode needs. It sees
@@ -201,7 +221,7 @@ script's `smoke_plan` has examples.
 
 The private selection controller sees the full proposal and the committed source, except
 that events in **closed windows** appear as outlines: their ID, kind, window and
-dependencies, without content (marked `content_dropped`). That text is gone for the agent,
+dependencies, with the text replaced by a note that it was written and its window closed. That text is gone for the agent,
 and dropping it keeps the controller's prompt from growing with every event ever written.
 The controller is an authoring role, never supervised actor output. For each content event, the actor prompt contains only **causal ancestors**, folded into the windows that are
 currently visible, with replacements applied and closed windows removed. Parallel and future

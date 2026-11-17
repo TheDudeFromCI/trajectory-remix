@@ -21,10 +21,14 @@ def closed_windows(source):
     return {event.window for event in source.events.values() if event.close_window}
 
 
+# Small selectors read a missing body as "not written yet" and write the event again, so
+# the outline says plainly that it happened.
+WRITTEN = "[Written. Its window is closed, so the text is gone.]"
+
+
 def _outline(event):
     data = compact(event)
-    data.pop("content", None)
-    data["content_dropped"] = True
+    data["content"] = WRITTEN
     return data
 
 

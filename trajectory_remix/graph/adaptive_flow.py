@@ -4,13 +4,13 @@ from copy import deepcopy
 from importlib.resources import files
 
 import yaml
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
-from . import tool_listing
+from . import envelope_errors, selection_fixes, tool_listing
 from .models import DTO, GraphSource, JsonValue, canonical, digest
 from .prompt_order import ordered
 from .selection_schema import Selection, prompt_schema
-from .selector_view import open_windows, source_view
+from .selector_view import closed_windows, open_windows, source_view
 from .validation import diagnose
 
 
@@ -184,13 +184,34 @@ def accept_selection(source, body, plan, settings, shown=None):
         raise ValueError("Choose the next event as task, or set finished to true")
     task = selection.task.as_event_task()
     tool_listing.check_tool_call(task.model_dump(mode="json"), shown)
-    if task.id in source.events or task.id.endswith(":echo"):
-        raise ValueError(f"Event ID {task.id} is already used; choose a new, unique ID")
+    if ":echo" in task.id:
+        raise ValueError(
+            "Chat deliveries (:echo events) are written automatically when a chat call is"
+            " submitted; never write one. Choose the next event."
+        )
+    if task.id in source.events:
+        n = 2
+        while f"{task.id}_{n}" in source.events:
+            n += 1
+        raise ValueError(
+            f"Event ID {task.id} is already written; this is a NEW event, so give it a new ID"
+            f" such as {task.id}_{n}, and make it follow {task.id} if it comes after it."
+        )
     data = source.to_dict()
-    for key, window in selection.windows.items():
-        if key in source.windows:
-            raise ValueError("Selection cannot redefine an existing window")
-        data["windows"][key] = window.model_dump(mode="json", exclude_none=True)
+    requested = {
+        key: window.model_dump(mode="json", exclude_none=True)
+        for key, window in selection.windows.items()
+    }
+    closed = closed_windows(source)
+    for key, definition in selection_fixes.new_windows(
+        source, requested, task.envelope, closed
+    ).items():
+        level = selection_fixes.reasoning_level(
+            definition.pop("reasoning_effort", None), settings.reasoning_levels
+        )
+        data["windows"][key] = (
+            definition if level is None else dict(definition, reasoning_effort=level)
+        )
     actor = task.envelope.get("kind") in {"agent_text", "tool_call"}
     if actor:
         if task.world:
@@ -199,10 +220,20 @@ def accept_selection(source, body, plan, settings, shown=None):
         # must never smuggle a solution or hidden fact into an actor prompt.
         task.instruction = plan["flow"]["actor_instruction"]
     task.envelope.setdefault("after", [])
+    if task.envelope.get("kind") == "tool_call" and not task.envelope.get("call_id"):
+        # Its result names this call; the event ID is unique and visible to the selector.
+        task.envelope["call_id"] = task.id
+    selection_fixes.response_call(source, task.envelope)
+    if task.envelope["window"] in source.windows:
+        selection_fixes.follow_window(source, task.envelope)
+    task.arguments = selection_fixes.argument_mode(task.envelope, plan["tools"], task.arguments)
     if set(task.envelope["after"]) - source.events.keys():
         raise ValueError("Selected event must depend only on committed events")
     data["events"][task.id] = dict(task.envelope, content="placeholder")
-    candidate = GraphSource.model_validate(data)
+    try:
+        candidate = GraphSource.model_validate(data)
+    except ValidationError as error:
+        raise ValueError(envelope_errors.explain(error, task.id)) from None
     errors = [d for d in diagnose(candidate, settings) if d.severity == "error"]
     if errors:
         raise ValueError(

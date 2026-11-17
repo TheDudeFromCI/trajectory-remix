@@ -50,7 +50,7 @@ def test_closed_windows_keep_their_shape_but_not_their_content():
     view = json.loads(selector_view.source_view(source))
     assert view["windows"]["w_0"]["closed"] and "closed" not in view["windows"]["notes"]
     think = view["events"]["think_0"]
-    assert think["content_dropped"] and "content" not in think
+    assert think["content"] == selector_view.WRITTEN
     assert think["after"] == ["opening"] and think["window"] == "w_0"
     assert view["events"]["note_0"]["content"] == "Fact 0."  # Notes stay open.
     assert list(view["events"])[-1] == "close_1"  # Still causal order.

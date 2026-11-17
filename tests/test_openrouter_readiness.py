@@ -258,7 +258,7 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
             text = text.split("\n\n", 1)[1]
         data = json.loads(text)
         if "upcoming_event" in data:  # The Show tools step: choose every tool.
-            output = {"tools": sorted(data["tools"]), "reason": "Fixture tools"}
+            output = {"reason": "Fixture tools", "tools": {key: True for key in data["tools"]}}
         elif "current_step" in data:  # A selector request.
             ticket = SimpleNamespace(
                 payload=dict(operation="flow_select", messages=[system, dict(content=text)])

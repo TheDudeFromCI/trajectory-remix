@@ -52,25 +52,38 @@ def selector_tools(plan, current):
 
 
 def choice_schema(plan):
+    """One true/false per catalogue tool, reason first.
+
+    A list of IDs let strict decoding loop ("chat", "read", "chat", ...) until the output
+    limit; an object with a fixed set of keys always ends.
+    """
     ids = list(plan["tools"])
     return {
         "type": "object",
         "properties": {
-            "tools": {
-                "type": "array",
-                "items": {"type": "string", "enum": ids},
-                "minItems": 1,
-                "description": "IDs of the tools this episode's agent will need.",
-            },
             "reason": {
                 "type": "string",
                 "minLength": 1,
                 "description": "Why these tools, in one or two sentences.",
             },
+            "tools": {
+                "type": "object",
+                "properties": {key: {"type": "boolean"} for key in ids},
+                "required": ids,
+                "additionalProperties": False,
+                "description": "For each tool ID, true if this episode's agent will need it.",
+            },
         },
-        "required": ["tools", "reason"],
+        "required": ["reason", "tools"],
         "additionalProperties": False,
     }
+
+
+def chosen_ids(tools):
+    """Tool IDs from a reply: {"id": true, ...}, or a plain list of IDs."""
+    if isinstance(tools, dict):
+        return [key for key, wanted in tools.items() if wanted is True]
+    return list(tools)
 
 
 def payload(source, plan, current, correction=""):
@@ -148,7 +161,10 @@ def accept(source, body, plan, settings, current):
     node = plan["flow"]["nodes"][current["node"]]
     catalogue = list(plan["tools"])
     event_id = _unused(source.events, "tools")
-    built = listing(plan["tools"], source.id, event_id, body["tools"], node.get("extra_tools", 0.5))
+    chosen = chosen_ids(body["tools"])
+    if not chosen:
+        raise ValueError("Choose at least one tool: set it to true")
+    built = listing(plan["tools"], source.id, event_id, chosen, node.get("extra_tools", 0.5))
     chosen, added, shown = built["chosen"], built["added"], built["shown"]
     data = source.to_dict()
     window = next(
