@@ -178,3 +178,9 @@ correction naming each failing field (it looks inside "object or null" alternati
 shortens quoted values) for both runs and the walkthrough. The selector's tool-call format
 setting is `call_format` in its schema (internally `arguments`), because small models put
 the arguments themselves into a field named `arguments`.
+
+Show tools: `python -m pytest -q tests/test_tool_listing.py` checks that a `tools` node lists
+the chosen tools (plus repeatable random additions) as a masked event before the opening,
+that the agent's ancestor context includes it, that selectors get a compact index first and
+only listed schemas afterwards, that unlisted tool calls are refused, and that flows without
+a `tools` node keep sending the whole catalogue (`graph/tool_listing.py`).

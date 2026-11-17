@@ -93,6 +93,7 @@ Each node kind has its own colour:
 | **Write event** (green) | Asks the Generator to write the event the last Select chose, and adds it to the trajectory. |
 | **Branch** (purple) | Reads one field of the last Selection, such as `finished`, and follows **then** (solid) or **otherwise** (dashed). No model call. |
 | **End** (orange) | Finishes the trajectory and hands it to review. |
+| **Show tools** (yellow) | Asks the Generator which tools the episode needs, then lists them, plus a random share of the others, for the agent before the opening. Later steps only see the listed tools. |
 
 ## Set up and generate
 

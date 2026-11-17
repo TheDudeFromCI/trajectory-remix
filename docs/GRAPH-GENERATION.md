@@ -58,7 +58,7 @@ kind of event has its own writer prompt:
 
 | Phase | Nodes | What happens |
 | --- | --- | --- |
-| Set the scene | `set_scene` → `write_opening` | Define the windows and the concrete world (persona, artifacts, a roster with observable capabilities, costs and context limits, budget, acceptance criteria, what the user has and has not authorized, hidden facts), then write the opening request or trigger. |
+| Set the scene | `set_scene` → `choose_tools` → `write_opening` | Define the windows and the concrete world (persona, artifacts, a roster with observable capabilities, costs and context limits, budget, acceptance criteria, what the user has and has not authorized, hidden facts), choose and list the episode's tools (see [Show tools](#show-tools)), then write the opening request or trigger. |
 | First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans, delegating specialist work and weighing any automation choice. A direct reply, a clarifying question or an approval request takes the general route instead. |
 | Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. The agent's own events are planning, delegation, review and communication; specialist output arrives as tool results or reports. |
 | Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives and the coordinator checks below. If anything is missing or violated, the verifier picks the event that fixes it and work continues. |
@@ -94,6 +94,23 @@ Routing is a chain of branches on `task.envelope.kind` (`is_tool_call`,
 author how that kind of event should read. For actor events it follows the
 `actor_instruction`, and it never carries private facts.
 
+### Show tools
+
+A `tools` node asks the Generator once which catalogue tools the episode needs. It sees
+a compact index (tool ID and the schema's `description`), the proposal and the upcoming
+opening event. Remix then writes the listing itself, never the model: a masked
+`external_text` event in a window whose purpose is `tools`, with one line per tool
+(`name`, `description`, `parameters`). Every tool the Generator did not choose is also
+listed with the node's `extra_tools` chance (default 0.5), drawn from the trajectory and
+event IDs, so the same trajectory always gets the same list and the agent learns to
+ignore tools it does not need. Chosen tools are always listed.
+
+The listing is placed before the next event (normally the opening), so every later event,
+and so the agent, sees it in context. Afterwards selector requests carry only the listed
+tools' schemas instead of the whole catalogue, and a tool call to an unlisted tool is
+rejected with the list of tools that were shown. Before the listing, selectors see only
+the compact index. Flows without a `tools` node send the whole catalogue as before.
+
 Each selection, local transition, event and echo commits with its interpreter checkpoint.
 Resume uses the frozen policy and accepted state. Loops have step and event limits;
 exhaustion retains the partial source as **Unfinished**, without a fabricated pass.
@@ -127,6 +144,7 @@ node's own `instruction` is sent as `current_step` after the data (see
 | `event` | Generate the selected event's content; continue at `next`. |
 | `branch` | Compare dotted `path` in the last selection with `equals`; take `then` or `otherwise`. Missing paths take `otherwise`; booleans are distinct from integers. |
 | `end` | Finish construction after a validated finish selection, then run configured reviews. |
+| `tools` | Show tools: ask which tools the episode needs, from tool IDs and descriptions, then list them for the agent; continue at `next`. See [Show tools](#show-tools). |
 
 Transitions can point backward to loop or forward to join branches. Step limits bound
 all cycles, including cycles without provider calls. Edit node instructions and add
