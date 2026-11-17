@@ -363,9 +363,11 @@ Configure these through endpoint JSON until frontend forms expose them. This is 
 additive endpoint-settings API change; the request and source schemas are unchanged.
 
 Before HTTP, the transport measures the serialized messages and response schema in
-UTF-8 bytes and reserves output tokens plus 512 framing tokens. It uses one byte per
-input token as a conservative ceiling for byte-backed tokenizers. This is deliberately
-stricter than a model-specific tokenizer: a request that could fit may be rejected.
+UTF-8 bytes and reserves output tokens plus 512 framing tokens. It estimates input tokens
+as bytes divided by the endpoint's `bytes_per_token` (default **1**, which can never
+undercount for byte-backed tokenizers but rejects many requests that would fit). English
+and compact JSON average about 3.5 bytes per token; **3** keeps a margin while using most
+of the real window. See [Provider options](PROJECT-SETTINGS.md#provider-options).
 It is not an exact Qwen chat-template count. No training tokenizer is loaded and no
 model endpoint is probed. Configure the actual model context size, rather than inflating
 it to bypass this check. Exact serving-tokenizer accounting is a future extension.

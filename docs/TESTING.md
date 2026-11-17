@@ -13,6 +13,8 @@ node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/flow_editor_frontend.mjs
+node tests/provider_options_frontend.mjs
+node tests/usage_view_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_flow_frontend.py

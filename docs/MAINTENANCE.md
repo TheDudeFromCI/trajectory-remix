@@ -19,7 +19,7 @@ Paths below are relative to `trajectory_remix/`.
 | Flow editor/walkthrough | `graph/flow_store.py` (project flow in the database; one-time `flow.yaml` import), `graph/flow_document.py`, `graph/walkthrough.py`, `graph/flow_api.py`, `graph/adaptive_driver.py` | Located diagnostics, lossless YAML, revision-checked saves, and walkthrough parity with runs (shared `request_payload`/acceptance; nothing stored) |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `flow-panel.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `flow-view.js`, `flow-model.js`, `flow-layout.js`, `flow-routes.js`, `flow-canvas.js`, `flow-inspector.js`, `flow-walkthrough.js`, `flow-view.css` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `flow-panel.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `flow-view.js`, `flow-model.js`, `flow-layout.js`, `flow-routes.js`, `flow-canvas.js`, `flow-inspector.js`, `flow-walkthrough.js`, `flow-view.css`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -83,6 +83,8 @@ node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/flow_editor_frontend.mjs
+node tests/provider_options_frontend.mjs
+node tests/usage_view_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
@@ -145,3 +147,11 @@ Chromium with a fake Generator.
 Prompt cache order: `python -m pytest -q tests/test_prompt_cache_order.py` checks that
 selector and event bodies run from stable to volatile fields, new events are appended,
 and the JSON-mode schema follows the system prompt, so prefix caches stay effective.
+
+Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
+tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra
+request fields and their reserved names, sticky `session_id`, usage kept for cut-off and
+non-JSON replies, per-job usage totals (missing values stay missing), the provider error
+shown in the walkthrough, the example settings and the model checker. All HTTP is mocked;
+`scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
+`graph/usage.py` stores counts only, never prompts, responses or credentials.

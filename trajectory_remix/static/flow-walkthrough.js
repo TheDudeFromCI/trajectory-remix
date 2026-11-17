@@ -42,7 +42,12 @@ export function renderRequest(request, exact) {
   if (request.endpoint) meta.append(tag('endpoint ' + request.endpoint, 'accent', 'mono'));
   else meta.append(tag('No Generator endpoint configured', 'danger'));
   if (request.wire) meta.append(tag(request.wire.model, 'muted', 'mono'));
-  if (request.budget) meta.append(node('span', `${request.budget.input_bytes} / ${request.budget.input_ceiling} input bytes allowed`, 'small muted num'));
+  if (request.budget) {
+    const b = request.budget, estimate = b.input_tokens_estimate ?? b.input_bytes;
+    const budget = node('span', `~${estimate} / ${b.input_ceiling} input tokens`, 'small muted num' + (estimate > b.input_ceiling ? ' error' : ''));
+    budget.dataset.tip = `${b.input_bytes} bytes at ${b.bytes_per_token ?? 1} bytes per token (the endpoint's estimate). A run pauses before sending a request over the allowance.`;
+    meta.append(budget);
+  }
   box.append(meta);
   const messages = request.wire?.messages || request.messages;
   messages.forEach((m, i) => {

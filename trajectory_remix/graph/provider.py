@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import os
 
 import httpx
@@ -99,6 +100,7 @@ def context_budget(payload, response_format, messages):
     endpoint = payload["endpoint_config"]
     limit = endpoint.get("context_window_tokens", 16384)
     output = endpoint.get("max_output_tokens", 2048)
+    ratio = endpoint.get("bytes_per_token", 1.0)
     size = len(
         json.dumps(
             dict(messages=messages, response_format=response_format), ensure_ascii=False
@@ -106,6 +108,8 @@ def context_budget(payload, response_format, messages):
     )
     return dict(
         input_bytes=size,
+        bytes_per_token=ratio,
+        input_tokens_estimate=math.ceil(size / ratio),
         input_ceiling=limit - output - 512,
         context_window_tokens=limit,
         max_output_tokens=output,
@@ -121,9 +125,11 @@ class OpenAITransport:
         headers = {"Authorization": "Bearer " + key} if key else {}
         response_format, messages = response_contract(payload)
         budget = context_budget(payload, response_format, messages)
-        if budget["input_bytes"] > budget["input_ceiling"]:
+        if budget["input_tokens_estimate"] > budget["input_ceiling"]:
             return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
         body = dict(
+            # Provider options first; validation stops them replacing the fields below.
+            **endpoint.get("extra_body", {}),
             model=endpoint["model"],
             messages=messages,
             stream=False,
@@ -133,6 +139,8 @@ class OpenAITransport:
         for key in ("temperature", "top_p", "presence_penalty"):
             if endpoint.get(key) is not None:
                 body[key] = endpoint[key]
+        if endpoint.get("sticky_sessions"):
+            body["session_id"] = ticket.trajectory_id
         timeout = endpoint.get("timeout_seconds", 120.0)
         # Bound the whole attempt as well as individual network operations.
         # Queue-owned retries each get their own deadline.
@@ -151,11 +159,23 @@ class OpenAITransport:
         response.raise_for_status()
         data = response.json()
         choice = data["choices"][0]
+        # Usage is kept even for unusable replies: their tokens were still billed.
+        meta = dict(model=data.get("model"), usage=data.get("usage"))
         if choice.get("finish_reason") != "stop":
             # Incomplete text never leaves this local buffer.
-            return {"invalid_output": True, "model": data.get("model")}
+            return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"))
         try:
             output = json.loads(choice["message"]["content"])
         except (ValueError, TypeError):
-            return {"invalid_output": True, "model": data.get("model")}
-        return dict(output=output, model=data.get("model"), usage=data.get("usage"))
+            return dict(meta, invalid_output=True, finish_reason="stop")
+        return dict(meta, output=output)
+
+
+def invalid_reason(result):
+    """Correction text for an unusable reply, sent back with the retry."""
+    if result.get("finish_reason") == "length":
+        return (
+            "The previous reply was cut off at the output token limit before it finished. "
+            "Return a shorter, complete JSON object."
+        )
+    return "The previous reply was not a single valid JSON object. Return only that object."

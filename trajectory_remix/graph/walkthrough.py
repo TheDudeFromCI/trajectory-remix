@@ -24,7 +24,7 @@ from . import adaptive_flow as interpreter
 from .flow import append_event, chat_echo
 from .flow_store import project_text
 from .models import DTO, GraphSource, JsonValue
-from .provider import context_budget, response_contract
+from .provider import context_budget, invalid_reason, response_contract
 from .sampling import SamplerService
 from .validation import diagnose
 
@@ -292,7 +292,7 @@ class Walkthrough:
             trace.update(accepted=False, error="Context limit: a run pauses without a verdict")
             return source
         if result.get("invalid_output"):
-            return self._reject(source, state, settings, "Incomplete or non-JSON reply", trace)
+            return self._reject(source, state, settings, invalid_reason(result), trace)
         body = result.get("output")
         try:
             jsonschema.Draft202012Validator(payload["schema"]).validate(body)
@@ -331,6 +331,9 @@ class Walkthrough:
             status = getattr(getattr(error, "response", None), "status_code", None)
             detail = f" HTTP {status}" if type(status) is int else ""
             text = f"{type(error).__name__}{detail}: {str(error)[:300]}"
+            provider = provider_message(error)
+            if provider:
+                text += f" Provider says: {provider}"
             trace.update(accepted=False, error="Request failed: " + text)
             return None
 
@@ -385,6 +388,23 @@ class Walkthrough:
         trace.update(event=written.events[task["id"]].model_dump(mode="json"))
         trace["summary"] = f"Wrote event {task['id']}"
         return written
+
+
+def provider_message(error):
+    """The provider's own error message, such as an unsupported parameter. Shown in the
+    walkthrough only; job logs never copy response bodies."""
+    response = getattr(error, "response", None)
+    try:
+        body = response.json() if response is not None else None
+    except ValueError:
+        return (response.text or "")[:500] if response is not None else ""
+    if isinstance(body, dict):
+        inner = body.get("error", body)
+        message = inner.get("message") if isinstance(inner, dict) else inner
+        raw = inner.get("metadata", {}).get("raw") if isinstance(inner, dict) else None
+        text = " ".join(str(part) for part in (message, raw) if part)
+        return text[:500]
+    return ""
 
 
 def _branch_text(node):

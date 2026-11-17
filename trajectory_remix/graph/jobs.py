@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from . import usage as usage_log
 from .models import GraphSource, canonical, digest
 from .progress import observed_request, request_label
 from .storage import GraphStore
@@ -769,14 +770,7 @@ class JobService:
                     continue
                 return None
             self.request_result(ticket, result)
-            usage = result.get("usage") if isinstance(result, dict) else None
-            counts = ""
-            if isinstance(usage, dict):
-                counts = " ".join(
-                    f"{key}={usage[key]}"
-                    for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-                    if type(usage.get(key)) is int
-                )
+            counts = usage_log.describe(usage_log.record(self.store, ticket, result, elapsed))
             self.progress(
                 ticket.job_id,
                 f"Response received ({elapsed:.1f}s); validation pending: "

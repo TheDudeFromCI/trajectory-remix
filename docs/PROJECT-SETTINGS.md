@@ -29,6 +29,17 @@ models.
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
 future work.
 
+### Provider options
+
+Open **Provider options** on an endpoint card for settings that matter mostly with
+hosted routers such as OpenRouter. For a full walk-through, see [OpenRouter](OPENROUTER.md).
+
+| Option | What it does |
+| --- | --- |
+| **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. The default, 1, can never undercount but rejects prompts that would fit. English and JSON average about 3.5 bytes per token, so **3** keeps a margin while letting you use the model's real window. |
+| **Sticky sessions** | Sends the trajectory ID as `session_id`, so a router keeps each trajectory on one provider and its prompt stays cached. |
+| **Extra request fields** | A JSON object added to every request, for example `{"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}`. Fields Remix sets itself (model, messages, response format, output limit, sampling and `session_id`) cannot be overridden. |
+
 ### Credentials
 
 If your server needs a key, set it in the environment **before starting Remix**. The

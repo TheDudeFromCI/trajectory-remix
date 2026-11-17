@@ -211,6 +211,9 @@ def create_studio_app(
     from .flow_api import add_flow_routes
 
     add_flow_routes(app, router, studio, sampler, generation.transport)
+    from . import usage
+
+    app.include_router(usage.router(studio.store))
 
     @router.post("/generation/runs", status_code=202)
     async def generation_run(body: SamplerRun):

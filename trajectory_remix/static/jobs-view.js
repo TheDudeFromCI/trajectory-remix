@@ -1,5 +1,6 @@
 /* Jobs view: a job list beside one job's progress, controls, logs and files.
    Everything updates in place so polling never flashes or resets scroll. */
+import {renderUsage} from './usage-view.js';
 import {kindName, KIND_TONES, JOB_TONES, makeTabs, node, progressBar, reconcile, setAttr, setText, shortId, stateWord, tag, toggleClass} from './ui-kit.js';
 
 const $ = id => document.getElementById(id);
@@ -98,8 +99,10 @@ export class JobsView {
     v.attempts = node('div', undefined, 'job-tab');
     v.results = node('div', undefined, 'job-tab');
     v.files = node('div', undefined, 'job-tab');
+    v.usage = node('div', undefined, 'job-tab');
     v.tabs = makeTabs([
       {id: 'logs', text: 'Logs', panel: logPanel}, {id: 'attempts', text: 'Attempts', panel: v.attempts},
+      {id: 'usage', text: 'Usage', panel: v.usage},
       {id: 'results', text: 'Results', panel: v.results}, {id: 'files', text: 'Files', panel: v.files}
     ], 'Job sections');
     v.tabs.root.classList.add('job-tabs');
@@ -129,7 +132,17 @@ export class JobsView {
     if (j.kind === 'run') await this.renderAttempts(v);
     if (j.kind === 'bulk') await this.renderResults(v);
     if (j.state === 'completed' && j.artifact && !v.signatures.files) await this.renderFiles(v, j);
+    await this.renderUsage(v, j);
     return j;
+  }
+
+  /** Model jobs only. A server without the usage route simply hides the tab. */
+  async renderUsage(v, j) {
+    const wanted = j.kind === 'run' || j.kind === 'bulk';
+    let report = null;
+    if (wanted) { try { report = await this.deps.api(`/jobs/${j.id}/usage`); } catch { report = null; } }
+    setAttr(v.tabs.tab('usage'), 'hidden', !report);
+    if (report) v.signatures.usage = renderUsage(v.usage, report, v.signatures.usage);
   }
 
   renderStats(v, j) {

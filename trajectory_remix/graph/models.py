@@ -254,6 +254,22 @@ class TokenizerProfile(DTO):
         return digest(self.model_dump(mode="json"))
 
 
+RESERVED_BODY_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "stream",
+        "max_tokens",
+        "max_completion_tokens",
+        "response_format",
+        "session_id",
+        "temperature",
+        "top_p",
+        "presence_penalty",
+    }
+)
+
+
 class Endpoint(DTO):
     url: Annotated[str, Field(pattern=r"^https?://[^/\s]+(?:/[^\s]*)?$")]
     model: Identifier
@@ -266,11 +282,24 @@ class Endpoint(DTO):
 
     context_window_tokens: Annotated[int, Field(ge=1024)] = 16384
     max_output_tokens: Annotated[int, Field(ge=1)] = 2048
+    # The context guard estimates input tokens as UTF-8 bytes / bytes_per_token. 1.0 can
+    # never undercount; English and compact JSON average about 3.5 bytes per token, so
+    # 3.0 keeps a margin while letting a model's real window be used.
+    bytes_per_token: Annotated[float, Field(ge=1, le=6)] = 1.0
+    # Send the trajectory ID as session_id so routers such as OpenRouter keep one
+    # trajectory on one provider, where its prompt prefix stays cached.
+    sticky_sessions: bool = False
+    # Extra request-body fields for this provider, such as OpenRouter's reasoning or
+    # provider routing options. Fields the transport controls cannot be replaced.
+    extra_body: dict[str, JsonValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def context_budget(self):
         if self.max_output_tokens + 512 >= self.context_window_tokens:
             raise ValueError("Reserve input space beyond output tokens and framing")
+        reserved = set(self.extra_body) & RESERVED_BODY_FIELDS
+        if reserved:
+            raise ValueError("extra_body cannot set " + ", ".join(sorted(reserved)))
         return self
 
 

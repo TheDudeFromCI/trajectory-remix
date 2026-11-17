@@ -12,6 +12,7 @@ from .flow import append_event, causal_view, chat_echo, event_payload, prepare_p
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
+from .provider import invalid_reason
 from .sampling import SamplerService
 from .storage import RevisionConflict
 from .validation import diagnose
@@ -464,8 +465,10 @@ class GenerationService:
                     ticket.job_id,
                     (
                         f"Local context guard ({ticket.payload['operation']}): "
-                        f"{complete['local_budget']['input_bytes']} input bytes exceed conservative "
-                        f"{complete['local_budget']['input_ceiling']}-byte allowance. "
+                        f"about {complete['local_budget']['input_tokens_estimate']} input tokens "
+                        f"({complete['local_budget']['input_bytes']} bytes at "
+                        f"{complete['local_budget']['bytes_per_token']} bytes/token) exceed the "
+                        f"{complete['local_budget']['input_ceiling']}-token allowance. "
                         "No provider call made. Reduce prompt scope or change the endpoint budget; "
                         "active runs keep frozen settings."
                         if complete.get("local_budget")
@@ -475,6 +478,8 @@ class GenerationService:
             return
         body = complete.get("output")
         try:
+            if complete.get("invalid_output"):
+                raise ValueError(invalid_reason(complete))
             jsonschema.Draft202012Validator(ticket.payload["schema"]).validate(body)
             if ticket.payload["operation"] == "flow_select":
                 selected_source, selected_task, selection = adaptive_flow.accept_selection(

@@ -15,6 +15,42 @@ export function tokenBudgetProblem(context, output) {
   if (output + 512 >= context) return 'Max output tokens + 512 must be less than the context limit.';
   return '';
 }
+/** Request fields the transport sets itself; extra_body may not replace them. */
+export const RESERVED_BODY_FIELDS = ['model', 'messages', 'stream', 'max_tokens', 'max_completion_tokens', 'response_format', 'session_id', 'temperature', 'top_p', 'presence_penalty'];
+/** Mirrors the server's extra_body rules; returns [value, ''] or [undefined, error]. */
+export function parseExtraBody(text) {
+  let value;
+  try { value = text.trim() ? JSON.parse(text) : {}; } catch { return [undefined, 'Extra request fields must be a JSON object.']; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [undefined, 'Extra request fields must be a JSON object.'];
+  const reserved = Object.keys(value).filter(key => RESERVED_BODY_FIELDS.includes(key));
+  if (reserved.length) return [undefined, `These are set by Remix and cannot be overridden: ${reserved.join(', ')}.`];
+  return [value, ''];
+}
+/** Options for hosted routers such as OpenRouter: token estimate, sticky sessions, extra fields. */
+function providerOptions(id, endpoint, edit, input) {
+  const box = node('details', undefined, 'settings-subsection'); box.append(node('summary', 'Provider options'));
+  box.open = (endpoint.bytes_per_token ?? 1) !== 1 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0;
+  const grid = node('div', undefined, 'settings-grid');
+  const ratio = input(`Endpoint ${id} bytes_per_token`, endpoint.bytes_per_token ?? 1, v => edit('bytes_per_token', v), 'number');
+  ratio.min = 1; ratio.max = 6; ratio.step = 0.1;
+  const ratioField = field('Bytes per token (context estimate)', ratio);
+  ratioField.append(node('span', '1 never undercounts but rejects prompts that would fit. English and JSON average about 3.5; 3 keeps a margin.', 'settings-help'));
+  const sticky = node('input'); sticky.type = 'checkbox'; sticky.checked = !!endpoint.sticky_sessions; sticky.setAttribute('aria-label', `Endpoint ${id} sticky sessions`);
+  sticky.onchange = () => edit('sticky_sessions', sticky.checked);
+  const stickyField = node('label', undefined, 'checkbox'); stickyField.append(sticky, ' Sticky sessions (send the trajectory ID as session_id)');
+  grid.append(ratioField, stickyField);
+  const extra = node('textarea'); extra.spellcheck = false; extra.setAttribute('aria-label', `Endpoint ${id} extra request fields`);
+  extra.value = JSON.stringify(endpoint.extra_body || {}, null, 2);
+  const problem = node('p', '', 'settings-help'); problem.setAttribute('role', 'alert');
+  extra.oninput = () => {
+    const [value, message] = parseExtraBody(extra.value);
+    problem.textContent = message; problem.classList.toggle('error', !!message); extra.setAttribute('aria-invalid', message ? 'true' : 'false');
+    if (value !== undefined) edit('extra_body', value);
+  };
+  const extraField = field('Extra request fields (JSON)', extra);
+  box.append(node('p', 'For hosted routers such as OpenRouter. Sticky sessions keep each trajectory on one provider so its prompt stays cached. Extra fields are added to every request, for example {"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}.', 'settings-help'), grid, extraField, problem);
+  return box;
+}
 function editor(container, initial, options) {
   // Read the shared draft on EVERY edit: tools, advanced JSON and both dialogs
   // all edit the same record without overwriting each other's unsaved changes.
@@ -67,8 +103,10 @@ export function renderProjectSettings(container, initial, options = {}) {
     }
     budget.fields = tokenFields; checkBudget();
     grid.append(budget);
+    card.append(grid);
+    card.append(providerOptions(id, endpoint, edit, input));
     const env = 'REMIX_API_KEY_' + id.toUpperCase().replaceAll('-', '_');
-    card.append(grid, node('p', `Authentication, if required: set ${env} in the server environment before launch. Keys are never stored in the project.`, 'settings-help'), button(`Remove endpoint ${id}`, () => {
+    card.append(node('p', `Authentication, if required: set ${env} in the server environment before launch. Keys are never stored in the project.`, 'settings-help'), button(`Remove endpoint ${id}`, () => {
       const cleared = Object.entries(current().endpoint_roles || {}).filter(([, assigned]) => assigned === id).map(([role]) => role);
       write(d => { delete d.endpoints[id]; for (const role of cleared) delete d.endpoint_roles[role]; });
       render(`Endpoint ${id} removed from the draft.${cleared.length ? ' Cleared endpoint roles: ' + cleared.join(', ') + '.' : ''} Existing jobs keep their frozen configuration.`);

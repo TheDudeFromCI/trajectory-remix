@@ -55,6 +55,7 @@ are untouched, and **Raw** on any card switches back to the exact token stream.
 
 The list on the left shows every job with its kind, state and progress. Select one to see
 its progress bar, counts, controls and tabs for **Logs**, **Attempts** (generation),
+**Usage** (tokens, cached share and provider-reported cost for model jobs),
 **Results** (bulk edits and reviews) and **Files** (exports). The page updates in place
 while you watch, so it never flickers or loses your scroll position.
 
