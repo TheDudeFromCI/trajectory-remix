@@ -327,8 +327,12 @@ as the rest of `/api/v1`.
 | `POST /generation/flow/check` | `{flow}` or `{yaml}`. Returns `valid`, `diagnostics` (each with `severity`, `code`, `message`, and `node`/`field` when it has a location), the normalized `flow`, `flow_hash` and rendered `yaml`. Never raises for a bad draft. |
 | `PUT /generation/flow` | `{flow}` or `{yaml}` with `expected_revision` from the last read. Stores the flow in the project database in one transaction. `yaml` text is written verbatim; `flow` is rendered with only the fields each node kind uses. A stale revision returns 409 `flow_conflict` with `current_revision`; errors return 422 and leave the saved flow untouched. |
 | `POST /walkthrough/start` | `{seed, overrides, flow?, flow_yaml?}`. Samples one proposal (not stored) and freezes a plan exactly as a run does. Returns `{state, next}`. |
-| `POST /walkthrough/step` | `{state, mode: "call" \| "manual", response?}`. Runs one transition and returns `{state, trace, next}`. |
-| `POST /walkthrough/describe` | `{...state}`. Returns `next` for a state without running it. |
+| `POST /walkthrough/step` | `{state, mode: "call" \| "manual", response?, latest_settings?, call_id?}`. Runs one transition and returns `{state, trace, next}`. `latest_settings: true` uses the latest saved project settings instead of the walkthrough's own revision. |
+| `POST /walkthrough/describe` | `{...state}`, optional `?latest_settings=true`. Returns `next` for a state without running it, with the `settings_revision` it used. |
+| `POST /walkthrough/cancel` | `{call_id}`. Stops that step's waiting model call; the step returns with its state unchanged and `cancelled: true` is returned here. |
+
+Walkthrough calls (never job calls) also return the start of an unusable reply's text as
+`raw_content` and `raw_reasoning` in the trace's `response`, so a cut-off reply can be read.
 
 `next` describes the coming step: `action` (`model`, `branch`, `chat_echo`, `end`,
 `limit`, `blocked` or `done`), the node, a summary, `knows` (the interpreter's position,

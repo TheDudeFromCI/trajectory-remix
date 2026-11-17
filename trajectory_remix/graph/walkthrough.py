@@ -56,6 +56,15 @@ class WalkStep(DTO):
     state: WalkState
     mode: Literal["call", "manual"] = "call"
     response: JsonValue = None
+    # Use the latest saved project settings instead of those the walkthrough started with,
+    # for example after raising an endpoint's output limit.
+    latest_settings: bool = False
+    # Lets POST /walkthrough/cancel stop this step's model call.
+    call_id: str | None = Field(default=None, max_length=64)
+
+
+class WalkCancel(DTO):
+    call_id: str = Field(min_length=1, max_length=64)
 
 
 def _snapshot(store, flow, text):
@@ -80,6 +89,17 @@ class Walkthrough:
     def __init__(self, store, sampler, transport):
         self.store, self.sampler, self.transport = store, sampler, transport
         self.lock = asyncio.Lock()  # At most one walkthrough model call at a time.
+        self.running = {}  # call_id -> task, so a waiting call can be stopped.
+        self.stopped = set()  # call_ids stopped on request, not by the server shutting down.
+
+    def cancel(self, call_id):
+        """Stop a waiting model call. The step then returns with its state unchanged."""
+        task = self.running.get(call_id)
+        if task is None or task.done():
+            return dict(cancelled=False)
+        self.stopped.add(call_id)
+        task.cancel()
+        return dict(cancelled=True)
 
     def start(self, seed=None, overrides=None, flow=None, flow_yaml=None):
         frozen = self.sampler.editor()
@@ -108,18 +128,25 @@ class Walkthrough:
         ).model_dump(mode="json")
         return dict(state=state, next=self.describe(state))
 
-    def _load(self, state):
+    def _load(self, state, latest=False):
         state = WalkState.model_validate(state).model_dump(mode="json")
+        if latest:
+            state["settings_revision"] = self.store.settings().revision
         settings = self.store.settings(state["settings_revision"]).settings
         return state, settings, GraphSource.model_validate(state["source"])
 
-    def describe(self, state):
+    def describe(self, state, latest=False):
         """What the next step will do, including the exact request for model steps."""
-        state, settings, source = self._load(state)
+        state, settings, source = self._load(state, latest)
         cp, plan = state["checkpoint"], state["plan"]
         current = cp["flow"]
         node = plan["flow"]["nodes"][current["node"]]
-        result = dict(node=current["node"], kind=node["kind"], knows=self.knows(state))
+        result = dict(
+            node=current["node"],
+            kind=node["kind"],
+            knows=self.knows(state),
+            settings_revision=state["settings_revision"],
+        )
         if state["done"]:
             return dict(result, action="done", summary=f"Finished: {state['outcome']}")
         if cp.get("echo"):
@@ -180,8 +207,8 @@ class Walkthrough:
             diagnostics=[d.model_dump(mode="json") for d in problems],
         )
 
-    async def step(self, state, mode="call", response=None):
-        state, settings, source = self._load(state)
+    async def step(self, state, mode="call", response=None, latest_settings=False, call_id=None):
+        state, settings, source = self._load(state, latest_settings)
         if state["done"]:
             raise ValueError("This walkthrough has finished; start a new sample")
         before = deepcopy(state)
@@ -189,7 +216,13 @@ class Walkthrough:
         current = cp["flow"]
         node_id = current["node"]
         node = plan["flow"]["nodes"][node_id]
-        trace = dict(node=node_id, kind=node["kind"], accepted=True, error=None)
+        trace = dict(
+            node=node_id,
+            kind=node["kind"],
+            accepted=True,
+            error=None,
+            settings_revision=state["settings_revision"],
+        )
         if cp.get("echo"):
             source = self._echo(source, cp, settings, trace)
         elif adaptive_driver.limit_reached(source, current, plan):
@@ -203,7 +236,7 @@ class Walkthrough:
         elif node["kind"] == "branch":
             self._branch(node, current, trace)
         else:
-            source = await self._model(source, state, settings, mode, response, trace)
+            source = await self._model(source, state, settings, mode, response, trace, call_id)
         trace["to"] = cp["flow"]["node"]
         state["source"] = source.to_dict()
         state = WalkState.model_validate(state).model_dump(mode="json")
@@ -265,7 +298,7 @@ class Walkthrough:
             summary=f"{node['path']} = {json.dumps(value) if found else '(missing)'} → {target}",
         )
 
-    async def _model(self, source, state, settings, mode, response, trace):
+    async def _model(self, source, state, settings, mode, response, trace, call_id=None):
         cp, plan = state["checkpoint"], state["plan"]
         payload = adaptive_driver.request_payload(source, cp, plan, settings)
         trace.update(action="model", operation=payload["operation"])
@@ -273,7 +306,7 @@ class Walkthrough:
         if mode == "manual":
             result = dict(output=response, model="manual")
         else:
-            result = await self._call(payload, settings, source, trace)
+            result = await self._call(payload, settings, source, trace, call_id)
             if result is None:
                 return source
         trace["response"] = result
@@ -297,7 +330,7 @@ class Walkthrough:
         except (ValueError, TypeError, KeyError) as error:
             return self._reject(source, state, settings, str(error), trace)
 
-    async def _call(self, payload, settings, source, trace):
+    async def _call(self, payload, settings, source, trace, call_id=None):
         endpoint = settings.endpoint_roles.get("generator")
         if endpoint is None:
             trace.update(accepted=False, error="Configure the Generator endpoint first")
@@ -308,6 +341,8 @@ class Walkthrough:
             endpoint=endpoint,
             step="walkthrough",
             epoch=0,
+            # Walkthrough only: keep the start of an unusable reply so it can be read.
+            keep_raw=True,
             payload=dict(
                 payload,
                 endpoint_config=settings.endpoints[endpoint].model_dump(mode="json"),
@@ -315,7 +350,19 @@ class Walkthrough:
         )
         try:
             async with self.lock:
-                return await self.transport(ticket)
+                task = asyncio.ensure_future(self.transport(ticket))
+                if call_id:
+                    self.running[call_id] = task
+                try:
+                    return await task
+                finally:
+                    self.running.pop(call_id, None)
+        except asyncio.CancelledError:
+            if call_id not in self.stopped:
+                raise  # The request itself was cancelled, not stopped by the person.
+            self.stopped.discard(call_id)
+            trace.update(accepted=False, error="Stopped before a reply arrived; nothing changed")
+            return None
         except Exception as error:  # Reported to the person debugging; never logged.
             status = getattr(getattr(error, "response", None), "status_code", None)
             detail = f" HTTP {status}" if type(status) is int else ""

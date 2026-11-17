@@ -180,14 +180,29 @@ class OpenAITransport:
         choice = data["choices"][0]
         # Usage is kept even for unusable replies: their tokens were still billed.
         meta = dict(model=data.get("model"), usage=data.get("usage"))
+        # Incomplete text never leaves this local buffer, except for the interactive
+        # walkthrough, which asks to see how a reply went wrong. Jobs never store it.
+        raw = raw_preview(choice) if getattr(ticket, "keep_raw", False) else {}
         if choice.get("finish_reason") != "stop":
-            # Incomplete text never leaves this local buffer.
-            return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"))
+            return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"), **raw)
         try:
             output = json.loads(choice["message"]["content"])
         except (ValueError, TypeError):
-            return dict(meta, invalid_output=True, finish_reason="stop")
+            return dict(meta, invalid_output=True, finish_reason="stop", **raw)
         return dict(meta, output=output)
+
+
+def raw_preview(choice, limit=4000):
+    """The start of a reply's text and any separate reasoning text, for the walkthrough."""
+    message = choice.get("message") or {}
+    preview = {}
+    for key, name in (("content", "raw_content"), ("reasoning_content", "raw_reasoning")):
+        value = message.get(key)
+        if key == "reasoning_content" and not value:
+            value = message.get("reasoning")  # OpenRouter's name for the same field.
+        if isinstance(value, str) and value:
+            preview[name] = value[:limit] + ("…" if len(value) > limit else "")
+    return preview
 
 
 def invalid_reason(result):

@@ -73,7 +73,13 @@ export function renderReply(trace) {
   box.append(meta);
   if (trace.error) box.append(node('p', trace.error, 'flow-error'));
   if (r.context_limit) box.append(node('p', 'The request was over the context budget, so nothing was sent.', 'note'));
-  if (r.invalid_output) box.append(node('p', 'The reply was cut off or was not JSON.', 'note'));
+  if (r.invalid_output) {
+    const cut = r.finish_reason === 'length';
+    box.append(node('p', cut ? 'The reply was cut off at Max output tokens. If the text below is the model thinking, turn thinking off in the endpoint\'s extra request fields; otherwise raise Max output tokens.' : 'The reply was not a single JSON object.', 'note'));
+    if (r.raw_reasoning) box.append(disclosure('Reasoning text (start)', pre(r.raw_reasoning), true));
+    if (r.raw_content) box.append(disclosure('Reply text (start)', pre(r.raw_content), true));
+    if (cut && !r.raw_reasoning && !r.raw_content) box.append(node('p', 'The server returned no text, so the whole limit was spent before any answer.', 'small muted'));
+  }
   if ('output' in r) box.append(node('h4', 'Reply'), pre(pretty(r.output)));
   if (trace.selection) box.append(disclosure('Accepted Selection', pre(pretty(trace.selection)), true));
   if (trace.event) box.append(disclosure('Event added', pre(pretty(trace.event)), true));
@@ -126,16 +132,18 @@ export class WalkthroughPanel {
   mount() {
     const $ = s => this.root.querySelector(s);
     this.root.innerHTML = `<section class="flow-walk-start"><div class="row wrap"><label class="inline-label">Seed <input id="walk-seed" type="number" step="1" value="0" title="0 picks a random seed"></label><button id="walk-start" class="primary sm" type="button">Sample &amp; start</button></div><p id="walk-pins" class="small muted"></p></section>
-      <section class="flow-walk-controls" hidden><div class="row wrap"><select id="walk-mode" aria-label="How to get replies"><option value="call">Call the Generator</option><option value="manual">Type replies myself</option></select><button id="walk-step" class="primary sm" type="button">Run next step</button><button id="walk-run" class="sm" type="button">Run to end</button><button id="walk-stop" class="sm" type="button" hidden>Stop</button></div>
+      <section class="flow-walk-controls" hidden><div class="row wrap"><select id="walk-mode" aria-label="How to get replies"><option value="call">Call the Generator</option><option value="manual">Type replies myself</option></select><button id="walk-step" class="primary sm" type="button">Run next step</button><button id="walk-run" class="sm" type="button">Run to end</button><button id="walk-stop" class="sm danger" type="button" hidden>Stop</button></div>
+      <div class="row wrap"><label class="checkbox small" data-tip="Each step uses the latest saved project settings, so raised limits or a changed endpoint apply straight away. Off: the settings the walkthrough started with, as a real run would."><input id="walk-latest" type="checkbox" checked> Use current settings</label><button id="walk-apply" class="ghost sm" type="button" data-tip="Reload the saved settings into the next step's preview">Apply saved settings</button></div>
       <div class="row wrap"><button id="walk-prev" class="ghost icon sm" type="button" aria-label="Previous step">‹</button><span id="walk-position" class="num small"></span><button id="walk-next" class="ghost icon sm" type="button" aria-label="Next step">›</button><span class="grow"></span><button id="walk-rewind" class="ghost sm" type="button">Rewind to here</button><button id="walk-save" class="ghost sm" type="button">Save trajectory</button></div></section>
       <div id="walk-summary" class="flow-walk-summary" role="status" aria-live="polite"></div>
       <div class="tab-list flow-walk-tabs" role="tablist" aria-label="Step details"></div><div id="walk-detail" class="flow-walk-detail"></div>`;
-    this.el = {seed: $('#walk-seed'), start: $('#walk-start'), pinsNote: $('#walk-pins'), controls: $('.flow-walk-controls'), mode: $('#walk-mode'), step: $('#walk-step'), run: $('#walk-run'), stop: $('#walk-stop'), prev: $('#walk-prev'), next: $('#walk-next'), position: $('#walk-position'), rewind: $('#walk-rewind'), save: $('#walk-save'), summary: $('#walk-summary'), tabs: $('.flow-walk-tabs'), detail: $('#walk-detail')};
+    this.el = {seed: $('#walk-seed'), start: $('#walk-start'), pinsNote: $('#walk-pins'), controls: $('.flow-walk-controls'), mode: $('#walk-mode'), step: $('#walk-step'), run: $('#walk-run'), stop: $('#walk-stop'), latest: $('#walk-latest'), apply: $('#walk-apply'), prev: $('#walk-prev'), next: $('#walk-next'), position: $('#walk-position'), rewind: $('#walk-rewind'), save: $('#walk-save'), summary: $('#walk-summary'), tabs: $('.flow-walk-tabs'), detail: $('#walk-detail')};
     const guard = fn => async () => { try { await fn(); } catch (error) { this.report(error); } };
     this.el.start.onclick = guard(() => this.start());
     this.el.step.onclick = guard(() => this.advance());
     this.el.run.onclick = guard(() => this.runToEnd());
-    this.el.stop.onclick = () => { this.stopped = true; };
+    this.el.stop.onclick = guard(() => this.stop());
+    this.el.apply.onclick = guard(() => this.applySettings());
     this.el.prev.onclick = () => this.show(this.view - 1);
     this.el.next.onclick = () => this.show(this.view + 1);
     this.el.rewind.onclick = () => { this.entries = this.entries.slice(0, this.view + 1); this.show(this.view); };
@@ -181,13 +189,29 @@ export class WalkthroughPanel {
     }
     this.busy = true; this.render();
     try {
-      const result = await this.api('/walkthrough/step', 'POST', {state: this.latest.state, mode: manual ? 'manual' : 'call', response});
+      this.callId = 'c' + Math.random().toString(36).slice(2, 12);
+      const result = await this.api('/walkthrough/step', 'POST', {state: this.latest.state, mode: manual ? 'manual' : 'call', response, latest_settings: this.el.latest.checked, call_id: this.callId});
       this.entries.push({state: result.state, next: result.next, trace: result.trace});
       if (result.trace.accepted) this.draftReply = undefined;
       this.view = this.entries.length - 1;
       if (this.tab === 'prompt' && result.trace.action === 'model') this.tab = 'reply';
       return result.trace;
     } finally { this.busy = false; this.render(); }
+  }
+
+  /** Stop a run to the end, and cancel the request waiting on the model if there is one. */
+  async stop() {
+    this.stopped = true;
+    if (this.busy && this.callId) await this.api('/walkthrough/cancel', 'POST', {call_id: this.callId});
+  }
+
+  /** Re-read the saved settings into the newest position, e.g. after raising a limit. */
+  async applySettings() {
+    const entry = this.latest; if (!entry || entry.state.done) return;
+    const next = await this.api('/walkthrough/describe?latest_settings=true', 'POST', entry.state);
+    entry.state = {...entry.state, settings_revision: next.settings_revision};
+    entry.next = next; this.view = this.entries.length - 1;
+    this.report('Saved settings applied to the next step.'); this.render();
   }
 
   async runToEnd() {
@@ -232,7 +256,8 @@ export class WalkthroughPanel {
     const done = !has || this.latest.state.done;
     this.el.step.disabled = this.busy || done || !latest;
     this.el.run.disabled = this.busy || done || !latest || this.running;
-    this.el.run.hidden = !!this.running; this.el.stop.hidden = !this.running;
+    this.el.run.hidden = !!this.running; this.el.stop.hidden = !(this.running || this.busy);
+    this.el.apply.disabled = this.busy || done || !latest || !this.el.latest.checked;
     this.el.prev.disabled = this.view <= 0; this.el.next.disabled = !has || latest;
     this.el.rewind.disabled = !has || latest || this.busy;
     this.el.save.disabled = !has;
@@ -250,7 +275,8 @@ export class WalkthroughPanel {
     const parts = [];
     if (entry.trace) {
       const t = entry.trace, line = node('div', undefined, 'row wrap');
-      line.append(tag(ACTIONS[t.action] || t.action, t.accepted ? 'mint' : 'danger'), node('code', t.node), node('span', '→ ' + t.to, 'muted'), node('span', t.summary || '', 'small'));
+      line.append(tag(ACTIONS[t.action] || t.action, t.accepted ? 'mint' : 'danger'), node('code', t.node), node('span', '→ ' + t.to, 'muted'), node('span', t.summary || t.error || '', t.summary || !t.error ? 'small' : 'small error'));
+      if (t.settings_revision) { const rev = tag('settings r' + t.settings_revision, 'faint', 'mono'); rev.dataset.tip = 'The saved settings revision this step used.'; line.append(rev); }
       parts.push(line);
     }
     const n = entry.next, upcoming = node('div', undefined, 'row wrap flow-walk-next');

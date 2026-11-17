@@ -85,6 +85,7 @@ node tests/run_inputs_frontend.mjs
 node tests/flow_editor_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/usage_view_frontend.mjs
+node tests/walkthrough_controls_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
@@ -160,3 +161,8 @@ Output modes: `python -m pytest -q tests/test_output_modes.py` checks that `auto
 `json_object` and `prompt` endpoints send the right `response_format` (or none) and always
 state the schema in the prompt when the server does not enforce it, and that the
 walkthrough shows the exact body the transport sends (`provider.request_body`).
+
+Walkthrough controls: `python -m pytest -q tests/test_walkthrough_controls.py` checks that
+Stop cancels a waiting call without counting a format error, that `latest_settings` applies
+newly saved limits, and that only walkthrough calls (never job tickets) keep the start of a
+cut-off reply.

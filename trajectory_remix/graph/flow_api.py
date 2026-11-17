@@ -5,7 +5,7 @@ from pydantic import Field
 
 from . import flow_document
 from .models import DTO, JsonValue
-from .walkthrough import WalkStart, WalkState, WalkStep, Walkthrough
+from .walkthrough import WalkCancel, WalkStart, WalkState, WalkStep, Walkthrough
 
 
 class FlowDraft(DTO):
@@ -57,9 +57,19 @@ def add_flow_routes(app, router, studio, sampler, transport):
         return walker.start(**body.model_dump())
 
     @router.post("/walkthrough/describe")
-    def walkthrough_describe(body: WalkState):
-        return walker.describe(body.model_dump(mode="json"))
+    def walkthrough_describe(body: WalkState, latest_settings: bool = False):
+        return walker.describe(body.model_dump(mode="json"), latest_settings)
 
     @router.post("/walkthrough/step")
     async def walkthrough_step(body: WalkStep):
-        return await walker.step(body.state.model_dump(mode="json"), body.mode, body.response)
+        return await walker.step(
+            body.state.model_dump(mode="json"),
+            body.mode,
+            body.response,
+            body.latest_settings,
+            body.call_id,
+        )
+
+    @router.post("/walkthrough/cancel")
+    def walkthrough_cancel(body: WalkCancel):
+        return walker.cancel(body.call_id)

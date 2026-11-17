@@ -149,6 +149,12 @@ Qwen3-family hybrid models, `{"chat_template_kwargs": {"enable_thinking": false}
    shows "—". **Model time** adds up every request's wait; the wall time line shows how long
    the run took from first to last response.
 
+If replies are **cut off at the output limit** even with a few thousand tokens, the model
+is almost certainly still thinking. Open the step's **Reply** tab: it shows the start of the
+reasoning or reply text. Try another thinking-off field in **Extra request fields** and save:
+with **Use current settings** on, the next step uses it straight away. **Stop** cancels a
+step still waiting on the model.
+
 What to look at before moving to a hosted model: whether trajectories finish, how many
 format corrections and pauses the logs show, typical events per trajectory and prompt
 tokens per request, and whether the content reads right in the **Editor**.

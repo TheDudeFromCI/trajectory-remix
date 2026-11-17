@@ -259,18 +259,25 @@ asked at each step, what it replied, and what the flow knows afterwards.
 2. Enter a **Seed** (0 picks one at random) and choose **Sample & start**. Pins set on the
    **Sampler** tab apply. The walkthrough uses the chart as drawn, unsaved edits included.
 3. Choose **Run next step** to advance one step, or **Run to end** to keep going until the
-   flow finishes (**Stop** pauses it).
-4. Read the step on the tabs below:
+   flow finishes. **Stop** ends a run to the end and cancels a request still waiting on the
+   model; the walkthrough stays where it was, so you can change settings and run the step
+   again.
+4. **Use current settings** (on by default) makes each step use the latest saved project
+   settings, so a raised output limit or a changed endpoint applies straight away. **Apply
+   saved settings** refreshes the next step's preview. Each step shows the settings
+   revision it used. Turn the option off to keep the settings the walkthrough started
+   with, as a real run does.
+5. Read the step on the tabs below:
 
    | Tab | Shows |
    | --- | --- |
    | **Prompt** | The messages sent to the model. Tick **Show exact text sent** for the raw text; the HTTP body and output schema are below. On the newest step it shows what will be sent next. |
-   | **Reply** | The model's reply, whether it was accepted, and why not. |
+   | **Reply** | The model's reply, whether it was accepted, and why not. For a reply cut off at the output limit or not in JSON, the start of what the model wrote, and any separate reasoning text, so you can see whether it was thinking. |
    | **Flow knows** | Position, step and event counts, the last Selection (what branches read), the task waiting to be written, and any correction the next request will carry. |
    | **Trajectory** | The events written so far; the step's new events are marked. |
    | **Proposal** | The sampled proposal the selector reads. Actors never see it. |
 
-5. Click a numbered chip under the chart, or use **‹** and **›**, to look back at any
+6. Click a numbered chip under the chart, or use **‹** and **›**, to look back at any
    step. **Rewind to here** drops the later steps so you can try again from that point.
 
 To test a reply without a model, switch **Call the Generator** to **Type replies myself**.
