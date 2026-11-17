@@ -5,6 +5,7 @@ import {KINDS, NODE_H, NODE_W, edges, subtitle} from './flow-model.js';
 import {lanesFor, route} from './flow-routes.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
+export const MIN_ZOOM = 0.2, MAX_ZOOM = 3;
 const svg = (name, attrs = {}) => {
   const el = document.createElementNS(SVG, name);
   for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
@@ -17,8 +18,8 @@ function portPoint(pos, kind, port) {
 }
 
 export class FlowCanvas {
-  constructor(root, {onSelect = () => {}, onConnect = () => {}, onMove = () => {}} = {}) {
-    this.root = root; this.handlers = {onSelect, onConnect, onMove}; this.scale = 1;
+  constructor(root, {onSelect = () => {}, onConnect = () => {}, onMove = () => {}, onZoom = () => {}} = {}) {
+    this.root = root; this.handlers = {onSelect, onConnect, onMove, onZoom}; this.scale = 1;
     this.plane = node('div', undefined, 'flow-plane');
     this.edgeLayer = svg('svg', {class: 'flow-edges', 'aria-hidden': 'true'});
     const defs = svg('defs');
@@ -29,6 +30,39 @@ export class FlowCanvas {
     this.edgeLayer.append(defs); this.edgeGroup = svg('g'); this.edgeLayer.append(this.edgeGroup);
     this.plane.append(this.edgeLayer); root.replaceChildren(this.plane);
     this.cards = new Map();
+    this.bindNavigation();
+  }
+
+  /** Wheel or pinch zooms around the pointer; dragging empty space (or the middle
+      button anywhere) pans. Cards and ports keep their own drag behaviour. */
+  bindNavigation() {
+    this.root.addEventListener('wheel', event => {
+      event.preventDefault();
+      // Trackpad pinches arrive as ctrl+wheel with small deltas; mouse wheels as ~100.
+      const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0015));
+      this.zoomAt(this.scale * factor, event.clientX, event.clientY);
+    }, {passive: false});
+    this.root.addEventListener('pointerdown', event => {
+      const onCard = event.target.closest?.('.flow-node');
+      if (!(event.button === 1 || (event.button === 0 && !onCard))) return;
+      event.preventDefault();
+      const start = {x: event.clientX, y: event.clientY, left: this.root.scrollLeft, top: this.root.scrollTop};
+      this.root.classList.add('is-panning');
+      const move = e => { this.root.scrollLeft = start.left - (e.clientX - start.x); this.root.scrollTop = start.top - (e.clientY - start.y); };
+      const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); this.root.classList.remove('is-panning'); };
+      addEventListener('pointermove', move); addEventListener('pointerup', up);
+    });
+  }
+
+  /** Zoom keeping the chart point under (clientX, clientY) where it is on screen. */
+  zoomAt(scale, clientX, clientY) {
+    const box = this.root.getBoundingClientRect();
+    const at = {x: clientX - box.left, y: clientY - box.top};
+    const point = {x: (this.root.scrollLeft + at.x) / this.scale, y: (this.root.scrollTop + at.y) / this.scale};
+    const applied = this.setZoom(scale);
+    this.root.scrollLeft = point.x * applied - at.x;
+    this.root.scrollTop = point.y * applied - at.y;
+    return applied;
   }
 
   /** Zoom so the whole chart fits the visible area (never above 100%). */
@@ -40,9 +74,10 @@ export class FlowCanvas {
   }
 
   setZoom(scale) {
-    this.scale = Math.min(2, Math.max(0.4, scale));
+    this.scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
     this.plane.style.transform = `scale(${this.scale})`;
     this.size();
+    this.handlers.onZoom(this.scale);
     return this.scale;
   }
 

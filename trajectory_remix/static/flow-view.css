@@ -24,6 +24,8 @@
   background-image: radial-gradient(circle, var(--surface-300) 1px, transparent 1px);
   background-size: 20px 20px;
 }
+.flow-canvas { cursor: grab; overscroll-behavior: contain; }
+.flow-canvas.is-panning { cursor: grabbing; user-select: none; }
 .flow-canvas::after { content: ''; display: block; width: var(--plane-w, 0); height: var(--plane-h, 0); pointer-events: none; }
 .flow-plane { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 .flow-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }

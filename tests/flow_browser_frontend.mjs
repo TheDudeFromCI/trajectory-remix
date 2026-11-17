@@ -18,6 +18,39 @@ try {
   const boxes = await page.locator('.flow-node').evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().toJSON()));
   for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, 'cards overlap');
 
+  // The wheel zooms around the pointer: the card under it stays put.
+  const canvas = page.locator('#flow-canvas'), card = page.locator('[data-node="work"]');
+  await card.scrollIntoViewIfNeeded();
+  const cardBefore = await card.boundingBox(), scaleBefore = await page.evaluate(() => flowView.canvas.scale);
+  const at = {x: cardBefore.x + cardBefore.width / 2, y: cardBefore.y + cardBefore.height / 2};
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.wheel(0, -400);
+  await page.waitForFunction(old => flowView.canvas.scale > old, scaleBefore);
+  const cardAfter = await card.boundingBox();
+  assert.ok(cardAfter.width > cardBefore.width * 1.3, 'zoomed in');
+  assert.ok(at.x > cardAfter.x && at.x < cardAfter.x + cardAfter.width && at.y > cardAfter.y && at.y < cardAfter.y + cardAfter.height, 'the pointed-at card stays under the pointer');
+  assert.match(await page.locator('#flow-zoom-reset').textContent(), /^\d+%$/);
+  assert.notEqual(await page.locator('#flow-zoom-reset').textContent(), `${Math.round(scaleBefore * 100)}%`);
+  // Dragging empty canvas pans; dragging a card still moves the card.
+  const box = await canvas.boundingBox();
+  const scroll = () => page.evaluate(() => [flowView.canvas.root.scrollLeft, flowView.canvas.root.scrollTop]);
+  const empty = await page.evaluate(() => {
+    const root = flowView.canvas.root.getBoundingClientRect();
+    for (let y = root.top + 10; y < root.bottom - 10; y += 15) for (let x = root.left + 10; x < root.right - 10; x += 15) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit && !hit.closest('.flow-node') && flowView.canvas.root.contains(hit)) return {x, y};
+    }
+    return null;
+  });
+  assert.ok(empty, 'found empty canvas');
+  const [left0, top0] = await scroll();
+  await page.mouse.move(empty.x, empty.y); await page.mouse.down();
+  await page.mouse.move(empty.x - 120, empty.y - 90, {steps: 6}); await page.mouse.up();
+  const [left1, top1] = await scroll();
+  assert.ok(left1 > left0 || top1 > top0, 'background drag pans the view');
+  assert.ok(box.width > 0);
+  await page.locator('#flow-zoom-fit').click();
+
   // Walk the default flow to the end with the fake Generator.
   await page.locator('[data-mode="walk"]').click();
   await page.locator('#walk-seed').fill('11');

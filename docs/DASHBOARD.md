@@ -239,7 +239,9 @@ Once you edit the chart, the YAML is rewritten from the chart and old comments a
 Drag nodes to arrange them; your layout is remembered in this browser. **Tidy layout**
 arranges them again: each phase runs down the page, a chain of branches joined by
 *otherwise* sits in one row like a switch, and links that loop back run along the sides.
-**Fit** zooms to show the whole chart, which is how it opens. If someone else saves the flow while
+**Fit** zooms to show the whole chart, which is how it opens. Scroll the mouse wheel
+(or pinch on a trackpad) to zoom in on the part you point at, and drag empty space, or
+hold the middle button anywhere, to move around. If someone else saves the flow while
 you edit, saving tells you so and keeps your draft until you **Reload**.
 
 Projects from older versions kept their flow in a `flow.yaml` file beside the database.

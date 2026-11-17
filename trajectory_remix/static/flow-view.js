@@ -34,7 +34,7 @@ export class FlowView {
 
   mount() {
     this.root.innerHTML = `<header class="flow-toolbar">
-        <h1>Flow <span class="info" tabindex="0" data-tip="How each trajectory is built: Select nodes ask the Generator what happens next, Write event nodes ask it to write that event, Branch nodes route on the selection, End finishes. Saved in the project database; runs freeze the flow when they start."></span></h1>
+        <h1>Flow <span class="info" tabindex="0" data-tip="Scroll or pinch to zoom where you point; drag empty space to pan. How each trajectory is built: Select nodes ask the Generator what happens next, Write event nodes ask it to write that event, Branch nodes route on the selection, End finishes. Saved in the project database; runs freeze the flow when they start."></span></h1>
         <span id="flow-origin"></span><span id="flow-hash"></span><span id="flow-dirty" class="tag"></span>
         <div class="seg" role="tablist" aria-label="Flow mode"><button type="button" role="tab" data-mode="edit">Edit</button><button type="button" role="tab" data-mode="walk">Walkthrough</button></div>
         <span class="grow"></span>
@@ -58,7 +58,8 @@ export class FlowView {
     this.canvas = new FlowCanvas($('#flow-canvas'), {
       onSelect: id => { this.selected = id; if (this.mode === 'edit') this.tab = 'node'; this.render(); },
       onMove: () => this.persistLayout(),
-      onConnect: (from, port, to) => this.change(f => { f.nodes[from][port] = to; })
+      onConnect: (from, port, to) => this.change(f => { f.nodes[from][port] = to; }),
+      onZoom: scale => { if (this.el?.zoom) this.el.zoom.textContent = Math.round(scale * 100) + '%'; }
     });
     for (const button of this.root.querySelectorAll('[data-mode]')) button.onclick = () => this.setMode(button.dataset.mode);
     const menu = $('#flow-add-menu .menu-list');
@@ -72,8 +73,8 @@ export class FlowView {
       tab.onclick = () => { this.tab = id; this.renderSide(); };
       this.el.tabs.append(tab);
     }
-    $('#flow-zoom-in').onclick = () => this.zoom(this.canvas.scale + 0.1);
-    $('#flow-zoom-out').onclick = () => this.zoom(this.canvas.scale - 0.1);
+    $('#flow-zoom-in').onclick = () => this.zoom(this.canvas.scale * 1.25);
+    $('#flow-zoom-out').onclick = () => this.zoom(this.canvas.scale / 1.25);
     this.el.zoom.onclick = () => this.zoom(1);
     $('#flow-zoom-fit').onclick = () => this.fit();
     $('#flow-tidy').onclick = () => { this.positions = layout(this.draft); this.persistLayout(); this.render(); };
@@ -163,7 +164,11 @@ export class FlowView {
     } catch { /* Storage unavailable: layout lasts for this page only. */ }
   }
 
-  zoom(scale) { this.el.zoom.textContent = Math.round(this.canvas.setZoom(scale) * 100) + '%'; }
+  /** Zoom around the middle of the visible chart, as the buttons do. */
+  zoom(scale) {
+    const box = this.canvas.root.getBoundingClientRect();
+    this.canvas.zoomAt(scale, box.left + box.width / 2, box.top + box.height / 2);
+  }
   fit() { this.el.zoom.textContent = Math.round(this.canvas.fit() * 100) + '%'; }
 
   setMode(mode) {
