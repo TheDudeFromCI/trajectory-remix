@@ -89,9 +89,11 @@ def summary(store, job):
             "WHERE job_id=? GROUP BY operation ORDER BY operation",
             (job,),
         ).fetchall()
-        trajectories = db.execute(
-            "SELECT COUNT(DISTINCT trajectory_id) FROM graph_usage WHERE job_id=?", (job,)
-        ).fetchone()[0]
+        trajectories, first, last = db.execute(
+            "SELECT COUNT(DISTINCT trajectory_id), MIN(created), MAX(created) FROM graph_usage "
+            "WHERE job_id=?",
+            (job,),
+        ).fetchone()
         models = [
             r[0]
             for r in db.execute(
@@ -119,11 +121,18 @@ def summary(store, job):
     if total and trajectories:
         average = {
             key: (total[key] / trajectories if total[key] is not None else None)
-            for key in (*COUNTS, "cost", "requests")
+            for key in (*COUNTS, "cost", "requests", "seconds")
         }
     return dict(
         job_id=job,
         trajectories=trajectories,
+        # From the first recorded response to the last, to the second. Requests run
+        # concurrently, so this is usually far less than the summed model time.
+        wall_seconds=(
+            (datetime.fromisoformat(last) - datetime.fromisoformat(first)).total_seconds()
+            if first and last
+            else None
+        ),
         models=models,
         total=total,
         per_trajectory=average,

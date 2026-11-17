@@ -83,3 +83,51 @@ negative quality verdicts.
 
 The default prompts and free-form response construction are a baseline to iterate on. The separate 25k-stored /
 20-active and full-training gates are outside this guide, and nothing here starts them.
+
+## Generate from the studio with a local llama.cpp server
+
+Use this to check a flow end to end on your own hardware before paying for hosted
+models: it costs nothing but runs slowly. It assumes `llama-server` from llama.cpp
+serving a GGUF model such as a Qwen3.6 35B-A3B quantization.
+
+1. **Start the server** with the model's own chat template and enough context per slot:
+
+   ```bash
+   llama-server -m /path/to/model.gguf --jinja -c 65536 -np 2 --port 8000
+   ```
+
+   `-c` is shared between the `-np` parallel slots, so this gives each request 32,768
+   tokens. Prompt caching is on by default and works per slot, which suits Remix's
+   cache-friendly prompt order.
+
+2. **Add an endpoint** in **Settings → Models & defaults**:
+
+   | Field | Value |
+   | --- | --- |
+   | Base URL | `http://127.0.0.1:8000/v1` |
+   | Model identifier | The name the server reports, for example the GGUF file name |
+   | Concurrent requests | The same as `-np` (2 above) |
+   | Context limit (tokens) | Context per slot: `-c` ÷ `-np` (32768 above) |
+   | Max output tokens | `2048` |
+   | Provider options → Bytes per token | `3` |
+   | Provider options → Sticky sessions | Off (a single local server needs no routing) |
+   | Provider options → Extra request fields | `{"chat_template_kwargs": {"enable_thinking": false}}` for Qwen3-family hybrid models |
+
+   Qwen3-family models think before answering by default. Turning thinking off matches
+   the hosted pilot and avoids replies cut off at the output limit. If your server rejects
+   the field, remove it and raise **Max output tokens** instead.
+
+3. **Assign the Generator role** to the endpoint, leave the review roles empty, and save.
+
+4. **Check one trajectory first.** In **Flow → Walkthrough**, sample a seed and run a few
+   steps with **Call the Generator**, then **Run to end**. A failed request shows the
+   server's own error message.
+
+5. **Run a few trajectories** from **Generate** (for example 5 attempts). In **Jobs**, the
+   **Usage** tab shows tokens and time: a local server reports no cost, so that column shows
+   "—". **Model time** adds up every request's wait; the wall time line shows how long the
+   run took from first to last response.
+
+What to look at before moving to a hosted model: whether trajectories finish, how many
+format corrections and pauses the logs show, typical events per trajectory and prompt
+tokens per request, and whether the content reads right in the **Editor**.

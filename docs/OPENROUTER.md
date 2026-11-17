@@ -12,6 +12,9 @@ implementation team: treat it as a checklist to follow and report on.
 - A model that supports **structured outputs** and, ideally, a **cache discount**. Use the
   model checker below rather than picking by price alone.
 
+To check a flow for free first, run a few trajectories on a local server: see
+[Generate from the studio with a local llama.cpp server](GRAPH-LOCAL-LLM.md#generate-from-the-studio-with-a-local-llamacpp-server).
+
 ## 1. Choose a model
 
 Run the checker. It reads OpenRouter's public model list (no key needed, no generation):

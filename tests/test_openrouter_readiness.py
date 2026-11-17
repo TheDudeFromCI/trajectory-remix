@@ -172,6 +172,8 @@ async def test_job_usage_totals_and_per_trajectory_average(tmp_path):
     assert report["total"]["cached_tokens"] == 900 * calls
     assert report["total"]["cost"] == pytest.approx(0.00012 * calls)
     assert report["per_trajectory"]["cost"] == pytest.approx(0.00012 * calls)
+    assert report["wall_seconds"] is not None and report["wall_seconds"] >= 0
+    assert report["per_trajectory"]["seconds"] == report["total"]["seconds"]  # One trajectory.
     assert set(report["operations"]) == {"flow_select", "event"}
     app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
     with TestClient(app) as client:
