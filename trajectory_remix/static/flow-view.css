@@ -102,6 +102,9 @@ label.checkbox { flex-direction: row; align-items: center; gap: var(--space-2); 
 .flow-message.role-user { --tone: var(--pastel-sky); }
 .flow-message.role-assistant { --tone: var(--pastel-mint); }
 .flow-message .flow-pre { max-height: 320px; border: 0; padding: 0; background: transparent; }
+.flow-message-head { gap: var(--space-2); }
+.flow-copy-row { gap: var(--space-1); margin-bottom: calc(-1 * var(--space-1)); }
+.flow-copy { height: 22px; padding: 0 var(--space-2); font-size: 12px; }
 .flow-message-role { color: var(--ink-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .flow-error { padding: var(--space-2); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 13px; white-space: pre-wrap; }
 .flow-reply { min-height: 220px; }

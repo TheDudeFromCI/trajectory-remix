@@ -6,9 +6,9 @@ from importlib.resources import files
 import yaml
 from pydantic import Field, model_validator
 
-from .flow import EventTask
-from .models import DTO, GraphSource, JsonValue, Window, canonical, digest
+from .models import DTO, GraphSource, JsonValue, canonical, digest
 from .prompt_order import ordered, source_json
+from .selection_schema import Selection, prompt_schema
 from .validation import diagnose
 
 
@@ -69,13 +69,6 @@ class Flow(DTO):
             if any(target not in self.nodes for target in targets):
                 raise ValueError("Flow transition references a missing node")
         return self
-
-
-class Selection(DTO):
-    finished: bool
-    reason: str = Field(min_length=1)
-    windows: dict[str, Window] = Field(default_factory=dict)
-    task: EventTask | None = None
 
 
 def load_flow(path=None, text=None):
@@ -151,7 +144,7 @@ def selection_payload(source, plan, current, correction=""):
     return dict(
         operation="flow_select",
         prompt_version="adaptive-flow/2",
-        schema=Selection.model_json_schema(),
+        schema=prompt_schema(),
         messages=[
             dict(role="system", content=shared or node["instruction"]),
             dict(role="user", content=ordered(pairs)),
@@ -169,18 +162,16 @@ def accept_selection(source, body, plan, settings):
         if any(d.severity == "error" for d in diagnose(source, settings)):
             raise ValueError("Cannot finish a structurally broken episode")
         return source, None, selection.model_dump(mode="json")
-    task = selection.task
-    if task is None or task.id in source.events or task.id.endswith(":echo"):
-        raise ValueError("Select a new event with a unique non-echo ID")
-    if task.when:
-        raise ValueError("Adaptive conditions belong in Flow branch nodes")
-    if "content" in task.envelope:
-        raise ValueError("Selection cannot pre-author event content")
+    if selection.task is None:
+        raise ValueError("Choose the next event as task, or set finished to true")
+    task = selection.task.as_event_task()
+    if task.id in source.events or task.id.endswith(":echo"):
+        raise ValueError(f"Event ID {task.id} is already used; choose a new, unique ID")
     data = source.to_dict()
     for key, window in selection.windows.items():
         if key in source.windows:
             raise ValueError("Selection cannot redefine an existing window")
-        data["windows"][key] = window.model_dump(mode="json")
+        data["windows"][key] = window.model_dump(mode="json", exclude_none=True)
     actor = task.envelope.get("kind") in {"agent_text", "tool_call"}
     if actor:
         if task.world:
@@ -202,11 +193,9 @@ def accept_selection(source, body, plan, settings):
     if event.supervision.masked == actor:
         raise ValueError("Actor events must be supervised; external events must be masked")
     data["events"].pop(task.id)
-    return (
-        GraphSource.model_validate(data),
-        task.model_dump(mode="json"),
-        selection.model_dump(mode="json"),
-    )
+    chosen = selection.model_dump(mode="json")
+    chosen["task"]["envelope"] = dict(task.envelope)
+    return GraphSource.model_validate(data), task.model_dump(mode="json"), chosen
 
 
 def frozen_plan(proposal, settings, snapshot):

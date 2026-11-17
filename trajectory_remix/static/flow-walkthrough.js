@@ -10,6 +10,30 @@ const disclosure = (title, body, open = false) => {
   d.append(node('summary', title), inner); return d;
 };
 const empty = text => node('p', text, 'empty');
+
+/** Copy text to the clipboard; falls back to a hidden textarea where the API is missing. */
+export async function copyText(text) {
+  if (globalThis.navigator?.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; }
+  const area = document.createElement('textarea'); area.value = text; area.setAttribute('readonly', '');
+  area.style.position = 'fixed'; area.style.opacity = '0'; document.body.append(area); area.select();
+  try { document.execCommand?.('copy'); } finally { area.remove(); }
+}
+
+/** A small button that copies getText() and confirms with "Copied". */
+export function copyButton(label, getText, title = 'Copy to the clipboard') {
+  const button = node('button', label, 'ghost sm flow-copy'); button.type = 'button'; button.dataset.tip = title;
+  button.onclick = async () => {
+    try { await copyText(getText()); button.textContent = 'Copied'; }
+    catch { button.textContent = 'Copy failed'; }
+    setTimeout(() => { button.textContent = label; }, 1500);
+  };
+  return button;
+}
+
+/** Messages as plain text, each headed by its role: easy to paste into notes or an issue. */
+export function messagesText(messages) {
+  return (messages || []).map(m => `### ${m.role}\n${m.content}`).join('\n\n');
+}
 const ACTIONS = {model: 'Model call', branch: 'Branch', chat_echo: 'Chat delivery', end: 'End', limit: 'Limit', done: 'Done', blocked: 'Blocked'};
 
 /** Skeleton reply for typing one by hand, shaped like the request's output schema. */
@@ -53,7 +77,9 @@ export function renderRequest(request, exact) {
   messages.forEach((m, i) => {
     const block = node('section', undefined, `flow-message role-${m.role}`);
     const appended = request.wire && i >= request.messages.length;
-    block.append(node('div', m.role + (appended ? ' · added for JSON mode' : ''), 'flow-message-role small'), messageBody(m.content, exact));
+    const head = node('div', undefined, 'row flow-message-head');
+    head.append(node('span', m.role + (appended ? ' · added for JSON mode' : ''), 'flow-message-role small grow'), copyButton('Copy', () => m.content, 'Copy this message exactly as sent'));
+    block.append(head, messageBody(m.content, exact));
     box.append(block);
   });
   box.append(disclosure('Output schema', pre(pretty(request.schema))));
@@ -286,21 +312,37 @@ export class WalkthroughPanel {
     box.replaceChildren(...parts);
   }
 
+  /** What the Copy button copies on each tab. */
+  copyable(entry) {
+    const t = entry.trace, n = entry.next;
+    if (this.tab === 'prompt') { const request = t ? t.request : n.request; return request ? messagesText(request.wire?.messages || request.messages) : ''; }
+    if (this.tab === 'reply') return t ? pretty({accepted: t.accepted, error: t.error, response: t.response, selection: t.selection, event: t.event}) : '';
+    if (this.tab === 'knows') return pretty(t ? t.knows : n.knows);
+    if (this.tab === 'trajectory') return pretty(entry.state.source);
+    return pretty(entry.state.plan.proposal);
+  }
+
   renderDetail(entry, latest) {
     const box = this.el.detail;
     if (!entry) { box.replaceChildren(); return; }
     const t = entry.trace, n = entry.next;
     const pendingModel = latest && n.action === 'model';
+    const tools = node('div', undefined, 'row flow-copy-row');
+    tools.append(node('span', '', 'grow'), copyButton('Copy', () => this.copyable(entry), 'Copy this tab'));
+    if (this.tab === 'prompt') {
+      const request = t ? t.request : n.request;
+      if (request?.wire) tools.append(copyButton('Copy JSON', () => pretty(request.wire), 'Copy the exact HTTP request body (no credentials)'));
+    }
     if (this.tab === 'prompt') {
       // A step shows what it sent; the newest position shows what will be sent next.
       const request = t ? t.request : n.request;
       const exact = node('label', undefined, 'checkbox small'); const box2 = node('input'); box2.type = 'checkbox'; box2.checked = this.exact;
       box2.onchange = () => { this.exact = box2.checked; this.render(); }; exact.append(box2, ' Show exact text sent');
       const head = node('p', t ? 'What this step sent.' : 'What the next step will send.', 'small muted');
-      box.replaceChildren(head, exact, renderRequest(request, this.exact));
+      box.replaceChildren(tools, head, exact, renderRequest(request, this.exact));
       if (t && pendingModel) box.append(disclosure('Next request', renderRequest(n.request, this.exact)));
     } else if (this.tab === 'reply') {
-      box.replaceChildren(renderReply(t));
+      box.replaceChildren(tools, renderReply(t));
       if (pendingModel && this.el.mode.value === 'manual') {
         const area = node('textarea', undefined, 'flow-reply mono'); area.id = 'walk-reply'; area.spellcheck = false;
         area.value = this.draftReply ?? replyTemplate(n.request); area.setAttribute('aria-label', 'Reply to use for the next step');
@@ -309,12 +351,12 @@ export class WalkthroughPanel {
         box.append(node('h4', 'Type the next reply'), node('p', 'Checked exactly like a model reply, then Run next step.', 'small muted'), area, reset);
       }
     } else if (this.tab === 'knows') {
-      box.replaceChildren(node('p', t ? 'After this step:' : 'Before the first step:', 'small muted'), renderKnows(t ? t.knows : n.knows));
+      box.replaceChildren(tools, node('p', t ? 'After this step:' : 'Before the first step:', 'small muted'), renderKnows(t ? t.knows : n.knows));
     } else if (this.tab === 'trajectory') {
-      box.replaceChildren(renderTrajectory(entry.state.source, t?.added_events || []));
+      box.replaceChildren(tools, renderTrajectory(entry.state.source, t?.added_events || []));
     } else {
       const proposal = entry.state.plan.proposal;
-      box.replaceChildren(node('p', 'The sampled proposal the selector reads. Actors never see it.', 'small muted'), pre(pretty(proposal)));
+      box.replaceChildren(tools, node('p', 'The sampled proposal the selector reads. Actors never see it.', 'small muted'), pre(pretty(proposal)));
     }
   }
 

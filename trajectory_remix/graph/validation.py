@@ -68,7 +68,10 @@ def diagnose(source: GraphSource, settings: ProjectSettings | None = None) -> li
             )
         elif isinstance(event, ChatMessage) and window.purpose != "chatroom":
             emit(
-                "invalid_chat_window", "Structured chat requires a chatroom window", ident, "window"
+                "invalid_chat_window",
+                'Chat messages need a window whose purpose is "chatroom"',
+                ident,
+                "window",
             )
         if len(event.after) != len(set(event.after)):
             emit("duplicate_dependency", "Dependencies must be unique", ident, "after")

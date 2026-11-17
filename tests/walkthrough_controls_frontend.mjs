@@ -55,4 +55,26 @@ const reply = root.querySelector('#walk-detail').textContent;
 assert.match(reply, /cut off at Max output tokens/); assert.match(reply, /let me think about this episode/);
 assert.match(root.querySelector('#walk-summary').textContent, /settings r2/);
 console.log('Walkthrough controls: stop a waiting step, apply saved settings and cut-off reply preview passed.');
+
+// Copy buttons: each tab copies something useful, and each message copies itself exactly.
+{
+  const {messagesText} = await import('../trajectory_remix/static/flow-walkthrough.js');
+  const copied = [];
+  Object.defineProperty(globalThis, 'navigator', {value: {clipboard: {writeText: async text => { copied.push(text); }}}, configurable: true});
+  assert.equal(messagesText([{role: 'system', content: 'rules'}, {role: 'user', content: 'data'}]), '### system\nrules\n\n### user\ndata');
+  root.querySelector('[data-tab="prompt"]').click();
+  const tabCopy = [...root.querySelectorAll('#walk-detail button')].find(b => b.textContent === 'Copy' && b.dataset.tip === 'Copy this tab');
+  tabCopy.click(); await settle();
+  assert.equal(copied.at(-1), '### user\nx', 'the prompt tab copies the messages sent');
+  const json = [...root.querySelectorAll('#walk-detail button')].find(b => b.textContent === 'Copy JSON');
+  json.click(); await settle();
+  assert.equal(JSON.parse(copied.at(-1)).max_tokens, 8192, 'Copy JSON copies the request body');
+  const perMessage = root.querySelector('.flow-message .flow-copy'); perMessage.click(); await settle();
+  assert.equal(copied.at(-1), 'x');
+  assert.equal(perMessage.textContent, 'Copied');
+  root.querySelector('[data-tab="reply"]').click();
+  [...root.querySelectorAll('#walk-detail button')].find(b => b.textContent === 'Copy').click(); await settle();
+  assert.equal(JSON.parse(copied.at(-1)).response.finish_reason, 'length');
+  console.log('Walkthrough copy buttons: tab, JSON body and per-message copies passed.');
+}
 window.happyDOM.abort();

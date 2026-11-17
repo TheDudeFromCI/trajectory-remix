@@ -166,3 +166,8 @@ Walkthrough controls: `python -m pytest -q tests/test_walkthrough_controls.py` c
 Stop cancels a waiting call without counting a format error, that `latest_settings` applies
 newly saved limits, and that only walkthrough calls (never job tickets) keep the start of a
 cut-off reply.
+
+Selection schema: `python -m pytest -q tests/test_selection_schema.py` replays a real small
+model's first reply (invented envelope fields, a recipe-only `when`, a descriptive chatroom
+purpose) and checks the selector schema describes every envelope and window field, rejects
+that reply with a correction naming the problem, and accepts the corrected form.

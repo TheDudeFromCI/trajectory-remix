@@ -40,6 +40,11 @@ selector_instruction: |-
     may receive private world facts in task.world; keep those consistent with the opening.
   - Use reason as your notes: which objectives are demonstrated by which event IDs, and
     what remains.
+  - Follow the output schema's field names exactly. A first event, for example:
+    {"id": "opening", "envelope": {"kind": "chat_message", "window": "chatroom",
+    "after": [], "chat": {"speaker": "Dana"}}, "instruction": "Dana asks for ...",
+    "world": {...}}, with {"chatroom": {"purpose": "chatroom", "agent_writable": false}}
+    in windows.
 nodes:
   # ---- Phase 1: set the scene and open the episode --------------------------------
   set_scene:

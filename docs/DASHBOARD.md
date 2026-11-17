@@ -277,6 +277,9 @@ asked at each step, what it replied, and what the flow knows afterwards.
    | **Trajectory** | The events written so far; the step's new events are marked. |
    | **Proposal** | The sampled proposal the selector reads. Actors never see it. |
 
+   **Copy** on each tab copies its contents (the Prompt tab copies the messages as text,
+   and **Copy JSON** the exact request body); each message also has its own **Copy**.
+
 6. Click a numbered chip under the chart, or use **‹** and **›**, to look back at any
    step. **Rewind to here** drops the later steps so you can try again from that point.
 
