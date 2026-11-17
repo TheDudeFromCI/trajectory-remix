@@ -86,6 +86,7 @@ node tests/flow_editor_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/walkthrough_controls_frontend.mjs
+node tests/tool_import_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py

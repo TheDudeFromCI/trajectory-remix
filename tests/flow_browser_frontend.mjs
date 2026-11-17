@@ -80,6 +80,22 @@ try {
   await page.waitForFunction(() => document.querySelector('#flow-dirty').textContent === 'Saved');
   const saved = await get('/generation/flow');
   assert.equal(saved.origin, 'project'); assert.equal(saved.flow.nodes.write_thought.instruction, 'Write it plainly.');
+  // Settings → Tools: import a catalogue file; same IDs are kept unless replacement is ticked.
+  const catalogue = new URL('../examples/kidra_tools_core.json', import.meta.url).pathname;
+  const toolsBefore = Object.keys((await get('/settings')).settings.tools);
+  await page.locator('#settings-button').click();
+  await page.locator('#settings-tab-tools').click();
+  await page.locator('#tool-schema-editor input[type=file]').setInputFiles(catalogue);
+  await page.locator('#tool-schema-editor .tool-import + p').filter({hasText: 'Save settings to apply'}).waitFor();
+  const note = await page.locator('#tool-schema-editor .tool-import + p').textContent();
+  assert.match(note, /Added 1[56]: subagent/);
+  if (toolsBefore.includes('read')) assert.ok(!/Kept your existing.*subagent/.test(note));
+  await page.locator('#settings-save').click();
+  await page.waitForFunction(async () => (await (await fetch('/api/v1/settings', {headers: {'X-Remix-Token': document.querySelector('meta[name=remix-token]').content}})).json()).settings.tools.subagent);
+  const savedTools = (await get('/settings')).settings.tools;
+  assert.ok(savedTools.subagent.input_schema.properties.agent && savedTools.chat, 'imported tools saved; existing ones kept');
+  await page.waitForFunction(() => !document.getElementById('settings-dialog').open);
+
   // The panel and canvas fit the compact layout without horizontal page overflow.
   await page.setViewportSize({width: 860, height: 900});
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

@@ -1,0 +1,21 @@
+/* Tool catalogue import rules: formats, validation and keep-or-replace merging. */
+import assert from 'node:assert/strict';
+import {Window} from 'happy-dom';
+const window = new Window(); globalThis.document = window.document;
+const {readCatalogue, mergeTools, describeMerge} = await import('../trajectory_remix/static/tool-import.js');
+const tool = name => ({name, input_schema: {type: 'object'}});
+assert.deepEqual(Object.keys(readCatalogue(JSON.stringify({tools: {a: tool('A')}}))), ['a'], 'settings-style file');
+assert.deepEqual(Object.keys(readCatalogue(JSON.stringify({b: tool('B')}))), ['b'], 'bare map');
+assert.throws(() => readCatalogue('{oops'), /not valid JSON/);
+assert.throws(() => readCatalogue('[1]'), /Expected/);
+assert.throws(() => readCatalogue(JSON.stringify({tools: {'Bad ID': tool('x')}})), /must start with a lowercase letter/);
+assert.throws(() => readCatalogue(JSON.stringify({tools: {c: {input_schema: {}}}})), /needs a name/);
+const current = {chat: tool('Mine'), a: tool('Old')};
+const kept = mergeTools(current, {a: tool('New'), b: tool('B')});
+assert.deepEqual(kept, {added: ['b'], replaced: [], kept: ['a']});
+assert.equal(current.a.name, 'Old');
+assert.match(describeMerge(kept), /Added 1: b\. Kept your existing a\. Save settings to apply\./);
+const replaced = mergeTools(current, {a: tool('New')}, {replace: true});
+assert.deepEqual(replaced.replaced, ['a']); assert.equal(current.a.name, 'New'); assert.equal(current.chat.name, 'Mine');
+console.log('Tool import: formats, validation, keep-or-replace merge passed.');
+window.happyDOM.abort();

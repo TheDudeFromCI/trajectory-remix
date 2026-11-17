@@ -4,6 +4,7 @@ import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
 import {renderFlowPanel} from './flow-panel.js';
+import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
@@ -661,7 +662,7 @@ export class StudioUI {
   renderToolSettings(selected = '') {
     const box = $('tool-schema-editor'); box.replaceChildren();
     box.className = 'settings-section';
-    box.append(node('h3', 'Synthetic tools'), node('p', 'Tools an agent can call in authored and generated trajectories. Forms edit the settings draft; Save settings validates it.', 'settings-help'));
+    box.append(node('h3', 'Synthetic tools'), node('p', 'Tools an agent can call in authored and generated trajectories. They are contracts only: the Generator writes each call and its result, and nothing runs. The selector and writers read each schema, including its description. Forms edit the settings draft; Save settings validates it.', 'settings-help'));
     const data = JSON.parse($('settings-json').value); data.tools ||= {};
     const write = () => { const current = JSON.parse($('settings-json').value); current.tools = data.tools; $('settings-json').value = json(current); };
     const control = (label, value = '') => { const wrap = node('label', label), n = node('input'); n.value = value; n.setAttribute('aria-label', label); wrap.append(n); return [wrap, n]; };
@@ -676,7 +677,11 @@ export class StudioUI {
       const id = ident.value.trim(); if (!/^[a-z][a-z0-9_-]*$/.test(id) || data.tools[id]) throw new Error('Supply a unique tool ID with letters, digits, underscores or hyphens.');
       data.tools[id] = {name: id, input_schema: {type:'object',properties:{}}}; write(); this.renderToolSettings(id);
     }, 'sm'));
-    box.append(top);
+    box.append(top, ...toolImportControls((tools, replace) => {
+      const summary = describeMerge(mergeTools(data.tools, tools, {replace})); write();
+      this.renderToolSettings(select.value || Object.keys(data.tools)[0]); $('tool-schema-editor').querySelector('.tool-import')?.nextElementSibling?.replaceChildren(summary);
+      return summary;
+    }));
     const tool = data.tools[select.value];
     if (!tool) { box.append(node('div', 'No tools defined yet. Add one by ID above.', 'empty')); return; }
     const card = node('section', undefined, 'settings-card'); box.append(card);

@@ -74,6 +74,28 @@ object schema and add or remove fields and required flags. Advanced JSON keeps n
 custom schemas. Removing a tool keeps the existing calls that use it. See
 [Synthetic tools and chat](TOOLS.md).
 
+Give each schema a top-level `description`. The generation controller and the event
+writers see only the catalogue, so the description is how they learn what a tool is for.
+Describe what the tool does for the agent, not how it might be simulated.
+
+### Import a tool catalogue
+
+**Settings → Tools → Import tools from JSON…** merges a file of tool definitions into the
+settings draft. The file may be a whole settings file or just `{"tools": {id: definition}}`.
+Tools you already have are kept unless you tick **Replace tools with the same ID**. Nothing
+is saved until you choose **Save settings**.
+
+Two starting catalogues for a coordinating agent come with Remix:
+
+| File | Contents |
+| --- | --- |
+| [`kidra_tools_core.json`](../examples/kidra_tools_core.json) | 16 tools, about 5.7 KB: specialist delegation (`subagent`, `subagent_get`, `subagent_list`, `subagent_close`), task notes, basic files, memory, web search, calculator and time. A good default. |
+| [`kidra_tools.json`](../examples/kidra_tools.json) | All 30 tools, about 11 KB: the core set plus file patch, copy, move, rename, delete and watch, skills, web find, timers and system diagnostics. |
+
+Every selector request includes the whole catalogue, so a larger one costs context and
+tokens on every call. Prefer the core set and add what your episodes need. `subagent`
+takes an optional `agent`, the specialist chosen from the roster the episode shows.
+
 ## Defaults
 
 | Setting | Notes |
