@@ -81,7 +81,7 @@ modes, chosen at the top:
 
 | Mode | What it does |
 | --- | --- |
-| **Edit** | The chart on the left, and tabs on the right for the selected **Node**, **Flow settings** (start node, limits and the actor instruction), the **YAML** it will save, and any **Problems**. |
+| **Edit** | The chart on the left, and tabs on the right for the selected **Node**, **Flow settings** (start node, limits, and the shared selector and actor instructions), the **YAML** it will save, and any **Problems**. |
 | **Walkthrough** | Sample one proposal and step through the flow. The chart lights up the current node, counts visits and highlights the link just taken. See [Walk through a generation step by step](#walk-through-a-generation-step-by-step). |
 
 Each node kind has its own colour:

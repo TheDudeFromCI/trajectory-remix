@@ -91,10 +91,13 @@ export function renderFlowForm(box, flow, hooks, diagnostics = []) {
   grid.append(field('Start node', start), node('span'),
     field('Max steps', number('max_steps', 10000), 'Every node visit counts, including branches'),
     field('Max events', number('max_events', 2000), 'Runs stop as Unfinished when reached'));
+  const selector = node('textarea'); selector.value = flow.selector_instruction || ''; selector.className = 'flow-instruction';
+  selector.oninput = () => hooks.change(f => { f.selector_instruction = selector.value; }, false);
   const actor = node('textarea'); actor.value = flow.actor_instruction || ''; actor.className = 'flow-instruction';
   actor.oninput = () => hooks.change(f => { f.actor_instruction = actor.value; }, false);
   const mine = diagnostics.filter(d => !d.node && d.field);
   box.replaceChildren(grid,
+    field('Selector instruction', selector, 'The system prompt shared by every Select node. Keep the rules here and each node\'s step instruction short: requests then share one cached prefix. Leave empty to use each node\'s instruction as its system prompt.'),
     field('Actor instruction', actor, 'Replaces the selector\'s instruction for agent text and tool calls, so private plans never reach the actor.'),
     ...(mine.length ? [problemList(mine)] : []));
 }

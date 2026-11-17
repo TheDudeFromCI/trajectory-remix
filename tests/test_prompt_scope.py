@@ -87,3 +87,35 @@ def test_output_budget_must_leave_input_room():
             context_window_tokens=2048,
             max_output_tokens=2048,
         )
+
+
+@pytest.mark.asyncio
+async def test_event_writers_see_only_direct_ancestors(tmp_path):
+    from test_adaptive_flow import episode
+    from test_graph_generation import finish
+
+    fake = episode()
+    gen, _ = service(tmp_path, fake, fast=False)
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
+
+    def ancestors(frontier):
+        seen, todo = set(), list(frontier)
+        while todo:
+            ident = todo.pop()
+            if ident not in seen:
+                seen.add(ident)
+                todo.extend(source.events[ident].after)
+        return seen
+
+    writes = [p for p in fake.calls if p["operation"] == "event"]
+    assert writes
+    for payload in writes:
+        visible = json.loads(payload["messages"][1]["content"])["visible"]
+        shown = {e["id"] for window in visible.values() for e in window["events"]}
+        allowed = ancestors(payload["task"]["envelope"].get("after", []))
+        assert shown <= allowed, (payload["task"]["id"], shown - allowed)
+    # Parallel siblings never see each other.
+    sibling = next(p for p in writes if p["task"]["id"] == "assign-b")
+    assert "assign-a" not in sibling["messages"][1]["content"]

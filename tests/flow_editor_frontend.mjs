@@ -10,7 +10,7 @@ const model = await import('../trajectory_remix/static/flow-model.js');
 const {layout} = await import('../trajectory_remix/static/flow-layout.js');
 const routes = await import('../trajectory_remix/static/flow-routes.js');
 const {FlowView} = await import('../trajectory_remix/static/flow-view.js');
-const {WalkthroughPanel, replyTemplate} = await import('../trajectory_remix/static/flow-walkthrough.js');
+const {WalkthroughPanel, replyTemplate, messageBody} = await import('../trajectory_remix/static/flow-walkthrough.js');
 
 const base = () => ({
   version: 'adaptive-flow/1', start: 'choose', max_steps: 600, max_events: 128, actor_instruction: 'Act.',
@@ -137,6 +137,9 @@ view.canvas.handlers.onMove('done', {x: 900, y: 40});
 assert.equal(JSON.parse(storage.get('flow-layout')).done.x, view.positions.done.x);
 
 // ---------- Walkthrough panel ----------
+// JSON-mode messages (schema sentence, then data) still format their data.
+assert.equal(messageBody('Return one JSON object. Schema: {}\n\n{"a":{"b":1}}', false).textContent, 'Return one JSON object. Schema: {}\n\n{\n  "a": {\n    "b": 1\n  }\n}');
+assert.equal(messageBody('x\n\n{"a":1}', true).textContent, 'x\n\n{"a":1}', 'exact text is untouched');
 const knows = {node: 'choose', steps: 0, max_steps: 600, events: 0, max_events: 128, last_selection: null, pending_task: null, correction: '', format_errors: 0, format_retries: 2, chat_echo_pending: null, windows: [], diagnostics: []};
 const request = {operation: 'flow_select', schema: {type: 'object'}, messages: [{role: 'system', content: 'Pick'}, {role: 'user', content: '{"proposal":{"a":1}}'}], endpoint: 'g', wire: {model: 'm', messages: [{role: 'system', content: 'Pick'}, {role: 'user', content: '{"proposal":{"a":1}}'}, {role: 'user', content: 'Return JSON'}]}, budget: {input_bytes: 10, input_ceiling: 99}};
 const walkCalls = [];

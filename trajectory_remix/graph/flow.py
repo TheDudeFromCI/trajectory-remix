@@ -41,8 +41,16 @@ class Plan(DTO):
     tasks: list[EventTask] = Field(min_length=1, max_length=1000)
 
 
-def causal_view(source, after):
-    """Fold only ancestors. Closed/replaced bodies never survive in a summary."""
+def causal_view(source, after, compact=False):
+    """Fold only ancestors. Closed/replaced bodies never survive in a summary.
+
+    compact drops fields left at their defaults, for prompts.
+    """
+    dump = (
+        (lambda model: model.model_dump(mode="json", exclude_defaults=True))
+        if compact
+        else (lambda model: model.model_dump(mode="json"))
+    )
     wanted, todo = set(), list(after)
     while todo:
         ident = todo.pop()
@@ -69,9 +77,9 @@ def causal_view(source, after):
             continue
         window = windows.setdefault(
             event.window,
-            dict(window=source.windows[event.window].model_dump(mode="json"), events=[]),
+            dict(window=dump(source.windows[event.window]), events=[]),
         )
-        window["events"].append(dict(id=ident, **event.model_dump(mode="json")))
+        window["events"].append(dict(id=ident, **dump(event)))
     return windows
 
 
@@ -178,7 +186,10 @@ def event_payload(source, task, settings, correction=False):
                         ("kind", canonical(envelope["kind"])),
                         ("task", canonical(task["instruction"])),
                         ("window_purpose", canonical(source.windows[envelope["window"]].purpose)),
-                        ("visible", canonical(causal_view(source, envelope.get("after", [])))),
+                        (
+                            "visible",
+                            canonical(causal_view(source, envelope.get("after", []), compact=True)),
+                        ),
                         *([("world", canonical(task["world"]))] if not actor else []),
                         ("correction", canonical(CORRECTION if correction else "")),
                     ]

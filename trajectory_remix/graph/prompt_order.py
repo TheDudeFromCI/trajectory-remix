@@ -31,10 +31,21 @@ def causal_order(events):
     return order
 
 
+def compact(model):
+    """A model without fields left at their defaults: same meaning, far fewer tokens.
+
+    Every event keeps its kind (it has no default); null and default flags, delivery and
+    supervision settings are dropped. Small models also read the shorter form more
+    reliably.
+    """
+    return model.model_dump(mode="json", exclude_defaults=True)
+
+
 def source_json(source):
     """The prompt view of a source: rarely changing fields first, then events appended."""
-    data = source.model_dump(mode="json", exclude={"metadata"})
-    events = data.pop("events")
+    data = source.model_dump(mode="json", exclude={"metadata", "windows", "events"})
+    data["windows"] = {key: compact(window) for key, window in source.windows.items()}
+    events = {key: compact(event) for key, event in source.events.items()}
     pairs = [(key, canonical(value)) for key, value in sorted(data.items())]
     body = ordered((ident, canonical(events[ident])) for ident in causal_order(events))
     return ordered([*pairs, ("events", body)])

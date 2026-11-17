@@ -25,7 +25,15 @@ FIELDS = {
     "end": ("kind",),
 }
 DEFAULTS = dict(next=None, path="finished", equals=True, then=None, otherwise=None)
-TOP = ("version", "start", "max_steps", "max_events", "actor_instruction", "nodes")
+TOP = (
+    "version",
+    "start",
+    "max_steps",
+    "max_events",
+    "actor_instruction",
+    "selector_instruction",
+    "nodes",
+)
 SELECTION_FIELDS = {"finished", "reason", "windows", "task"}
 
 
@@ -107,6 +115,9 @@ def structure(flow):
     if not isinstance(actor, str) or not actor.strip():
         text = "Actor instruction is required"
         problems.append(_diag("error", "actor_instruction", text, field="actor_instruction"))
+    if not isinstance(flow.get("selector_instruction", ""), str):
+        text = "Selector instruction must be text"
+        problems.append(_diag("error", "selector_instruction", text, field="selector_instruction"))
     nodes = flow.get("nodes")
     if not isinstance(nodes, dict) or not nodes:
         problems.append(_diag("error", "no_nodes", "Add at least one node", field="nodes"))
@@ -262,6 +273,8 @@ _Dumper.add_representer(str, _string)
 def compact(flow):
     """The normalized flow with only the fields each node kind uses, in a stable order."""
     result = {key: flow[key] for key in TOP if key != "nodes" and key in flow}
+    if not result.get("selector_instruction"):
+        result.pop("selector_instruction", None)
     result["nodes"] = {}
     for ident, node in flow["nodes"].items():
         kept = {key: node[key] for key in FIELDS[node["kind"]] if key in node}

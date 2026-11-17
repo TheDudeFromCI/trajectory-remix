@@ -141,8 +141,8 @@ def test_walkthrough_can_use_an_unsaved_flow_draft(tmp_path):
         flow = client.get("/api/v1/generation/flow").json()["flow"]
         flow["nodes"]["set_scene"]["instruction"] = "DRAFT SELECTOR PROMPT"
         started = client.post("/api/v1/walkthrough/start", json={"seed": 3, "flow": flow}).json()
-        system = started["next"]["request"]["messages"][0]["content"]
-        assert system == "DRAFT SELECTOR PROMPT"
+        body = json.loads(started["next"]["request"]["messages"][1]["content"])
+        assert body["current_step"]["instruction"] == "DRAFT SELECTOR PROMPT"
         flow["nodes"]["set_scene"]["next"] = "missing"
         rejected = client.post("/api/v1/walkthrough/start", json={"seed": 3, "flow": flow})
     assert rejected.status_code == 422 and "invalid" in rejected.json()["message"]

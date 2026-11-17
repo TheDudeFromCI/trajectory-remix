@@ -49,6 +49,9 @@ class Flow(DTO):
     max_steps: int = Field(default=600, ge=1, le=10000)
     max_events: int = Field(default=128, ge=1, le=2000)
     actor_instruction: str = Field(min_length=1)
+    # Shared system prompt for every select node. When set, each node's instruction is
+    # sent after the data as current_step, so all selectors share one cached prefix.
+    selector_instruction: str = ""
     nodes: dict[str, Node]
 
     @model_validator(mode="after")
@@ -112,29 +115,46 @@ def branch(node, output):
     )
 
 
+def previous_notes(output):
+    """The last selection as the selector's own notes. Its task envelope is already in the
+    source once written, so only the decision, reasoning and task ID are repeated."""
+    if not isinstance(output, dict):
+        return output
+    task = output.get("task")
+    return dict(
+        finished=output.get("finished"),
+        reason=output.get("reason"),
+        task_id=task.get("id") if isinstance(task, dict) else None,
+    )
+
+
 def selection_payload(source, plan, current, correction=""):
-    node = plan["flow"]["nodes"][current["node"]]
-    remaining = plan["flow"]["max_events"] - len(source.events)
+    flow, node_id = plan["flow"], current["node"]
+    node = flow["nodes"][node_id]
+    remaining = flow["max_events"] - len(source.events)
+    shared = flow.get("selector_instruction", "")
+    # Most stable first, so requests share a long cacheable prefix. With a shared
+    # selector instruction the step instruction comes last, nearest the answer.
+    pairs = [
+        ("tools", canonical(plan["tools"])),
+        ("proposal", canonical(plan["proposal"])),
+        ("source", source_json(source)),
+    ]
+    if shared:
+        step = dict(node=node_id, instruction=node["instruction"])
+        pairs.append(("current_step", canonical(step)))
+    pairs += [
+        ("remaining_events", canonical(remaining)),
+        ("previous", canonical(previous_notes(current.get("output")))),
+        ("correction", canonical(correction)),
+    ]
     return dict(
         operation="flow_select",
-        prompt_version="adaptive-flow/1",
+        prompt_version="adaptive-flow/2",
         schema=Selection.model_json_schema(),
         messages=[
-            dict(role="system", content=node["instruction"]),
-            dict(
-                role="user",
-                # Most stable first, so requests share a long cacheable prefix.
-                content=ordered(
-                    [
-                        ("tools", canonical(plan["tools"])),
-                        ("proposal", canonical(plan["proposal"])),
-                        ("source", source_json(source)),
-                        ("remaining_events", canonical(remaining)),
-                        ("previous", canonical(current.get("output"))),
-                        ("correction", canonical(correction)),
-                    ]
-                ),
-            ),
+            dict(role="system", content=shared or node["instruction"]),
+            dict(role="user", content=ordered(pairs)),
         ],
     )
 

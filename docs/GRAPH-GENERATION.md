@@ -53,7 +53,8 @@ a model's finish decision is not proof of semantic coverage or training readines
 ### The default flow
 
 The packaged flow works in phases, much like the scenarios that came before it. Each
-phase has its own selector prompt, and each kind of event has its own writer prompt:
+phase has its own step instruction under one shared selector instruction, and each
+kind of event has its own writer prompt:
 
 | Phase | Nodes | What happens |
 | --- | --- | --- |
@@ -115,7 +116,10 @@ Invalid configuration is rejected before reserving attempts.
 The complete normalized Flow, hash, proposal and tool catalogue freeze into the run.
 
 The YAML declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
-`actor_instruction` and a `nodes` map. Nodes support:
+`actor_instruction`, an optional `selector_instruction` and a `nodes` map. With
+`selector_instruction` set, it is the system prompt of every `select` node and each
+node's own `instruction` is sent as `current_step` after the data (see
+[Prompt order and prefix caching](#prompt-order-and-prefix-caching)). Nodes support:
 
 | Kind | Action and transitions |
 | --- | --- |
@@ -373,19 +377,41 @@ much of the previous request as possible. Caching saves prompt-processing time a
 cost; it does **not** enlarge the context window, because cached tokens still count
 toward `context_window_tokens`.
 
-- **Selector requests:** the node's system prompt, then (in JSON mode) the fixed output
-  schema, then the data from most to least stable: `tools`, `proposal`, `source`,
-  `remaining_events`, `previous`, `correction`. Inside `source`, events are listed in
-  causal order, so a newly committed event is usually appended at the end. Consecutive
-  requests from the same selector node typically share 85–95% of their bytes.
+- **Selector requests:** the flow's shared `selector_instruction` as the system prompt
+  (the same for every selector node and every trajectory), then one user message. In
+  JSON mode it starts with the fixed output schema, followed by the data from most to
+  least stable: `tools`, `proposal`, `source`, `current_step` (this node's ID and
+  instruction), `remaining_events`, `previous`, `correction`. Inside `source`, events are
+  listed in causal order, so a newly committed event is usually appended at the end.
 - **Event requests:** the fixed system prompt, then `tool`, `input_schema`, `kind`,
   `task`, `window_purpose`, `visible`, `world` and `correction`.
 
-Each selector node has its own system prompt, so the first request after a phase change
-starts a new prefix. Long episodes spend almost all their calls in the work loop, where
-reuse is high. The JSON content is unchanged; only its byte order is, and the
-walkthrough's **Prompt** tab shows the exact order sent. Keep this order when changing
-prompt builders; `tests/test_prompt_cache_order.py` checks it.
+`current_step` deliberately comes after the source, so the instruction sits next to the
+answer, which small open-weight models follow more reliably. Moving it earlier would
+save reprocessing only the step text (a few hundred tokens) per call, at the cost of
+burying it behind the whole trajectory. A flow without `selector_instruction` keeps the
+older layout: each node's instruction is its system prompt and there is no
+`current_step`.
+
+The roles always alternate (system, then user): the JSON-mode schema is joined to the
+user message rather than sent separately, because some open-weight chat templates
+reject two user messages in a row. Keep this order when changing prompt builders;
+`tests/test_prompt_cache_order.py` checks it, and the walkthrough's **Prompt** tab
+shows the exact text sent.
+
+#### What is left out of prompts
+
+Prompts carry what the model needs and nothing that is implied:
+
+- **Default-valued fields are dropped** from events and windows, in both the selector's
+  source and the writers' visible context. An event shows its kind, window, dependencies,
+  content and anything set to a non-default value; null call IDs, false flags and default
+  delivery and supervision settings are omitted. At 100 events this saves roughly 20 KB.
+- **`previous` holds the selector's own notes**, `finished`, `reason` and the chosen
+  task's ID, not the full last Selection: the task envelope is already in the source.
+- **Writers see only causal ancestors** of the event they write. Parallel branches and
+  later events are never included; `tests/test_prompt_scope.py` checks this. Only the
+  private selector sees the whole committed source, all of which is in the past.
 
 Over-budget requests return a context-limit result before contacting the model. A
 non-repair operation pauses with operation/input-size/allowance in its job log; repair

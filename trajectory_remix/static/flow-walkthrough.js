@@ -22,8 +22,15 @@ export function replyTemplate(request) {
 }
 
 /** Message content is often canonical JSON; show it formatted unless exact text is wanted. */
-function messageBody(content, exact) {
-  if (!exact) { try { return pre(pretty(JSON.parse(content))); } catch { /* plain text */ } }
+export function messageBody(content, exact) {
+  if (!exact) {
+    try { return pre(pretty(JSON.parse(content))); } catch { /* not pure JSON */ }
+    // JSON mode puts the schema sentence before the data, in the same message.
+    const at = content.indexOf('\n\n{');
+    if (at >= 0) {
+      try { return pre(content.slice(0, at) + '\n\n' + pretty(JSON.parse(content.slice(at + 2)))); } catch { /* plain text */ }
+    }
+  }
   return pre(content);
 }
 

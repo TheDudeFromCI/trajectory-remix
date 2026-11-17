@@ -3,8 +3,8 @@
 export const KINDS = {
   select: {
     label: 'Select', tone: 'sky', ports: ['next'],
-    help: 'Asks the Generator to choose the next event, or to finish. Its instruction is the system prompt. Output: a Selection (finished, reason, windows, task).',
-    instruction: 'System prompt for the selector'
+    help: 'Asks the Generator to choose the next event, or to finish. The shared selector instruction (Flow settings) is the system prompt; this step instruction is sent after the data, nearest the answer. Without a shared instruction, this one is the system prompt. Output: a Selection (finished, reason, windows, task).',
+    instruction: 'Step instruction'
   },
   event: {
     label: 'Write event', tone: 'mint', ports: ['next'],

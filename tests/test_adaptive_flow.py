@@ -118,8 +118,9 @@ async def test_default_adapts_with_parallel_results_join_and_causal_actor_contex
     # Eight events, one proposed finish and one confirmed finish after verification.
     selects = [p for p in fake.calls if p["operation"] == "flow_select"]
     assert len(selects) == 10
-    assert selects[-1]["messages"][0]["content"] != selects[-2]["messages"][0]["content"]
-    assert "Audit the committed events" in selects[-1]["messages"][0]["content"]
+    steps = [json.loads(p["messages"][1]["content"])["current_step"] for p in selects]
+    assert [s["node"] for s in steps[-2:]] == ["work", "verify"]
+    assert "Audit the committed events" in steps[-1]["instruction"]
 
 
 @pytest.mark.asyncio
@@ -139,10 +140,13 @@ async def test_default_flow_routes_each_event_kind_to_its_own_writer(tmp_path):
     for ident, node in writers.items():
         assert events[ident]["task"]["instruction"].endswith(flow[node]["instruction"])
     # Each phase has its own selector prompt.
-    systems = [p["messages"][0]["content"] for p in fake.calls if p["operation"] == "flow_select"]
-    assert systems[0] == flow["set_scene"]["instruction"]
-    assert systems[1] == flow["first_move"]["instruction"]
-    assert systems[2] == flow["work"]["instruction"]
+    # Every phase shares one system prompt; the step instruction comes after the data.
+    selects = [p for p in fake.calls if p["operation"] == "flow_select"]
+    shared = load_flow()["flow"]["selector_instruction"]
+    assert shared and {p["messages"][0]["content"] for p in selects} == {shared}
+    steps = [json.loads(p["messages"][1]["content"])["current_step"] for p in selects]
+    for step, node in zip(steps, ["set_scene", "first_move", "work"]):
+        assert step == {"node": node, "instruction": flow[node]["instruction"]}
 
 
 @pytest.mark.asyncio
