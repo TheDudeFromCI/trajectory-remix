@@ -178,6 +178,11 @@ against the schema and graph validator. Keep the prompts in `graph/draft_assembl
 descriptions in `compact_spec.schema` in sync.
 Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
 
+Phase barrier: `python -m pytest -q tests/test_phase_barrier.py` checks that every trajectory is
+drafted and assembled before any review (parked trajectories don't count toward the active cap),
+that the job pauses at the barrier and Resume runs the reviews, that the phase survives a restart,
+that starting reviews early skips the pause, and the phase routes.
+
 Held trajectories: `python -m pytest -q tests/test_trajectory_hold.py` checks that invalid review
 output or a local error holds only that trajectory while the rest finish, that the job pauses
 only when held trajectories alone remain, that Resume retries and clears `needs_attention`, and

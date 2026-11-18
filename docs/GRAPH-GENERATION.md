@@ -264,6 +264,40 @@ reply is unwrapped. Then:
 The draft is kept in the trajectory's `metadata.draft`, so you can compare it with the assembled
 graph.
 
+### Generate and review in separate sessions
+
+If you can't load your generation and review models at the same time (for example two local
+models that don't fit in VRAM together), turn on **Pause after Draft and Assembly (phase barrier)**
+(`generation.phase_barrier: true`). A run then works in two phases:
+
+| Phase | What runs | When it ends |
+|---|---|---|
+| 1. Draft and Assembly | Draft, Assembly and the assembly fix. A trajectory that reaches review **parks** instead. | When every trajectory is parked, held or finished, the job **pauses** and the log says so. |
+| 2. Reviews | Resume releases the parked trajectories into Fast Review and Critical Review, with their repairs. | When every trajectory is settled. |
+
+Parked trajectories don't count toward the active-trajectory cap, so a run of 100 drafts and
+assembles all 100, not just the first 20. The phase is stored with the job, so it survives
+shutting the server down between sessions.
+
+A typical day-and-night cycle with two local models:
+
+1. Give **Draft** and **Assembly** an endpoint for the generation model, **Fast Review** an
+   endpoint for the review model on a different server or port, and **Critical Review** a hosted
+   endpoint. Turn on the phase barrier.
+2. Load the generation model and start a run. Draft and Assembly run; reviews wait.
+3. When the job pauses at the barrier, check the log and any trajectories held for attention.
+   You can shut everything down now.
+4. Next session: start the server, load the review model, open the job and click **Resume**.
+   Reviews run until the job completes.
+
+If generation hasn't finished when you want to switch, click **Start reviews now** on the job
+(`POST /api/v1/jobs/{id}/phase/review`). Assembled trajectories go to review; unfinished ones carry
+on with Draft and Assembly once their endpoint is back. An endpoint whose server is offline pauses
+itself after its retries; resume it from the job page when the model is loaded.
+
+Point the two local endpoints at **different servers or ports**. If both use one server that
+answers with whatever model is loaded, review requests can silently go to the generation model.
+
 ## What the model sees
 
 The private selection controller sees the full proposal and the committed source, except
@@ -383,7 +417,7 @@ without calling a model.
 
 ## Reference
 
-**Settings** (`generation` in project settings): `method` (`flow` or `draft_assembly`, default `flow`),
+**Settings** (`generation` in project settings): `method` (`flow` or `draft_assembly`, default `flow`), `phase_barrier` (default false),
 `fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
 (default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
 (default 3). Configure the `chat` tool with a JSON object input that has a string `content`

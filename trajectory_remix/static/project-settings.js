@@ -201,7 +201,10 @@ export function renderGenerationSettings(container, initial, options = {}) {
   for (const [value, text] of [['flow', 'Step by step (Flow)'], ['draft_assembly', 'Draft and Assembly']]) { const o = node('option', text); o.value = value; method.append(o); }
   method.value = current().generation?.method ?? 'flow';
   method.onchange = () => write(d => { d.generation ||= {}; d.generation.method = method.value; });
-  settingsColumn.append(field('Generation method', method));
+  const barrier = node('input'); barrier.type = 'checkbox'; barrier.checked = current().generation?.phase_barrier ?? false; barrier.setAttribute('aria-label', 'Phase barrier');
+  barrier.onchange = () => write(d => { d.generation ||= {}; d.generation.phase_barrier = barrier.checked; });
+  barrier.dataset.tip = 'Every trajectory finishes Draft and Assembly before any review starts. The job then pauses so you can switch to the review models; Resume starts the reviews.';
+  settingsColumn.append(field('Generation method', method), field('Pause after Draft and Assembly (phase barrier)', barrier));
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Response and repair limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;

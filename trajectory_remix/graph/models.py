@@ -358,6 +358,9 @@ def default_checklists():
 class GenerationOptions(DTO):
     # flow: the step-by-step YAML Flow. draft_assembly: Draft, then Assembly (with its fix).
     method: Literal["flow", "draft_assembly"] = "flow"
+    # Runs only: every trajectory finishes generation (Draft and Assembly) before any review
+    # starts; the job then pauses so models can be swapped, and Resume starts the reviews.
+    phase_barrier: bool = False
     fast: bool = True
     critical: bool = True
     repair: bool = True

@@ -12,6 +12,7 @@ from . import (
     assembly_fix,
     draft_assembly,
     flow_store,
+    phase_barrier,
     repair_policy,
     reviews,
     spec_normalize,
@@ -345,6 +346,8 @@ class GenerationService:
             cp.pop("held")
             self._save(job, trajectory_hold.unflag(source), cp)
             return
+        if self._parked(job, ident, cp, settings):
+            return
         if cp["phase"] == "event":
             if cp.get("echo"):
                 echo = chat_echo(source, cp.pop("echo"))
@@ -544,6 +547,46 @@ class GenerationService:
             raise ValueError("No checkpoint to hold")
         cp.update(_epoch=epoch, _revision=record.revision)
         self._hold(job, record.source, cp, "A local error interrupted it; edits are kept.")
+
+    def _parked(self, job, ident, cp, settings):
+        """With a phase barrier, a run's reviews wait until every trajectory is assembled."""
+        if cp.get("manual") or not settings.generation.phase_barrier:
+            return False
+        if not phase_barrier.waits(cp):
+            return False
+        if phase_barrier.phase(self.store, job) == phase_barrier.GENERATION:
+            if phase_barrier.modes(self.store, job).get(ident) != "parked":
+                phase_barrier.set_mode(self.store, job, ident, "parked")
+                self.jobs.progress(job, f"Trajectory parked until reviews: {label(ident)}")
+            return True
+        if phase_barrier.modes(self.store, job).get(ident) == "parked":
+            phase_barrier.set_mode(self.store, job, ident, "attached")
+        return False
+
+    def _barrier(self, job, epoch):
+        """Pause the run once every trajectory is parked (or held) before its reviews."""
+        j = self.jobs.inspect(job)
+        if j["kind"] != "run" or j["state"] != "running":
+            return
+        if not self.settings_for(job).generation.phase_barrier:
+            return
+        if phase_barrier.phase(self.store, job) != phase_barrier.GENERATION:
+            return
+        if phase_barrier.pending_attempts(self.store, job):
+            return
+        owners = phase_barrier.modes(self.store, job)
+        parked = [i for i, mode in owners.items() if mode == "parked"]
+        held = [i for i in owners if trajectory_hold.held(self.jobs.checkpoint(job, i), epoch)]
+        if not parked or len(parked) + len(held) < len(owners):
+            return
+        phase_barrier.advance(self.store, job)
+        self.jobs.control(job, "pause")
+        self.jobs.append_log(
+            job,
+            f"Phase barrier: Draft and Assembly finished for {len(parked)} trajectories"
+            + (f" ({len(held)} held for attention)" if held else "")
+            + ". Switch to the review models, then Resume to start Fast and Critical Review.",
+        )
 
     def _pause_if_only_held(self, job, epoch):
         owners = self._owners(job)
@@ -929,5 +972,6 @@ class GenerationService:
                 except Exception:
                     self._hold_owned(job, ident, epoch)
             self._pause_if_only_held(job, epoch)
+            self._barrier(job, epoch)
             self.dispatch()
             await asyncio.sleep(0.025)
