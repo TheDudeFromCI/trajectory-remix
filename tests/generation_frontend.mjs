@@ -48,6 +48,10 @@ try {
   await page.locator('#trajectory-menu summary').click();
   const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#export-source').click()]);
   assert.equal(download.suggestedFilename(),`${record.source.id}.json`);
+  // Bulk Export downloads every trajectory matching the current search.
+  await page.locator('.bulk-edit summary').click(); await page.selectOption('#bulk-action','export');
+  const [bulk]=await Promise.all([page.waitForEvent('download'),page.locator('#bulk-start').click()]);
+  assert.equal(bulk.suggestedFilename(),'trajectories.jsonl');
   // Two distinct review jobs, independent logs and settled history records.
   assert.equal((await get('/job-summaries')).filter(j=>j.kind==='bulk').length,2);
   await page.locator('#trajectory-tab').click();
