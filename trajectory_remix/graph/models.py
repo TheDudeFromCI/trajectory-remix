@@ -356,10 +356,8 @@ def default_checklists():
 
 
 class GenerationOptions(DTO):
-    # flow: the step-by-step YAML Flow. two_pass: a prose draft, then one assembled graph.
-    method: Literal["flow", "two_pass"] = "flow"
-    # Two-pass only: the generator first fixes its own graph from validator diagnostics.
-    self_repair: bool = False
+    # flow: the step-by-step YAML Flow. draft_assembly: Draft, then Assembly (with its fix).
+    method: Literal["flow", "draft_assembly"] = "flow"
     fast: bool = True
     critical: bool = True
     repair: bool = True
@@ -390,9 +388,10 @@ class ProjectSettings(DTO):
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
-    endpoint_roles: dict[Literal["generator", "fast", "critical"], Identifier] = Field(
-        default_factory=dict
-    )
+    # draft and assembly are optional: Draft falls back to generator, Assembly to Draft.
+    endpoint_roles: dict[
+        Literal["generator", "draft", "assembly", "fast", "critical"], Identifier
+    ] = Field(default_factory=dict)
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
     review_checklists: dict[Literal["core", "critical"], dict[Identifier, Criterion]] = Field(
         default_factory=default_checklists

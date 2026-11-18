@@ -13,7 +13,7 @@ never executed.
 
 - [Run a generation](#run-a-generation)
 - [How a trajectory is built](#how-a-trajectory-is-built)
-- [Two-pass generation](#two-pass-generation)
+- [Draft and Assembly](#draft-and-assembly)
 - [What the model sees](#what-the-model-sees)
 - [Tools and chat during generation](#tools-and-chat-during-generation)
 - [Reviews and repair](#reviews-and-repair)
@@ -22,7 +22,8 @@ never executed.
 
 ## Run a generation
 
-1. In **Settings**, add endpoints and assign the **Generator** role (and optionally
+1. In **Settings**, add endpoints and assign the **Generator** role, or the **Draft** and
+   **Assembly** roles for [Draft and Assembly](#draft-and-assembly) (and optionally
    **Fast** and **Critical** review roles). See [Project settings](PROJECT-SETTINGS.md).
 2. Open **Sampler Matrix → Proposal preview → Generate trajectories**.
 3. Choose any **pins**, a **seed** and an **attempt count**, then **Start generation**.
@@ -218,46 +219,50 @@ separate engine. Each task has:
 Instructions are trusted project configuration and must respect the same boundaries. The smoke
 script's `smoke_plan` has examples.
 
-## Two-pass generation
+## Draft and Assembly
 
-Two-pass generation is an alternative to the step-by-step flow. It writes a whole episode in two
-generator calls, then reviews and repairs it as usual. To use it, set **Settings → Automatic review
-and repair → Generation method** to **Two pass** (`generation.method: two_pass`).
+**Draft and Assembly** is an alternative to the step-by-step flow, and the recommended method. It
+writes a whole episode in two calls, fixes its structure, then reviews and repairs it:
 
-| Pass | What the generator writes |
-|---|---|
-| 1. Draft | Plain-prose working notes for the whole episode. They include messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
-| 2. Assemble | One compact JSON spec of windows and events. It preserves the draft's facts and voice and connects each action to the events that make its evidence visible. |
+**Draft → Assembly → Fast Review → Critical Review**
 
-Both passes see the proposal, the tool catalogue, the review checklist (core and critical) and the
-flow's `actor_instruction`, so a persona added there applies here too. The prompts are in
-`trajectory_remix/graph/two_pass.yaml`.
+To use it, set **Settings → Automatic review and repair → Generation method** to **Draft and
+Assembly** (`generation.method: draft_assembly`).
 
-The draft places approvals, results and other evidence before the actions they support.
-The assembler gives independent steps separate windows so they can run in parallel.
-It saves findings that later steps need in notes before closing the reasoning windows.
+| Stage | Endpoint role | What happens |
+|---|---|---|
+| Draft | **Draft** (falls back to Generator) | Plain-prose working notes for the whole episode: messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
+| Assembly | **Assembly** (falls back to Draft) | One compact JSON spec of windows and events, built from the draft. If the validator reports any error or warning, the same model then fixes its own graph (the *assembly fix*). |
+| Fast Review | **Fast Review** | Checklist review, with repair if it fails. |
+| Critical Review | **Critical Review** | Stricter checklist review, with repair if it fails. |
+
+Draft and Assembly can share one endpoint, or you can give Assembly a stronger model for better
+structure. The Draft and Assembly calls see the proposal, the tool catalogue, the review checklist
+(core and critical) and the flow's `actor_instruction`, so a persona added there applies here too.
+The prompts are in `trajectory_remix/graph/draft_assembly.yaml`.
+
+### Assembly
 
 Remix builds the graph from the spec. It adds the tool listing event, tool-call IDs on results,
-chat deliveries (`:echo` events) and canonical tool arguments. Then:
+chat deliveries (`:echo` events) and canonical tool arguments. It also settles slips whose
+meaning is clear: an `:echo` written for an event that has no delivery means the event itself,
+echo events the model wrote are dropped (the builder writes them), and a tools object or a wrapped
+reply is unwrapped. Then:
 
-- A spec that can't be built (an unknown event or window, a reused ID, a call with no tool) gets a
-  correction with the reason, up to `format_retries` times.
-- A graph that builds but has structural errors goes straight to **Fast repair**, which fixes them
-  in place. With repair off, it gets a correction instead.
-- A clean graph goes to Fast and then Critical review.
+- A spec that still can't be built (an event listed before what it depends on, an unknown window,
+  a reused ID, a call with no tool) gets a correction that says how to fix it, up to
+  `format_retries` times.
+- A graph with any validator error or warning goes to the **assembly fix**: the Assembly model
+  sees the graph, every diagnostic, the causal views and the draft, and fixes them with the same
+  patch actions as repair (`view`, `inspect`, `patch`, `patch_window`, `remove_event`). It ends
+  with `done`, which is refused while structural errors remain, or `give_up`.
+- Giving up, running out of corrections or reaching `repair_context_bytes` hands the graph on
+  unchanged rather than failing it. Errors still left go to Fast repair; otherwise the graph goes
+  to Fast Review. The result is kept in `metadata.assembly_fix` (reason, turns, errors and
+  warnings left).
 
-**Generator self-repair (optional).** With **Generator fixes its own graph first** on
-(`generation.self_repair: true`), an assembled graph that has any validator error or warning goes
-back to the generator before review. The generator sees the graph, every diagnostic, the causal
-views and its own draft, and fixes them with the same patch actions as repair (`view`, `inspect`,
-`patch`, `patch_window`, `remove_event`). It ends with `done`, which is refused while structural
-errors remain, or `give_up`. Either way the graph then continues as above: errors still left go to
-Fast repair, otherwise to review. Giving up, running out of corrections or reaching
-`repair_context_bytes` hands the graph on unchanged rather than failing it. The result is recorded
-in `metadata.self_repair` (reason, turns, remaining errors and warnings).
-
-The draft is kept in the trajectory's `metadata.two_pass.draft`, so you can compare it with the
-assembled graph.
+The draft is kept in the trajectory's `metadata.draft`, so you can compare it with the assembled
+graph.
 
 ## What the model sees
 
@@ -374,8 +379,8 @@ without calling a model.
 
 ## Reference
 
-**Settings** (`generation` in project settings): `method` (`flow` or `two_pass`, default `flow`),
-`self_repair` (default false, two pass only), `fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
+**Settings** (`generation` in project settings): `method` (`flow` or `draft_assembly`, default `flow`),
+`fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
 (default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
 (default 3). Configure the `chat` tool with a JSON object input that has a string `content`
 to enable the echo helper ([example config](../examples/graph_local_llm.json)).

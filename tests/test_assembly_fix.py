@@ -1,10 +1,10 @@
-"""Generator self-repair: the generator fixes its own assembled graph from diagnostics."""
+"""Assembly fix: the Assembly model fixes its own graph from validator diagnostics."""
 
 import pytest
+from test_draft_assembly import DRAFT, spec
 from test_graph_generation import finish, service
-from test_two_pass import DRAFT, spec
 
-from trajectory_remix.graph import self_repair
+from trajectory_remix.graph import assembly_fix
 
 
 def tangled():
@@ -30,7 +30,7 @@ def fix(t):
 
 
 async def run(tmp_path, responses, **opts):
-    gen, fake = service(tmp_path, method="two_pass", self_repair=True, **opts)
+    gen, fake = service(tmp_path, method="draft_assembly", **opts)
     fake.responses = [{"draft": DRAFT}, *responses]
     job = gen.start([{"seed": 21}], {})
     await finish(gen, job)
@@ -41,10 +41,10 @@ async def run(tmp_path, responses, **opts):
 @pytest.mark.asyncio
 async def test_generator_fixes_errors_then_reviews_run(tmp_path):
     gen, job, source, ops, fake = await run(tmp_path, [tangled(), fix, {"action": "done"}])
-    assert ops[2:4] == [self_repair.OPERATION] * 2 and "repair" not in ops
+    assert ops[2:4] == [assembly_fix.OPERATION] * 2 and "repair" not in ops
     assert source.metadata["stage"] == 2
-    assert source.metadata["self_repair"]["reason"] == "done"
-    assert source.metadata["self_repair"]["errors"] == 0
+    assert source.metadata["assembly_fix"]["reason"] == "done"
+    assert source.metadata["assembly_fix"]["errors"] == 0
     first = fake.calls[2].payload["messages"]
     assert "unordered_window_writers" in first[1]["content"] and DRAFT in first[1]["content"]
 
@@ -64,9 +64,9 @@ async def test_warnings_alone_start_self_repair_and_give_up_hands_on(tmp_path):
     gen, job, source, ops, fake = await run(
         tmp_path, [left_open(), {"action": "give_up", "reason": reason}]
     )
-    assert ops[2] == self_repair.OPERATION and source.metadata["stage"] == 2
-    assert source.metadata["self_repair"]["reason"] == "gave_up"
-    assert source.metadata["self_repair"]["warnings"] >= 1
+    assert ops[2] == assembly_fix.OPERATION and source.metadata["stage"] == 2
+    assert source.metadata["assembly_fix"]["reason"] == "gave_up"
+    assert source.metadata["assembly_fix"]["warnings"] >= 1
 
 
 @pytest.mark.asyncio
@@ -75,18 +75,10 @@ async def test_invalid_self_repair_output_hands_on_without_pausing(tmp_path):
         tmp_path, [left_open(), {"action": "bogus"}], format_retries=0
     )
     assert gen.jobs.inspect(job)["state"] == "completed"
-    assert source.metadata["self_repair"]["reason"] == "invalid_output"
+    assert source.metadata["assembly_fix"]["reason"] == "invalid_output"
 
 
 @pytest.mark.asyncio
 async def test_clean_graph_skips_self_repair(tmp_path):
     gen, job, source, ops, fake = await run(tmp_path, [spec()])
-    assert self_repair.OPERATION not in ops and "self_repair" not in source.metadata
-
-
-@pytest.mark.asyncio
-async def test_self_repair_is_off_by_default(tmp_path):
-    gen, fake = service(tmp_path, method="two_pass")
-    fake.responses = [{"draft": DRAFT}, left_open()]
-    await finish(gen, gen.start([{"seed": 22}], {}))
-    assert self_repair.OPERATION not in [c.payload["operation"] for c in fake.calls]
+    assert assembly_fix.OPERATION not in ops and "assembly_fix" not in source.metadata

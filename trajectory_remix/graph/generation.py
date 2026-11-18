@@ -9,12 +9,13 @@ import jsonschema
 from . import (
     adaptive_driver,
     adaptive_flow,
+    assembly_fix,
+    draft_assembly,
     flow_store,
     repair_policy,
     reviews,
-    self_repair,
+    spec_normalize,
     tool_listing,
-    two_pass,
 )
 from .commands import merge_patch
 from .flow import append_event, chat_echo, event_payload, prepare_plan
@@ -44,7 +45,10 @@ class GenerationService:
         frozen = self.sampler.editor()
         settings_record = self.store.settings(frozen["settings_revision"])
         settings = settings_record.settings
-        if "generator" not in settings.endpoint_roles:
+        if settings.generation.method == "draft_assembly":
+            if not {"draft", "generator"} & settings.endpoint_roles.keys():
+                raise ValueError("Configure the Draft (or Generator) endpoint in Project Settings")
+        elif "generator" not in settings.endpoint_roles:
             raise ValueError("Configure the Generator endpoint in Project Settings")
         if settings.generation.fast and "fast" in settings.endpoint_roles:
             reviews.review_schema(settings, "fast")
@@ -63,11 +67,13 @@ class GenerationService:
             instructions["_flow_snapshot"] = adaptive_flow.load_flow(text=text)
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
-        if settings.generation.method == "two_pass":
+        if settings.generation.method == "draft_assembly":
             if "plan" in instructions:
                 raise ValueError("Two-pass generation uses the project flow, not a plan")
             snapshot = instructions["_flow_snapshot"]
-            plans = {p["id"]: two_pass.plan(p["proposal"], settings, snapshot) for p in proposals}
+            plans = {
+                p["id"]: draft_assembly.plan(p["proposal"], settings, snapshot) for p in proposals
+            }
         else:
             plans = {
                 p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals
@@ -349,11 +355,12 @@ class GenerationService:
                     ).fetchone()[0]
                 )
             plan = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
-            if plan.get("method") == "two_pass":
+            if plan.get("method") == "draft_assembly":
                 if cp.get("assembled"):
                     self._after_generation(job, source, cp)
                     return
-                payload = two_pass.payload(cp, plan, settings)
+                payload = draft_assembly.payload(cp, plan, settings)
+                payload["_role"] = draft_assembly.role(settings, payload["operation"])
             elif "flow" in plan:
                 payload = adaptive_driver.prepare(self, job, source, cp, plan, settings)
                 if payload is None:
@@ -370,16 +377,16 @@ class GenerationService:
                 ]
                 payload = event_payload(source, task, settings, cp["errors"] > 0)
                 payload["task"] = task
-            tier = "generator"
-        elif cp["phase"] == self_repair.PHASE:
-            payload = self_repair.payload(cp)
+            tier = payload.pop("_role", "generator")
+        elif cp["phase"] == assembly_fix.PHASE:
+            payload = assembly_fix.payload(cp)
             if (
                 len(canonical(payload["messages"]).encode())
                 >= settings.generation.repair_context_bytes
             ):
-                self._end_self_repair(job, source, cp, "context_limit")
+                self._end_assembly_fix(job, source, cp, "context_limit")
                 return
-            tier = "generator"
+            tier = cp["tier"]
         else:
             tier = cp["tier"]
             payload = reviews.payload(
@@ -453,19 +460,24 @@ class GenerationService:
             + (f" structural_errors={len(broken)}" if broken else ""),
         )
         settings = self.settings_for(ticket.job_id)
-        if settings.generation.self_repair and self_repair.needed(source, settings):
-            draft = source.metadata.get("two_pass", {}).get("draft", "")
-            cp.update(phase=self_repair.PHASE, tier="generator", errors=0, history=[])
-            cp["self_base"] = self_repair.base(source, settings, draft)
+        if assembly_fix.needed(source, settings):
+            draft = source.metadata.get("draft", "")
+            cp.update(
+                phase=assembly_fix.PHASE,
+                tier=draft_assembly.role(settings, "assembly"),
+                errors=0,
+                history=[],
+            )
+            cp["self_base"] = assembly_fix.base(source, settings, draft)
             self._save(ticket.job_id, source, cp, ticket=ticket)
             return
         self._to_review(ticket.job_id, source, broken, cp, ticket)
 
-    def _end_self_repair(self, job, source, cp, reason, ticket=None):
+    def _end_assembly_fix(self, job, source, cp, reason, ticket=None):
         """Hand the graph on to review (or Fast repair if errors remain)."""
         settings = self.settings_for(job)
         data = source.to_dict()
-        data["metadata"]["self_repair"] = self_repair.outcome(source, settings, cp, reason)
+        data["metadata"]["assembly_fix"] = assembly_fix.outcome(source, settings, cp, reason)
         source = GraphSource.model_validate(data)
         for key in ("self_base", "history"):
             cp.pop(key, None)
@@ -473,24 +485,24 @@ class GenerationService:
         self.jobs.progress(
             job, f"Self-repair ended ({label(reason)}): trajectory={label(source.id)}"
         )
-        self._to_review(job, source, self_repair.errors(source, settings), cp, ticket)
+        self._to_review(job, source, assembly_fix.errors(source, settings), cp, ticket)
 
-    def _self_repair_step(self, ticket, source, cp, body):
+    def _assembly_fix_step(self, ticket, source, cp, body):
         settings = self.settings_for(ticket.job_id)
         if body["action"] == "give_up":
-            self._end_self_repair(ticket.job_id, source, cp, "gave_up", ticket)
+            self._end_assembly_fix(ticket.job_id, source, cp, "gave_up", ticket)
         elif body["action"] != "done":
             self._repair_action(ticket, source, cp, body)
-        elif self_repair.errors(source, settings):
+        elif assembly_fix.errors(source, settings):
             cp["history"].extend(
                 [
                     dict(role="assistant", content=canonical(body)),
-                    self_repair.not_done(source, settings),
+                    assembly_fix.not_done(source, settings),
                 ]
             )
             self._save(ticket.job_id, source, cp, ticket=ticket)
         else:
-            self._end_self_repair(ticket.job_id, source, cp, "done", ticket)
+            self._end_assembly_fix(ticket.job_id, source, cp, "done", ticket)
 
     def _to_review(self, job, source, broken, cp, ticket=None):
         if not broken:
@@ -525,8 +537,8 @@ class GenerationService:
             f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
         )
         if cp["errors"] > settings.generation.format_retries:
-            if cp["phase"] == self_repair.PHASE:
-                self._end_self_repair(ticket.job_id, source, cp, "invalid_output", ticket)
+            if cp["phase"] == assembly_fix.PHASE:
+                self._end_assembly_fix(ticket.job_id, source, cp, "invalid_output", ticket)
             elif cp["phase"] == "event":
                 data = source.to_dict()
                 data["metadata"]["stage"] = -1
@@ -561,7 +573,7 @@ class GenerationService:
                     "Review/repair output invalid; no verdict recorded. Manual Resume required.",
                 )
         else:
-            if cp["phase"] in ("repair", self_repair.PHASE):
+            if cp["phase"] in ("repair", assembly_fix.PHASE):
                 cp["history"].append(
                     dict(
                         role="user",
@@ -579,8 +591,8 @@ class GenerationService:
             raise Fenced("Source changed while request was in progress")
         settings = self.settings_for(ticket.job_id)
         if complete.get("context_limit"):
-            if cp["phase"] == self_repair.PHASE:
-                self._end_self_repair(ticket.job_id, source, cp, "context_limit", ticket)
+            if cp["phase"] == assembly_fix.PHASE:
+                self._end_assembly_fix(ticket.job_id, source, cp, "context_limit", ticket)
             elif cp["phase"] == "repair":
                 self._next_round(ticket.job_id, source, cp, ticket)
             else:
@@ -605,6 +617,8 @@ class GenerationService:
         try:
             if complete.get("invalid_output"):
                 raise ValueError(invalid_reason(complete))
+            if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
+                body = spec_normalize.normalize(body)
             problem = explain(ticket.payload["schema"], body)
             if problem:
                 raise ValueError(problem)
@@ -616,9 +630,9 @@ class GenerationService:
                     settings,
                     shown=cp["flow"].get("shown_tools"),
                 )
-            if ticket.payload["operation"] == two_pass.ASSEMBLE:
+            if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
                 plan = self._plan(ticket.job_id, ticket.trajectory_id)
-                assembled, broken = two_pass.assemble(source, body, plan, settings)
+                assembled, broken = draft_assembly.assemble(source, body, plan, settings)
                 if broken and not self._can_repair(settings):
                     raise ValueError(
                         "Structural errors; fix them: "
@@ -658,15 +672,17 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
-        if cp["phase"] == self_repair.PHASE:
-            self._self_repair_step(ticket, source, cp, body)
+        if cp["phase"] == assembly_fix.PHASE:
+            self._assembly_fix_step(ticket, source, cp, body)
             return
-        if ticket.payload["operation"] == two_pass.DRAFT:
+        if ticket.payload["operation"] == draft_assembly.DRAFT:
             cp["draft"] = body["draft"]
-            self._save(ticket.job_id, two_pass.with_draft(source, body["draft"]), cp, ticket=ticket)
+            self._save(
+                ticket.job_id, draft_assembly.with_draft(source, body["draft"]), cp, ticket=ticket
+            )
             self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
             return
-        if ticket.payload["operation"] == two_pass.ASSEMBLE:
+        if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
             self._assembled(ticket, assembled, broken, cp)
             return
         if ticket.payload["operation"] == tool_listing.OPERATION:

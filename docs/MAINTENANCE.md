@@ -168,18 +168,19 @@ agent event is told its text won't be seen again, and that the default flow teac
 window lifecycle. Keep the shared `selector_instruction` short and put step-specific
 guidance in the step's own instruction: every selector request carries the shared text.
 
-Two-pass generation: `python -m pytest -q tests/test_two_pass.py tests/test_repair_policy.py`
+Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test_spec_normalize.py tests/test_repair_policy.py`
 checks the draft and assemble order, the draft kept in metadata, the builder's tool listing,
-chat deliveries and call IDs, corrections for specs that can't be built, and the handoff of
-structural errors to Fast repair. It also validates the worked example in the assemble prompt
-against the schema and graph validator. Keep the prompts in `graph/two_pass.yaml` and the field
+chat deliveries and call IDs, corrections for specs that can't be built, the handoff of
+errors left after the assembly fix to Fast repair, and that Draft, Assembly and the fix use their
+own endpoint roles (with Generator and Draft as fallbacks). `tests/test_spec_normalize.py` checks
+the settled `:echo` slips, tools objects and wrappers, and the builder's fix-it messages. It also validates the worked example in the assemble prompt
+against the schema and graph validator. Keep the prompts in `graph/draft_assembly.yaml` and the field
 descriptions in `compact_spec.schema` in sync.
 Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
 
-Generator self-repair: `python -m pytest -q tests/test_self_repair.py` checks that errors and
-warnings (not a clean graph) start self-repair, that `done` is refused while errors remain, that
-giving up or invalid output hands the graph on to review without pausing, and that it is off by
-default.
+Assembly fix: `python -m pytest -q tests/test_assembly_fix.py` checks that errors and
+warnings (not a clean graph) start the fix, that `done` is refused while errors remain, and that
+giving up or invalid output hands the graph on to review without pausing.
 
 Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
 verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
