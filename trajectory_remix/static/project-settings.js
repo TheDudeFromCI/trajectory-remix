@@ -17,7 +17,7 @@ export function tokenBudgetProblem(context, output) {
   return '';
 }
 /** Request fields the transport sets itself; extra_body may not replace them. */
-export const RESERVED_BODY_FIELDS = ['model', 'messages', 'stream', 'max_tokens', 'max_completion_tokens', 'response_format', 'session_id', 'temperature', 'top_p', 'presence_penalty'];
+export const RESERVED_BODY_FIELDS = ['model', 'messages', 'stream', 'max_tokens', 'max_completion_tokens', 'response_format', 'session_id', 'temperature', 'top_p', 'presence_penalty', 'reasoning_effort'];
 /** Mirrors the server's extra_body rules; returns [value, ''] or [undefined, error]. */
 export function parseExtraBody(text) {
   let value;
@@ -110,6 +110,16 @@ export function renderProjectSettings(container, initial, options = {}) {
       if (key.endsWith('_tokens')) tokenFields.push(n);
     }
     budget.fields = tokenFields; checkBudget();
+    const timeout = input(`Endpoint ${id} timeout_seconds`, endpoint.timeout_seconds ?? 120, v => { if (v > 0) edit('timeout_seconds', v); }, 'number'); timeout.min = 0; timeout.step = 1;
+    const reconnect = input(`Endpoint ${id} reconnect_seconds`, endpoint.reconnect_seconds, v => edit('reconnect_seconds', v > 0 ? v : null), 'number'); reconnect.min = 0; reconnect.step = 1;
+    const reconnectField = field('Auto-reconnect after (seconds)', reconnect);
+    reconnectField.append(node('span', 'Blank keeps the endpoint paused after its retries fail until you press Resume. Set seconds to retry automatically.', 'settings-help'));
+    const reasoning = input(`Endpoint ${id} reasoning`, endpoint.reasoning || '', v => edit('reasoning', v.trim() || null));
+    reasoning.setAttribute('list', `reasoning-levels-${id}`); reasoning.placeholder = 'Model default';
+    const suggestions = node('datalist'); suggestions.id = `reasoning-levels-${id}`;
+    for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']) { const o = node('option'); o.value = level; suggestions.append(o); }
+    const reasoningField = field('Reasoning level', reasoning); reasoningField.append(suggestions, node('span', 'Sent as reasoning_effort. Type any value your model accepts; "none" disables reasoning. Blank uses the model default.', 'settings-help'));
+    grid.append(field('Request timeout (seconds)', timeout), reconnectField, reasoningField);
     grid.append(budget);
     card.append(grid);
     card.append(providerOptions(id, endpoint, edit, input));
