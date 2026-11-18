@@ -13,7 +13,9 @@ from .validation import diagnose
 NOTE = (
     " Repair actions: view returns the current source with diagnostics; inspect shows one"
     " event and what it can see; patch merges a patch into an event (a new event ID adds"
-    " one); patch_window edits a window; remove_event deletes one. A verdict that still"
+    " one); patch_window edits a window; remove_event deletes one. What an event can see"
+    " (causal_views) is computed from its after list, so to give an event missing evidence,"
+    " patch its after to include the events that show it. A verdict that still"
     " fails keeps the session open: keep repairing. Use give_up, with the reason, only"
     " when repair is not feasible."
 )

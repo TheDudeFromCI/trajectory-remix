@@ -46,6 +46,8 @@ async def test_failing_verdict_keeps_the_session_open(tmp_path):
     assert source.metadata["stage"] == 1 and source.events["x"].content == "repaired"
     told = fake.calls[1].payload["messages"][-1]["content"]
     assert "still_failing" in told and "give_up" in told
+    system = fake.calls[0].payload["messages"][0]["content"]
+    assert "computed from its after list" in system
 
 
 @pytest.mark.asyncio
