@@ -19,7 +19,7 @@ Paths below are relative to `trajectory_remix/`.
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -84,6 +84,8 @@ node tests/provider_options_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/show_tools_frontend.mjs
+node tests/job_log_levels_frontend.mjs
+python tests/run_layout_frontend.py
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
@@ -122,7 +124,7 @@ Prompt-scope regressions: `python -m pytest -q tests/test_prompt_scope.py` check
 real stored sampler snapshots stay out of model prompts, review bodies aren't
 repeated per frontier, and oversized requests are intercepted before HTTP.
 
-Generation progress: `python -m pytest -q tests/test_generation_progress.py tests/test_graph_jobs.py` verifies first-request visibility, heartbeats before a
+Generation progress: `python -m pytest -q tests/test_generation_progress.py tests/test_graph_jobs.py` verifies first-request visibility, opt-in heartbeats before a
 response, stage/event progress, retry reporting and cancellation fencing without
 copying model or exception bodies to logs.
 

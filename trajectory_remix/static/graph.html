@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/sampler.css">
 <link rel="stylesheet" href="/static/project-settings.css">
 <script type="module" src="/static/shell.js"></script>
+<script type="module" src="/static/layout.js"></script>
 <script type="module" src="/static/graph.js"></script>
 <script type="module" src="/static/sampler.js"></script>
 </head>
@@ -26,6 +27,7 @@
 <symbol id="i-expand" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></symbol>
 <symbol id="i-shrink" viewBox="0 0 16 16"><path d="M13.5 6.5h-4v-4M9.5 6.5l4-4M2.5 9.5h4v4M6.5 9.5l-4 4"/></symbol>
 <symbol id="i-timeline" viewBox="0 0 16 16"><path d="M2.5 4.5h7M2.5 8h11M2.5 11.5h5"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 3v3.5H9.5"/><path d="M12.6 6.5A5 5 0 1 0 13 9"/></symbol>
 </svg>
 
@@ -93,36 +95,15 @@
     </details>
   </aside>
 
-  <div class="editor-center">
-    <section class="widget trajectory-bar" id="metadata-panel" aria-label="Trajectory">
-      <div class="bar-row">
-        <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
-        <span id="dirty-indicator" class="tag"></span>
-        <button id="diagnostics-summary" class="sm ghost" hidden></button>
-        <span class="grow"></span>
-        <button class="primary sm" id="save-source">Save</button>
-        <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
-          <button id="review-source">Review</button>
-          <button id="review-repair-source">Review &amp; Repair</button>
-          <button id="export-source">Export</button>
-          <hr>
-          <button id="reload-source">Reload saved source</button>
-          <hr>
-          <button id="delete-sample" class="danger">Delete trajectory</button>
-        </div></details>
-      </div>
-      <div class="bar-row meta-row">
-        <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
-        <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
-        <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
-        <span id="lock-slot" class="row"></span>
-      </div>
-    </section>
+  <div class="splitter" id="split-dataset" data-resize="dataset" role="separator" aria-orientation="vertical" aria-label="Resize dataset panel" tabindex="0"></div>
 
+  <div class="editor-center">
     <section class="widget windows-widget replay-view" aria-label="Windows">
       <div class="widget-head"><h2>Windows <span class="info" tabindex="0" data-tip="Context windows as they look at the selected timeline position. Each window keeps one colour everywhere in the editor."></span></h2></div>
       <div id="window-grid" class="window-grid widget-body"></div>
     </section>
+
+    <div class="splitter" id="split-timeline" data-resize="timeline" role="separator" aria-orientation="horizontal" aria-label="Resize timeline panel" tabindex="0"></div>
 
     <section class="widget timeline-widget timeline-section" aria-label="Timeline">
       <div class="widget-head timeline-controls">
@@ -157,7 +138,34 @@
     <div id="window-popout-body" class="popout-body"></div>
   </section>
 
+  <div class="splitter" id="split-event" data-resize="event" role="separator" aria-orientation="vertical" aria-label="Resize event panel" tabindex="0"></div>
+
   <aside class="widget event-panel editor-panel" id="event-editor-panel" aria-label="Event editor">
+    <section class="trajectory-bar" id="metadata-panel" aria-label="Trajectory">
+      <div class="bar-row">
+        <button id="header-toggle" class="ghost icon sm" type="button" aria-expanded="true" aria-controls="trajectory-meta" aria-label="Collapse trajectory details" data-tip="Collapse trajectory details"><svg class="ico"><use href="#i-chevron"/></svg></button>
+        <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
+        <span id="dirty-indicator" class="tag"></span>
+        <button id="diagnostics-summary" class="sm ghost" hidden></button>
+        <span class="grow"></span>
+        <button class="primary sm" id="save-source">Save</button>
+        <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
+          <button id="review-source">Review</button>
+          <button id="review-repair-source">Review &amp; Repair</button>
+          <button id="export-source">Export</button>
+          <hr>
+          <button id="reload-source">Reload saved source</button>
+          <hr>
+          <button id="delete-sample" class="danger">Delete trajectory</button>
+        </div></details>
+      </div>
+      <div class="bar-row meta-row" id="trajectory-meta">
+        <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
+        <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
+        <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
+        <span id="lock-slot" class="row"></span>
+      </div>
+    </section>
     <div class="widget-head">
       <h2 class="event-heading">Event</h2>
       <select id="event-picker" aria-label="Event"></select>
@@ -267,6 +275,7 @@
       <button id="jobs-next" class="ghost icon sm" aria-label="Next jobs"><svg class="ico"><use href="#i-next"/></svg></button>
     </div>
   </aside>
+  <div class="splitter" id="split-jobs" data-resize="jobs" role="separator" aria-orientation="vertical" aria-label="Resize job list" tabindex="0"></div>
   <section class="widget job-detail" id="job-detail" aria-label="Job detail">
     <div class="empty" id="job-empty">Select a job to see its progress, logs and files.</div>
   </section>
@@ -299,6 +308,7 @@
 
 <footer class="status-bar">
   <div id="status" role="status" aria-live="polite"></div>
+  <div id="status-transport" class="status-transport" aria-label="Timeline controls" hidden></div>
   <div id="job-status-bar" aria-label="Active jobs"></div>
 </footer>
 <div id="tooltip" role="tooltip"></div>

@@ -8,6 +8,7 @@ import os
 import httpx
 
 from ..structured_output import decoding_schema
+from .failure_reason import key_variable
 
 
 def strict_schema_supported(schema):
@@ -151,7 +152,7 @@ class OpenAITransport:
         payload = ticket.payload
         endpoint = payload["endpoint_config"]
         # Credentials are process configuration; never put them in jobs/source.
-        key = os.environ.get("REMIX_API_KEY_" + ticket.endpoint.upper().replace("-", "_"))
+        key = os.environ.get(key_variable(ticket.endpoint))
         headers = {"Authorization": "Bearer " + key} if key else {}
         body, budget = request_body(payload, ticket.trajectory_id)
         if budget["input_tokens_estimate"] > budget["input_ceiling"]:

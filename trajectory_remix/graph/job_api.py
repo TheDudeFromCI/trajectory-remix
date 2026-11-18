@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
 from .bulk import BulkService
+from .failure_reason import local_failure, log_local_error
 from .jobs import TERMINAL, Fenced, JobService, OwnershipConflict
 from .models import DTO, JsonValue
 from .phase_api import add_phase_routes
@@ -83,7 +84,9 @@ class JobWorker:
             else:
                 self.jobs.control(job, "pause")
                 self.jobs.append_log(
-                    job, "No driver registered; manual Resume after driver installation."
+                    job,
+                    "No driver registered; manual Resume after driver installation.",
+                    level="error",
                 )
         except (Fenced, asyncio.CancelledError):
             pass
@@ -93,15 +96,21 @@ class JobWorker:
             if self.jobs.inspect(job)["state"] == "running":
                 self.jobs.control(job, "pause")
                 if j["kind"] == "export" and isinstance(error, ValueError):
-                    self.jobs.append_log(job, "Export blocked: " + str(error)[:2000])
+                    self.jobs.append_log(job, "Export blocked: " + str(error)[:2000], level="error")
                 elif j["kind"] == "export" and isinstance(error, ImportError):
                     self.jobs.append_log(
-                        job, "Export dependencies unavailable; install trajectory-remix[export]."
+                        job,
+                        "Export dependencies unavailable; install trajectory-remix[export].",
+                        level="error",
                     )
                 else:
+                    log_local_error(error, j["kind"], job)
                     self.jobs.append_log(
                         job,
-                        "Operation interrupted; completed commits retained. Manual Resume required.",
+                        f"{j['kind'].capitalize()} job interrupted by {local_failure(error)}; "
+                        "completed commits retained. The traceback is in the server output. "
+                        "Manual Resume required.",
+                        level="error",
                     )
         finally:
             # Resume can arrive while a fenced thread is settling. Start the new
