@@ -13,8 +13,8 @@ exactly what the author or the generating model wrote.
 - Arguments are checked against the input schema when a call is **submitted**. A mismatch is a
   warning, not an error, because training data may deliberately include bad calls.
 
-Fresh projects include a `chat` tool whose input has a string `content`. It powers the default
-instruction-and-response flow. You can remove it, but then that flow won't produce chat replies.
+Fresh projects include a `chat` tool whose input has a string `content`. It's how the agent
+talks to people in generated episodes. You can remove it, but then episodes have no chat replies.
 
 ## Writing a call
 
@@ -43,7 +43,7 @@ click **Show tools…** next to the event editor's **+** button:
    **Add listing to draft** and save.
 
 The listing is a masked `external_text` event with one JSON line per tool (name, description,
-parameters). It is exactly what the Flow's **Show tools** step writes during generation, and
+parameters). It is exactly what Assembly writes during generation, and
 the random additions repeat: the same trajectory ID and event ID always add the same tools.
 
 ### Partial and abandoned calls

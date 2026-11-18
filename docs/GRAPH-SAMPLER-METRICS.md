@@ -117,4 +117,4 @@ python -m pytest -q tests/test_graph_sampling.py tests/test_graph_studio.py \
 ```
 
 These use a few deterministic proposals and tiny sources. No distribution experiments, benchmarks, training or live
-model calls run, and the 25k-stored / 20-active, live-Flow and training gates remain separate.
+model calls run, and the 25k-stored / 20-active, live-generation and training gates remain separate.

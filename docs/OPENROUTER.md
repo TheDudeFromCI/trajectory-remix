@@ -12,7 +12,7 @@ implementation team: treat it as a checklist to follow and report on.
 - A model that supports **structured outputs** and, ideally, a **cache discount**. Use the
   model checker below rather than picking by price alone.
 
-To check a flow for free first, run a few trajectories on a local server: see
+To check generation for free first, run a few trajectories on a local server: see
 [Generate from the studio with a local server](GRAPH-LOCAL-LLM.md#generate-from-the-studio-with-a-local-server).
 
 ## 1. Choose a model
@@ -24,7 +24,7 @@ python scripts/openrouter_models.py mistralai/mistral-small-3.2-24b-instruct dee
 ```
 
 For each model it reports whether Remix can use it, how its reasoning must be set, the
-exact **extra request fields** to use, and an estimated Generator cost per 1,000
+exact **extra request fields** to use, and an estimated Draft and Assembly cost per 1,000
 trajectories at 20, 40 and 80 events. To list every ready model under a price:
 
 ```bash
@@ -36,8 +36,8 @@ What to look for:
 | Check | Why it matters |
 | --- | --- |
 | **Ready** | Remix sends JSON-schema requests. Models without structured outputs ignore them or cannot be routed. |
-| **Cache discount** | Most of each selector request repeats the previous one. With a discount, cached input costs a fraction of the normal price, roughly halving the total. |
-| **Reasoning** | Reasoning (thinking) tokens are billed as output and can multiply the cost. Turn it off where the model allows; the checker gives the right field. A model whose reasoning is mandatory costs more than the estimate. |
+| **Cache discount** | Each assembly fix and repair turn repeats the previous one. With a discount, that cached input costs a fraction of the normal price. |
+| **Reasoning** | Reasoning (thinking) tokens are billed as output. The estimate assumes medium reasoning, as in the pilots; turning it off costs less, and the checker gives the right field. |
 
 A good first choice is **Mistral Small 3.2 24B**: structured outputs, no reasoning, a
 cache discount and a 256k window.
@@ -65,8 +65,8 @@ cache discount and a 256k window.
    | Provider options → Sticky sessions | On |
    | Provider options → Extra request fields | The `extra_body` the checker printed, for example `{"provider": {"require_parameters": true}}` |
 
-3. Assign the **Generator** role to `openrouter`. Leave Fast and Critical Review empty to
-   skip reviews for now.
+3. Assign the **Draft** role to `openrouter` (Assembly falls back to it). Leave Fast and
+   Critical Review empty to skip reviews for now.
 4. **Save settings.**
 
 [`examples/openrouter.json`](../examples/openrouter.json) has the same configuration as
@@ -83,17 +83,16 @@ Why these settings:
 - **Bytes per token 3** lets the context check use most of the 32k window. At the default
   of 1, a prompt of about 30 KB (roughly 9k real tokens) would already be refused.
 
-## 3. Check one trajectory step by step
+## 3. Check one trajectory first
 
-Before spending on a run, open **Flow → Walkthrough**, sample a seed and choose **Run next
-step** a few times with **Call the Generator**:
+Before spending on a run, start **1 attempt** from **Generate**:
 
-- The first step should be accepted. If the request fails, the error includes the
-  provider's own message, for example an unsupported reasoning setting.
-- The **Prompt** tab shows the estimated tokens against the allowance.
-- The **Reply** tab shows each reply's tokens and cost.
+- In **Jobs**, the log should show **Draft written**, then **Graph assembled**. A refused
+  request is logged with its HTTP status; check **Extra request fields** if it says a field is
+  unsupported.
+- The **Usage** tab shows each stage's tokens, time and cost.
 
-Then choose **Run to end** to see a whole trajectory and its quality before running more.
+Then open the trajectory in the Editor and read it before running more.
 
 ## 4. Run the 10-trajectory pilot
 
@@ -112,11 +111,11 @@ Open a few finished trajectories in the **Editor** to judge the content itself.
 
 | You see | What to do |
 | --- | --- |
-| `Request failed (HTTPStatusError HTTP 400)` and the endpoint pauses | Usually an unsupported request field. Run one walkthrough step to read the provider's message, fix **Extra request fields**, then **Resume** the endpoint. |
+| `Request failed (HTTPStatusError HTTP 400)` and the endpoint pauses | Usually an unsupported request field. Read the provider's message in the job log, fix **Extra request fields**, then **Resume** the endpoint. |
 | HTTP 401 or 402 | The key is missing (set it before starting the studio) or the account is out of credit. |
 | HTTP 429 | Too many concurrent requests. Lower **Concurrent requests**, then **Resume**. |
 | Many `Invalid structured output` corrections | The model struggles with the format. Make sure `require_parameters` is set; otherwise try another model. |
-| Corrections saying the reply was **cut off** | The reply hit **Max output tokens**. With reasoning on, the thinking used it up: turn reasoning off, or raise the limit. With reasoning off, the model probably got stuck repeating itself (open the reply in a walkthrough to see). That costs a minute or two and the full output limit each time, so for a model without reasoning set **Max output tokens** to about `3000`: a stuck reply then fails fast and is retried. |
+| Corrections saying the reply was **cut off** | The reply hit **Max output tokens**. With reasoning on, the thinking used it up: turn reasoning off, or raise the limit. With reasoning off, the model probably got stuck repeating itself. That costs a minute or two and the full output limit each time, so for a model without reasoning set **Max output tokens** to about `3000`: a stuck reply then fails fast and is retried. |
 | `Local context guard` holds a trajectory | A request was over the allowance. Raise **Context limit** toward the model's real window, or check **Bytes per token**. |
 | Cached share near 0% on the **Usage** tab | Check **Sticky sessions** is on and the model has a cache discount. |
 | Reasoning tokens in **Usage** | Reasoning is still on. Use the field the model checker suggests. |
