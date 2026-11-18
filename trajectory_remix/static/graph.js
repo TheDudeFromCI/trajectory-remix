@@ -533,6 +533,16 @@ export class StudioUI {
     this.history([{id: this.id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
     this.record = value; this.diagnostics = value.diagnostics; this.draft = copy(value.source); this.editors.clear(); this.renderDraft(); this.renderEvent(); this.schedulePreview(); await this.listing();
   }
+  exportSource() {
+    if (!this.draft || !this.id) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(this.draft, null, 2) + '\n'], {type: 'application/json'})), a = node('a');
+    a.href = url; a.download = `${this.id}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async exportMatches() {
+    const response = await fetch('/api/v1/trajectories/export?' + new URLSearchParams(this.query()), {headers: {'X-Remix-Token': document.querySelector('meta[name=remix-token]').content}});
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).message || response.statusText);
+    const url = URL.createObjectURL(await response.blob()), a = node('a'); a.href = url; a.download = 'trajectories.jsonl'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   async download(job, name) {
     const response = await fetch(`/api/v1/jobs/${job}/artifacts/${encodeURIComponent(name)}`, {headers: {'X-Remix-Token': document.querySelector('meta[name=remix-token]').content}});
     if (!response.ok) throw new Error('Artifact unavailable or expired');
@@ -770,10 +780,11 @@ export class StudioUI {
     on('export-button', 'click', () => $('export-dialog').showModal());
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-action', 'change', () => { $('bulk-value-label').hidden = !['stage', 'split'].includes($('bulk-action').value); });
-    on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'review' || action === 'review_repair') return this.startReview({repair: action === 'review_repair', bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
+    on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review' || action === 'review_repair') return this.startReview({repair: action === 'review_repair', bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
     on('review-source', 'click', () => this.startReview({repair: false}));
     on('review-repair-source', 'click', () => this.startReview({repair: true}));
+    on('export-source', 'click', () => this.exportSource());
     on('metrics-refresh', 'click', () => this.loadMetrics());
     on('metrics-calculate', 'click', async () => {
       const r = await api('/metrics/calculate-missing', 'POST', {query: this.query()});
