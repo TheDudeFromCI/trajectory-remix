@@ -834,6 +834,7 @@ class GenerationService:
     def dispatch(self):
         # Claims remain the sole ordering/cap authority. Each task is one queue
         # item, transport retries remain inside execute_one, never at the tail.
+        self.jobs.reconnect_due()
         with self.store.connect() as db:
             endpoints = [dict(r) for r in db.execute("SELECT * FROM graph_endpoints")]
         for endpoint in endpoints:

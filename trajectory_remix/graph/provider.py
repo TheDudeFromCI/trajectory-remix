@@ -141,6 +141,8 @@ def request_body(payload, trajectory_id):
     for key in ("temperature", "top_p", "presence_penalty"):
         if endpoint.get(key) is not None:
             body[key] = endpoint[key]
+    if endpoint.get("reasoning") is not None:
+        body["reasoning_effort"] = endpoint["reasoning"]
     if endpoint.get("sticky_sessions"):
         body["session_id"] = trajectory_id
     return body, budget

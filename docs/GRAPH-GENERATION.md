@@ -373,7 +373,19 @@ API. The settings JSON Schema exposes them at `GET /api/v1/schema/settings`.
 | `temperature` | `null` | Number from 0 to 2, or `null` |
 | `top_p` | `null` | Number from 0 to 1, or `null` |
 | `presence_penalty` | `null` | Number from -2 to 2, or `null` |
-| `timeout_seconds` | `120` | Finite number greater than zero |
+| `timeout_seconds` | `120` | Finite number greater than zero; the limit for each request |
+| `reasoning` | `null` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` |
+| `reconnect_seconds` | `null` | Number of seconds greater than zero, or `null` |
+
+`reasoning` is sent as the standard `reasoning_effort` request field. `none` asks the
+model not to reason; `null` omits the field so the model uses its own default. Because
+Remix sets this field, `extra_body` cannot contain `reasoning_effort`. Some models
+reject levels they do not support, so leave it blank for those.
+
+`reconnect_seconds` is off by default. When an endpoint pauses because all of its
+retries failed, it normally stays paused until you press **Resume**. With this set, it
+resumes by itself after that many seconds and tries the waiting requests again; if they
+fail again it pauses and waits again. Pressing **Resume** earlier still works.
 
 A blank sampling control should save as `null`: the transport omits it so the
 provider/model chooses its default. Zero is an explicit setting and is sent.
