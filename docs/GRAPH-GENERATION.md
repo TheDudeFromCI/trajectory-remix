@@ -23,7 +23,7 @@ never executed.
 
 ## Run a generation
 
-1. In **Settings**, add endpoints and assign the **Draft** role (or **Generator**), and
+1. In **Settings**, add endpoints and assign the **Draft** role, and
    optionally **Assembly**, **Fast Review** and **Critical Review**. See
    [Project settings](PROJECT-SETTINGS.md).
 2. Open **Sampler Matrix → Proposal preview → Generate trajectories**.
@@ -58,7 +58,7 @@ review and repair:
 
 | Stage | Endpoint role | What happens |
 |---|---|---|
-| Draft | **Draft** (falls back to Generator) | Plain-prose working notes for the whole episode: messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
+| Draft | **Draft** | Plain-prose working notes for the whole episode: messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
 | Assembly | **Assembly** (falls back to Draft) | One compact JSON spec of windows and events, built from the draft. If the validator reports any error or warning, the same model then fixes its own graph (the *assembly fix*). |
 | Fast Review | **Fast Review** | Checklist review, with repair if it fails. |
 | Critical Review | **Critical Review** | Stricter checklist review, with repair if it fails. |
@@ -187,7 +187,7 @@ endpoint, prompt version, evidence and resulting stage change.
 | Critical review (after Fast pass) passes / fails | **Validated (2)** / **Rejected (-2)** |
 | You approve | **Ready (3)**, always manual |
 
-If a review role is missing, generation still works with the Generator alone. Critical never
+If a review role is missing, generation still works with the Draft endpoint alone. Critical never
 skips Fast. Configured roles are used automatically unless the project toggle turns them off.
 
 ### Repair
@@ -279,8 +279,8 @@ the same retry policy. Your local server must support the requested JSON respons
 
 | Route | Action |
 | --- | --- |
-| `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{}}`. Needs a Draft or Generator role. Returns a job. |
-| `POST /api/v1/sampler/runs` | The same driver when a Draft or Generator role exists, otherwise a paused snapshot-only run. |
+| `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{}}`. Needs a Draft role. Returns a job. |
+| `POST /api/v1/sampler/runs` | The same driver when a Draft role exists, otherwise a paused snapshot-only run. |
 | `GET /api/v1/generation/prompts/default` | The packaged prompts, for Load default. Saves nothing. |
 | `POST /api/v1/reviews` | `{query, mode, repair}` or `{trajectory, expected_revision, mode, repair}`. |
 | `GET /api/v1/trajectories/{id}` | Source, ownership, diagnostics and review staleness. |

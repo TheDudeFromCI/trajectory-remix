@@ -76,8 +76,7 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
 
 1. **Add a model endpoint.** Click **Settings**. On **Models & defaults**, enter an
    endpoint ID and click **Add endpoint**, then fill in the base URL, the exact model
-   name, a concurrent-request limit and a retry count. Assign the *Draft* role (or
-   *Generator*), and optionally *Assembly*, *Fast Review* and *Critical Review*. One
+   name, a concurrent-request limit and a retry count. Assign the *Draft* role, and optionally *Assembly*, *Fast Review* and *Critical Review*. One
    endpoint can serve every role. Details,
    including credentials, are in [Project settings](PROJECT-SETTINGS.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the

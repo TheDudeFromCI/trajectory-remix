@@ -128,9 +128,9 @@ export function renderProjectSettings(container, initial, options = {}) {
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
     write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:65536, max_output_tokens:8192}; }); render();
   })); container.append(addition);
-  heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Draft falls back to Generator and Assembly to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
+  heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Assembly falls back to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');
-  for (const [role, name] of [['generator', 'Generator'], ['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
+  for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
     const choices = [['', 'Not configured'], ...Object.keys(current().endpoints || {}).map(id => [id, id])];
     roles.append(field(name, select(`${name} endpoint`, current().endpoint_roles?.[role], choices, value => {
       write(d => { d.endpoint_roles ||= {}; if (value) d.endpoint_roles[role] = value; else delete d.endpoint_roles[role]; });

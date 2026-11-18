@@ -70,7 +70,7 @@ With the `chat` tool, a successful call can **echo** into the room automatically
 when the story needs something else, such as a filtered message or a rejection with no
 delivery. Then write those outcomes yourself as events.
 
-The generator follows the same rules. See
+The Draft and Assembly models follow the same rules. See
 [Event generation](GRAPH-GENERATION.md#tools-and-chat-during-generation).
 
 ## What was removed

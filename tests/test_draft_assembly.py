@@ -166,9 +166,8 @@ def roles_service(tmp_path, roles):
 @pytest.mark.parametrize(
     "roles, expected",
     [
-        (dict(generator="g"), ["g", "g", "g"]),
         (dict(draft="d"), ["d", "d", "d"]),
-        (dict(generator="g", draft="d", assembly="a"), ["d", "a", "a"]),
+        (dict(draft="d", assembly="a"), ["d", "a", "a"]),
     ],
 )
 async def test_draft_assembly_and_fix_use_their_own_roles(tmp_path, roles, expected):
@@ -190,7 +189,7 @@ async def test_draft_assembly_and_fix_use_their_own_roles(tmp_path, roles, expec
     assert [c.endpoint for c in fake.calls[:3]] == expected
 
 
-def test_draft_assembly_needs_a_draft_or_generator_role(tmp_path):
+def test_draft_assembly_needs_a_draft_role(tmp_path):
     gen, _ = roles_service(tmp_path, dict(assembly="a"))
     with pytest.raises(ValueError, match="Draft"):
         gen.start([{"seed": 17}], {})

@@ -145,7 +145,7 @@ class GraphAgent:
                     for key, p in settings.tokenizer_profiles.items()
                 },
                 tools={key: t.name for key, t in settings.tools.items()},
-                generation_available="generator" in settings.endpoint_roles,
+                generation_available="draft" in settings.endpoint_roles,
             )
         if name == "get_authoring_guide":
             return self.guide(args.topic)

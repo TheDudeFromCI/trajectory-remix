@@ -24,7 +24,7 @@ def settings(**options):
         endpoints={
             k: dict(url="http://127.0.0.1:1/v1", model=k, retries=0) for k in ("g", "f", "c")
         },
-        endpoint_roles={"generator": "g", "fast": "f", "critical": "c"},
+        endpoint_roles={"draft": "g", "fast": "f", "critical": "c"},
         tools={
             "chat": dict(
                 name="Chat",

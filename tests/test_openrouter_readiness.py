@@ -200,7 +200,7 @@ def test_openrouter_example_settings_are_valid():
 
     path = Path(__file__).parents[1] / "examples" / "openrouter.json"
     settings = ProjectSettings.model_validate(json.loads(path.read_text()))
-    endpoint = settings.endpoints[settings.endpoint_roles["generator"]]
+    endpoint = settings.endpoints[settings.endpoint_roles["draft"]]
     assert endpoint.sticky_sessions and endpoint.bytes_per_token == 3.0
     assert endpoint.extra_body["provider"] == {"require_parameters": True}
     assert not settings.generation.fast and not settings.generation.repair

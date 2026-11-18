@@ -145,7 +145,7 @@ Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test
 checks the draft and assemble order, the draft kept in metadata, the builder's tool listing,
 chat deliveries and call IDs, corrections for specs that can't be built, the handoff of
 errors left after the assembly fix to Fast repair, and that Draft, Assembly and the fix use their
-own endpoint roles (with Generator and Draft as fallbacks). `tests/test_spec_normalize.py` checks
+own endpoint roles (with Draft as the fallback). `tests/test_spec_normalize.py` checks
 the settled `:echo` slips, tools objects and wrappers, and the builder's fix-it messages. It also validates the worked example in the assemble prompt
 against the schema and graph validator. Keep the prompts in `graph/draft_assembly.yaml` and the field
 descriptions in `compact_spec.schema` in sync.

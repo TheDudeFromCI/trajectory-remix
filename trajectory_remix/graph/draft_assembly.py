@@ -36,11 +36,11 @@ def prompts(settings):
 
 
 def role(settings, stage):
-    """The endpoint role for a stage: its own role, else Draft's, else the Generator."""
+    """The endpoint role for a stage: its own role, else Draft's."""
     roles = settings.endpoint_roles
     if stage == ASSEMBLE and "assembly" in roles:
         return "assembly"
-    return "draft" if "draft" in roles else "generator"
+    return "draft"
 
 
 def plan(proposal, settings):

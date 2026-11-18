@@ -44,8 +44,8 @@ class GenerationService:
         frozen = self.sampler.editor()
         settings_record = self.store.settings(frozen["settings_revision"])
         settings = settings_record.settings
-        if not {"draft", "generator"} & settings.endpoint_roles.keys():
-            raise ValueError("Configure the Draft (or Generator) endpoint in Project Settings")
+        if "draft" not in settings.endpoint_roles:
+            raise ValueError("Configure the Draft endpoint in Project Settings")
         if settings.generation.fast and "fast" in settings.endpoint_roles:
             reviews.review_schema(settings, "fast")
             if settings.generation.critical and "critical" in settings.endpoint_roles:

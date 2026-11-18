@@ -17,7 +17,7 @@ assert.equal(draft.endpoints['local-model'].url,'http://127.0.0.1:8000/v1');
 enter(byLabel(root,'Endpoint local-model model'),'tiny-local');
 enter(byLabel(root,'Endpoint local-model concurrency'),'3');
 enter(byLabel(root,'Endpoint local-model retries'),'4');
-change(byLabel(root,'Generator endpoint'),'local-model');
+change(byLabel(root,'Draft endpoint'),'local-model');
 change(byLabel(root,'Fast Review endpoint'),'local-model');
 assert.deepEqual(draft.endpoints['local-model'],{url:'http://127.0.0.1:8000/v1',model:'tiny-local',concurrency:3,retries:4,context_window_tokens:65536,max_output_tokens:8192});
 const alertText = () => root.querySelector('[role=alert]').textContent;
@@ -31,7 +31,7 @@ out('0');assert.match(alertText(),/positive whole numbers/);
 out('2048');assert.equal(alertText(),'');
 assert.deepEqual([draft.endpoints['local-model'].context_window_tokens,draft.endpoints['local-model'].max_output_tokens],[8705,2048]);
 ctx('16384');
-assert.deepEqual(draft.endpoint_roles,{generator:'local-model',fast:'local-model'});
+assert.deepEqual(draft.endpoint_roles,{draft:'local-model',fast:'local-model'});
 change(byLabel(root,'Assembly endpoint'),'local-model');assert.equal(draft.endpoint_roles.assembly,'local-model');
 assert.match(root.textContent,/REMIX_API_KEY_LOCAL_MODEL/);
 // A separate editor changes the same authoritative draft between keystrokes.
@@ -58,7 +58,7 @@ assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists
 assert.equal(draft.endpoints['local-model'].model,'tiny-local');
 btn(root,'Remove endpoint local-model').click();
 assert.deepEqual(draft.endpoint_roles,{});assert.deepEqual(draft.endpoints,{});
-assert.match(root.textContent,/Cleared endpoint roles: generator, fast/);
+assert.match(root.textContent,/Cleared endpoint roles: draft, fast/);
 assert.equal(draft.review_checklists.core.evidence.text,'Require exact supporting events');
 // Import a real-shaped tokenizer JSON and keep its original vocabulary intact.
 const names=['bos','eos','noop','ctx_begin','ctx_end','tool_begin','tool_end','response_begin','response_end','msg_begin','msg_end','window_ref'];

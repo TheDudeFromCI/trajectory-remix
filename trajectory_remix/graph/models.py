@@ -391,6 +391,17 @@ class GenerationOptions(DTO):
 
 
 class ProjectSettings(DTO):
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_generator_role(cls, data):
+        # Projects saved while a Generator endpoint role existed: Draft replaces it.
+        roles = data.get("endpoint_roles") if isinstance(data, dict) else None
+        if isinstance(roles, dict) and "generator" in roles:
+            roles = {k: v for k, v in roles.items() if k != "generator"}
+            roles.setdefault("draft", data["endpoint_roles"]["generator"])
+            data = {**data, "endpoint_roles": roles}
+        return data
+
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
     tools: dict[Identifier, ToolDefinition] = Field(
         default_factory=lambda: {
@@ -408,10 +419,10 @@ class ProjectSettings(DTO):
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
-    # draft and assembly are optional: Draft falls back to generator, Assembly to Draft.
-    endpoint_roles: dict[
-        Literal["generator", "draft", "assembly", "fast", "critical"], Identifier
-    ] = Field(default_factory=dict)
+    # Assembly is optional: it falls back to Draft.
+    endpoint_roles: dict[Literal["draft", "assembly", "fast", "critical"], Identifier] = Field(
+        default_factory=dict
+    )
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
     review_checklists: dict[Literal["core", "critical"], dict[Identifier, Criterion]] = Field(
         default_factory=default_checklists

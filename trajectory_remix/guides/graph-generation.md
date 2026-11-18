@@ -1,6 +1,6 @@
 # Generate or review graph sources
 
-Read `get_graph_session` first. The Draft (or Generator) endpoint must be configured
+Read `get_graph_session` first. The Draft endpoint must be configured
 for `generate_graphs`; Assembly and the review roles are optional. Requests invoke those endpoints.
 Confirm that model use is within the current task authorization.
 

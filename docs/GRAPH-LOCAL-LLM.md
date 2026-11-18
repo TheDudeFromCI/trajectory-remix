@@ -11,9 +11,9 @@ certify tool coherence, objective coverage or truthful reasoning, so record what
 
 1. Install the project and start your own OpenAI-compatible server with structured JSON-schema output.
 2. Copy [`examples/graph_local_llm.json`](../examples/graph_local_llm.json) to a local config and set each base URL
-   and model. The three roles (generator, fast, critical) may share one server, and the example uses concurrency 1.
+   and model. The three roles (draft, fast, critical) may share one server, and the example uses concurrency 1.
    Project toggles let you opt out of review and repair. No cloud account is needed.
-3. If your server needs a key, set `REMIX_API_KEY_LOCAL_GENERATOR`, `REMIX_API_KEY_LOCAL_FAST` and
+3. If your server needs a key, set `REMIX_API_KEY_LOCAL_DRAFT`, `REMIX_API_KEY_LOCAL_FAST` and
    `REMIX_API_KEY_LOCAL_CRITICAL` in the environment.
 
 ## 2. Run one trajectory first

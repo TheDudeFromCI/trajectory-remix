@@ -13,7 +13,7 @@
       "extra_body": {"provider": {"require_parameters": true}}
     }
   },
-  "endpoint_roles": {"generator": "openrouter"},
+  "endpoint_roles": {"draft": "openrouter"},
   "generation": {"fast": false, "critical": false, "repair": false, "format_retries": 2, "repair_context_bytes": 65536},
   "tools": {
     "chat": {"name": "Chat", "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"], "additionalProperties": false}},

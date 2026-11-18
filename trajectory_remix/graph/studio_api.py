@@ -203,7 +203,7 @@ def create_studio_app(
 
     @router.post("/sampler/runs", status_code=202)
     async def sampler_run(body: SamplerRun):
-        if "generator" in studio.store.settings().settings.endpoint_roles:
+        if "draft" in studio.store.settings().settings.endpoint_roles:
             job = generation.start([r.model_dump() for r in body.requests], body.instructions)
         else:
             job = sampler.run([r.model_dump() for r in body.requests], body.instructions)
@@ -263,7 +263,7 @@ def create_studio_app(
         return dict(
             id=studio.store.project_id,
             format="kidra-graph-project/1",
-            generation_available="generator" in studio.store.settings().settings.endpoint_roles,
+            generation_available="draft" in studio.store.settings().settings.endpoint_roles,
         )
 
     @router.get("/settings")

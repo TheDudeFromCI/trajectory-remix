@@ -42,7 +42,7 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
    [Source format](docs/GRAPH-SOURCE.md).
 2. **Studio.** Edit sources, run jobs and review work in the browser
    ([Dashboard](docs/DASHBOARD.md), [Studio reference](docs/GRAPH-STUDIO.md)).
-3. **Generate and review.** The sampler proposes a scenario, your generator model
+3. **Generate and review.** The sampler proposes a scenario, your draft and assembly models
    writes the events one at a time, and optional reviewers sign off or repair
    ([Event generation](docs/GRAPH-GENERATION.md)).
 4. **Stage.** Each trajectory has a stage from Unfinished (-3) up to **Ready (3)**.

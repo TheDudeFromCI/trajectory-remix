@@ -583,8 +583,8 @@ export class StudioUI {
     const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
     const box = $('generation-run-controls'); box.replaceChildren(node('h3', 'New run'));
     const roles = this.settings.endpoint_roles || {}, roleList = node('div', undefined, 'role-list');
-    for (const [role, name] of [['generator', 'Generator'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
-      const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'generator' ? 'danger' : 'faint')); roleList.append(row);
+    for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
+      const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'draft' ? 'danger' : 'faint')); roleList.append(row);
     }
     box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
@@ -667,7 +667,7 @@ export class StudioUI {
   renderToolSettings(selected = '') {
     const box = $('tool-schema-editor'); box.replaceChildren();
     box.className = 'settings-section';
-    box.append(node('h3', 'Synthetic tools'), node('p', 'Tools an agent can call in authored and generated trajectories. They are contracts only: the Generator writes each call and its result, and nothing runs. The selector and writers read each schema, including its description. Forms edit the settings draft; Save settings validates it.', 'settings-help'));
+    box.append(node('h3', 'Synthetic tools'), node('p', 'Tools an agent can call in authored and generated trajectories. They are contracts only: the Draft and Assembly models write each call and its result, and nothing runs. The selector and writers read each schema, including its description. Forms edit the settings draft; Save settings validates it.', 'settings-help'));
     const data = JSON.parse($('settings-json').value); data.tools ||= {};
     const write = () => { const current = JSON.parse($('settings-json').value); current.tools = data.tools; $('settings-json').value = json(current); };
     const control = (label, value = '') => { const wrap = node('label', label), n = node('input'); n.value = value; n.setAttribute('aria-label', label); wrap.append(n); return [wrap, n]; };

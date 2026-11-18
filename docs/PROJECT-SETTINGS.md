@@ -26,8 +26,7 @@ models.
 
    | Role | Used for |
    |---|---|
-   | **Generator** | The fallback for Draft when no Draft role is set (older projects use it). |
-   | **Draft** | The Draft stage of [Draft and Assembly](GRAPH-GENERATION.md#draft-and-assembly). Optional. |
+   | **Draft** | The Draft stage of [Draft and Assembly](GRAPH-GENERATION.md#draft-and-assembly). Required to generate. Older projects with a Generator role are converted to Draft. |
    | **Assembly** | The Assembly stage and its fix. Optional; falls back to Draft. Give it a stronger model for better structure. |
    | **Fast Review** | Fast Review and its repair. |
    | **Critical Review** | Critical Review and its repair. |
