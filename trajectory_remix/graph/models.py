@@ -358,6 +358,8 @@ def default_checklists():
 class GenerationOptions(DTO):
     # flow: the step-by-step YAML Flow. two_pass: a prose draft, then one assembled graph.
     method: Literal["flow", "two_pass"] = "flow"
+    # Two-pass only: the generator first fixes its own graph from validator diagnostics.
+    self_repair: bool = False
     fast: bool = True
     critical: bool = True
     repair: bool = True

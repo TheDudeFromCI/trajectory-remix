@@ -176,6 +176,11 @@ against the schema and graph validator. Keep the prompts in `graph/two_pass.yaml
 descriptions in `compact_spec.schema` in sync.
 Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
 
+Generator self-repair: `python -m pytest -q tests/test_self_repair.py` checks that errors and
+warnings (not a clean graph) start self-repair, that `done` is refused while errors remain, that
+giving up or invalid output hands the graph on to review without pausing, and that it is off by
+default.
+
 Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
 verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
 shows the patched source, that context exhaustion starts a fresh round on the current graph,

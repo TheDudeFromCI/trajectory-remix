@@ -12,6 +12,7 @@ from . import (
     flow_store,
     repair_policy,
     reviews,
+    self_repair,
     tool_listing,
     two_pass,
 )
@@ -370,6 +371,15 @@ class GenerationService:
                 payload = event_payload(source, task, settings, cp["errors"] > 0)
                 payload["task"] = task
             tier = "generator"
+        elif cp["phase"] == self_repair.PHASE:
+            payload = self_repair.payload(cp)
+            if (
+                len(canonical(payload["messages"]).encode())
+                >= settings.generation.repair_context_bytes
+            ):
+                self._end_self_repair(job, source, cp, "context_limit")
+                return
+            tier = "generator"
         else:
             tier = cp["tier"]
             payload = reviews.payload(
@@ -442,11 +452,52 @@ class GenerationService:
             f"Graph assembled: trajectory={label(source.id)} events={len(source.events)}"
             + (f" structural_errors={len(broken)}" if broken else ""),
         )
-        if not broken:
-            cp["assembled"] = True
+        settings = self.settings_for(ticket.job_id)
+        if settings.generation.self_repair and self_repair.needed(source, settings):
+            draft = source.metadata.get("two_pass", {}).get("draft", "")
+            cp.update(phase=self_repair.PHASE, tier="generator", errors=0, history=[])
+            cp["self_base"] = self_repair.base(source, settings, draft)
             self._save(ticket.job_id, source, cp, ticket=ticket)
             return
+        self._to_review(ticket.job_id, source, broken, cp, ticket)
+
+    def _end_self_repair(self, job, source, cp, reason, ticket=None):
+        """Hand the graph on to review (or Fast repair if errors remain)."""
+        settings = self.settings_for(job)
+        data = source.to_dict()
+        data["metadata"]["self_repair"] = self_repair.outcome(source, settings, cp, reason)
+        source = GraphSource.model_validate(data)
+        for key in ("self_base", "history"):
+            cp.pop(key, None)
+        cp.update(phase="event", errors=0)
+        self.jobs.progress(
+            job, f"Self-repair ended ({label(reason)}): trajectory={label(source.id)}"
+        )
+        self._to_review(job, source, self_repair.errors(source, settings), cp, ticket)
+
+    def _self_repair_step(self, ticket, source, cp, body):
         settings = self.settings_for(ticket.job_id)
+        if body["action"] == "give_up":
+            self._end_self_repair(ticket.job_id, source, cp, "gave_up", ticket)
+        elif body["action"] != "done":
+            self._repair_action(ticket, source, cp, body)
+        elif self_repair.errors(source, settings):
+            cp["history"].extend(
+                [
+                    dict(role="assistant", content=canonical(body)),
+                    self_repair.not_done(source, settings),
+                ]
+            )
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+        else:
+            self._end_self_repair(ticket.job_id, source, cp, "done", ticket)
+
+    def _to_review(self, job, source, broken, cp, ticket=None):
+        if not broken:
+            cp["assembled"] = True
+            self._save(job, source, cp, ticket=ticket)
+            return
+        settings = self.settings_for(job)
         data = source.to_dict()
         data["metadata"].update(
             stage=-1, generation_failure=dict(kind="assembled_with_structural_errors")
@@ -454,7 +505,7 @@ class GenerationService:
         source = GraphSource.model_validate(data)
         cp.update(phase="repair", tier="fast", errors=0, history=[], round=1)
         cp["repair_base"] = reviews.payload(source, settings, "fast", "repair")["messages"]
-        self._save(ticket.job_id, source, cp, ticket=ticket)
+        self._save(job, source, cp, ticket=ticket)
 
     def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
         data = source.to_dict()
@@ -474,7 +525,9 @@ class GenerationService:
             f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
         )
         if cp["errors"] > settings.generation.format_retries:
-            if cp["phase"] == "event":
+            if cp["phase"] == self_repair.PHASE:
+                self._end_self_repair(ticket.job_id, source, cp, "invalid_output", ticket)
+            elif cp["phase"] == "event":
                 data = source.to_dict()
                 data["metadata"]["stage"] = -1
                 data["metadata"]["generation_failure"] = {
@@ -508,7 +561,7 @@ class GenerationService:
                     "Review/repair output invalid; no verdict recorded. Manual Resume required.",
                 )
         else:
-            if cp["phase"] == "repair":
+            if cp["phase"] in ("repair", self_repair.PHASE):
                 cp["history"].append(
                     dict(
                         role="user",
@@ -526,7 +579,9 @@ class GenerationService:
             raise Fenced("Source changed while request was in progress")
         settings = self.settings_for(ticket.job_id)
         if complete.get("context_limit"):
-            if cp["phase"] == "repair":
+            if cp["phase"] == self_repair.PHASE:
+                self._end_self_repair(ticket.job_id, source, cp, "context_limit", ticket)
+            elif cp["phase"] == "repair":
                 self._next_round(ticket.job_id, source, cp, ticket)
             else:
                 self._save(ticket.job_id, source, cp, ticket=ticket)
@@ -603,6 +658,9 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
+        if cp["phase"] == self_repair.PHASE:
+            self._self_repair_step(ticket, source, cp, body)
+            return
         if ticket.payload["operation"] == two_pass.DRAFT:
             cp["draft"] = body["draft"]
             self._save(ticket.job_id, two_pass.with_draft(source, body["draft"]), cp, ticket=ticket)

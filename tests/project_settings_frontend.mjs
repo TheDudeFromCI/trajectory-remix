@@ -51,6 +51,7 @@ enter(byLabel(generation,'New critical criterion ID'),'quality');btn(generation,
 enter(byLabel(generation,'critical criterion quality'),'Avoid unsupported conclusions');
 const method=byLabel(generation,'Generation method');assert.equal(method.value,'flow');method.value='two_pass';method.dispatchEvent(new window.Event('change'));
 enter(byLabel(generation,'Repair rounds'),'4');
+const own=byLabel(generation,'Generator fixes its own graph first');assert.equal(own.checked,false);own.checked=true;own.dispatchEvent(new window.Event('change'));assert.equal(draft.generation.self_repair,true);
 assert.equal(draft.generation.method,'two_pass');assert.equal(draft.generation.repair_rounds,4);
 assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists.critical.quality.text,'Avoid unsupported conclusions');
 assert.equal(draft.endpoints['local-model'].model,'tiny-local');

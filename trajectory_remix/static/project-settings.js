@@ -201,7 +201,9 @@ export function renderGenerationSettings(container, initial, options = {}) {
   for (const [value, text] of [['flow', 'Step by step (Flow)'], ['two_pass', 'Two pass: draft, then assemble']]) { const o = node('option', text); o.value = value; method.append(o); }
   method.value = current().generation?.method ?? 'flow';
   method.onchange = () => write(d => { d.generation ||= {}; d.generation.method = method.value; });
-  settingsColumn.append(field('Generation method', method));
+  const selfRepair = node('input'); selfRepair.type = 'checkbox'; selfRepair.checked = current().generation?.self_repair ?? false; selfRepair.setAttribute('aria-label', 'Generator fixes its own graph first');
+  selfRepair.onchange = () => write(d => { d.generation ||= {}; d.generation.self_repair = selfRepair.checked; });
+  settingsColumn.append(field('Generation method', method), field('Generator fixes its own graph first (two pass)', selfRepair));
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Response and repair limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;

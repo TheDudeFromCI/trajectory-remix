@@ -246,6 +246,16 @@ chat deliveries (`:echo` events) and canonical tool arguments. Then:
   in place. With repair off, it gets a correction instead.
 - A clean graph goes to Fast and then Critical review.
 
+**Generator self-repair (optional).** With **Generator fixes its own graph first** on
+(`generation.self_repair: true`), an assembled graph that has any validator error or warning goes
+back to the generator before review. The generator sees the graph, every diagnostic, the causal
+views and its own draft, and fixes them with the same patch actions as repair (`view`, `inspect`,
+`patch`, `patch_window`, `remove_event`). It ends with `done`, which is refused while structural
+errors remain, or `give_up`. Either way the graph then continues as above: errors still left go to
+Fast repair, otherwise to review. Giving up, running out of corrections or reaching
+`repair_context_bytes` hands the graph on unchanged rather than failing it. The result is recorded
+in `metadata.self_repair` (reason, turns, remaining errors and warnings).
+
 The draft is kept in the trajectory's `metadata.two_pass.draft`, so you can compare it with the
 assembled graph.
 
@@ -365,7 +375,7 @@ without calling a model.
 ## Reference
 
 **Settings** (`generation` in project settings): `method` (`flow` or `two_pass`, default `flow`),
-`fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
+`self_repair` (default false, two pass only), `fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
 (default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
 (default 3). Configure the `chat` tool with a JSON object input that has a string `content`
 to enable the echo helper ([example config](../examples/graph_local_llm.json)).
