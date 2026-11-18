@@ -92,7 +92,7 @@ def causal_evidence(source):
                 window: [item["id"] for item in view["events"]]
                 for window, view in causal_view(source, event.after).items()
             }
-        except ValueError:
+        except (ValueError, KeyError):  # A repair can leave an event in an unknown window.
             result[ident] = {
                 "unavailable": "Structurally invalid causal frontier; see diagnostics."
             }

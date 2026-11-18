@@ -481,7 +481,8 @@ class GenerationService:
                     "kind": "invalid_provider_output",
                     "event_index": cp["index"],
                 }
-                if settings.generation.repair and "fast" in settings.endpoint_roles:
+                # An empty graph has nothing to repair and would pass structurally.
+                if self._can_repair(settings) and source.events:
                     cp.update(phase="repair", tier="fast", errors=0, history=[])
                     cp["repair_base"] = reviews.payload(
                         GraphSource.model_validate(data), settings, "fast", "repair"

@@ -16,7 +16,6 @@ from .validation import diagnose
 
 DRAFT, ASSEMBLE = "two_pass_draft", "two_pass_assemble"
 OPERATIONS = {DRAFT, ASSEMBLE}
-VERSION = "two-pass/1"
 DRAFT_SCHEMA = dict(
     type="object",
     properties=dict(draft=dict(type="string", minLength=200)),
@@ -55,10 +54,11 @@ def _messages(plan, settings, instruction, extra):
 def payload(cp, plan, settings):
     """The next request, or None when the assembled graph is ready for review."""
     correction = cp.get("flow_error", "") if cp["errors"] else ""
+    version = plan["prompts"]["version"]
     if "draft" not in cp:
         return dict(
             operation=DRAFT,
-            prompt_version=VERSION,
+            prompt_version=version,
             schema=DRAFT_SCHEMA,
             messages=_messages(
                 plan, settings, plan["prompts"]["draft_instruction"], dict(correction=correction)
@@ -66,7 +66,7 @@ def payload(cp, plan, settings):
         )
     return dict(
         operation=ASSEMBLE,
-        prompt_version=VERSION,
+        prompt_version=version,
         schema=compact_spec.schema(list(plan["tools"])),
         messages=_messages(
             plan,

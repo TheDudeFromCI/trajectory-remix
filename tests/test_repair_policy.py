@@ -103,3 +103,24 @@ async def test_round_cap_is_the_only_other_failure(tmp_path):
     source = await run(gen, record)
     assert source.metadata["stage"] == -3
     assert source.metadata["repair_outcomes"][-1]["outcome"] == "round_limit"
+
+
+def test_review_prompt_survives_an_event_in_an_unknown_window():
+    from trajectory_remix.graph import repair_policy, reviews
+    from trajectory_remix.graph.models import GraphSource
+
+    # A repair patch can add an event in a window that does not exist yet.
+    source = GraphSource.model_validate(
+        dict(
+            format="kidra-trajectory-graph/1",
+            id=str(uuid4()),
+            windows=plan()["windows"],
+            events={
+                "x": dict(kind="agent_text", window="reason", content="before"),
+                "y": dict(kind="agent_text", window="nowhere", after=["x"], content="new"),
+                "z": dict(kind="agent_text", window="reason", after=["y"], content="later"),
+            },
+        )
+    )
+    assert "unavailable" in reviews.causal_evidence(source)["z"]
+    assert isinstance(repair_policy.inspect(source, "z")["visible"], str)

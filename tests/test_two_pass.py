@@ -117,3 +117,22 @@ def test_builder_explains_bad_specs(tmp_path, change, message):
     base = dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
     with pytest.raises(ValueError, match=message):
         compact_spec.build(body, base, tools)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_draft_is_not_sent_to_repair(tmp_path):
+    gen, fake = two_pass_service(tmp_path, format_retries=0)
+    fake.responses = [{"draft": "too short"}]
+    job = gen.start([{"seed": 14}], {})
+    await finish(gen, job)
+    attempt = gen.jobs.attempts(job)[0]
+    assert [c.payload["operation"] for c in fake.calls] == [two_pass.DRAFT]
+    assert attempt["outcome"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_requests_carry_the_prompt_file_version(tmp_path):
+    gen, fake = two_pass_service(tmp_path)
+    fake.responses = [{"draft": DRAFT}, spec()]
+    await finish(gen, gen.start([{"seed": 15}], {}))
+    assert fake.calls[0].payload["prompt_version"] == two_pass.prompts()["version"]

@@ -51,9 +51,13 @@ def view(source, settings):
 def inspect(source, ident):
     if ident not in source.events:
         raise ValueError("Unknown event ID")
+    try:
+        visible = causal_view(source, source.events[ident].after)
+    except (ValueError, KeyError):
+        visible = "Structurally invalid causal frontier; see diagnostics from view."
     return dict(
         event=source.events[ident].model_dump(mode="json"),
-        visible=causal_view(source, source.events[ident].after),
+        visible=visible,
         source_hash=source.intrinsic_hash,
     )
 
