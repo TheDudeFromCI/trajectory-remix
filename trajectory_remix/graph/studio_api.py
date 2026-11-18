@@ -9,15 +9,17 @@ from typing import Literal
 
 from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
 
+from .bulk import BulkService
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
 from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checklists
+from .query_export import iter_jsonl
 from .reviews import ReviewInput
 from .studio import Studio
 from .validation import diagnose
@@ -301,6 +303,25 @@ def create_studio_app(
             if v is not None
         }
         return studio.listing(query, limit=limit, offset=offset)
+
+    @router.get("/trajectories/export")
+    def export_matches(
+        text: str | None = None,
+        stage: int | None = None,
+        split: str | None = None,
+        tool: str | None = None,
+    ):
+        query = {
+            k: v
+            for k, v in dict(text=text, stage=stage, split=split, tool=tool).items()
+            if v is not None
+        }
+        BulkService._where(query)  # Validate before the stream starts.
+        return StreamingResponse(
+            iter_jsonl(studio.store, query),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="trajectories.jsonl"'},
+        )
 
     @router.post("/diagnostics")
     def draft_diagnostics(body: GraphSource):
