@@ -1,5 +1,5 @@
 /* Top-level view switching shared by the shell, the controller and the Sampler. */
-const VIEWS = {workspace: 'trajectory-tab', 'jobs-view': 'jobs-button', 'metrics-view': 'metrics-button', 'sampler-workbench': 'sampler-tab', 'flow-view': 'flow-tab', 'review-view': 'review-tab'};
+const VIEWS = {workspace: 'trajectory-tab', 'jobs-view': 'jobs-button', 'metrics-view': 'metrics-button', 'sampler-workbench': 'sampler-tab', 'review-view': 'review-tab'};
 
 export function currentView() {
   return Object.keys(VIEWS).find(id => document.getElementById(id) && !document.getElementById(id).hidden) || 'workspace';

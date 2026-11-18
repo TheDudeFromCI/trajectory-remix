@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from trajectory_remix.graph import reviews
 from trajectory_remix.graph.bulk import BulkService
-from trajectory_remix.graph.flow import causal_view, prepare_plan
+from trajectory_remix.graph.flow import causal_view
 from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import Fenced, JobService, OwnershipConflict
 from trajectory_remix.graph.models import GraphSource
@@ -93,6 +93,65 @@ def report(payload, status="pass", source_ids=()):
     )
 
 
+DRAFT = "Working notes. " * 20
+
+
+def spec(**changes):
+    body = dict(
+        tools=["chat", "read"],
+        windows=[
+            dict(id="room", purpose="chatroom", writable=False),
+            dict(id="notes", purpose="notes", writable=True),
+            dict(id="w1", purpose="reasoning", writable=True),
+            dict(id="w2", purpose="reasoning", writable=True),
+        ],
+        events=[
+            dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
+            dict(
+                id="ack", kind="call", window="w1", after=["ask"], tool="chat",
+                arguments={"content": "Sure, checking now."},
+            ),
+            dict(id="plan", kind="think", window="w1", after=["ack"], content="Read it."),
+            dict(
+                id="look", kind="call", window="w1", after=["plan"], tool="read",
+                arguments={"path": "a.md"}, close=True,
+            ),
+            dict(id="got", kind="result", window="w2", after=["look"], content="A says yes."),
+            dict(id="note", kind="think", window="notes", after=["got"], content="A: yes."),
+            dict(
+                id="tell", kind="call", window="w2", after=["note"], tool="chat",
+                arguments={"content": "A says yes."}, close=True,
+            ),
+        ],
+    )  # fmt: skip
+    body.update(changes)
+    return body
+
+
+def chat_spec():
+    """An Assembly reply that needs only the chat tool, which every project has."""
+    return dict(
+        tools=["chat"],
+        windows=[
+            dict(id="room", purpose="chatroom", writable=False),
+            dict(id="w1", purpose="reasoning", writable=True),
+        ],
+        events=[
+            dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
+            dict(id="think", kind="think", window="w1", after=["ask"], content="Reply."),
+            dict(
+                id="ack",
+                kind="call",
+                window="w1",
+                after=["think"],
+                tool="chat",
+                arguments={"content": "Hello!"},
+                close=True,
+            ),
+        ],
+    )
+
+
 class Fake:
     def __init__(self):
         self.calls = []
@@ -106,60 +165,13 @@ class Fake:
             if callable(value):
                 value = value(ticket)
             return {"output": value, "model": "actual-fixture"}
-        if p["operation"] == "flow_tools":  # Show tools: choose every tool offered.
-            ids = {key: True for key in p["schema"]["properties"]["tools"]["required"]}
-            return {"output": {"tools": ids, "reason": "Fixture tools"}, "model": "actual-fixture"}
-        if p["operation"] == "flow_select":
-            source = json.loads(p["messages"][1]["content"])["source"]
-            if "reply" in source["events"]:
-                body = dict(
-                    finished=True, reason="Delivered the fixture reply", windows={}, task=None
-                )
-            else:
-                steps = [
-                    (
-                        "opening",
-                        dict(kind="chat_message", window="chatroom", chat={"speaker": "user"}),
-                    ),
-                    ("decision", dict(kind="agent_text", window="reasoning", after=["opening"])),
-                    (
-                        "reply",
-                        dict(
-                            kind="tool_call",
-                            window="reply",
-                            after=["decision"],
-                            tool="chat",
-                            call_id="reply",
-                            close_window=True,
-                        ),
-                    ),
-                ]
-                ident, envelope = next(
-                    (key, event) for key, event in steps if key not in source["events"]
-                )
-                body = dict(
-                    finished=False,
-                    reason="Continue the fixture episode",
-                    windows={}
-                    if source["windows"]
-                    else {
-                        "chatroom": dict(purpose="chatroom", agent_writable=False),
-                        "reasoning": dict(purpose="reasoning", agent_writable=True),
-                        "reply": dict(purpose="tool", agent_writable=True),
-                    },
-                    task=dict(
-                        id=ident,
-                        envelope=envelope,
-                        instruction="Author the fixture event",
-                        call_format="json" if ident == "reply" else "text",
-                    ),
-                )
-        elif p["operation"] == "event":
-            body = (
-                {"arguments": {"content": "Supported reply"}}
-                if "arguments" in p["schema"]["properties"]
-                else {"content": "Visible observation " + p["task"]["id"]}
-            )
+        if p["operation"] == "draft":
+            body = {"draft": DRAFT}
+        elif p["operation"] == "assembly":
+            offered = p["schema"]["properties"]["tools"]["items"]["enum"]
+            body = spec() if "read" in offered else chat_spec()
+        elif p["operation"] == "assembly_fix":
+            body = {"action": "done"}
         elif p["operation"] == "repair":
             body = {"action": "verdict", "review": report(p)}
         else:
@@ -184,7 +196,7 @@ async def finish(gen, job):
 
 
 @pytest.mark.asyncio
-async def test_event_flow_reviews_snapshots_echo_and_ownership(tmp_path, monkeypatch):
+async def test_generation_reviews_snapshots_echo_and_ownership(tmp_path, monkeypatch):
     # A compile-free guard covers generation, review and repairs transitively.
     from trajectory_remix.graph.compiler import GraphCompiler
 
@@ -192,7 +204,7 @@ async def test_event_flow_reviews_snapshots_echo_and_ownership(tmp_path, monkeyp
         GraphCompiler, "__init__", lambda *a, **k: pytest.fail("generation compiled")
     )
     gen, fake = service(tmp_path)
-    job = gen.start([{"seed": 137}, {"seed": 138}], {"plan": plan()})
+    job = gen.start([{"seed": 137}, {"seed": 138}], {})
     frozen = gen.jobs.inspect(job)["config"]
     current = gen.store.settings()
     updated = current.settings.model_dump(mode="json")
@@ -208,18 +220,9 @@ async def test_event_flow_reviews_snapshots_echo_and_ownership(tmp_path, monkeyp
         source = record.source
         assert source.metadata["stage"] == 2
         assert source.metadata["targets"] == a["proposal"]["proposal"]["metrics"]
-        assert source.events["call:echo"].chat.speaker == "agent"
-        assert source.events["call:echo"].after == ["call", "other", "user"]
-        assert (
-            len(
-                [
-                    t
-                    for t in fake.calls
-                    if t.trajectory_id == source.id and t.payload["operation"] == "event"
-                ]
-            )
-            == 5
-        )
+        assert source.events["ack:echo"].chat.speaker == "agent"
+        calls = [t.payload["operation"] for t in fake.calls if t.trajectory_id == source.id]
+        assert calls[:2] == ["draft", "assembly"]
         assert [e["tier"] for e in source.metadata["evaluations"]] == ["fast", "critical"]
         assert source.metadata["evaluations"][0]["model"] == "actual-fixture"
         assert reviews.stale(source, gen.settings_for(job))["stale"] is False
@@ -227,17 +230,6 @@ async def test_event_flow_reviews_snapshots_echo_and_ownership(tmp_path, monkeyp
             gen.jobs.acquire(gen.jobs.create_job("manual"), source.id, record.revision - 1)
     assert gen.jobs.inspect(job)["config"] == frozen
     assert all(t.payload["endpoint_config"]["model"] != "edited-later" for t in fake.calls)
-    actors = [
-        t
-        for t in fake.calls
-        if t.payload["operation"] == "event"
-        and t.payload["task"]["envelope"]["kind"] in ("agent_text", "tool_call")
-    ]
-    assert all(
-        "learning_objective" not in t.payload["messages"][1]["content"]
-        and "world" not in json.loads(t.payload["messages"][1]["content"])
-        for t in actors
-    )
 
 
 def test_causal_frontiers_replacement_close_parallel(tmp_path):
@@ -273,100 +265,13 @@ def test_causal_frontiers_replacement_close_parallel(tmp_path):
     )
     text = json.dumps(causal_view(source, ["new", "closed"]))
     assert "current" in text and "SECRET" not in text
-    with pytest.raises(ValueError):
-        prepare_plan(
-            gen.sampler.propose(seed=137)["proposal"],
-            gen.store.settings().settings,
-            {
-                "plan": {
-                    "windows": plan()["windows"],
-                    "tasks": [
-                        dict(
-                            id="x",
-                            world={"secret": "x"},
-                            envelope=dict(kind="agent_text", window="reason"),
-                        )
-                    ],
-                }
-            },
-        )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("streamed", [False, True])
-async def test_partial_calls_results_free_form_and_chat_opt_out(tmp_path, streamed):
-    gen, fake = service(tmp_path, fast=False)
-    p = plan()
-    p["tasks"] = [
-        p["tasks"][0],
-        dict(
-            id="prefix",
-            envelope=dict(
-                kind="tool_call",
-                tool="chat",
-                call_id="partial",
-                window="call",
-                after=["user"],
-                insert_tool_end=False,
-            ),
-        ),
-        dict(
-            id="retrieval",
-            envelope=dict(
-                kind="external_text", window="doc", content_placeholder=False, after=["prefix"]
-            ),
-        ),
-        dict(
-            id="suffix",
-            envelope=dict(
-                kind="tool_call",
-                tool="chat",
-                call_id="partial",
-                window="call",
-                after=["retrieval"],
-                insert_tool_begin=False,
-                echo_chat=False,
-            ),
-        ),
-        dict(
-            id="result",
-            envelope=dict(
-                kind="tool_response",
-                call_id="partial",
-                window="doc",
-                after=["suffix"],
-                delivery={
-                    "mode": "streamed" if streamed else "instant",
-                    "chain_immediately": False,
-                },
-                replace_body=True,
-            ),
-        ),
-    ]
-    del p["tasks"][2]["envelope"]["content_placeholder"]
-    fake.responses = [
-        {"content": "question"},
-        {"content": '{"content":"'},
-        {"content": "retrieved fact"},
-        {"content": 'message"}'},
-        {"content": "arbitrary document: [not JSON, nested errors"},
-    ]
-    job = gen.start([{"seed": 137}], {"plan": p})
-    await finish(gen, job)
-    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
-    assert len(source.events) == 5
-    assert source.events["result"].content.startswith("arbitrary document")
-    assert source.events["result"].delivery.mode == ("streamed" if streamed else "instant")
-    context = json.loads(fake.calls[3].payload["messages"][1]["content"])["visible"]
-    assert "retrieved fact" in json.dumps(context)
-    assert source.metadata["stage"] == 0
 
 
 @pytest.mark.asyncio
 async def test_generation_format_failure_no_replacement(tmp_path):
     gen, fake = service(tmp_path, fast=False, repair=False, format_retries=1)
     fake.responses = [{"wrong": "x"}, {"wrong": "x"}]
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     attempts = gen.jobs.attempts(job)
     source = gen.store.read(attempts[0]["trajectory_id"]).source
@@ -378,11 +283,11 @@ async def test_generation_format_failure_no_replacement(tmp_path):
 async def test_malformed_review_pauses_without_verdict(tmp_path):
     gen, fake = service(tmp_path, format_retries=0)
     fake.responses = [
-        *({"content": "x"} for _ in range(4)),
-        {"arguments": {"content": "reply"}},
+        {"draft": DRAFT},
+        spec(),
         {"items": {}},
     ]
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     a = gen.jobs.attempts(job)[0]
     source = gen.store.read(a["trajectory_id"]).source
@@ -565,7 +470,7 @@ async def test_manual_force_staleness_skips_locks(tmp_path):
 @pytest.mark.asyncio
 async def test_restart_manual_resume_discard_cancel(tmp_path):
     gen, fake = service(tmp_path, fast=False)
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     gen._admit(job)
     ident = gen.jobs.attempts(job)[0]["trajectory_id"]
     gen._prepare(job, ident)
@@ -594,7 +499,7 @@ def test_rest_generation_and_manual_popup_contract(tmp_path):
             "/api/v1/generation/runs",
             json={
                 "requests": [{"seed": 137, "overrides": {"domain": "software_engineering"}}],
-                "instructions": {"plan": plan()},
+                "instructions": {},
             },
         )
         assert response.status_code == 202, response.text
@@ -664,7 +569,7 @@ def test_rest_generation_and_manual_popup_contract(tmp_path):
 @pytest.mark.asyncio
 async def test_checklist_and_source_stale_without_automatic_review(tmp_path):
     gen, fake = service(tmp_path)
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     record = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"])
     before = len(fake.calls)
@@ -679,7 +584,7 @@ async def test_checklist_and_source_stale_without_automatic_review(tmp_path):
     current = gen.store.settings()
     gen.store.update_settings(updated, current.revision)
     data = record.source.to_dict()
-    data["events"]["think"]["content"] = "manual edit"
+    data["events"]["plan"]["content"] = "manual edit"
     changed = gen.store.replace(record.source.id, data, record.revision)
     assert set(reviews.stale(changed.source, gen.store.settings().settings)["reasons"]) == {
         "source_changed",
@@ -699,7 +604,7 @@ async def test_transport_exhaustion_pause_and_cancel_no_quality_failure(tmp_path
         raise OSError("provider unavailable")
 
     gen.transport = outage
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     task = asyncio.create_task(gen.run(gen.jobs, job))
     await asyncio.wait_for(called.wait(), 2)
     for _ in range(100):
@@ -721,12 +626,12 @@ async def test_transport_exhaustion_pause_and_cancel_no_quality_failure(tmp_path
 async def test_automatic_fast_failure_repair_then_critical(tmp_path):
     gen, fake = service(tmp_path)
     fake.responses = [
-        *({"content": "x"} for _ in range(4)),
-        {"arguments": {"content": "reply"}},
+        {"draft": DRAFT},
+        spec(),
         lambda t: report(t.payload, "fail"),
         lambda t: {"action": "verdict", "review": report(t.payload, "pass")},
     ]
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     assert source.metadata["stage"] == 2
@@ -735,35 +640,6 @@ async def test_automatic_fast_failure_repair_then_critical(tmp_path):
         ("fast", "repair", "pass"),
         ("critical", "review", "pass"),
     ]
-
-
-@pytest.mark.asyncio
-async def test_chat_echo_resume_and_following_actor_visibility(tmp_path):
-    gen, fake = service(tmp_path, fast=False)
-    p = plan()
-    p["tasks"].append(
-        dict(id="followup", envelope=dict(kind="agent_text", window="reason", after=["call"]))
-    )
-    job = gen.start([{"seed": 137}], {"plan": p})
-    await finish(gen, job)
-    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
-    assert source.events["followup"].after == ["call:echo"]
-    assert "Supported reply" in fake.calls[-1].payload["messages"][1]["content"]
-    assert len([i for i in source.events if i.endswith(":echo")]) == 1
-
-
-def test_all_user_machine_smoke_envelopes_offline(tmp_path):
-    import runpy
-    from pathlib import Path
-
-    smoke = runpy.run_path(str(Path(__file__).parents[1] / "scripts/graph_local_llm_smoke.py"))
-    gen, _ = service(tmp_path)
-    proposal = gen.sampler.propose(seed=137)["proposal"]
-    for case in smoke["CASES"]:
-        prepared = prepare_plan(
-            proposal, gen.store.settings().settings, {"plan": smoke["smoke_plan"](case)}
-        )
-        assert prepared["tasks"] and "content" not in prepared["tasks"][0]["envelope"]
 
 
 @pytest.mark.asyncio
@@ -813,20 +689,6 @@ async def test_manual_repair_structurally_broken_draft(tmp_path):
     await finish(gen, job)
     assert gen.store.read(record.source.id).source.metadata["stage"] == 1
     assert gen.store.read(record.source.id).source.events["x"].after == []
-
-
-@pytest.mark.asyncio
-async def test_json_tool_schema_mismatch_advisory_not_retry(tmp_path):
-    gen, fake = service(tmp_path, fast=False)
-    p = plan()
-    p["tasks"] = [p["tasks"][-1]]
-    p["tasks"][0]["envelope"]["after"] = []
-    fake.responses = [{"arguments": {"unexpected": "schema mismatch is advisory"}}]
-    job = gen.start([{"seed": 137}], {"plan": p})
-    await finish(gen, job)
-    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
-    assert source.metadata["stage"] == 0 and len(fake.calls) == 1
-    assert len(source.events) == 1  # No fabricated echo for missing content.
 
 
 @pytest.mark.asyncio
@@ -894,7 +756,7 @@ def test_local_checkpoint_and_admission_keep_original_epoch(tmp_path):
     from trajectory_remix.graph.jobs import Fenced
 
     gen, _ = service(tmp_path, fast=False)
-    job = gen.start([{"seed": 137}], {"plan": plan()})
+    job = gen.start([{"seed": 137}], {})
     epoch = gen.jobs.inspect(job)["epoch"]
     gen._admit(job, epoch)
     record = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"])

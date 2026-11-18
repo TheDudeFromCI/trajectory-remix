@@ -3,7 +3,7 @@
 Reads OpenRouter's public model list (no API key, no generation requests) and reports,
 for each model: whether it supports the structured output Remix sends, how its
 reasoning must be configured, the extra request fields to put in the endpoint's
-settings, and a rough Generator cost per 1,000 trajectories (no reviews or repairs).
+settings, and a rough Draft and Assembly cost per 1,000 trajectories (no reviews or repairs).
 
     python scripts/openrouter_models.py mistralai/mistral-small-3.2-24b-instruct
     python scripts/openrouter_models.py --max-input-price 0.15
@@ -18,28 +18,30 @@ import sys
 import urllib.request
 
 MODELS_URL = "https://openrouter.ai/api/v1/models"
+# Draft and Assembly per trajectory, from pilots at medium reasoning (about 25 events).
 ASSUMPTIONS = dict(
-    bytes_per_token=3.5,
-    selector_fixed_bytes=16050,  # Selector instruction, schema, ~6 KB tools, proposal, step.
-    source_bytes_per_event=600,  # Compact envelope plus average content.
-    writer_fixed_bytes=2000,
-    writer_visible_share=0.4,  # Average share of history in a writer's ancestor view.
-    selection_output_tokens=400,
-    event_output_tokens=180,
-    overhead=1.10,  # Phase, verify and echo steps, about 5% format retries.
-    selector_cached_share=0.75,  # With sticky sessions and a cache discount.
+    draft_input_tokens=4300,  # Prompts, proposal, tools and checklist.
+    draft_output_per_event=140,  # Including reasoning.
+    assembly_input_tokens=6200,  # The same context plus the draft.
+    assembly_output_per_event=360,  # Including reasoning.
+    fix_turns_per_event=0.3,  # Assembly fix turns, one action each.
+    fix_input_tokens=8200,  # The graph, diagnostics and the session so far.
+    fix_output_tokens=1900,
+    overhead=1.10,  # About 10% format corrections.
+    fix_cached_share=0.75,  # Each fix turn extends the last; with sticky sessions.
 )
 
 
 def tokens(events, a=ASSUMPTIONS):
-    """Estimated (selector input, writer input, output) tokens for one trajectory."""
-    fixed, step = a["selector_fixed_bytes"], a["source_bytes_per_event"]
-    selector = sum(fixed + step * k for k in range(events)) / a["bytes_per_token"]
-    visible = a["writer_visible_share"] * step
-    writer = sum(a["writer_fixed_bytes"] + visible * k for k in range(events))
-    writer /= a["bytes_per_token"]
-    output = events * (a["selection_output_tokens"] + a["event_output_tokens"])
-    return tuple(value * a["overhead"] for value in (selector, writer, output))
+    """Estimated (cacheable input, other input, output) tokens for one trajectory."""
+    turns = events * a["fix_turns_per_event"]
+    cacheable = turns * a["fix_input_tokens"]
+    other = (
+        a["draft_input_tokens"] + a["assembly_input_tokens"] + events * a["draft_output_per_event"]
+    )
+    output = events * (a["draft_output_per_event"] + a["assembly_output_per_event"])
+    output += turns * a["fix_output_tokens"]
+    return tuple(value * a["overhead"] for value in (cacheable, other, output))
 
 
 def per_million(pricing, key):
@@ -56,10 +58,10 @@ def cost_per_thousand(model, events):
     cached_price = per_million(pricing, "input_cache_read")
     if price_in is None or price_out is None:
         return None
-    selector, writer, output = tokens(events)
+    cacheable, other, output = tokens(events)
     discounted = cached_price is not None and 0 < cached_price < price_in
-    cached = selector * ASSUMPTIONS["selector_cached_share"] if discounted else 0
-    dollars = (selector + writer - cached) * price_in + cached * (cached_price or 0)
+    cached = cacheable * ASSUMPTIONS["fix_cached_share"] if discounted else 0
+    dollars = (cacheable + other - cached) * price_in + cached * (cached_price or 0)
     dollars += output * price_out
     return dollars / 1e6 * 1000
 
@@ -131,7 +133,7 @@ def report(result):
         f" cache discount: {'yes' if result['cache_discount'] else 'no'};"
         f" context {result['context_length']}",
         f"  reasoning: {result['reasoning']}",
-        f"  estimated Generator cost per 1,000 trajectories: {money}",
+        f"  estimated Draft and Assembly cost per 1,000 trajectories: {money}",
         f"  extra_body: {json.dumps(result['extra_body'])}",
     ]
     lines += [f"  ! {problem}" for problem in result["problems"]]

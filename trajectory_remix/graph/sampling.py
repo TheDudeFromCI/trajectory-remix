@@ -238,7 +238,7 @@ class SamplerService:
             family_id=world_group_id,
             frozen=frozen,
         )
-        if not persist:  # Interactive walkthroughs keep their sample in the browser only.
+        if not persist:  # A preview sample stays with the caller; nothing is stored.
             return snapshot
         with self.store.connect() as db:
             db.execute(

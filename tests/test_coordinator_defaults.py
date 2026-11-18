@@ -1,19 +1,15 @@
-"""Coordinator-first defaults: checklists, packaged flow and the derived investment label.
+"""Coordinator-first defaults: checklists, the agent prompt and the derived investment label.
 
 Fake providers only. These tests show structure (keys exist, prompts are delivered, saved
 projects are left alone), not that the new prompt wording improves live model output.
 """
 
-import json
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from test_adaptive_flow import episode
 from test_graph_generation import finish, service
 
-from trajectory_remix.graph import flow_document
-from trajectory_remix.graph.adaptive_flow import load_flow
 from trajectory_remix.graph.derived_labels import (
     DerivedLabelCounts,
     strategic_investment,
@@ -97,34 +93,15 @@ def test_a_new_project_stores_the_full_defaults(tmp_path):
     assert stored.review_checklists == default_checklists()
 
 
-def test_packaged_flow_still_validates():
-    checked = flow_document.check(text=flow_document.packaged_text())
-    assert checked["valid"] and checked["diagnostics"] == []
-
-
 @pytest.mark.asyncio
-async def test_actor_events_receive_the_actor_instruction_verbatim(tmp_path):
-    fake = episode()
-    gen, _ = service(tmp_path, fake, fast=False, critical=False)
+async def test_draft_and_assembly_receive_the_agent_prompt_verbatim(tmp_path):
+    gen, fake = service(tmp_path, fast=False, critical=False)
     await finish(gen, gen.start([{"seed": 137}], {}))
-    actor_instruction = load_flow()["flow"]["actor_instruction"]
-    kinds = {"agent_text", "tool_call"}
-    actor = [
-        p
-        for p in fake.calls
-        if p["operation"] == "event" and p["task"]["envelope"]["kind"] in kinds
-    ]
-    external = [
-        p
-        for p in fake.calls
-        if p["operation"] == "event" and p["task"]["envelope"]["kind"] not in kinds
-    ]
-    assert actor and external
-    for p in actor:
-        assert p["task"]["instruction"].startswith(actor_instruction)
-        assert json.loads(p["messages"][1]["content"])["task"].startswith(actor_instruction)
-    for p in external:
-        assert actor_instruction not in p["task"]["instruction"]
+    actor = gen.store.settings().settings.prompts.actor
+    stages = [c.payload for c in fake.calls if c.payload["operation"] in {"draft", "assembly"}]
+    assert {p["operation"] for p in stages} == {"draft", "assembly"}
+    for p in stages:
+        assert p["messages"][0]["content"].endswith("Actor guide:\n" + actor)
 
 
 def test_default_checklists_are_served_for_the_dashboard_reset(tmp_path):

@@ -51,7 +51,7 @@ class ExportInput(DTO):
 class JobWorker:
     """Host-owned tasks survive HTTP disconnects. No built-in model driver.
 
-    Event Flow registers async handlers and schedules through endpoint claims;
+    Generation registers async handlers and schedules through endpoint claims;
     providers never run directly from an HTTP handler.
     """
 

@@ -62,7 +62,6 @@ body.graph-studio { display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
 .inline-label { flex-direction: row; align-items: center; gap: var(--space-2); }
 .inline-label select { height: 28px; }
 .meta-row .tag:empty { display: none; }
-#flow-outcome { cursor: help; }
 #lock-slot { gap: var(--space-2); min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
 .lock-note { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: 340px; color: var(--warning); font-size: 12px; }
 #diagnostics-summary { gap: var(--space-1); padding: 0 var(--space-1); }
@@ -288,12 +287,3 @@ td.faint { color: var(--ink-faint); }
 #view-menu .menu-list button { gap: var(--space-2); }
 .wt-header { flex-wrap: wrap; column-gap: var(--space-3); }
 .wt-field { white-space: nowrap; }
-
-/* ---------- Generate dialog: adaptive Flow ---------- */
-.flow-section { display: flex; flex-direction: column; gap: var(--space-2); }
-.flow-summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
-.flow-nodes { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
-.flow-nodes li { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-0); }
-.flow-nodes li[data-tip] { cursor: help; }
-.flow-nodes code { font-size: 13px; }
-#generation-flow-yaml { width: 100%; min-height: 260px; font-size: 12px; }

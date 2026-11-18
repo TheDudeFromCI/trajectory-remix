@@ -1,4 +1,5 @@
 /* Form editors over the existing project-settings DTO. No network or credentials. */
+import {renderPromptSettings} from './prompt-settings.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
@@ -127,7 +128,7 @@ export function renderProjectSettings(container, initial, options = {}) {
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
     write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:65536, max_output_tokens:8192}; }); render();
   })); container.append(addition);
-  heading(container, 'Endpoint roles', 'Generator writes step-by-step Flow events. Draft and Assembly run the Draft and Assembly method; Draft falls back to Generator and Assembly to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
+  heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Draft falls back to Generator and Assembly to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');
   for (const [role, name] of [['generator', 'Generator'], ['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
     const choices = [['', 'Not configured'], ...Object.keys(current().endpoints || {}).map(id => [id, id])];
@@ -197,14 +198,10 @@ export function renderGenerationSettings(container, initial, options = {}) {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
-  const method = node('select'); method.setAttribute('aria-label', 'Generation method');
-  for (const [value, text] of [['flow', 'Step by step (Flow)'], ['draft_assembly', 'Draft and Assembly']]) { const o = node('option', text); o.value = value; method.append(o); }
-  method.value = current().generation?.method ?? 'flow';
-  method.onchange = () => write(d => { d.generation ||= {}; d.generation.method = method.value; });
   const barrier = node('input'); barrier.type = 'checkbox'; barrier.checked = current().generation?.phase_barrier ?? false; barrier.setAttribute('aria-label', 'Phase barrier');
   barrier.onchange = () => write(d => { d.generation ||= {}; d.generation.phase_barrier = barrier.checked; });
   barrier.dataset.tip = 'Every trajectory finishes Draft and Assembly before any review starts. The job then pauses so you can switch to the review models; Resume starts the reviews.';
-  settingsColumn.append(field('Generation method', method), field('Pause after Draft and Assembly (phase barrier)', barrier));
+  settingsColumn.append(field('Pause after Draft and Assembly (phase barrier)', barrier));
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Response and repair limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
@@ -237,6 +234,7 @@ export function renderGenerationSettings(container, initial, options = {}) {
       write(d => { d.review_checklists = copy(defaults); }); render('Review checklists reset to the defaults. Choose Save settings to keep them.');
     }), node('p', 'Replaces both lists with the packaged defaults. Saving changed checklists marks affected sign-offs stale.', 'settings-help')); settingsColumn.append(reset);
   }
+  renderPromptSettings(settingsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
   settingsColumn.append(status);
   if (options.notice) report(options.notice);
   if (options.footer) settingsColumn.append(options.footer);

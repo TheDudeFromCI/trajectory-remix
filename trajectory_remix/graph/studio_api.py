@@ -208,9 +208,13 @@ def create_studio_app(
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
-    from .flow_api import add_flow_routes
+    from .prompt_migration import migrate
+    from .prompts_api import add_prompt_routes
+    from .tools_api import add_tool_routes
 
-    add_flow_routes(app, router, studio, sampler, generation.transport)
+    migrate(studio.store)
+    add_tool_routes(router, studio.store)
+    add_prompt_routes(router)
     from . import usage
 
     app.include_router(usage.router(studio.store))

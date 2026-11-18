@@ -9,8 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from test_adaptive_flow import episode
-from test_graph_generation import finish, service
+from test_graph_generation import DRAFT, Fake, chat_spec, finish, service
 
 from trajectory_remix.graph import usage
 from trajectory_remix.graph.jobs import Ticket
@@ -145,13 +144,13 @@ def test_usage_counts_read_openrouter_fields_and_keep_unknowns_missing():
 
 
 class Billed:
-    """The scripted episode, with OpenRouter-style usage on every reply."""
+    """The fixture Draft and Assembly replies, with OpenRouter-style usage on every reply."""
 
     def __init__(self, cost=True):
-        self.inner, self.cost = episode(), cost
+        self.inner, self.cost = Fake(), cost
 
     async def __call__(self, ticket):
-        result = await self.inner(ticket)
+        result = dict(await self.inner(ticket), model="scripted-offline")
         billed = dict(OPENROUTER_USAGE)
         if not self.cost:
             billed.pop("cost")
@@ -174,7 +173,7 @@ async def test_job_usage_totals_and_per_trajectory_average(tmp_path):
     assert report["per_trajectory"]["cost"] == pytest.approx(0.00012 * calls)
     assert report["wall_seconds"] is not None and report["wall_seconds"] >= 0
     assert report["per_trajectory"]["seconds"] == report["total"]["seconds"]  # One trajectory.
-    assert set(report["operations"]) == {"flow_select", "flow_tools", "event"}
+    assert set(report["operations"]) == {"draft", "assembly"}
     app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
     with TestClient(app) as client:
         client.headers["X-Remix-Token"] = app.state.csrf
@@ -194,28 +193,6 @@ async def test_cost_total_is_missing_when_any_response_lacked_it(tmp_path):
     assert report["total"]["prompt_tokens"] > 0
 
 
-def test_walkthrough_shows_the_providers_error_message(tmp_path, monkeypatch):
-    async def handler(request):
-        return httpx.Response(
-            400,
-            json={"error": {"message": "Reasoning effort 'none' is not supported for this model"}},
-        )
-
-    original = httpx.AsyncClient
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs),
-    )
-    gen, _ = service(tmp_path, fast=False)
-    app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
-    with TestClient(app) as client:
-        client.headers["X-Remix-Token"] = app.state.csrf
-        state = client.post("/api/v1/walkthrough/start", json={"seed": 1}).json()["state"]
-        trace = client.post("/api/v1/walkthrough/step", json={"state": state}).json()["trace"]
-    assert "HTTP 400" in trace["error"] and "is not supported" in trace["error"]
-
-
 def test_openrouter_example_settings_are_valid():
     from pathlib import Path
 
@@ -233,9 +210,6 @@ def test_openrouter_example_settings_are_valid():
 async def test_full_job_through_the_real_transport_with_the_example_settings(tmp_path, monkeypatch):
     """End to end over HTTP: example OpenRouter settings, real transport, mocked server."""
     from pathlib import Path
-    from types import SimpleNamespace
-
-    from test_graph_generation import Fake
 
     from trajectory_remix.graph.bulk import BulkService
     from trajectory_remix.graph.generation import GenerationService
@@ -246,7 +220,7 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
     example = Path(__file__).parents[1] / "examples" / "openrouter.json"
     store = GraphStore.initialize(tmp_path / "p.sqlite", json.loads(example.read_text()))
     monkeypatch.setenv("REMIX_API_KEY_OPENROUTER", "test-key")
-    script, requests = Fake(), []
+    requests = []
 
     async def openrouter(request):
         body = json.loads(request.content)
@@ -257,17 +231,12 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
         if text.startswith("Return one JSON object"):
             text = text.split("\n\n", 1)[1]
         data = json.loads(text)
-        if "upcoming_event" in data:  # The Show tools step: choose every tool.
-            output = {"reason": "Fixture tools", "tools": {key: True for key in data["tools"]}}
-        elif "current_step" in data:  # A selector request.
-            ticket = SimpleNamespace(
-                payload=dict(operation="flow_select", messages=[system, dict(content=text)])
-            )
-            output = (await script(ticket))["output"]
-        elif body["response_format"]["type"] == "json_schema":
-            output = {"content": "Visible observation"}
-        else:  # A complete tool call written as JSON arguments.
-            output = {"arguments": {"content": "Supported reply"}}
+        if system["content"].startswith("You assembled"):  # The assembly fix.
+            output = {"action": "done"}
+        elif "notes" in data:  # Assembly: the compact spec.
+            output = chat_spec()
+        else:  # Draft.
+            output = {"draft": DRAFT}
         return httpx.Response(
             200,
             json={
@@ -292,7 +261,7 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
     assert gen.jobs.inspect(job)["state"] == "completed"
     ident = gen.jobs.attempts(job)[0]["trajectory_id"]
     source = gen.store.read(ident).source
-    assert source.metadata["stage"] == 0 and "reply:echo" in source.events
+    assert source.metadata["stage"] == 0 and "ack:echo" in source.events
     for request, body in requests:
         assert str(request.url) == "https://openrouter.ai/api/v1/chat/completions"
         assert request.headers["authorization"] == "Bearer test-key"

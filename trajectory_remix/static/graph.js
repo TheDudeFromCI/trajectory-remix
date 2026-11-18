@@ -3,7 +3,6 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
-import {renderFlowPanel} from './flow-panel.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {openShowTools} from './show-tools.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -250,9 +249,6 @@ export class StudioUI {
     const stale = this.record.review_status?.stale;
     $('review-stale').textContent = stale ? 'Review stale' : '';
     setAttr($('review-stale'), 'data-tip', stale ? 'Review is stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : null);
-    const outcome = this.draft.metadata?.flow_outcome, reason = outcome && typeof outcome === 'object' ? String(outcome.reason || '') : '';
-    $('flow-outcome').textContent = outcome ? (outcome.finished === false ? 'Flow stopped' : 'Flow finished') : '';
-    setAttr($('flow-outcome'), 'data-tip', outcome ? `The generation controller's own finish explanation, not measured coverage${reason ? ': ' + (reason.length > 360 ? reason.slice(0, 360) + '…' : reason) : '.'}` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
@@ -544,7 +540,7 @@ export class StudioUI {
     const settings = JSON.parse($('settings-json').value);
     const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
-    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, footer: this.reviewFoot ||= $('review-settings-foot')});
+    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, loadDefaultPrompts: async () => api('/generation/prompts/default'), footer: this.reviewFoot ||= $('review-settings-foot')});
   }
   async openSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();
@@ -591,9 +587,7 @@ export class StudioUI {
     pinBox.append(node('span', 'Pins', 'muted small'));
     if (Object.keys(pins).length) for (const [k, v] of Object.entries(pins)) pinBox.append(tag(`${k}: ${v}`, 'lilac'));
     else pinBox.append(node('span', 'None — the sampler uses saved matrix weights', 'small faint'));
-    const flowBox = node('section', undefined, 'flow-section');
-    box.append(pinBox, flowBox, node('p', 'Each run freezes its settings, matrix, pins and flow when it starts.', 'note'));
-    this.flowPanel = await renderFlowPanel(flowBox, api);
+    box.append(pinBox, node('p', 'Each run freezes its settings, prompts, matrix and pins when it starts.', 'note'));
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
       if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
@@ -604,7 +598,7 @@ export class StudioUI {
       start.disabled = true;
       try {
         const requests = Array.from({length:n}, (_, i) => ({seed:first+i, overrides:{...(sampler?.pins || {})}}));
-        const run = await api('/generation/runs', 'POST', {requests, instructions: this.flowPanel?.instructions() || {}});
+        const run = await api('/generation/runs', 'POST', {requests, instructions: {}});
         status.textContent = `Started ${n} attempts. Job ${run.job_id}`;
         $('generation-settings-dialog').close(); await this.inspectJob(run.job_id); await this.listing();
       } finally { start.disabled = false; }
