@@ -28,10 +28,13 @@ def prompts():
     return yaml.safe_load(files(__package__).joinpath("two_pass.yaml").read_text())
 
 
-def plan(proposal, settings, snapshot):
+METHODS = {"two_pass", "one_pass_agent"}
+
+
+def plan(proposal, settings, snapshot, method="two_pass"):
     """The frozen per-trajectory plan. The actor guide comes from the project flow."""
     return dict(
-        method="two_pass",
+        method=method,
         windows={},
         proposal=deepcopy(proposal),
         tools={key: value.model_dump(mode="json") for key, value in settings.tools.items()},

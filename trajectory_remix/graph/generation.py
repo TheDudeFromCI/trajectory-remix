@@ -9,6 +9,7 @@ import jsonschema
 from . import (
     adaptive_driver,
     adaptive_flow,
+    build_agent,
     flow_store,
     repair_policy,
     reviews,
@@ -62,11 +63,18 @@ class GenerationService:
             instructions["_flow_snapshot"] = adaptive_flow.load_flow(text=text)
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
-        if settings.generation.method == "two_pass":
+        method = settings.generation.method
+        if method in two_pass.METHODS:
             if "plan" in instructions:
                 raise ValueError("Two-pass generation uses the project flow, not a plan")
+            if method == "one_pass_agent" and (
+                settings.generation.agent_role not in settings.endpoint_roles
+            ):
+                raise ValueError("Configure the endpoint role that runs the one-pass agent")
             snapshot = instructions["_flow_snapshot"]
-            plans = {p["id"]: two_pass.plan(p["proposal"], settings, snapshot) for p in proposals}
+            plans = {
+                p["id"]: two_pass.plan(p["proposal"], settings, snapshot, method) for p in proposals
+            }
         else:
             plans = {
                 p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals
@@ -348,9 +356,12 @@ class GenerationService:
                     ).fetchone()[0]
                 )
             plan = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
-            if plan.get("method") == "two_pass":
+            if plan.get("method") in two_pass.METHODS:
                 if cp.get("assembled"):
                     self._after_generation(job, source, cp)
+                    return
+                if plan["method"] == "one_pass_agent" and "draft" in cp:
+                    self._start_agent(job, source, cp, plan, settings)
                     return
                 payload = two_pass.payload(cp, plan, settings)
             elif "flow" in plan:
@@ -370,6 +381,16 @@ class GenerationService:
                 payload = event_payload(source, task, settings, cp["errors"] > 0)
                 payload["task"] = task
             tier = "generator"
+        elif cp["phase"] == build_agent.PHASE:
+            plan = self._plan(job, ident)
+            payload = build_agent.payload(cp, plan, settings)
+            if (
+                len(canonical(payload["messages"]).encode())
+                >= settings.generation.repair_context_bytes
+            ):
+                self._agent_round(job, source, cp, plan)
+                return
+            tier = cp["tier"]
         else:
             tier = cp["tier"]
             payload = reviews.payload(
@@ -456,6 +477,87 @@ class GenerationService:
         cp["repair_base"] = reviews.payload(source, settings, "fast", "repair")["messages"]
         self._save(ticket.job_id, source, cp, ticket=ticket)
 
+    def _start_agent(self, job, source, cp, plan, settings):
+        spec = deepcopy(build_agent.EMPTY)
+        cp.update(phase=build_agent.PHASE, tier=settings.generation.agent_role, errors=0)
+        cp.update(history=[], round=1, spec=spec)
+        cp["agent_base"] = build_agent.base(plan, settings, spec, cp["draft"])
+        self._save(job, source, cp)
+        self.jobs.progress(job, f"Agent build started: trajectory={label(source.id)}")
+
+    def _agent_round(self, job, source, cp, plan, ticket=None):
+        """A session that outgrew its budget continues as a fresh round on the current spec."""
+        settings = self.settings_for(job)
+        if cp["round"] >= settings.generation.repair_rounds:
+            self._agent_end(job, source, cp, "round_limit", ticket)
+            return
+        note = "Earlier rounds built the spec shown; continue from it."
+        cp.update(round=cp["round"] + 1, history=[], errors=0)
+        cp["agent_base"] = build_agent.base(plan, settings, cp["spec"], cp["draft"], note)
+        self._save(job, source, cp, ticket=ticket)
+        self.jobs.progress(job, f"Agent round {cp['round']} started: trajectory={label(source.id)}")
+
+    def _agent_end(self, job, source, cp, reason, ticket=None, detail=None):
+        data = source.to_dict()
+        data["metadata"]["stage"] = -3
+        data["metadata"]["agent_outcome"] = dict(
+            reason=reason, **({"detail": detail} if detail else {})
+        )
+        cp["phase"] = "done"
+        self._save(job, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail")
+
+    def _agent_step(self, ticket, source, record, cp, body, complete):
+        settings = self.settings_for(ticket.job_id)
+        action = body["action"]
+        if action == "give_up":
+            self._agent_end(ticket.job_id, source, cp, "gave_up", ticket, body["reason"])
+            return
+        if action == "finish":
+            reply = self._agent_finish(ticket, source, record, cp, body, complete, settings)
+            if reply is None:
+                return
+        elif action == "view":
+            reply = build_agent.view(source, cp["spec"], settings)
+        else:
+            plan = self._plan(ticket.job_id, ticket.trajectory_id)
+            try:
+                spec = build_agent.changed(cp["spec"], body)
+                built = build_agent.build(source, spec, plan)
+            except (ValueError, KeyError) as error:
+                reply = dict(accepted=False, error=str(error)[:1500])
+            else:
+                cp["spec"], source = spec, built
+                reply = build_agent.summary(source, settings)
+        cp["history"].extend(
+            [
+                dict(role="assistant", content=canonical(body)),
+                dict(role="user", content=canonical(reply)),
+            ]
+        )
+        self._save(ticket.job_id, source, cp, ticket=ticket)
+
+    def _agent_finish(self, ticket, source, record, cp, body, complete, settings):
+        """Sign off a passing verdict (returns None), or return the reply that keeps going."""
+        broken = build_agent.errors(source, settings)
+        if broken:
+            return dict(accepted=False, errors=[d.model_dump(mode="json") for d in broken])
+        try:
+            quality = reviews.verdict(body["review"], source)
+        except ValueError as error:
+            return dict(accepted=False, error=str(error))
+        if quality == "fail":
+            return dict(
+                accepted=False, still_failing=repair_policy.still_failing(body["review"])["content"]
+            )
+        source, _ = reviews.signoff(
+            source, record, settings, "critical", build_agent.OPERATION, body["review"],
+            ticket.endpoint, complete.get("model"), settings.endpoints[ticket.endpoint].model,
+        )  # fmt: skip
+        cp["phase"] = "done"
+        self._save(ticket.job_id, source, cp, ticket=ticket, outcome="pass")
+        self.jobs.progress(ticket.job_id, f"Agent signed off: trajectory={label(source.id)}")
+        return None
+
     def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
         data = source.to_dict()
         data.setdefault("metadata", {})["stage"] = -3
@@ -474,7 +576,9 @@ class GenerationService:
             f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
         )
         if cp["errors"] > settings.generation.format_retries:
-            if cp["phase"] == "event":
+            if cp["phase"] == build_agent.PHASE:
+                self._agent_end(ticket.job_id, source, cp, "invalid_output", ticket)
+            elif cp["phase"] == "event":
                 data = source.to_dict()
                 data["metadata"]["stage"] = -1
                 data["metadata"]["generation_failure"] = {
@@ -508,7 +612,7 @@ class GenerationService:
                     "Review/repair output invalid; no verdict recorded. Manual Resume required.",
                 )
         else:
-            if cp["phase"] == "repair":
+            if cp["phase"] in ("repair", build_agent.PHASE):
                 cp["history"].append(
                     dict(
                         role="user",
@@ -526,7 +630,10 @@ class GenerationService:
             raise Fenced("Source changed while request was in progress")
         settings = self.settings_for(ticket.job_id)
         if complete.get("context_limit"):
-            if cp["phase"] == "repair":
+            if cp["phase"] == build_agent.PHASE:
+                plan = self._plan(ticket.job_id, ticket.trajectory_id)
+                self._agent_round(ticket.job_id, source, cp, plan, ticket)
+            elif cp["phase"] == "repair":
                 self._next_round(ticket.job_id, source, cp, ticket)
             else:
                 self._save(ticket.job_id, source, cp, ticket=ticket)
@@ -603,6 +710,9 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
+        if cp["phase"] == build_agent.PHASE:
+            self._agent_step(ticket, source, record, cp, body, complete)
+            return
         if ticket.payload["operation"] == two_pass.DRAFT:
             cp["draft"] = body["draft"]
             self._save(ticket.job_id, two_pass.with_draft(source, body["draft"]), cp, ticket=ticket)

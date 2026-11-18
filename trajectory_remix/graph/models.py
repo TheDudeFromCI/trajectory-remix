@@ -357,7 +357,10 @@ def default_checklists():
 
 class GenerationOptions(DTO):
     # flow: the step-by-step YAML Flow. two_pass: a prose draft, then one assembled graph.
-    method: Literal["flow", "two_pass"] = "flow"
+    # one_pass_agent: a prose draft, then one model builds, reviews and repairs the graph.
+    method: Literal["flow", "two_pass", "one_pass_agent"] = "flow"
+    # The endpoint role that runs the one-pass agent.
+    agent_role: Literal["fast", "critical"] = "critical"
     fast: bool = True
     critical: bool = True
     repair: bool = True

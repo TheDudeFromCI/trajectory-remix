@@ -176,6 +176,11 @@ against the schema and graph validator. Keep the prompts in `graph/two_pass.yaml
 descriptions in `compact_spec.schema` in sync.
 Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
 
+One-pass agent: `python -m pytest -q tests/test_one_pass_agent.py` checks the draft then agent
+order on the configured role's endpoint, refusal of unbuildable changes with the spec kept,
+refusal of `finish` while structural errors remain or the verdict fails, the signoff as a Critical
+evaluation, `give_up`, fresh rounds on the current spec, the round cap and the role check at start.
+
 Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
 verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
 shows the patched source, that context exhaustion starts a fresh round on the current graph,

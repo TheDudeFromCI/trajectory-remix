@@ -249,6 +249,32 @@ chat deliveries (`:echo` events) and canonical tool arguments. Then:
 The draft is kept in the trajectory's `metadata.two_pass.draft`, so you can compare it with the
 assembled graph.
 
+### One pass with a building agent
+
+The **One pass, then an agent builds, reviews and repairs** method
+(`generation.method: one_pass_agent`) keeps the draft pass but replaces assembly, review and repair
+with one continuing session on a single model: the endpoint in **Agent endpoint role**
+(`generation.agent_role`, `critical` by default, or `fast`). It needs that role configured.
+
+The agent sees the proposal, the tool catalogue, the checklist, the draft, the spec schema and the
+assemble guide from `two_pass.yaml`, and works through these actions, one per reply:
+
+| Action | What it does |
+|---|---|
+| `set_tools` | Chooses the tools the agent in the episode is shown. |
+| `add` | Appends windows and events, in causal order, to the compact spec. |
+| `replace_event` | Rewrites one event in place, keeping its ID. |
+| `remove_event` | Deletes one event. |
+| `view` | Returns the spec, diagnostics and causal views. |
+| `finish` | The agent's own full checklist verdict. Accepted only for a structurally valid graph; a failing verdict keeps the session open. |
+| `give_up` | Ends the build as failed, with the reason (`metadata.agent_outcome`). |
+
+Every change is rebuilt into a graph at once. A change that can't be built is refused with the
+reason and the spec stays as it was. A passing `finish` is recorded as a Critical evaluation
+(operation `agent_build`), so the trajectory reaches stage 2 without an independent reviewer.
+Run a manual **force Critical** review afterwards if you want a second opinion. When the session
+reaches `repair_context_bytes`, a fresh round starts on the current spec, up to `repair_rounds`.
+
 ## What the model sees
 
 The private selection controller sees the full proposal and the committed source, except
@@ -364,7 +390,8 @@ without calling a model.
 
 ## Reference
 
-**Settings** (`generation` in project settings): `method` (`flow` or `two_pass`, default `flow`),
+**Settings** (`generation` in project settings): `method` (`flow`, `two_pass` or `one_pass_agent`,
+default `flow`), `agent_role` (`critical` or `fast`, default `critical`),
 `fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
 (default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
 (default 3). Configure the `chat` tool with a JSON object input that has a string `content`
