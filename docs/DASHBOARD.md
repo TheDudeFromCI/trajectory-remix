@@ -16,7 +16,7 @@ with the tabs at the top and reveal detail with tabs, menus and tooltips.
 | --- | --- |
 | **View tabs** | **Editor**, **Jobs**, **Metrics** and **Sampler**. A badge on Jobs counts running and paused jobs. |
 | **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings** and **Generate**. **Review Settings** is a tab next to **Sampler**. |
-| **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. |
+| **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. While the Editor's timeline is hidden, the timeline's step and play controls appear here too. |
 
 Hover anything with an **ⓘ** for an explanation. Units, reasons and definitions live in
 tooltips rather than in extra text on screen.
@@ -26,10 +26,9 @@ tooltips rather than in extra text on screen.
 | Panel | What it does |
 | --- | --- |
 | **Dataset** (left) | Search and filter trajectories by text, stage, split or tool. Each row shows a short ID, its stage and split, and a lock if a job owns it. Hover a row for the full ID. |
-| **Trajectory bar** (top) | The selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event editor** (right) | Tabs for the selected event: **Content**, **Links** (dependencies), **Options** (closing, masks, delivery, framing), **Windows**, **Problems** and **JSON**. |
+| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Links** (dependencies), **Options** (closing, masks, delivery, framing), **Windows**, **Problems** and **JSON**. |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -167,8 +166,25 @@ Broken drafts always save. Problems show up as you edit:
 
 Open the **View** menu and choose **Hide dataset panel**, **Hide timeline panel** or
 **Hide event panel**; the same items read **Show …** to bring a panel back, and
-**Show all panels** restores everything. The windows grow into the freed space. Your
-layout is remembered in this browser.
+**Show all panels** restores everything. The windows grow into the freed space. Hiding the
+event panel also hides the trajectory bar, so show it again to save. When you hide the timeline,
+its step and **Play** controls move to the status bar so you can still scrub the windows.
+Your layout is remembered in this browser.
+
+### Resize panels
+
+Drag the thin gap between two panels to resize them: the dataset and event panels
+sideways, the timeline up or down, and the job list in the Jobs view. Each handle also
+works from the keyboard: focus it and press the arrow keys (hold **Shift** for bigger
+steps). **Double-click** a handle or press **Home** to restore its default size. Sizes are
+remembered in this browser, and panels can't shrink below a usable minimum or squeeze the
+windows out.
+
+### Collapse the trajectory bar
+
+Click the chevron at the left of the trajectory bar to hide its **Stage** and **Split**
+row and keep just the title, save state and **Save**. Click it again to expand. The choice is
+remembered in this browser.
 
 ### Choose how trajectories are built
 
@@ -243,6 +259,17 @@ Bulk edits skip locked trajectories and can be undone with **Undo** once they fi
 the server owns the work. A trajectory that a job is working on shows a lock and an
 **Inspect owning job** button.
 
+Log lines are coloured by status: ordinary progress is grey, **green** marks successes
+(a passing verdict or a trajectory that settled as a pass), **amber** marks things that
+need a look (a request that failed but will retry, an invalid reply being corrected, a
+held trajectory) and **red** marks errors (retries ran out, a trajectory failed, a job stopped on
+an error). The wording always says the same thing, so colour is never the only clue. A failed
+request says why: the HTTP status with a plain-language hint (and the provider's short error
+code, if it sends one), a timeout with the limit that applied, a refused connection, or a
+missing API key variable. A local error names the exception and the place in the code; the
+full traceback is printed to the server output. Prompts, model replies and keys never
+appear in logs. The "still waiting" heartbeat lines are off.
+
 Two kinds of "resume" are separate:
 
 - **Endpoint Resume** restarts an endpoint that paused after its retries ran out. It
@@ -301,6 +328,7 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.css` | Layout of the shell, Editor, Jobs and Metrics views and the status bar. |
 | `sampler.css`, `project-settings.css` | The Sampler view and the settings forms. |
 | `shell.js` | View tabs, disclosure menus, keyboard-navigable tab panels and the `[data-tip]` tooltip. |
+| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), the collapsible trajectory bar, and moving the timeline controls into the status bar while the timeline is hidden. |
 | `views.js` | `showView()` / `currentView()`; dispatches a `studio-view` event that loads Jobs, Metrics and the Sampler on demand. |
 | `ui-kit.js` | DOM helpers: keyed `reconcile()`, idempotent `setText`/`setAttr`/`toggleClass`, `progressBar()`, `makeTabs()`, stage and job tone maps. |
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |

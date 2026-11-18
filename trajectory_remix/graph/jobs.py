@@ -11,6 +11,9 @@ from uuid import uuid4
 
 from . import reconnect
 from . import usage as usage_log
+from .failure_reason import endpoint_failure
+from .log_levels import check as check_level
+from .log_levels import migrate as migrate_log_levels
 from .models import GraphSource, canonical, digest
 from .progress import observed_request, request_label
 from .storage import GraphStore
@@ -104,7 +107,8 @@ class JobService:
     be coordinated by the host (recovery intentionally invalidates old workers).
     """
 
-    heartbeat_interval = 10.0
+    # Seconds between "Still waiting" log lines for a slow request; None keeps them off.
+    heartbeat_interval = None
 
     def __init__(self, store: GraphStore, *, active_limit=20, recover=True, clock=time.time):
         if type(active_limit) is not int or active_limit < 1:
@@ -114,6 +118,7 @@ class JobService:
         with store.connect() as db:
             db.executescript(SCHEMA)
             reconnect.ensure_columns(db)
+            migrate_log_levels(db)
         self.configure_endpoints()
         if recover:
             self.recover()
@@ -760,21 +765,24 @@ class JobService:
                 self.progress(
                     ticket.job_id,
                     "Request interrupted; no response accepted: " + request_label(ticket),
+                    "warning",
                 )
                 raise
             except Exception as error:
                 retrying = self.retry(ticket)
-                status = getattr(getattr(error, "response", None), "status_code", None)
-                detail = f" HTTP {status}" if type(status) is int else ""
+                reason = endpoint_failure(
+                    error, ticket.endpoint, ticket.payload.get("endpoint_config")
+                )
                 self.progress(
                     ticket.job_id,
-                    f"Request failed ({type(error).__name__}{detail}); "
+                    f"Request failed ({type(error).__name__}): {reason}; "
                     + (
                         "retrying in the same queue slot: "
                         if retrying
                         else "endpoint paused after retry exhaustion; manual Resume required: "
                     )
                     + request_label(ticket),
+                    "warning" if retrying else "error",
                 )
                 if retrying:
                     continue
@@ -870,13 +878,14 @@ class JobService:
                 ],
             )
 
-    def progress(self, job, text):
+    def progress(self, job, text, level="info"):
         stamp = datetime.fromtimestamp(self.clock(), UTC).isoformat(timespec="seconds")
-        return self.append_log(job, f"[{stamp}] {text}")
+        return self.append_log(job, f"[{stamp}] {text}", level=level)
 
-    def append_log(self, job, text, *, budget=None):
+    def append_log(self, job, text, *, budget=None, level="info"):
         if not isinstance(text, str):
             raise ValueError("Log text must be a string")
+        check_level(level)
         # budget is bytes for fake-budget tests; production uses project MiB.
         if budget is None:
             cap = self.store.settings().settings.log_cache_mib
@@ -887,8 +896,8 @@ class JobService:
             db.execute("BEGIN IMMEDIATE")
             self._job(db, job)
             cursor = db.execute(
-                "INSERT INTO graph_job_logs(job_id,text,bytes) VALUES(?,?,?)",
-                (job, text, len(text.encode())),
+                "INSERT INTO graph_job_logs(job_id,text,bytes,level) VALUES(?,?,?,?)",
+                (job, text, len(text.encode()), level),
             ).lastrowid
             db.execute("UPDATE graph_log_cursors SET last=? WHERE job_id=?", (cursor, job))
             if budget is not None:
@@ -919,7 +928,7 @@ class JobService:
                 items=[
                     dict(r)
                     for r in db.execute(
-                        "SELECT sequence,text FROM graph_job_logs WHERE job_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?",
+                        "SELECT sequence,text,level FROM graph_job_logs WHERE job_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?",
                         (job, after, through if through is not None else state["last"], limit),
                     )
                 ],

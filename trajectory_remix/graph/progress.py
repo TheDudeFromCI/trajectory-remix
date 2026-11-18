@@ -31,6 +31,7 @@ async def observed_request(jobs, ticket, driver, attempt):
     key = (ticket.job_id, ticket.trajectory_id, ticket.id, ticket.endpoint)
     jobs._calls[key] = task
     try:
+        # Heartbeat lines are off unless the service sets heartbeat_interval (seconds).
         while not task.done():
             done, _ = await asyncio.wait({task}, timeout=jobs.heartbeat_interval)
             if not done:

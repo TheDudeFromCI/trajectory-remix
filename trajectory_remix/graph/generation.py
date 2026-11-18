@@ -16,6 +16,7 @@ from . import (
     trajectory_hold,
 )
 from .commands import merge_patch
+from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
@@ -132,6 +133,7 @@ class GenerationService:
             self.jobs.progress(
                 job,
                 f"Trajectory settled: {label(source.id)} outcome={label(outcome)} events={len(source.events)}",
+                {"pass": "success", "fail": "error"}.get(outcome, "info"),
             )
         return accepted
 
@@ -168,7 +170,9 @@ class GenerationService:
         if j["config"]["config"].get("driver") != DRIVER:
             self.jobs.control(job, "pause")
             self.jobs.append_log(
-                job, "This run was made by a retired generation method; start a new generation run."
+                job,
+                "This run was made by a retired generation method; start a new generation run.",
+                level="error",
             )
             return
         self.settings_for(job)
@@ -378,6 +382,7 @@ class GenerationService:
                 if paused
                 else "; awaiting endpoint slot"
             ),
+            "warning" if paused else "info",
         )
 
     def _next_round(self, job, source, cp, ticket=None):
@@ -480,16 +485,18 @@ class GenerationService:
             job,
             f"Trajectory {label(source.id)} held for attention: {reason} Other trajectories"
             " continue. Resume retries it; detach it to settle it as Unfinished.",
+            level="warning",
         )
 
-    def _hold_owned(self, job, ident, epoch):
+    def _hold_owned(self, job, ident, epoch, error=None):
         """Hold a trajectory after a local error, from its last saved checkpoint."""
         record = self.store.read(ident)
         cp = self.jobs.checkpoint(job, ident)
         if cp is None:
             raise ValueError("No checkpoint to hold")
         cp.update(_epoch=epoch, _revision=record.revision)
-        self._hold(job, record.source, cp, "A local error interrupted it; edits are kept.")
+        cause = f" ({local_failure(error)}; traceback in the server output)" if error else ""
+        self._hold(job, record.source, cp, f"A local error interrupted it{cause}; edits are kept.")
 
     def _parked(self, job, ident, cp, settings):
         """With a phase barrier, a run's reviews wait until every trajectory is assembled."""
@@ -529,6 +536,7 @@ class GenerationService:
             f"Phase barrier: Draft and Assembly finished for {len(parked)} trajectories"
             + (f" ({len(held)} held for attention)" if held else "")
             + ". Switch to the review models, then Resume to start Fast and Critical Review.",
+            level="warning",
         )
 
     def _pause_if_only_held(self, job, epoch):
@@ -541,6 +549,7 @@ class GenerationService:
                 job,
                 f"Only held trajectories remain ({len(owners)}). Fix the cause, then Resume to"
                 " retry them, or detach them.",
+                level="warning",
             )
 
     def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
@@ -559,6 +568,7 @@ class GenerationService:
         self.jobs.progress(
             ticket.job_id,
             f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
+            "warning",
         )
         if cp["errors"] > settings.generation.format_retries:
             if cp["phase"] == assembly_fix.PHASE:
@@ -700,7 +710,9 @@ class GenerationService:
             return
         if cp["phase"] == "repair" and body["action"] == "give_up":
             self.jobs.progress(
-                ticket.job_id, f"Repair given up as not feasible: trajectory={label(source.id)}"
+                ticket.job_id,
+                f"Repair given up as not feasible: trajectory={label(source.id)}",
+                "warning",
             )
             self._repair_failure(
                 ticket.job_id, source, cp, "unfeasible", ticket, detail=body["reason"]
@@ -724,6 +736,7 @@ class GenerationService:
         self.jobs.progress(
             ticket.job_id,
             f"{label(cp['tier'])} {label(cp['phase'])} verdict: {label(result)} trajectory={label(source.id)}",
+            "success" if result == "pass" else "warning",
         )
         if cp["phase"] == "repair":
             if result == "fail":
@@ -814,21 +827,25 @@ class GenerationService:
                 self.consume(ticket)
         except (Fenced, asyncio.CancelledError):
             pass
-        except Exception:
+        except Exception as error:
             # Unknown local wrapper/transport-adapter failures are resumable. Hold only
             # the trajectory involved; pause the job only if even that fails.
+            if "ticket" in locals() and ticket:
+                log_local_error(error, "Generation step", ticket.job_id)
             if (
                 "ticket" in locals()
                 and ticket
                 and self.jobs.inspect(ticket.job_id)["state"] == "running"
             ):
                 try:
-                    self._hold_owned(ticket.job_id, ticket.trajectory_id, ticket.epoch)
+                    self._hold_owned(ticket.job_id, ticket.trajectory_id, ticket.epoch, error)
                 except Exception:
                     self.jobs.control(ticket.job_id, "pause")
                     self.jobs.append_log(
                         ticket.job_id,
-                        "Generation interrupted; completed commits retained. Manual Resume required.",
+                        f"Generation interrupted by {local_failure(error)}; completed commits"
+                        " retained. The traceback is in the server output. Manual Resume required.",
+                        level="error",
                     )
 
     def dispatch(self):
@@ -865,8 +882,9 @@ class GenerationService:
                     self._prepare(job, ident, epoch)
                 except (Fenced, OwnershipConflict):
                     raise
-                except Exception:
-                    self._hold_owned(job, ident, epoch)
+                except Exception as error:
+                    log_local_error(error, "Preparing trajectory " + label(ident), job)
+                    self._hold_owned(job, ident, epoch, error)
             self._pause_if_only_held(job, epoch)
             self._barrier(job, epoch)
             self.dispatch()

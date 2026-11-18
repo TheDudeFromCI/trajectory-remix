@@ -348,16 +348,24 @@ apply changed budgets.
 ### Watch a running job
 
 The existing job log shows timestamped admission, request queue/start, response,
-draft and assembly, review verdict and trajectory outcome messages. Requests that are
-still pending a complete model response emit an elapsed-time heartbeat every ten
-seconds. A heartbeat means the request is still awaiting a response; it does not
-claim tokens are being generated. Queue messages identify paused endpoints, and
-retry messages distinguish another attempt from exhausted retries requiring Resume.
+draft and assembly, review verdict and trajectory outcome messages. Each line has a
+status level (`info`, `success`, `warning` or `error`) that the dashboard shows as a
+colour; `GET /jobs/{job}/logs` returns it as `level` on every item. Elapsed-time
+heartbeat lines ("Still waiting for model response") are off by default; set
+`JobService.heartbeat_interval` to a number of seconds to bring them back. Queue
+messages identify paused endpoints, and retry messages distinguish another attempt
+(`warning`) from exhausted retries requiring Resume (`error`). Request failures say why:
+the HTTP status with a plain-language hint, a short provider error code when it is a
+plain identifier, the timeout that applied, a refused connection, or the missing
+`REMIX_API_KEY_*` variable. Local errors name the exception type and the file, line and
+function that raised it, with the traceback in the server output.
 Responses report provider token counts when supplied, and input sizes are bytes,
 not estimated token counts.
 
 Logs contain operation, endpoint and trajectory/request/event IDs, timings and
-counts. They do not include prompts, model output, provider error bodies or keys.
+counts. They do not include prompts, model output, provider error bodies, exception
+messages or keys (the provider's error `code` is copied only if it is a short
+identifier such as `rate_limit_exceeded`).
 The transport still receives whole responses rather than streaming tokens. The
 existing log endpoint and job dialog need no API changes; polling an open job's
 log shows new entries even while the model is busy. Existing log-cache retention

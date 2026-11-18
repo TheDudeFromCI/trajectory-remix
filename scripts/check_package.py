@@ -13,6 +13,7 @@ REQUIRED = [
     "static/graph.js",
     "static/graph.css",
     "static/shell.js",
+    "static/layout.js",
     "static/views.js",
     "static/ui-kit.js",
     "static/jobs-view.js",

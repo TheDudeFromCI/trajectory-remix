@@ -93,6 +93,7 @@ jobs:
       - run: node tests/usage_view_frontend.mjs
       - run: node tests/tool_import_frontend.mjs
       - run: node tests/show_tools_frontend.mjs
+      - run: node tests/job_log_levels_frontend.mjs
 
   browser:
     name: Browser workflow tests
@@ -118,6 +119,7 @@ jobs:
         run: |
           export CHROMIUM_PATH="$(cd tests && node -e "console.log(require('playwright').chromium.executablePath())")"
           python tests/run_dashboard_frontend.py
+          python tests/run_layout_frontend.py
           python tests/run_sampler_frontend.py
           python tests/run_generation_frontend.py
 
