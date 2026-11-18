@@ -5,7 +5,7 @@ what follows from them: the tool listing event, tool-call IDs on results, chat d
 (:echo events) and canonical JSON tool arguments. It never invents content.
 """
 
-from . import tool_listing
+from . import spec_normalize, tool_listing
 from .flow import chat_echo
 from .models import GraphSource, canonical
 
@@ -129,20 +129,30 @@ def build(spec, base, tools, extra_tools=0.5):
         data["windows"][window["id"]] = dict(
             purpose=window["purpose"], agent_writable=window["writable"]
         )
+    listed_ids = [e["id"] for e in spec["events"]]
     for event in spec["events"]:
-        _add(data, event, listed["shown"])
+        _add(data, event, listed["shown"], listed_ids)
     return data
 
 
-def _add(data, event, shown):
+def _add(data, event, shown, listed_ids=()):
     ident = event["id"]
     if ident in data["events"]:
         raise ValueError(f"Event ID {ident} is used twice; give each event its own ID")
+    event = dict(event, after=spec_normalize.resolve(event["after"], data["events"]))
     missing = [a for a in event["after"] if a not in data["events"]]
+    later = [a for a in missing if a in listed_ids]
+    if later:
+        raise ValueError(
+            f"Event {ident} follows {', '.join(later)}, which is listed after it. Events must be"
+            f" listed in causal order: move {ident} below {', '.join(later)}, or drop the"
+            " dependency if it does not need that evidence"
+        )
     if missing:
         raise ValueError(
-            f"Event {ident} follows {', '.join(missing)}, which is not an earlier event;"
-            " list events in causal order and refer only to earlier IDs"
+            f"Event {ident} follows {', '.join(missing)}, which is not an event in the spec."
+            " Only chat calls have a delivery (<chat call id>:echo); follow other events by"
+            " their own ID"
         )
     if event["window"] not in data["windows"]:
         raise ValueError(f"Event {ident} is in undefined window {event['window']}")

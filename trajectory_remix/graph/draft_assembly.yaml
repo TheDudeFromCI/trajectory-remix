@@ -1,4 +1,4 @@
-version: two-pass/2
+version: draft-assembly/1
 draft_instruction: |-
   Write working notes for one synthetic episode, from the opening to the final state.
   Return a JSON object with one field, "draft", containing at least 200 characters of
@@ -58,7 +58,8 @@ assemble_instruction: |-
   Put the answered event in after to infer its call ID. If specifying call explicitly,
   use the same call ID on the result as on the call, which defaults to its event ID.
   For a person's reply to a chat call, put "<chat event ID>:echo" in after so the reply
-  follows delivery. The builder creates that echo, the tools listing, default links to
+  follows delivery. Only chat calls have an echo: follow a person's message, a document,
+  a result or any other call by its own ID, and never write an echo event yourself. The builder creates that echo, the tools listing, default links to
   the listing for empty after arrays, and canonical JSON for arguments.
 
   Fictional example. The read tool takes a path and routes both results to "inbox".

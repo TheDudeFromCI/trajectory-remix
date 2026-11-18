@@ -14,7 +14,7 @@ from . import compact_spec, reviews
 from .models import GraphSource, canonical
 from .validation import diagnose
 
-DRAFT, ASSEMBLE = "two_pass_draft", "two_pass_assemble"
+DRAFT, ASSEMBLE = "draft", "assembly"
 OPERATIONS = {DRAFT, ASSEMBLE}
 DRAFT_SCHEMA = dict(
     type="object",
@@ -25,13 +25,21 @@ DRAFT_SCHEMA = dict(
 
 
 def prompts():
-    return yaml.safe_load(files(__package__).joinpath("two_pass.yaml").read_text())
+    return yaml.safe_load(files(__package__).joinpath("draft_assembly.yaml").read_text())
+
+
+def role(settings, stage):
+    """The endpoint role for a stage: its own role, else Draft's, else the Generator."""
+    roles = settings.endpoint_roles
+    if stage == ASSEMBLE and "assembly" in roles:
+        return "assembly"
+    return "draft" if "draft" in roles else "generator"
 
 
 def plan(proposal, settings, snapshot):
     """The frozen per-trajectory plan. The actor guide comes from the project flow."""
     return dict(
-        method="two_pass",
+        method="draft_assembly",
         windows={},
         proposal=deepcopy(proposal),
         tools={key: value.model_dump(mode="json") for key, value in settings.tools.items()},
@@ -90,5 +98,5 @@ def assemble(source, body, plan, settings):
 
 def with_draft(source, draft):
     data = source.to_dict()
-    data.setdefault("metadata", {})["two_pass"] = dict(draft=draft)
+    data.setdefault("metadata", {})["draft"] = draft
     return GraphSource.model_validate(data)

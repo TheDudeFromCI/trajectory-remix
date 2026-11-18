@@ -21,9 +21,16 @@ models.
 3. Fill in the **base URL** (for example `http://127.0.0.1:8000/v1`; Remix adds
    `/chat/completions`), the exact **model** name, a **concurrent-request limit** and a
    **retry count** for transport errors.
-4. Assign the **Generator**, **Fast Review** and **Critical Review** roles from the
-   dropdowns. One endpoint can fill all three. Leave a review role empty to skip that
-   review.
+4. Assign the roles from the dropdowns. One endpoint can fill all of them. Leave a review
+   role empty to skip that review.
+
+   | Role | Used for |
+   |---|---|
+   | **Generator** | Step-by-step Flow generation. Also the fallback for Draft. |
+   | **Draft** | The Draft stage of [Draft and Assembly](GRAPH-GENERATION.md#draft-and-assembly). Optional. |
+   | **Assembly** | The Assembly stage and its fix. Optional; falls back to Draft. Give it a stronger model for better structure. |
+   | **Fast Review** | Fast Review and its repair. |
+   | **Critical Review** | Critical Review and its repair. |
 5. **Save settings**, then open **Generate** to choose review and repair options.
 
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
