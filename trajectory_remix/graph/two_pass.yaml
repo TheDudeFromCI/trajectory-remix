@@ -1,0 +1,46 @@
+version: two-pass/1
+# Pass 1 works out the whole episode as plain prose. No graph, no JSON events.
+draft_instruction: |-
+  You are writing the working notes for ONE synthetic training episode in which the agent
+  (described in the actor guide below) solves a problem for a person. Work out everything
+  that happens, in order, as plain prose. Do not write a trajectory, JSON or events.
+
+  Include, in the order they happen:
+  - The person's opening message, in their own words, and any later messages from them.
+  - Any documents or prior state the agent can see at the start.
+  - The agent's immediate short reply to the person, before it thinks.
+  - Each piece of the agent's private reasoning, as it would actually think it: short,
+    specific, never addressed to anyone. Note which pieces of reasoning are independent
+    and can happen at the same time.
+  - Each tool call: which tool, the exact arguments, and why. Mark calls that are sent
+    together (in parallel).
+  - A plain-text example of each tool's output, realistic and consistent with the world.
+    Results may arrive in a different order from the calls. Some may fail or surprise.
+  - What the agent notes down to keep (conclusions, decisions, open items).
+  - Every message the agent sends the person (progress updates and the final report),
+    in the agent's voice. Never claim anything a result has not shown yet.
+  - How the episode ends, and what is still open.
+
+  Choose the tools from the catalogue that the episode needs. Make the episode show the
+  whole proposal: objective, dimensions, constraints and event tags, not just their
+  labels. Aim the episode at the review checklist, which reviewers will apply strictly:
+  later evidence never justifies an earlier action, and nothing is claimed before it is
+  observed.
+
+# Pass 2 turns the notes into a parallel trajectory in the compact spec format.
+assemble_instruction: |-
+  Turn the working notes into ONE parallel trajectory in the compact spec format (JSON).
+  Keep the notes' content and voice; fill in anything they missed so the episode is
+  complete and consistent. Return only the spec.
+
+  Format:
+  - tools: IDs of the tools the agent is shown (from the catalogue).
+  - windows: {id, purpose, writable}. Use a chatroom (purpose chatroom, writable false),
+    a notes window (purpose notes, writable true), document windows for given material
+    (writable false), and one SHORT-LIVED reasoning window (purpose reasoning, writable
+    true) per step of thinking.
+  - events, listed in causal order. Each has id, kind, window and after (IDs of earlier
+    events it directly depends on):
+    - user: a message from a person, in the chatroom; set speaker.
+    - document: material the agent is given, or a tool's report that arrives unasked.
+    - think: the agent's private reasoning (content). Never addressed to
