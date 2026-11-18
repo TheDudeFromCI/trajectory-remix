@@ -237,6 +237,6 @@ class Studio:
                 db.execute("UPDATE graph_jobs SET progress=progress+1 WHERE id=?", (job,))
                 jobs._notify(db, job)
             if warning:
-                jobs.append_log(job, warning)
+                jobs.append_log(job, warning, level="warning")
             await asyncio.sleep(0)
         jobs.finish(job, epoch)

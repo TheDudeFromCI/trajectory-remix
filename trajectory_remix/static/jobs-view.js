@@ -6,6 +6,15 @@ import {kindName, KIND_TONES, JOB_TONES, makeTabs, node, progressBar, reconcile,
 const $ = id => document.getElementById(id);
 const PAGE = 50;
 const ACTIVE = new Set(['running', 'paused', 'queued']);
+const LOG_LEVELS = new Set(['info', 'success', 'warning', 'error']);
+const MAX_LOG_LINES = 2000;
+
+/** One log line, coloured by its status level (older servers send none: plain info). */
+export function logLine(text, level) {
+  const el = node('span', text + '\n', `log-line level-${LOG_LEVELS.has(level) ? level : 'info'}`);
+  el.dataset.level = LOG_LEVELS.has(level) ? level : 'info';
+  return el;
+}
 
 export class JobsView {
   /** deps: {api, report, download, openTrajectory, afterDetach, isVisible} */
@@ -174,13 +183,17 @@ export class JobsView {
   async appendLogs(v) {
     const log = await this.deps.api(`/jobs/${v.id}/logs?after=${v.cursor}&limit=100`);
     const atBottom = v.logs.scrollHeight - v.logs.scrollTop - v.logs.clientHeight < 24;
-    let text = v.logs.textContent;
-    if (log.truncated) text = '[Earlier retained logs were cleared or evicted]\n' + text;
-    for (const line of log.items) { text += line.text + '\n'; v.cursor = line.sequence; }
+    const added = [];
+    if (log.truncated) added.push(logLine('[Earlier retained logs were cleared or evicted]', 'info'));
+    for (const line of log.items) { added.push(logLine(line.text, line.level)); v.cursor = line.sequence; }
     if (!log.items.length) v.cursor = Math.max(v.cursor, log.last);
-    text = text.slice(-200000);
-    if (text !== v.logs.textContent) { v.logs.textContent = text; if (atBottom) v.logs.scrollTop = v.logs.scrollHeight; }
-    const lines = text ? text.split('\n').length - 1 : 0;
+    if (added.length) {
+      if (log.truncated) v.logs.prepend(added.shift());
+      v.logs.append(...added);
+      while (v.logs.childElementCount > MAX_LOG_LINES) v.logs.firstElementChild.remove();
+      if (atBottom) v.logs.scrollTop = v.logs.scrollHeight;
+    }
+    const lines = v.logs.childElementCount;
     setText(v.logCount, lines ? `${lines} line${lines === 1 ? '' : 's'}` : 'No log lines retained for this job.');
   }
 
