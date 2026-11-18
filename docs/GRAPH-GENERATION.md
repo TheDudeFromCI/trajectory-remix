@@ -13,6 +13,7 @@ never executed.
 
 - [Run a generation](#run-a-generation)
 - [How a trajectory is built](#how-a-trajectory-is-built)
+- [Draft and Assembly](#draft-and-assembly)
 - [What the model sees](#what-the-model-sees)
 - [Tools and chat during generation](#tools-and-chat-during-generation)
 - [Reviews and repair](#reviews-and-repair)
@@ -21,7 +22,8 @@ never executed.
 
 ## Run a generation
 
-1. In **Settings**, add endpoints and assign the **Generator** role (and optionally
+1. In **Settings**, add endpoints and assign the **Generator** role, or the **Draft** and
+   **Assembly** roles for [Draft and Assembly](#draft-and-assembly) (and optionally
    **Fast** and **Critical** review roles). See [Project settings](PROJECT-SETTINGS.md).
 2. Open **Sampler Matrix → Proposal preview → Generate trajectories**.
 3. Choose any **pins**, a **seed** and an **attempt count**, then **Start generation**.
@@ -217,6 +219,51 @@ separate engine. Each task has:
 Instructions are trusted project configuration and must respect the same boundaries. The smoke
 script's `smoke_plan` has examples.
 
+## Draft and Assembly
+
+**Draft and Assembly** is an alternative to the step-by-step flow, and the recommended method. It
+writes a whole episode in two calls, fixes its structure, then reviews and repairs it:
+
+**Draft → Assembly → Fast Review → Critical Review**
+
+To use it, set **Settings → Automatic review and repair → Generation method** to **Draft and
+Assembly** (`generation.method: draft_assembly`).
+
+| Stage | Endpoint role | What happens |
+|---|---|---|
+| Draft | **Draft** (falls back to Generator) | Plain-prose working notes for the whole episode: messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
+| Assembly | **Assembly** (falls back to Draft) | One compact JSON spec of windows and events, built from the draft. If the validator reports any error or warning, the same model then fixes its own graph (the *assembly fix*). |
+| Fast Review | **Fast Review** | Checklist review, with repair if it fails. |
+| Critical Review | **Critical Review** | Stricter checklist review, with repair if it fails. |
+
+Draft and Assembly can share one endpoint, or you can give Assembly a stronger model for better
+structure. The Draft and Assembly calls see the proposal, the tool catalogue, the review checklist
+(core and critical) and the flow's `actor_instruction`, so a persona added there applies here too.
+The prompts are in `trajectory_remix/graph/draft_assembly.yaml`.
+
+### Assembly
+
+Remix builds the graph from the spec. It adds the tool listing event, tool-call IDs on results,
+chat deliveries (`:echo` events) and canonical tool arguments. It also settles slips whose
+meaning is clear: an `:echo` written for an event that has no delivery means the event itself,
+echo events the model wrote are dropped (the builder writes them), and a tools object or a wrapped
+reply is unwrapped. Then:
+
+- A spec that still can't be built (an event listed before what it depends on, an unknown window,
+  a reused ID, a call with no tool) gets a correction that says how to fix it, up to
+  `format_retries` times.
+- A graph with any validator error or warning goes to the **assembly fix**: the Assembly model
+  sees the graph, every diagnostic, the causal views and the draft, and fixes them with the same
+  patch actions as repair (`view`, `inspect`, `patch`, `patch_window`, `remove_event`). It ends
+  with `done`, which is refused while structural errors remain, or `give_up`.
+- Giving up, running out of corrections or reaching `repair_context_bytes` hands the graph on
+  unchanged rather than failing it. Errors still left go to Fast repair; otherwise the graph goes
+  to Fast Review. The result is kept in `metadata.assembly_fix` (reason, turns, errors and
+  warnings left).
+
+The draft is kept in the trajectory's `metadata.draft`, so you can compare it with the assembled
+graph.
+
 ## What the model sees
 
 The private selection controller sees the full proposal and the committed source, except
@@ -269,18 +316,29 @@ skips Fast. Configured roles are used automatically unless the project toggle tu
 
 ### Repair
 
-A failed review can enter **one** Repair & Validate session on that tier's own model. The model
-sees the original source and checklist, plus each full inspect-and-patch exchange so far, until a
-verdict or the context budget (`repair_context_bytes`, default 65,536) runs out. There is no
-compaction, second attempt or extra confirmation pass.
+A failed review enters a Repair & Validate session on that tier's own model. The model sees the
+source, the checklist and the failed review, plus each exchange so far. **A repair only fails when
+the model gives up**, saying why repair is not feasible.
 
-- *Inspect* returns a causal view of events. A *patch* merges into one event or window using the
-  expected source hash, and an event can be added or removed. Removal keeps broken references for
-  you to fix.
+| Action | What it does |
+|---|---|
+| `view` | Returns the current source with diagnostics, including earlier patches. |
+| `inspect` | Returns one event and the causal view it can see. |
+| `patch`, `patch_window` | Merges a patch into one event or window, using the expected source hash. A new event ID adds an event. |
+| `remove_event` | Deletes an event. Broken references stay for you to fix. |
+| `verdict` | A full checklist verdict. A passing verdict ends the session; a failing one keeps it open with the failing items listed. |
+| `give_up` | Ends the repair as failed, with the model's reason (`unfeasible`). |
+
+When a session's transcript reaches `repair_context_bytes` (default 65,536), or the provider's
+context runs out, a fresh **round** starts on the current graph with the last failed review. The
+`repair_rounds` setting (default 3) caps the rounds as a spending guard; reaching it fails the
+repair as `round_limit`.
+
+- Accepted patches save immediately, even if they leave editable errors.
 - Accepted patches save immediately, even if they leave editable errors. A passing final verdict
   needs a structurally valid graph.
-- On failure or context exhaustion, the trajectory is detached as Unfinished with its edits
-  and any real verdict evidence kept. No verdict is made up for a context-limit failure.
+- When the repair gives up or reaches the round cap, the trajectory is detached as Unfinished
+  with its edits and any real verdict evidence kept. The reason is in `metadata.repair_outcomes`.
 - A successful Fast repair can proceed to Critical review.
 
 ### Manual review
@@ -312,18 +370,23 @@ without calling a model.
   attached work are kept. Fix the server and use **Resume endpoint**.
 - **Format failures** (the model returned unusable JSON): a bounded number of new calls
   (`format_retries`, default 2 extra). Generation that runs out records **Unsuccessful** and may
-  go to repair. For review and repair, the job **pauses with no quality verdict**, and Resume retries
-  within the same session and budget.
-- **Local wrapper problems** pause the job instead of asking a model to fix programmatic envelopes.
+  go to repair. For review and repair, that trajectory is **held** with no quality verdict.
+- **Local wrapper problems** and **context limits** hold that trajectory too, instead of asking a
+  model to fix programmatic envelopes.
+- **Held trajectories** never stall the rest of the job: the others keep running. A held
+  trajectory shows the reason in `metadata.needs_attention` and the job log. When only held
+  trajectories remain, the job pauses. **Resume** retries every held trajectory (with a fresh
+  bounded correction); **detach** settles one as Unfinished, keeping its edits.
 - **Server restart:** jobs pause, callbacks are fenced, unaccepted text is dropped, and you
   resume manually. Completed events and repair patches survive.
 - **Cancel and detach** use the same fences as everywhere else ([Jobs](GRAPH-JOBS.md)).
 
 ## Reference
 
-**Settings** (`generation` in project settings): `fast`, `critical`, `repair` (default true),
-`format_retries` (default 2) and `repair_context_bytes` (default 65,536, a transcript bound, not
-a token estimate). Configure the `chat` tool with a JSON object input that has a string `content`
+**Settings** (`generation` in project settings): `method` (`flow` or `draft_assembly`, default `flow`),
+`fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
+(default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
+(default 3). Configure the `chat` tool with a JSON object input that has a string `content`
 to enable the echo helper ([example config](../examples/graph_local_llm.json)).
 
 **Endpoints:** URLs are OpenAI-compatible base URLs. Remix appends `/chat/completions`, sends a
@@ -488,7 +551,7 @@ Prompts carry what the model needs and nothing that is implied:
   private selector sees the whole committed source, all of which is in the past.
 
 Over-budget requests return a context-limit result before contacting the model. A
-non-repair operation pauses with operation/input-size/allowance in its job log; repair
+non-repair operation holds its trajectory, with operation/input-size/allowance in the job log; repair
 retains the existing context-limit failure behavior. Nothing is silently truncated or
 converted into a quality failure. Frozen runs keep their endpoint settings: start a
 new run to apply changed budgets or the narrower prompt recipe. Long episodes still

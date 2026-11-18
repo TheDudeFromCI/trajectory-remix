@@ -168,6 +168,30 @@ agent event is told its text won't be seen again, and that the default flow teac
 window lifecycle. Keep the shared `selector_instruction` short and put step-specific
 guidance in the step's own instruction: every selector request carries the shared text.
 
+Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test_spec_normalize.py tests/test_repair_policy.py`
+checks the draft and assemble order, the draft kept in metadata, the builder's tool listing,
+chat deliveries and call IDs, corrections for specs that can't be built, the handoff of
+errors left after the assembly fix to Fast repair, and that Draft, Assembly and the fix use their
+own endpoint roles (with Generator and Draft as fallbacks). `tests/test_spec_normalize.py` checks
+the settled `:echo` slips, tools objects and wrappers, and the builder's fix-it messages. It also validates the worked example in the assemble prompt
+against the schema and graph validator. Keep the prompts in `graph/draft_assembly.yaml` and the field
+descriptions in `compact_spec.schema` in sync.
+Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
+
+Held trajectories: `python -m pytest -q tests/test_trajectory_hold.py` checks that invalid review
+output or a local error holds only that trajectory while the rest finish, that the job pauses
+only when held trajectories alone remain, that Resume retries and clears `needs_attention`, and
+that detaching a held trajectory completes the job. Never pause a whole job for one trajectory.
+
+Assembly fix: `python -m pytest -q tests/test_assembly_fix.py` checks that errors and
+warnings (not a clean graph) start the fix, that `done` is refused while errors remain, and that
+giving up or invalid output hands the graph on to review without pausing.
+
+Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
+verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
+shows the patched source, that context exhaustion starts a fresh round on the current graph,
+and that `repair_rounds` caps the rounds.
+
 Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
 tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra
 request fields and their reserved names, sticky `session_id`, usage kept for cut-off and

@@ -32,6 +32,7 @@ out('2048');assert.equal(alertText(),'');
 assert.deepEqual([draft.endpoints['local-model'].context_window_tokens,draft.endpoints['local-model'].max_output_tokens],[8705,2048]);
 ctx('16384');
 assert.deepEqual(draft.endpoint_roles,{generator:'local-model',fast:'local-model'});
+change(byLabel(root,'Assembly endpoint'),'local-model');assert.equal(draft.endpoint_roles.assembly,'local-model');
 assert.match(root.textContent,/REMIX_API_KEY_LOCAL_MODEL/);
 // A separate editor changes the same authoritative draft between keystrokes.
 draft.tools.chat.name='Renamed elsewhere';
@@ -49,6 +50,9 @@ const repair=byLabel(generation,'Attempt repair after review failure');repair.ch
 enter(byLabel(generation,'core criterion evidence'),'Require exact supporting events');
 enter(byLabel(generation,'New critical criterion ID'),'quality');btn(generation,'Add critical criterion').click();
 enter(byLabel(generation,'critical criterion quality'),'Avoid unsupported conclusions');
+const method=byLabel(generation,'Generation method');assert.equal(method.value,'flow');method.value='draft_assembly';method.dispatchEvent(new window.Event('change'));
+enter(byLabel(generation,'Repair rounds'),'4');
+assert.equal(draft.generation.method,'draft_assembly');assert.equal(draft.generation.repair_rounds,4);
 assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists.critical.quality.text,'Avoid unsupported conclusions');
 assert.equal(draft.endpoints['local-model'].model,'tiny-local');
 btn(root,'Remove endpoint local-model').click();

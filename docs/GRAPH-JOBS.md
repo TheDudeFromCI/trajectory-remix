@@ -31,6 +31,9 @@ into it. Jobs never execute synthetic tools.
   review it marks the item `detached`, and edits already committed stay in Undo history. A job
   finishes when nothing is pending or working, even if it was paused when the last detach happened.
 - **Resume** is rejected for finished jobs.
+- **Held trajectories:** a trajectory that needs manual intervention (output that stays invalid,
+  a context limit, a local error) is held, and the rest of the job keeps running. The job pauses
+  only when nothing but held trajectories is left. Resume retries them; detach settles one.
 
 ### Endpoints that run out of retries
 

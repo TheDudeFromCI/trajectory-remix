@@ -127,9 +127,9 @@ export function renderProjectSettings(container, initial, options = {}) {
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
     write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:65536, max_output_tokens:8192}; }); render();
   })); container.append(addition);
-  heading(container, 'Endpoint roles', 'Generator writes event content. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
+  heading(container, 'Endpoint roles', 'Generator writes step-by-step Flow events. Draft and Assembly run the Draft and Assembly method; Draft falls back to Generator and Assembly to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');
-  for (const [role, name] of [['generator', 'Generator'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
+  for (const [role, name] of [['generator', 'Generator'], ['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
     const choices = [['', 'Not configured'], ...Object.keys(current().endpoints || {}).map(id => [id, id])];
     roles.append(field(name, select(`${name} endpoint`, current().endpoint_roles?.[role], choices, value => {
       write(d => { d.endpoint_roles ||= {}; if (value) d.endpoint_roles[role] = value; else delete d.endpoint_roles[role]; });
@@ -197,11 +197,17 @@ export function renderGenerationSettings(container, initial, options = {}) {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
+  const method = node('select'); method.setAttribute('aria-label', 'Generation method');
+  for (const [value, text] of [['flow', 'Step by step (Flow)'], ['draft_assembly', 'Draft and Assembly']]) { const o = node('option', text); o.value = value; method.append(o); }
+  method.value = current().generation?.method ?? 'flow';
+  method.onchange = () => write(d => { d.generation ||= {}; d.generation.method = method.value; });
+  settingsColumn.append(field('Generation method', method));
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Response and repair limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
   const bytes = input('Repair transcript byte limit', current().generation?.repair_context_bytes ?? 65536, value => write(d => { d.generation ||= {}; d.generation.repair_context_bytes = value; }), 'number'); bytes.min = 256; bytes.step = 1;
-  limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), node('p', 'Repair keeps one continuing session. This transcript bound and provider context exhaustion end that attempt; it is not a spending cap.', 'settings-help')); settingsColumn.append(limits);
+  const rounds = input('Repair rounds', current().generation?.repair_rounds ?? 3, value => write(d => { d.generation ||= {}; d.generation.repair_rounds = value; }), 'number'); rounds.min = 1; rounds.max = 10; rounds.step = 1;
+  limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), field('Repair rounds', rounds), node('p', 'A repair fails only when the repairer gives up. A session that reaches the transcript limit starts a fresh round on the current graph; the round count caps spending.', 'settings-help')); settingsColumn.append(limits);
   const checklistHelp = 'Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
   for (const [group, target] of [['core', coreColumn], ['critical', criticalColumn]]) {
     if (group === 'core') tipHeading(target, 'Core checklist', `Applied in both Fast and Critical Review. ${checklistHelp}`); else tipHeading(target, 'Critical checklist', 'Additional criteria applied only during Critical Review, on top of the core checklist.');

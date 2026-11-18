@@ -117,7 +117,7 @@ Open a few finished trajectories in the **Editor** to judge the content itself.
 | HTTP 429 | Too many concurrent requests. Lower **Concurrent requests**, then **Resume**. |
 | Many `Invalid structured output` corrections | The model struggles with the format. Make sure `require_parameters` is set; otherwise try another model. |
 | Corrections saying the reply was **cut off** | The reply hit **Max output tokens**. With reasoning on, the thinking used it up: turn reasoning off, or raise the limit. With reasoning off, the model probably got stuck repeating itself (open the reply in a walkthrough to see). That costs a minute or two and the full output limit each time, so for a model without reasoning set **Max output tokens** to about `3000`: a stuck reply then fails fast and is retried. |
-| `Local context guard` pauses | A request was over the allowance. Raise **Context limit** toward the model's real window, or check **Bytes per token**. |
+| `Local context guard` holds a trajectory | A request was over the allowance. Raise **Context limit** toward the model's real window, or check **Bytes per token**. |
 | Cached share near 0% on the **Usage** tab | Check **Sticky sessions** is on and the model has a cache discount. |
 | Reasoning tokens in **Usage** | Reasoning is still on. Use the field the model checker suggests. |
 

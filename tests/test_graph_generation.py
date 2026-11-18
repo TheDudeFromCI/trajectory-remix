@@ -394,8 +394,7 @@ async def test_malformed_review_pauses_without_verdict(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["negative_verdict", "context_limit", None])
-async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path, failure):
+async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path):
     gen, fake = service(tmp_path, critical=False)
     # Start from a detached failed source for a compact manual session.
     source = dict(
@@ -416,24 +415,14 @@ async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path, failure
         lambda t: {"action": "inspect", "event_id": "x"},
         lambda t: {
             "action": "verdict",
-            "review": report(t.payload, "fail" if failure == "negative_verdict" else "pass", ["x"]),
+            "review": report(t.payload, "pass", ["x"]),
         },
     ]
-    if failure == "context_limit":
-        original = fake.__call__
-
-        async def limited(t):
-            if len(fake.calls) == 2:
-                fake.calls.append(t)
-                return {"context_limit": True}
-            return await original(t)
-
-        gen.transport = limited
     job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
     await finish(gen, job)
     source = gen.store.read(record.source.id).source
     assert source.events["x"].content == "repaired"
-    assert source.metadata["stage"] == (-3 if failure else 1)
+    assert source.metadata["stage"] == 1
     assert len(fake.calls) == 3
     assert all(t.endpoint == "f" for t in fake.calls)
     assert len(fake.calls[1].payload["messages"]) > len(fake.calls[0].payload["messages"])

@@ -356,6 +356,8 @@ def default_checklists():
 
 
 class GenerationOptions(DTO):
+    # flow: the step-by-step YAML Flow. draft_assembly: Draft, then Assembly (with its fix).
+    method: Literal["flow", "draft_assembly"] = "flow"
     fast: bool = True
     critical: bool = True
     repair: bool = True
@@ -363,6 +365,9 @@ class GenerationOptions(DTO):
     # An explicit byte budget for the continuing repair transcript, not a token
     # estimate or a spending limit. Provider context exhaustion also terminates it.
     repair_context_bytes: Annotated[int, Field(ge=256)] = 65536
+    # A spending guard: a repair session that outgrows repair_context_bytes starts a
+    # fresh round on the current graph, up to this many rounds in all.
+    repair_rounds: Annotated[int, Field(ge=1, le=10)] = 3
 
 
 class ProjectSettings(DTO):
@@ -383,9 +388,10 @@ class ProjectSettings(DTO):
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
-    endpoint_roles: dict[Literal["generator", "fast", "critical"], Identifier] = Field(
-        default_factory=dict
-    )
+    # draft and assembly are optional: Draft falls back to generator, Assembly to Draft.
+    endpoint_roles: dict[
+        Literal["generator", "draft", "assembly", "fast", "critical"], Identifier
+    ] = Field(default_factory=dict)
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
     review_checklists: dict[Literal["core", "critical"], dict[Identifier, Criterion]] = Field(
         default_factory=default_checklists
