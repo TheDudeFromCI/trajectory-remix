@@ -226,12 +226,16 @@ and repair → Generation method** to **Two pass** (`generation.method: two_pass
 
 | Pass | What the generator writes |
 |---|---|
-| 1. Draft | Plain-prose working notes for the whole episode: the person's messages, the agent's replies and reasoning, each tool call with a plain-text example of its output, what runs in parallel, and how it ends. No events yet. |
-| 2. Assemble | One compact JSON spec of windows and events in causal order, built from the notes. It fills in anything the notes missed. |
+| 1. Draft | Plain-prose working notes for the whole episode. They include messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
+| 2. Assemble | One compact JSON spec of windows and events. It preserves the draft's facts and voice and connects each action to the events that make its evidence visible. |
 
 Both passes see the proposal, the tool catalogue, the review checklist (core and critical) and the
 flow's `actor_instruction`, so a persona added there applies here too. The prompts are in
 `trajectory_remix/graph/two_pass.yaml`.
+
+The draft places approvals, results and other evidence before the actions they support.
+The assembler gives independent steps separate windows so they can run in parallel.
+It saves findings that later steps need in notes before closing the reasoning windows.
 
 Remix builds the graph from the spec. It adds the tool listing event, tool-call IDs on results,
 chat deliveries (`:echo` events) and canonical tool arguments. Then:
