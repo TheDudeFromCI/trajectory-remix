@@ -24,13 +24,21 @@ def schema(tool_ids):
     window = dict(
         type="object",
         properties=dict(
-            id=dict(type="string", pattern=r"^[A-Za-z0-9_.-]+$"),
+            id=dict(
+                type="string",
+                pattern=r"^[A-Za-z0-9_.-]+$",
+                description="Unique window ID. The builder reserves tools.",
+            ),
             purpose=dict(
                 type="string",
                 pattern=r"^[A-Za-z0-9_.-]+$",
-                description="chatroom, notes, document, or reasoning (one short step each)",
+                description="chatroom for messages, notes for lasting conclusions, document"
+                " for given material, or reasoning for a short step",
             ),
-            writable=dict(type="boolean", description="True if the agent writes in it"),
+            writable=dict(
+                type="boolean",
+                description="True for think and call windows, false for chatroom and documents",
+            ),
         ),
         required=["id", "purpose", "writable"],
         additionalProperties=False,
@@ -38,7 +46,11 @@ def schema(tool_ids):
     event = dict(
         type="object",
         properties=dict(
-            id=dict(type="string", pattern=r"^[A-Za-z0-9_.-]+$"),
+            id=dict(
+                type="string",
+                pattern=r"^[A-Za-z0-9_.-]+$",
+                description="Unique event ID. The builder reserves tools.",
+            ),
             kind=dict(
                 type="string",
                 enum=list(KINDS),
@@ -46,19 +58,28 @@ def schema(tool_ids):
                 " unasked report; think: private reasoning; call: a tool call; result:"
                 " a tool's output",
             ),
-            window=dict(type="string", description="ID of a window in windows"),
+            window=dict(
+                type="string",
+                description="ID from windows. For a result, use its tool's response_window"
+                " if configured.",
+            ),
             after=dict(
                 type="array",
                 items=dict(type="string"),
-                description="IDs of earlier events this one directly depends on. A chat"
-                " call's delivery to the chatroom has the ID <call id>:echo.",
+                description="IDs of earlier dependencies. A person's reply follows the"
+                " generated <chat event ID>:echo. Each writer must follow the prior writer"
+                " in its window, directly or transitively.",
             ),
             content=dict(type="string", description="Text of every kind except call"),
-            arguments=dict(type="object", description="call only: the tool arguments"),
-            tool=dict(type="string", enum=list(tool_ids), description="call only"),
+            arguments=dict(
+                type="object", description="Call only. An object matching the tool's input_schema."
+            ),
+            tool=dict(type="string", enum=list(tool_ids), description="Call only. ID from tools."),
             call=dict(
                 type="string",
-                description="result only, optional: the call answered, if it is not in after",
+                description="Optional call ID. On a call it defaults to the event ID. On a"
+                " result it defaults to the call ID of the answered event in after. The"
+                " answered call must be a dependency.",
             ),
             speaker=dict(type="string", description="user only: who is speaking"),
             close=dict(
@@ -71,7 +92,12 @@ def schema(tool_ids):
     return dict(
         type="object",
         properties=dict(
-            tools=dict(type="array", items=dict(type="string", enum=list(tool_ids)), minItems=1),
+            tools=dict(
+                type="array",
+                items=dict(type="string", enum=list(tool_ids)),
+                minItems=1,
+                description="Catalogue IDs to show the agent. Include every tool used by a call.",
+            ),
             windows=dict(type="array", items=window, minItems=1),
             events=dict(
                 type="array",

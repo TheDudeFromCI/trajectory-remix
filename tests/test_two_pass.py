@@ -1,9 +1,15 @@
 """Two-pass generation: a prose draft, one assembled graph, then review and repair."""
 
+import json
+
 import pytest
+from jsonschema import Draft202012Validator
 from test_graph_generation import finish, service
 
 from trajectory_remix.graph import compact_spec, two_pass
+from trajectory_remix.graph.flow import causal_view
+from trajectory_remix.graph.models import GraphSource, ToolDefinition
+from trajectory_remix.graph.validation import diagnose
 
 DRAFT = "Working notes. " * 20
 
@@ -58,6 +64,8 @@ async def test_draft_then_assemble_then_both_reviews(tmp_path):
     assert source.metadata["two_pass"]["draft"] == DRAFT
     assert "ack:echo" in source.events and source.events["got"].call_id == "look"
     assert DRAFT in fake.calls[1].payload["messages"][1]["content"]
+    system_message = fake.calls[1].payload["messages"][0]["content"]
+    assert two_pass.prompts()["assemble_instruction"] in system_message
 
 
 @pytest.mark.asyncio
@@ -99,6 +107,35 @@ def test_builder_fills_in_listing_echo_and_call_ids(tmp_path):
     assert data["events"]["look"]["content"] == '{"path":"a.md"}'
     assert data["events"]["look"]["close_window"] is True
     assert data["events"]["ack:echo"]["window"] == "room"
+
+
+def test_assemble_prompt_example_builds_cleanly(tmp_path):
+    gen, _ = service(tmp_path)
+    settings = gen.store.settings().settings
+    settings.tools["read"] = ToolDefinition(
+        name="Read",
+        input_schema={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        response_window="inbox",
+    )
+    tools = {key: tool.model_dump(mode="json") for key, tool in settings.tools.items()}
+    example = two_pass.prompts()["assemble_instruction"].split("```json\n", 1)[1].split("```", 1)[0]
+    body = json.loads(example)
+    Draft202012Validator(compact_spec.schema(tools)).validate(body)
+    base = dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
+    source = GraphSource.model_validate(compact_spec.build(body, base, tools))
+
+    assert diagnose(source, settings) == []
+    assert source.events["read-n"].after == source.events["read-s"].after == ["ack:echo"]
+    assert source.events["got-n"].call_id == "read-n"
+    assert source.events["got-s"].call_id == "read-s"
+    visible = causal_view(source, ["report"])
+    assert "notes" in visible
+    assert "inbox" not in visible
 
 
 @pytest.mark.parametrize(

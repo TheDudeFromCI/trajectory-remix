@@ -1,34 +1,85 @@
-version: two-pass/1
-# Pass 1 works out the whole episode as plain prose. No graph, no JSON events.
+version: two-pass/2
 draft_instruction: |-
-  You are writing the working notes for ONE synthetic training episode in which the agent
-  (described in the actor guide below) solves a problem for a person. Work out everything
-  that happens, in order, as plain prose. Do not write a trajectory, JSON or events.
+  Write working notes for one synthetic episode, from the opening to the final state.
+  Return a JSON object with one field, "draft", containing at least 200 characters of
+  plain prose. Leave graph windows and event IDs to the next pass.
 
-  Include, in the order they happen:
-  - The person's opening message, in their own words, and any later messages from them.
-  - Any documents or prior state the agent can see at the start.
-  - The agent's immediate short reply to the person, before it thinks.
-  - Each piece of the agent's private reasoning, as it would actually think it: short,
-    specific, never addressed to anyone. Note which pieces of reasoning are independent
-    and can happen at the same time.
-  - Each tool call: which tool, the exact arguments, and why. Mark calls that are sent
-    together (in parallel).
-  - A plain-text example of each tool's output, realistic and consistent with the world.
-    Results may arrive in a different order from the calls. Some may fail or surprise.
-  - What the agent notes down to keep (conclusions, decisions, open items).
-  - Every message the agent sends the person (progress updates and the final report),
-    in the agent's voice. Never claim anything a result has not shown yet.
-  - How the episode ends, and what is still open.
+  Turn the proposal's objectives, dimensions, constraints, event tags and numeric
+  targets into things the episode actually shows. Use the checklist to check coverage.
+  Set up concrete starting evidence and write the person's messages in their own words.
+  When a person opens the conversation, give the agent a brief chat reply before private
+  reasoning. Write the agent's messages in its voice and keep its reasoning private.
 
-  Choose the tools from the catalogue that the episode needs. Make the episode show the
-  whole proposal: objective, dimensions, constraints and event tags, not just their
-  labels. Aim the episode at the review checklist, which reviewers will apply strictly:
-  later evidence never justifies an earlier action, and nothing is claimed before it is
-  observed.
+  Walk through what happens. Include what the agent delegates and why, the exact
+  arguments for each call, and which steps run independently. Give each tool that
+  returns data a realistic output and say when it arrives. Results can arrive out of
+  order, fail or be incomplete.
+  Use tools from the catalogue for their stated purpose and follow their input schemas.
+  Keep names, IDs returned by tools, task ownership and state consistent. Repeat a call or
+  message only when there is a concrete reason and show what prompted it.
 
-# Pass 2 turns the notes into a parallel trajectory in the compact spec format.
+  At each action or message, use only evidence available to the agent at that point.
+  Show the observation before anything that relies on it, including approval, a cited
+  result or a verification claim. Later evidence cannot justify earlier work, and a
+  report from someone else is not independent verification. Record conclusions worth
+  keeping and end with what is confirmed, what remains open and any next step. If
+  correction is nonempty, fix the stated problem in the complete draft.
+
 assemble_instruction: |-
-  Convert the working notes into one parallel trajectory, using the format defined by
-  the response schema; each field's description says how to use it. Keep the notes'
-  content and voice, and complete anything they left out. Return only the JSON.
+  Turn the notes into one episode. Preserve their facts, outcomes and voice. Fill gaps
+  with the smallest consistent details needed to show the proposal and checklist.
+  If correction is nonempty, fix the stated problem. Return only the complete JSON spec.
+
+  List the catalogue IDs the agent needs in tools. Define windows with unique IDs and
+  leave the ID "tools" to the builder for both windows and events. Use a read-only
+  chatroom for user messages, read-only document windows for given material or unsolicited
+  reports, and one writable notes window for lasting conclusions. Put every think and
+  call in a writable window. When a person opens the episode, acknowledge them with a
+  chat call in its own short-lived window before any private reasoning. Speak to people
+  through chat calls with arguments {"content": "..."}.
+
+  Use a fresh reasoning window for each step. Give independent steps separate windows
+  and shared prerequisites where appropriate. Put results in fresh windows as they arrive,
+  in whatever order they arrive. If the tool declares response_window, define and use
+  that exact window ID. Order successive writers in each window through after, directly
+  or through other events. Copy evidence or conclusions later steps need into notes
+  before their window closes, and have those steps depend on the relevant notes. Set
+  close: true on the last event in each short-lived window. Closed content is no longer
+  visible to later actions, and a closed window cannot receive more events.
+
+  Give each event a unique ID and list it after all its dependencies. In after, name
+  earlier events that provide the evidence or state it uses. List order alone gives no
+  visibility. A branch cannot rely on another branch until it depends on that evidence.
+  Check every claim and action against the evidence visible at that point. Add any
+  missing dependency or move the claim or action until the evidence is available.
+
+  Use catalogue tool IDs from tools and arguments objects that match input_schema. Each
+  result must depend on the earlier call it answers, with at most one result per call.
+  Put the answered event in after to infer its call ID. If specifying call explicitly,
+  use the same call ID on the result as on the call, which defaults to its event ID.
+  For a person's reply to a chat call, put "<chat event ID>:echo" in after so the reply
+  follows delivery. The builder creates that echo, the tools listing, default links to
+  the listing for empty after arrays, and canonical JSON for arguments.
+
+  Fictional example. The read tool takes a path and routes both results to "inbox".
+  The reads are independent, the second returns first, and the report follows the notes.
+  Use the actual catalogue and scenario for your episode.
+  ```json
+  {"tools":["chat","read"],"windows":[
+    {"id":"room","purpose":"chatroom","writable":false},
+    {"id":"acknowledge","purpose":"reasoning","writable":true},
+    {"id":"north","purpose":"reasoning","writable":true},
+    {"id":"south","purpose":"reasoning","writable":true},
+    {"id":"inbox","purpose":"reasoning","writable":true},
+    {"id":"notes","purpose":"notes","writable":true}
+  ],"events":[
+    {"id":"ask","kind":"user","window":"room","after":[],"speaker":"Lee","content":"What time does each library close?"},
+    {"id":"ack","kind":"call","window":"acknowledge","after":["ask"],"tool":"chat","arguments":{"content":"I'll check both schedules."},"close":true},
+    {"id":"read-n","kind":"call","window":"north","after":["ack:echo"],"tool":"read","arguments":{"path":"north.txt"},"close":true},
+    {"id":"read-s","kind":"call","window":"south","after":["ack:echo"],"tool":"read","arguments":{"path":"south.txt"},"close":true},
+    {"id":"got-s","kind":"result","window":"inbox","after":["read-s"],"content":"South library closes at 6 pm."},
+    {"id":"got-n","kind":"result","window":"inbox","after":["read-n","got-s"],"content":"North library closes at 8 pm."},
+    {"id":"remember","kind":"think","window":"notes","after":["got-n"],"content":"Posted closing times: North 8 pm, South 6 pm."},
+    {"id":"report","kind":"call","window":"inbox","after":["remember"],"tool":"chat","arguments":{"content":"The schedules list North at 8 pm and South at 6 pm."},"close":true}
+  ]}
+  ```
