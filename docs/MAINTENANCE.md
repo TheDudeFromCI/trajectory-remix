@@ -178,6 +178,11 @@ against the schema and graph validator. Keep the prompts in `graph/draft_assembl
 descriptions in `compact_spec.schema` in sync.
 Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
 
+Held trajectories: `python -m pytest -q tests/test_trajectory_hold.py` checks that invalid review
+output or a local error holds only that trajectory while the rest finish, that the job pauses
+only when held trajectories alone remain, that Resume retries and clears `needs_attention`, and
+that detaching a held trajectory completes the job. Never pause a whole job for one trajectory.
+
 Assembly fix: `python -m pytest -q tests/test_assembly_fix.py` checks that errors and
 warnings (not a clean graph) start the fix, that `done` is refused while errors remain, and that
 giving up or invalid output hands the graph on to review without pausing.

@@ -370,9 +370,13 @@ without calling a model.
   attached work are kept. Fix the server and use **Resume endpoint**.
 - **Format failures** (the model returned unusable JSON): a bounded number of new calls
   (`format_retries`, default 2 extra). Generation that runs out records **Unsuccessful** and may
-  go to repair. For review and repair, the job **pauses with no quality verdict**, and Resume retries
-  within the same session and budget.
-- **Local wrapper problems** pause the job instead of asking a model to fix programmatic envelopes.
+  go to repair. For review and repair, that trajectory is **held** with no quality verdict.
+- **Local wrapper problems** and **context limits** hold that trajectory too, instead of asking a
+  model to fix programmatic envelopes.
+- **Held trajectories** never stall the rest of the job: the others keep running. A held
+  trajectory shows the reason in `metadata.needs_attention` and the job log. When only held
+  trajectories remain, the job pauses. **Resume** retries every held trajectory (with a fresh
+  bounded correction); **detach** settles one as Unfinished, keeping its edits.
 - **Server restart:** jobs pause, callbacks are fenced, unaccepted text is dropped, and you
   resume manually. Completed events and repair patches survive.
 - **Cancel and detach** use the same fences as everywhere else ([Jobs](GRAPH-JOBS.md)).
@@ -547,7 +551,7 @@ Prompts carry what the model needs and nothing that is implied:
   private selector sees the whole committed source, all of which is in the past.
 
 Over-budget requests return a context-limit result before contacting the model. A
-non-repair operation pauses with operation/input-size/allowance in its job log; repair
+non-repair operation holds its trajectory, with operation/input-size/allowance in the job log; repair
 retains the existing context-limit failure behavior. Nothing is silently truncated or
 converted into a quality failure. Frozen runs keep their endpoint settings: start a
 new run to apply changed budgets or the narrower prompt recipe. Long episodes still

@@ -16,6 +16,7 @@ from . import (
     reviews,
     spec_normalize,
     tool_listing,
+    trajectory_hold,
 )
 from .commands import merge_patch
 from .flow import append_event, chat_echo, event_payload, prepare_plan
@@ -337,7 +338,13 @@ class GenerationService:
                     )
             else:
                 cp = dict(serial=0, phase="event", index=0, errors=0, manual=False)
+        if trajectory_hold.held(cp, epoch):
+            return
         cp.update(_epoch=epoch, _revision=record.revision)
+        if cp.get("held"):  # Resumed: retry it, with a fresh bounded correction.
+            cp.pop("held")
+            self._save(job, trajectory_hold.unflag(source), cp)
+            return
         if cp["phase"] == "event":
             if cp.get("echo"):
                 echo = chat_echo(source, cp.pop("echo"))
@@ -519,6 +526,37 @@ class GenerationService:
         cp["repair_base"] = reviews.payload(source, settings, "fast", "repair")["messages"]
         self._save(job, source, cp, ticket=ticket)
 
+    def _hold(self, job, source, cp, reason, ticket=None):
+        """Hold one trajectory for attention; the rest of the job keeps running."""
+        trajectory_hold.mark(cp, ticket.epoch if ticket else cp["_epoch"], reason)
+        self._save(job, trajectory_hold.flag(source, reason), cp, ticket=ticket)
+        self.jobs.append_log(
+            job,
+            f"Trajectory {label(source.id)} held for attention: {reason} Other trajectories"
+            " continue. Resume retries it; detach it to settle it as Unfinished.",
+        )
+
+    def _hold_owned(self, job, ident, epoch):
+        """Hold a trajectory after a local error, from its last saved checkpoint."""
+        record = self.store.read(ident)
+        cp = self.jobs.checkpoint(job, ident)
+        if cp is None:
+            raise ValueError("No checkpoint to hold")
+        cp.update(_epoch=epoch, _revision=record.revision)
+        self._hold(job, record.source, cp, "A local error interrupted it; edits are kept.")
+
+    def _pause_if_only_held(self, job, epoch):
+        owners = self._owners(job)
+        if not owners or self.jobs.inspect(job)["state"] != "running":
+            return
+        if all(trajectory_hold.held(self.jobs.checkpoint(job, i), epoch) for i in owners):
+            self.jobs.control(job, "pause")
+            self.jobs.append_log(
+                job,
+                f"Only held trajectories remain ({len(owners)}). Fix the cause, then Resume to"
+                " retry them, or detach them.",
+            )
+
     def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
         data = source.to_dict()
         data.setdefault("metadata", {})["stage"] = -3
@@ -563,14 +601,15 @@ class GenerationService:
                         outcome="fail",
                     )
             else:
-                # No quality verdict exists. Consume invalid body, preserve stage,
-                # then pause for explicit Resume and a fresh bounded correction.
-                cp["errors"] = 0
-                self._save(ticket.job_id, source, cp, ticket=ticket)
-                self.jobs.control(ticket.job_id, "pause")
-                self.jobs.append_log(
+                # No quality verdict exists. Keep the stage and hold this trajectory;
+                # Resume gives it a fresh bounded correction.
+                self._hold(
                     ticket.job_id,
-                    "Review/repair output invalid; no verdict recorded. Manual Resume required.",
+                    source,
+                    cp,
+                    "Review/repair output stayed invalid after its corrections; no verdict"
+                    " recorded.",
+                    ticket,
                 )
         else:
             if cp["phase"] in ("repair", assembly_fix.PHASE):
@@ -596,10 +635,10 @@ class GenerationService:
             elif cp["phase"] == "repair":
                 self._next_round(ticket.job_id, source, cp, ticket)
             else:
-                self._save(ticket.job_id, source, cp, ticket=ticket)
-                self.jobs.control(ticket.job_id, "pause")
-                self.jobs.append_log(
+                self._hold(
                     ticket.job_id,
+                    source,
+                    cp,
                     (
                         f"Local context guard ({ticket.payload['operation']}): "
                         f"about {complete['local_budget']['input_tokens_estimate']} input tokens "
@@ -609,8 +648,9 @@ class GenerationService:
                         "No provider call made. Reduce prompt scope or change the endpoint budget; "
                         "active runs keep frozen settings."
                         if complete.get("local_budget")
-                        else "Provider context limit; no quality verdict. Manual Resume required."
+                        else "Provider context limit; no quality verdict."
                     ),
+                    ticket,
                 )
             return
         body = complete.get("output")
@@ -837,17 +877,21 @@ class GenerationService:
         except (Fenced, asyncio.CancelledError):
             pass
         except Exception:
-            # Unknown local wrapper/transport-adapter failures are resumable.
+            # Unknown local wrapper/transport-adapter failures are resumable. Hold only
+            # the trajectory involved; pause the job only if even that fails.
             if (
                 "ticket" in locals()
                 and ticket
                 and self.jobs.inspect(ticket.job_id)["state"] == "running"
             ):
-                self.jobs.control(ticket.job_id, "pause")
-                self.jobs.append_log(
-                    ticket.job_id,
-                    "Flow interrupted; completed commits retained. Manual Resume required.",
-                )
+                try:
+                    self._hold_owned(ticket.job_id, ticket.trajectory_id, ticket.epoch)
+                except Exception:
+                    self.jobs.control(ticket.job_id, "pause")
+                    self.jobs.append_log(
+                        ticket.job_id,
+                        "Flow interrupted; completed commits retained. Manual Resume required.",
+                    )
 
     def dispatch(self):
         # Claims remain the sole ordering/cap authority. Each task is one queue
@@ -878,6 +922,12 @@ class GenerationService:
             if self.jobs.inspect(job)["state"] != "running":
                 break
             for ident in self._owners(job):
-                self._prepare(job, ident, epoch)
+                try:
+                    self._prepare(job, ident, epoch)
+                except (Fenced, OwnershipConflict):
+                    raise
+                except Exception:
+                    self._hold_owned(job, ident, epoch)
+            self._pause_if_only_held(job, epoch)
             self.dispatch()
             await asyncio.sleep(0.025)
