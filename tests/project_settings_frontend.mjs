@@ -49,6 +49,9 @@ const repair=byLabel(generation,'Attempt repair after review failure');repair.ch
 enter(byLabel(generation,'core criterion evidence'),'Require exact supporting events');
 enter(byLabel(generation,'New critical criterion ID'),'quality');btn(generation,'Add critical criterion').click();
 enter(byLabel(generation,'critical criterion quality'),'Avoid unsupported conclusions');
+const method=byLabel(generation,'Generation method');assert.equal(method.value,'flow');method.value='two_pass';method.dispatchEvent(new window.Event('change'));
+enter(byLabel(generation,'Repair rounds'),'4');
+assert.equal(draft.generation.method,'two_pass');assert.equal(draft.generation.repair_rounds,4);
 assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists.critical.quality.text,'Avoid unsupported conclusions');
 assert.equal(draft.endpoints['local-model'].model,'tiny-local');
 btn(root,'Remove endpoint local-model').click();

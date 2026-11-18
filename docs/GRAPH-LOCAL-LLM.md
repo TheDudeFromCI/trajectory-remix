@@ -66,9 +66,10 @@ Work on a **copy** of a smoke project:
   Rejected by hand, and run Standard with repair on. Watch the continuing event patches and the single combined
   verdict. There should be no extra same-model validation after a successful repair. Whether the flaw is noticed
   depends on the model, so record misses.
-- **Repair limits.** Use an impossible criterion to elicit a negative verdict, or set a small
-  `repair_context_bytes` on a new operation. A failure ends detached as Unfinished, keeping completed edits. Test a
-  provider-reported context limit separately if your server supports it.
+- **Repair limits.** Use an impossible criterion to elicit a negative verdict: the session should keep
+  going until the model gives up. Set a small `repair_context_bytes` and `repair_rounds: 1` to see the round
+  cap end the repair detached as Unfinished, keeping completed edits. Test a provider-reported context limit
+  separately if your server supports it.
 - **Stale indicators.** Change a checklist and edit a reviewed source. Stale markers appear, stages don't move and
   nothing re-reviews until you ask.
 - **Failures.** Stop the endpoint mid-call. After its retries run out, the queue pauses with no quality verdict and

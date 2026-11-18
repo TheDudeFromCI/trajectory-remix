@@ -168,6 +168,17 @@ agent event is told its text won't be seen again, and that the default flow teac
 window lifecycle. Keep the shared `selector_instruction` short and put step-specific
 guidance in the step's own instruction: every selector request carries the shared text.
 
+Two-pass generation: `python -m pytest -q tests/test_two_pass.py` checks the draft then
+assemble order, the draft kept in metadata, the builder's tool listing, chat deliveries and call
+IDs, corrections for specs that can't be built, and that structural errors go straight to Fast
+repair. Keep the prompts in `graph/two_pass.yaml` and the field descriptions in
+`compact_spec.schema` in step: the assemble prompt relies on the schema to explain the format.
+
+Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
+verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
+shows the patched source, that context exhaustion starts a fresh round on the current graph,
+and that `repair_rounds` caps the rounds.
+
 Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
 tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra
 request fields and their reserved names, sticky `session_id`, usage kept for cut-off and

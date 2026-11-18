@@ -29,18 +29,6 @@ draft_instruction: |-
 
 # Pass 2 turns the notes into a parallel trajectory in the compact spec format.
 assemble_instruction: |-
-  Turn the working notes into ONE parallel trajectory in the compact spec format (JSON).
-  Keep the notes' content and voice; fill in anything they missed so the episode is
-  complete and consistent. Return only the spec.
-
-  Format:
-  - tools: IDs of the tools the agent is shown (from the catalogue).
-  - windows: {id, purpose, writable}. Use a chatroom (purpose chatroom, writable false),
-    a notes window (purpose notes, writable true), document windows for given material
-    (writable false), and one SHORT-LIVED reasoning window (purpose reasoning, writable
-    true) per step of thinking.
-  - events, listed in causal order. Each has id, kind, window and after (IDs of earlier
-    events it directly depends on):
-    - user: a message from a person, in the chatroom; set speaker.
-    - document: material the agent is given, or a tool's report that arrives unasked.
-    - think: the agent's private reasoning (content). Never addressed to
+  Convert the working notes into one parallel trajectory, using the format defined by
+  the response schema; each field's description says how to use it. Keep the notes'
+  content and voice, and complete anything they left out. Return only the JSON.

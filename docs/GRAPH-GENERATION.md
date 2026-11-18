@@ -13,6 +13,7 @@ never executed.
 
 - [Run a generation](#run-a-generation)
 - [How a trajectory is built](#how-a-trajectory-is-built)
+- [Two-pass generation](#two-pass-generation)
 - [What the model sees](#what-the-model-sees)
 - [Tools and chat during generation](#tools-and-chat-during-generation)
 - [Reviews and repair](#reviews-and-repair)
@@ -217,6 +218,33 @@ separate engine. Each task has:
 Instructions are trusted project configuration and must respect the same boundaries. The smoke
 script's `smoke_plan` has examples.
 
+## Two-pass generation
+
+Two-pass generation is an alternative to the step-by-step flow. It writes a whole episode in two
+generator calls, then reviews and repairs it as usual. To use it, set **Settings → Automatic review
+and repair → Generation method** to **Two pass** (`generation.method: two_pass`).
+
+| Pass | What the generator writes |
+|---|---|
+| 1. Draft | Plain-prose working notes for the whole episode: the person's messages, the agent's replies and reasoning, each tool call with a plain-text example of its output, what runs in parallel, and how it ends. No events yet. |
+| 2. Assemble | One compact JSON spec of windows and events in causal order, built from the notes. It fills in anything the notes missed. |
+
+Both passes see the proposal, the tool catalogue, the review checklist (core and critical) and the
+flow's `actor_instruction`, so a persona added there applies here too. The prompts are in
+`trajectory_remix/graph/two_pass.yaml`.
+
+Remix builds the graph from the spec. It adds the tool listing event, tool-call IDs on results,
+chat deliveries (`:echo` events) and canonical tool arguments. Then:
+
+- A spec that can't be built (an unknown event or window, a reused ID, a call with no tool) gets a
+  correction with the reason, up to `format_retries` times.
+- A graph that builds but has structural errors goes straight to **Fast repair**, which fixes them
+  in place. With repair off, it gets a correction instead.
+- A clean graph goes to Fast and then Critical review.
+
+The draft is kept in the trajectory's `metadata.two_pass.draft`, so you can compare it with the
+assembled graph.
+
 ## What the model sees
 
 The private selection controller sees the full proposal and the committed source, except
@@ -269,18 +297,29 @@ skips Fast. Configured roles are used automatically unless the project toggle tu
 
 ### Repair
 
-A failed review can enter **one** Repair & Validate session on that tier's own model. The model
-sees the original source and checklist, plus each full inspect-and-patch exchange so far, until a
-verdict or the context budget (`repair_context_bytes`, default 65,536) runs out. There is no
-compaction, second attempt or extra confirmation pass.
+A failed review enters a Repair & Validate session on that tier's own model. The model sees the
+source, the checklist and the failed review, plus each exchange so far. **A repair only fails when
+the model gives up**, saying why repair is not feasible.
 
-- *Inspect* returns a causal view of events. A *patch* merges into one event or window using the
-  expected source hash, and an event can be added or removed. Removal keeps broken references for
-  you to fix.
+| Action | What it does |
+|---|---|
+| `view` | Returns the current source with diagnostics, including earlier patches. |
+| `inspect` | Returns one event and the causal view it can see. |
+| `patch`, `patch_window` | Merges a patch into one event or window, using the expected source hash. A new event ID adds an event. |
+| `remove_event` | Deletes an event. Broken references stay for you to fix. |
+| `verdict` | A full checklist verdict. A passing verdict ends the session; a failing one keeps it open with the failing items listed. |
+| `give_up` | Ends the repair as failed, with the model's reason (`unfeasible`). |
+
+When a session's transcript reaches `repair_context_bytes` (default 65,536), or the provider's
+context runs out, a fresh **round** starts on the current graph with the last failed review. The
+`repair_rounds` setting (default 3) caps the rounds as a spending guard; reaching it fails the
+repair as `round_limit`.
+
+- Accepted patches save immediately, even if they leave editable errors.
 - Accepted patches save immediately, even if they leave editable errors. A passing final verdict
   needs a structurally valid graph.
-- On failure or context exhaustion, the trajectory is detached as Unfinished with its edits
-  and any real verdict evidence kept. No verdict is made up for a context-limit failure.
+- When the repair gives up or reaches the round cap, the trajectory is detached as Unfinished
+  with its edits and any real verdict evidence kept. The reason is in `metadata.repair_outcomes`.
 - A successful Fast repair can proceed to Critical review.
 
 ### Manual review
@@ -321,9 +360,10 @@ without calling a model.
 
 ## Reference
 
-**Settings** (`generation` in project settings): `fast`, `critical`, `repair` (default true),
-`format_retries` (default 2) and `repair_context_bytes` (default 65,536, a transcript bound, not
-a token estimate). Configure the `chat` tool with a JSON object input that has a string `content`
+**Settings** (`generation` in project settings): `method` (`flow` or `two_pass`, default `flow`),
+`fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
+(default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
+(default 3). Configure the `chat` tool with a JSON object input that has a string `content`
 to enable the echo helper ([example config](../examples/graph_local_llm.json)).
 
 **Endpoints:** URLs are OpenAI-compatible base URLs. Remix appends `/chat/completions`, sends a

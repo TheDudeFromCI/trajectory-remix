@@ -356,6 +356,8 @@ def default_checklists():
 
 
 class GenerationOptions(DTO):
+    # flow: the step-by-step YAML Flow. two_pass: a prose draft, then one assembled graph.
+    method: Literal["flow", "two_pass"] = "flow"
     fast: bool = True
     critical: bool = True
     repair: bool = True
@@ -363,6 +365,9 @@ class GenerationOptions(DTO):
     # An explicit byte budget for the continuing repair transcript, not a token
     # estimate or a spending limit. Provider context exhaustion also terminates it.
     repair_context_bytes: Annotated[int, Field(ge=256)] = 65536
+    # A spending guard: a repair session that outgrows repair_context_bytes starts a
+    # fresh round on the current graph, up to this many rounds in all.
+    repair_rounds: Annotated[int, Field(ge=1, le=10)] = 3
 
 
 class ProjectSettings(DTO):

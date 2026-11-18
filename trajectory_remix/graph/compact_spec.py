@@ -25,8 +25,12 @@ def schema(tool_ids):
         type="object",
         properties=dict(
             id=dict(type="string", pattern=r"^[A-Za-z0-9_.-]+$"),
-            purpose=dict(type="string", pattern=r"^[A-Za-z0-9_.-]+$"),
-            writable=dict(type="boolean"),
+            purpose=dict(
+                type="string",
+                pattern=r"^[A-Za-z0-9_.-]+$",
+                description="chatroom, notes, document, or reasoning (one short step each)",
+            ),
+            writable=dict(type="boolean", description="True if the agent writes in it"),
         ),
         required=["id", "purpose", "writable"],
         additionalProperties=False,
@@ -35,15 +39,31 @@ def schema(tool_ids):
         type="object",
         properties=dict(
             id=dict(type="string", pattern=r"^[A-Za-z0-9_.-]+$"),
-            kind=dict(type="string", enum=list(KINDS)),
-            window=dict(type="string"),
-            after=dict(type="array", items=dict(type="string")),
-            content=dict(type="string"),
-            arguments=dict(type="object"),
-            tool=dict(type="string", enum=list(tool_ids)),
-            call=dict(type="string"),
-            speaker=dict(type="string"),
-            close=dict(type="boolean"),
+            kind=dict(
+                type="string",
+                enum=list(KINDS),
+                description="user: a person's message; document: given material or an"
+                " unasked report; think: private reasoning; call: a tool call; result:"
+                " a tool's output",
+            ),
+            window=dict(type="string", description="ID of a window in windows"),
+            after=dict(
+                type="array",
+                items=dict(type="string"),
+                description="IDs of earlier events this one directly depends on. A chat"
+                " call's delivery to the chatroom has the ID <call id>:echo.",
+            ),
+            content=dict(type="string", description="Text of every kind except call"),
+            arguments=dict(type="object", description="call only: the tool arguments"),
+            tool=dict(type="string", enum=list(tool_ids), description="call only"),
+            call=dict(
+                type="string",
+                description="result only, optional: the call answered, if it is not in after",
+            ),
+            speaker=dict(type="string", description="user only: who is speaking"),
+            close=dict(
+                type="boolean", description="True on the last event in a short-lived window"
+            ),
         ),
         required=["id", "kind", "window", "after"],
         additionalProperties=False,
@@ -53,7 +73,12 @@ def schema(tool_ids):
         properties=dict(
             tools=dict(type="array", items=dict(type="string", enum=list(tool_ids)), minItems=1),
             windows=dict(type="array", items=window, minItems=1),
-            events=dict(type="array", items=event, minItems=2),
+            events=dict(
+                type="array",
+                items=event,
+                minItems=2,
+                description="All events in causal order",
+            ),
         ),
         required=["tools", "windows", "events"],
         additionalProperties=False,

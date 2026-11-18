@@ -6,9 +6,17 @@ from copy import deepcopy
 
 import jsonschema
 
-from . import adaptive_driver, adaptive_flow, flow_store, reviews, tool_listing
+from . import (
+    adaptive_driver,
+    adaptive_flow,
+    flow_store,
+    repair_policy,
+    reviews,
+    tool_listing,
+    two_pass,
+)
 from .commands import merge_patch
-from .flow import append_event, causal_view, chat_echo, event_payload, prepare_plan
+from .flow import append_event, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
@@ -54,7 +62,15 @@ class GenerationService:
             instructions["_flow_snapshot"] = adaptive_flow.load_flow(text=text)
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
-        plans = {p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals}
+        if settings.generation.method == "two_pass":
+            if "plan" in instructions:
+                raise ValueError("Two-pass generation uses the project flow, not a plan")
+            snapshot = instructions["_flow_snapshot"]
+            plans = {p["id"]: two_pass.plan(p["proposal"], settings, snapshot) for p in proposals}
+        else:
+            plans = {
+                p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals
+            }
         return self.jobs.create_run(
             dict(
                 instructions=deepcopy(instructions),
@@ -332,7 +348,12 @@ class GenerationService:
                     ).fetchone()[0]
                 )
             plan = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
-            if "flow" in plan:
+            if plan.get("method") == "two_pass":
+                if cp.get("assembled"):
+                    self._after_generation(job, source, cp)
+                    return
+                payload = two_pass.payload(cp, plan, settings)
+            elif "flow" in plan:
                 payload = adaptive_driver.prepare(self, job, source, cp, plan, settings)
                 if payload is None:
                     return
@@ -362,7 +383,7 @@ class GenerationService:
                     len(canonical(payload["messages"]).encode())
                     >= settings.generation.repair_context_bytes
                 ):
-                    self._repair_failure(job, source, cp, "context_limit")
+                    self._next_round(job, source, cp)
                     return
         endpoint = settings.endpoint_roles[tier]
         payload.update(
@@ -389,12 +410,59 @@ class GenerationService:
             ),
         )
 
-    def _repair_failure(self, job, source, cp, reason, ticket=None):
+    def _next_round(self, job, source, cp, ticket=None):
+        """A repair that outgrew its context continues as a fresh round, up to the cap."""
+        settings = self.settings_for(job)
+        base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
+        if not repair_policy.new_round(cp, settings, base):
+            self._repair_failure(job, source, cp, "round_limit", ticket)
+            return
+        self._save(job, source, cp, ticket=ticket)
+        self.jobs.progress(
+            job, f"Repair round {cp['round']} started: trajectory={label(source.id)}"
+        )
+
+    def _plan(self, job, ident):
+        with self.store.connect() as db:
+            proposal = json.loads(
+                db.execute(
+                    "SELECT proposal FROM graph_attempts WHERE trajectory_id=?", (ident,)
+                ).fetchone()[0]
+            )
+        return self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
+
+    @staticmethod
+    def _can_repair(settings):
+        return settings.generation.repair and "fast" in settings.endpoint_roles
+
+    def _assembled(self, ticket, source, broken, cp):
+        """Commit an assembled graph. Structural errors go straight to Fast repair."""
+        self.jobs.progress(
+            ticket.job_id,
+            f"Graph assembled: trajectory={label(source.id)} events={len(source.events)}"
+            + (f" structural_errors={len(broken)}" if broken else ""),
+        )
+        if not broken:
+            cp["assembled"] = True
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+            return
+        settings = self.settings_for(ticket.job_id)
+        data = source.to_dict()
+        data["metadata"].update(
+            stage=-1, generation_failure=dict(kind="assembled_with_structural_errors")
+        )
+        source = GraphSource.model_validate(data)
+        cp.update(phase="repair", tier="fast", errors=0, history=[], round=1)
+        cp["repair_base"] = reviews.payload(source, settings, "fast", "repair")["messages"]
+        self._save(ticket.job_id, source, cp, ticket=ticket)
+
+    def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
         data = source.to_dict()
         data.setdefault("metadata", {})["stage"] = -3
-        data["metadata"].setdefault("repair_outcomes", []).append(
-            dict(tier=cp["tier"], outcome=reason, source_hash=source.intrinsic_hash)
-        )
+        outcome = dict(tier=cp["tier"], outcome=reason, source_hash=source.intrinsic_hash)
+        if detail:
+            outcome["reason"] = detail
+        data["metadata"].setdefault("repair_outcomes", []).append(outcome)
         cp["phase"] = "done"
         self._save(job, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail")
 
@@ -458,7 +526,7 @@ class GenerationService:
         settings = self.settings_for(ticket.job_id)
         if complete.get("context_limit"):
             if cp["phase"] == "repair":
-                self._repair_failure(ticket.job_id, source, cp, "context_limit", ticket)
+                self._next_round(ticket.job_id, source, cp, ticket)
             else:
                 self._save(ticket.job_id, source, cp, ticket=ticket)
                 self.jobs.control(ticket.job_id, "pause")
@@ -492,6 +560,14 @@ class GenerationService:
                     settings,
                     shown=cp["flow"].get("shown_tools"),
                 )
+            if ticket.payload["operation"] == two_pass.ASSEMBLE:
+                plan = self._plan(ticket.job_id, ticket.trajectory_id)
+                assembled, broken = two_pass.assemble(source, body, plan, settings)
+                if broken and not self._can_repair(settings):
+                    raise ValueError(
+                        "Structural errors; fix them: "
+                        + "; ".join(f"{d.code}: {d.message}" for d in broken[:8])
+                    )
             if ticket.payload["operation"] == tool_listing.OPERATION:
                 listed_flow = deepcopy(cp["flow"])
                 listed_source, listing = tool_listing.accept(
@@ -505,6 +581,18 @@ class GenerationService:
                     raise ValueError("A structural error cannot receive a passing signoff")
             elif cp["phase"] == "repair" and body["action"] == "verdict":
                 quality = reviews.verdict(body["review"], source)
+                if quality == "fail":
+                    # Not a failure: the repairer keeps working, or gives up explicitly.
+                    cp["errors"] = 0
+                    cp["failed_review"] = body["review"]
+                    cp["history"].extend(
+                        [
+                            dict(role="assistant", content=canonical(body)),
+                            repair_policy.still_failing(body["review"]),
+                        ]
+                    )
+                    self._save(ticket.job_id, source, cp, ticket=ticket)
+                    return
                 if quality == "pass" and any(
                     d.severity == "error" for d in diagnose(source, settings)
                 ):
@@ -514,6 +602,14 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
+        if ticket.payload["operation"] == two_pass.DRAFT:
+            cp["draft"] = body["draft"]
+            self._save(ticket.job_id, two_pass.with_draft(source, body["draft"]), cp, ticket=ticket)
+            self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
+            return
+        if ticket.payload["operation"] == two_pass.ASSEMBLE:
+            self._assembled(ticket, assembled, broken, cp)
+            return
         if ticket.payload["operation"] == tool_listing.OPERATION:
             cp["flow"] = listed_flow
             adaptive_driver.advance(cp, ticket.payload["flow_plan"])
@@ -547,6 +643,14 @@ class GenerationService:
             self.jobs.progress(
                 ticket.job_id,
                 f"Event committed: {label(task['id'])} trajectory={label(source.id)} total_events={len(source.events)}",
+            )
+            return
+        if cp["phase"] == "repair" and body["action"] == "give_up":
+            self.jobs.progress(
+                ticket.job_id, f"Repair given up as not feasible: trajectory={label(source.id)}"
+            )
+            self._repair_failure(
+                ticket.job_id, source, cp, "unfeasible", ticket, detail=body["reason"]
             )
             return
         if cp["phase"] == "repair" and body["action"] != "verdict":
@@ -591,7 +695,7 @@ class GenerationService:
             else settings.generation.repair
         )
         if result == "fail" and repair_enabled:
-            cp.update(phase="repair", errors=0, history=[])
+            cp.update(phase="repair", errors=0, history=[], round=1, failed_review=review)
             cp["repair_base"] = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
             cp["repair_base"].append(
                 dict(role="user", content=canonical({"failed_review": review}))
@@ -616,13 +720,9 @@ class GenerationService:
         ident = body.get("event_id", body.get("window_id"))
         try:
             if body["action"] == "inspect":
-                if ident not in source.events:
-                    raise ValueError("Unknown event ID")
-                reply = dict(
-                    event=source.events[ident].model_dump(mode="json"),
-                    visible=causal_view(source, source.events[ident].after),
-                    source_hash=source.intrinsic_hash,
-                )
+                reply = repair_policy.inspect(source, ident)
+            elif body["action"] == "view":
+                reply = repair_policy.view(source, settings)
             else:
                 if body["expected_source_hash"] != source.intrinsic_hash:
                     raise ValueError("Patch source hash is stale")
