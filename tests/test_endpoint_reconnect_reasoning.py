@@ -26,14 +26,14 @@ def test_defaults_omit_reasoning_and_reconnect():
     assert "reasoning_effort" not in body()
 
 
-@pytest.mark.parametrize("level", ["none", "minimal", "low", "medium", "high", "xhigh"])
+@pytest.mark.parametrize("level", ["none", "low", "xhigh", "Max-Thinking", "budget:4096"])
 def test_reasoning_reaches_wire(level):
     assert body(reasoning=level)["reasoning_effort"] == level
 
 
 def test_reasoning_validation():
     with pytest.raises(ValueError):
-        Endpoint(url="http://x/v1", model="m", reasoning="loud")
+        Endpoint(url="http://x/v1", model="m", reasoning="")
     with pytest.raises(ValueError):
         Endpoint(url="http://x/v1", model="m", extra_body={"reasoning_effort": "low"})
     with pytest.raises(ValueError):

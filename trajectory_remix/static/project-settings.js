@@ -114,8 +114,12 @@ export function renderProjectSettings(container, initial, options = {}) {
     const reconnect = input(`Endpoint ${id} reconnect_seconds`, endpoint.reconnect_seconds, v => edit('reconnect_seconds', v > 0 ? v : null), 'number'); reconnect.min = 0; reconnect.step = 1;
     const reconnectField = field('Auto-reconnect after (seconds)', reconnect);
     reconnectField.append(node('span', 'Blank keeps the endpoint paused after its retries fail until you press Resume. Set seconds to retry automatically.', 'settings-help'));
-    const reasoning = select(`Endpoint ${id} reasoning`, endpoint.reasoning || '', [['', 'Model default'], ['none', 'None (disable reasoning)'], ['minimal', 'Minimal'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high']], v => edit('reasoning', v || null));
-    grid.append(field('Request timeout (seconds)', timeout), reconnectField, field('Reasoning level', reasoning));
+    const reasoning = input(`Endpoint ${id} reasoning`, endpoint.reasoning || '', v => edit('reasoning', v.trim() || null));
+    reasoning.setAttribute('list', `reasoning-levels-${id}`); reasoning.placeholder = 'Model default';
+    const suggestions = node('datalist'); suggestions.id = `reasoning-levels-${id}`;
+    for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']) { const o = node('option'); o.value = level; suggestions.append(o); }
+    const reasoningField = field('Reasoning level', reasoning); reasoningField.append(suggestions, node('span', 'Sent as reasoning_effort. Type any value your model accepts; "none" disables reasoning. Blank uses the model default.', 'settings-help'));
+    grid.append(field('Request timeout (seconds)', timeout), reconnectField, reasoningField);
     grid.append(budget);
     card.append(grid);
     card.append(providerOptions(id, endpoint, edit, input));

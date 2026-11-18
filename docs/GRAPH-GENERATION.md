@@ -374,13 +374,14 @@ API. The settings JSON Schema exposes them at `GET /api/v1/schema/settings`.
 | `top_p` | `null` | Number from 0 to 1, or `null` |
 | `presence_penalty` | `null` | Number from -2 to 2, or `null` |
 | `timeout_seconds` | `120` | Finite number greater than zero; the limit for each request |
-| `reasoning` | `null` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `null` |
+| `reasoning` | `null` | Any non-empty text, or `null` (common values: `none`, `low`, `medium`, `high`) |
 | `reconnect_seconds` | `null` | Number of seconds greater than zero, or `null` |
 
 `reasoning` is sent as the standard `reasoning_effort` request field. `none` asks the
 model not to reason; `null` omits the field so the model uses its own default. Because
-Remix sets this field, `extra_body` cannot contain `reasoning_effort`. Some models
-reject levels they do not support, so leave it blank for those.
+Remix sets this field, `extra_body` cannot contain `reasoning_effort`. Any string is
+accepted and sent unchanged, because models name their levels differently; Remix
+does not check it, so use a value your model supports.
 
 `reconnect_seconds` is off by default. When an endpoint pauses because all of its
 retries failed, it normally stays paused until you press **Resume**. With this set, it
