@@ -10,7 +10,6 @@ from typing import Literal
 from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
@@ -21,6 +20,7 @@ from .job_api import create_job_app
 from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checklists
 from .query_export import iter_jsonl
 from .reviews import ReviewInput
+from .static_files import RevalidatingStaticFiles
 from .studio import Studio
 from .validation import diagnose
 
@@ -182,7 +182,7 @@ def create_studio_app(
     def index():
         return (static / "graph.html").read_text().replace("__REMIX_TOKEN__", token)
 
-    app.mount("/static", StaticFiles(directory=static), name="static")
+    app.mount("/static", RevalidatingStaticFiles(directory=static), name="static")
     router = APIRouter(prefix="/api/v1")
 
     @router.get("/sampler")
