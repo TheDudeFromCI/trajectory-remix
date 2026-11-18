@@ -1,0 +1,127 @@
+"""Phase barrier: every trajectory is drafted and assembled before any review starts."""
+
+import pytest
+from test_draft_assembly import DRAFT, spec
+from test_graph_generation import Fake, finish, service
+
+from trajectory_remix.graph import phase_barrier
+from trajectory_remix.graph.bulk import BulkService
+from trajectory_remix.graph.generation import GenerationService
+from trajectory_remix.graph.jobs import JobService
+from trajectory_remix.graph.sampling import SamplerService
+
+
+def by_operation(fake):
+    async def call(t):
+        operation = t.payload["operation"]
+        if operation == "draft":
+            fake.calls.append(t)
+            return {"output": {"draft": DRAFT}, "model": "fixture"}
+        if operation == "assembly":
+            fake.calls.append(t)
+            return {"output": spec(), "model": "fixture"}
+        return await fake(t)
+
+    return call
+
+
+def operations(fake):
+    return [c.payload["operation"] for c in fake.calls]
+
+
+def logs(gen, job):
+    return " ".join(item["text"] for item in gen.jobs.logs(job)["items"])
+
+
+async def to_barrier(tmp_path, count=4):
+    # service() caps active trajectories at 2; parked ones must not count toward it.
+    gen, fake = service(tmp_path, method="draft_assembly", phase_barrier=True)
+    gen.transport = by_operation(fake)
+    job = gen.start([{"seed": 50 + i} for i in range(count)], {})
+    await finish(gen, job)
+    return gen, fake, job
+
+
+@pytest.mark.asyncio
+async def test_all_trajectories_assemble_before_any_review_then_the_job_pauses(tmp_path):
+    gen, fake, job = await to_barrier(tmp_path)
+    assert operations(fake).count("draft") == 4 and operations(fake).count("assembly") == 4
+    assert "review" not in operations(fake)
+    assert gen.jobs.inspect(job)["state"] == "paused"
+    assert phase_barrier.phase(gen.store, job) == phase_barrier.REVIEW
+    assert "Phase barrier: Draft and Assembly finished for 4 trajectories" in logs(gen, job)
+
+    gen.jobs.control(job, "resume")
+    await finish(gen, job)
+    assert gen.jobs.inspect(job)["state"] == "completed"
+    assert [a["outcome"] for a in gen.jobs.attempts(job)] == ["pass"] * 4
+    assert operations(fake)[8:].count("review") == 8  # Fast and Critical for each.
+
+
+@pytest.mark.asyncio
+async def test_the_barrier_survives_a_server_restart(tmp_path):
+    gen, fake, job = await to_barrier(tmp_path, count=3)
+    jobs = JobService(gen.store, active_limit=2)  # A new process recovers the store.
+    restarted = GenerationService(jobs, SamplerService(jobs), BulkService(jobs), Fake())
+    assert phase_barrier.phase(restarted.store, job) == phase_barrier.REVIEW
+    restarted.jobs.control(job, "resume")
+    await finish(restarted, job)
+    assert [a["outcome"] for a in restarted.jobs.attempts(job)] == ["pass"] * 3
+
+
+@pytest.mark.asyncio
+async def test_without_the_barrier_reviews_follow_assembly_directly(tmp_path):
+    gen, fake = service(tmp_path, method="draft_assembly")
+    gen.transport = by_operation(fake)
+    job = gen.start([{"seed": 60}, {"seed": 61}], {})
+    await finish(gen, job)
+    assert gen.jobs.inspect(job)["state"] == "completed"
+    assert "Phase barrier" not in logs(gen, job)
+
+
+def phase_client(gen):
+    from fastapi import APIRouter, FastAPI
+    from fastapi.testclient import TestClient
+
+    from trajectory_remix.graph.phase_api import add_phase_routes
+
+    class Worker:
+        kicked = []
+
+        def kick(self, job):
+            self.kicked.append(job)
+
+    router, worker = APIRouter(), Worker()
+    add_phase_routes(router, gen.jobs, worker)
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app), worker
+
+
+def test_phase_routes_report_and_start_reviews_early(tmp_path):
+    gen, _ = service(tmp_path, method="draft_assembly", phase_barrier=True)
+    job = gen.start([{"seed": 70}], {})
+    client, worker = phase_client(gen)
+    assert client.get(f"/jobs/{job}/phase").json() == {"enabled": True, "phase": "generation"}
+    reply = client.post(f"/jobs/{job}/phase/review")
+    assert reply.json() == {"enabled": True, "phase": "review"}
+    assert "Reviews started early" in logs(gen, job)
+
+
+def test_start_reviews_needs_a_barrier(tmp_path):
+    gen, _ = service(tmp_path, method="draft_assembly")
+    job = gen.start([{"seed": 71}], {})
+    client, _ = phase_client(gen)
+    assert client.get(f"/jobs/{job}/phase").json()["enabled"] is False
+    assert client.post(f"/jobs/{job}/phase/review").status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_starting_reviews_early_lets_the_run_finish_without_pausing(tmp_path):
+    gen, fake = service(tmp_path, method="draft_assembly", phase_barrier=True)
+    gen.transport = by_operation(fake)
+    job = gen.start([{"seed": 72}, {"seed": 73}], {})
+    phase_barrier.advance(gen.store, job)
+    await finish(gen, job)
+    assert gen.jobs.inspect(job)["state"] == "completed"
+    assert "Phase barrier" not in logs(gen, job)
