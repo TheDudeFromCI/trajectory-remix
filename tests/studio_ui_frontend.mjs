@@ -39,7 +39,8 @@ const responses = {
   '/jobs/job-1?include_config=false': job,
   '/jobs/job-1/logs?after=0&limit=100': {items: [{sequence: 1, text: 'started'}], last: 1, truncated: false},
   '/jobs/job-1/logs?after=1&limit=100': {items: [], last: 1, truncated: false},
-  '/jobs/job-1/attempts?limit=100&offset=0': [{id: 'a1', ordinal: 0, state: 'active', trajectory_id: 'traj-0001'}]
+  '/jobs/job-1/attempts?limit=100&offset=0': [{id: 'a1', ordinal: 0, state: 'active', trajectory_id: 'traj-0001'}],
+  '/jobs/job-1/phase': {enabled: false, phase: 'generation'}
 };
 const api = async path => { if (!(path in responses)) throw new Error('Unexpected request ' + path); return structuredClone(responses[path]); };
 const view = new JobsView({api, report: e => { throw e; }, download: async () => {}, openTrajectory: async () => {}, afterDetach: async () => {}, isVisible: () => true});
@@ -53,5 +54,13 @@ responses['/jobs/job-1?include_config=false'] = {...job, state: 'paused', progre
 await view.refresh('job-1');
 assert.equal(view.panels.get('job-1').root, panel); assert.equal(panel.dataset.state, 'run · paused');
 assert.equal(view.panels.get('job-1').buttons.resume.disabled, false);
+// Start reviews now shows only for a run with a phase barrier that is still generating.
+assert.equal(view.panels.get('job-1').reviews.hidden, true);
+responses['/jobs/job-1/phase'] = {enabled: true, phase: 'generation'};
+await view.refresh('job-1');
+assert.equal(view.panels.get('job-1').reviews.hidden, false);
+responses['/jobs/job-1/phase'] = {enabled: true, phase: 'review'};
+await view.refresh('job-1');
+assert.equal(view.panels.get('job-1').reviews.hidden, true);
 console.log('Studio UI: keyed rows, idempotent progress and flicker-free job refresh passed.');
 window.happyDOM.abort();

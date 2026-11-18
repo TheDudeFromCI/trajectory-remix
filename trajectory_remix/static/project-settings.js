@@ -1,4 +1,5 @@
 /* Form editors over the existing project-settings DTO. No network or credentials. */
+import {renderPromptSettings} from './prompt-settings.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
@@ -14,6 +15,49 @@ export function tokenBudgetProblem(context, output) {
   if (context < 1024) return 'Context limit must be at least 1024 tokens.';
   if (output + 512 >= context) return 'Max output tokens + 512 must be less than the context limit.';
   return '';
+}
+/** Request fields the transport sets itself; extra_body may not replace them. */
+export const RESERVED_BODY_FIELDS = ['model', 'messages', 'stream', 'max_tokens', 'max_completion_tokens', 'response_format', 'session_id', 'temperature', 'top_p', 'presence_penalty'];
+/** Mirrors the server's extra_body rules; returns [value, ''] or [undefined, error]. */
+export function parseExtraBody(text) {
+  let value;
+  try { value = text.trim() ? JSON.parse(text) : {}; } catch { return [undefined, 'Extra request fields must be a JSON object.']; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [undefined, 'Extra request fields must be a JSON object.'];
+  const reserved = Object.keys(value).filter(key => RESERVED_BODY_FIELDS.includes(key));
+  if (reserved.length) return [undefined, `These are set by Remix and cannot be overridden: ${reserved.join(', ')}.`];
+  return [value, ''];
+}
+/** Options for hosted routers such as OpenRouter: token estimate, sticky sessions, extra fields. */
+function providerOptions(id, endpoint, edit, input) {
+  const box = node('details', undefined, 'settings-subsection'); box.append(node('summary', 'Provider options'));
+  box.open = (endpoint.bytes_per_token ?? 1) !== 1 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0 || (endpoint.output_mode ?? 'auto') !== 'auto';
+  const grid = node('div', undefined, 'settings-grid');
+  const ratio = input(`Endpoint ${id} bytes_per_token`, endpoint.bytes_per_token ?? 1, v => edit('bytes_per_token', v), 'number');
+  ratio.min = 1; ratio.max = 6; ratio.step = 0.1;
+  const ratioField = field('Bytes per token (context estimate)', ratio);
+  ratioField.append(node('span', '1 never undercounts but rejects prompts that would fit. English and JSON average about 3.5; 3 keeps a margin.', 'settings-help'));
+  const sticky = node('input'); sticky.type = 'checkbox'; sticky.checked = !!endpoint.sticky_sessions; sticky.setAttribute('aria-label', `Endpoint ${id} sticky sessions`);
+  sticky.onchange = () => edit('sticky_sessions', sticky.checked);
+  const stickyField = node('label', undefined, 'checkbox'); stickyField.append(sticky, ' Sticky sessions (send the trajectory ID as session_id)');
+  const mode = node('select'); mode.setAttribute('aria-label', `Endpoint ${id} structured output`);
+  for (const [value, text] of [['auto', 'Auto: native JSON schema where possible'], ['json_object', 'JSON object: schema in the prompt'], ['prompt', 'Prompt only: no response_format']]) {
+    const option = node('option', text); option.value = value; mode.append(option);
+  }
+  mode.value = endpoint.output_mode || 'auto'; mode.onchange = () => edit('output_mode', mode.value);
+  const modeField = field('Structured output', mode);
+  modeField.append(node('span', 'Use JSON object or Prompt only if the server ignores or rejects JSON-schema output. Prompt only suits servers with no JSON mode at all.', 'settings-help'));
+  grid.append(ratioField, modeField, stickyField);
+  const extra = node('textarea'); extra.spellcheck = false; extra.setAttribute('aria-label', `Endpoint ${id} extra request fields`);
+  extra.value = JSON.stringify(endpoint.extra_body || {}, null, 2);
+  const problem = node('p', '', 'settings-help'); problem.setAttribute('role', 'alert');
+  extra.oninput = () => {
+    const [value, message] = parseExtraBody(extra.value);
+    problem.textContent = message; problem.classList.toggle('error', !!message); extra.setAttribute('aria-invalid', message ? 'true' : 'false');
+    if (value !== undefined) edit('extra_body', value);
+  };
+  const extraField = field('Extra request fields (JSON)', extra);
+  box.append(node('p', 'For hosted routers such as OpenRouter. Sticky sessions keep each trajectory on one provider so its prompt stays cached. Extra fields are added to every request, for example {"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}.', 'settings-help'), grid, extraField, problem);
+  return box;
 }
 function editor(container, initial, options) {
   // Read the shared draft on EVERY edit: tools, advanced JSON and both dialogs
@@ -67,8 +111,10 @@ export function renderProjectSettings(container, initial, options = {}) {
     }
     budget.fields = tokenFields; checkBudget();
     grid.append(budget);
+    card.append(grid);
+    card.append(providerOptions(id, endpoint, edit, input));
     const env = 'REMIX_API_KEY_' + id.toUpperCase().replaceAll('-', '_');
-    card.append(grid, node('p', `Authentication, if required: set ${env} in the server environment before launch. Keys are never stored in the project.`, 'settings-help'), button(`Remove endpoint ${id}`, () => {
+    card.append(node('p', `Authentication, if required: set ${env} in the server environment before launch. Keys are never stored in the project.`, 'settings-help'), button(`Remove endpoint ${id}`, () => {
       const cleared = Object.entries(current().endpoint_roles || {}).filter(([, assigned]) => assigned === id).map(([role]) => role);
       write(d => { delete d.endpoints[id]; for (const role of cleared) delete d.endpoint_roles[role]; });
       render(`Endpoint ${id} removed from the draft.${cleared.length ? ' Cleared endpoint roles: ' + cleared.join(', ') + '.' : ''} Existing jobs keep their frozen configuration.`);
@@ -80,11 +126,11 @@ export function renderProjectSettings(container, initial, options = {}) {
   addition.append(field('New endpoint ID', ident), button('Add endpoint', () => {
     const id = ident.value.trim();
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
-    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:16384, max_output_tokens:2048}; }); render();
+    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:65536, max_output_tokens:8192}; }); render();
   })); container.append(addition);
-  heading(container, 'Endpoint roles', 'Generator writes event content. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
+  heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Assembly falls back to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');
-  for (const [role, name] of [['generator', 'Generator'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
+  for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast Review'], ['critical', 'Critical Review']]) {
     const choices = [['', 'Not configured'], ...Object.keys(current().endpoints || {}).map(id => [id, id])];
     roles.append(field(name, select(`${name} endpoint`, current().endpoint_roles?.[role], choices, value => {
       write(d => { d.endpoint_roles ||= {}; if (value) d.endpoint_roles[role] = value; else delete d.endpoint_roles[role]; });
@@ -142,8 +188,8 @@ export function renderGenerationSettings(container, initial, options = {}) {
     let draft = copy(initial); const notify = options.onChange;
     return renderGenerationSettings(container, draft, {...options, getSettings: () => draft, onChange: value => { draft = copy(value); notify?.(copy(value)); }});
   }
-  const {current, write, input, status, error} = editor(container, initial, options);
-  const render = () => renderGenerationSettings(container, current(), options.getSettings ? options : {...options, getSettings: current});
+  const {current, write, input, status, error, report} = editor(container, initial, options);
+  const render = notice => renderGenerationSettings(container, current(), {...(options.getSettings ? options : {...options, getSettings: current}), notice});
   const column = name => node('div', undefined, `review-column review-column-${name}`);
   const settingsColumn = column('settings'), coreColumn = column('core'), criticalColumn = column('critical');
   container.classList.add('review-columns'); container.append(settingsColumn, coreColumn, criticalColumn);
@@ -152,11 +198,16 @@ export function renderGenerationSettings(container, initial, options = {}) {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
+  const barrier = node('input'); barrier.type = 'checkbox'; barrier.checked = current().generation?.phase_barrier ?? false; barrier.setAttribute('aria-label', 'Phase barrier');
+  barrier.onchange = () => write(d => { d.generation ||= {}; d.generation.phase_barrier = barrier.checked; });
+  barrier.dataset.tip = 'Every trajectory finishes Draft and Assembly before any review starts. The job then pauses so you can switch to the review models; Resume starts the reviews.';
+  settingsColumn.append(field('Pause after Draft and Assembly (phase barrier)', barrier));
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Response and repair limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
   const bytes = input('Repair transcript byte limit', current().generation?.repair_context_bytes ?? 65536, value => write(d => { d.generation ||= {}; d.generation.repair_context_bytes = value; }), 'number'); bytes.min = 256; bytes.step = 1;
-  limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), node('p', 'Repair keeps one continuing session. This transcript bound and provider context exhaustion end that attempt; it is not a spending cap.', 'settings-help')); settingsColumn.append(limits);
+  const rounds = input('Repair rounds', current().generation?.repair_rounds ?? 3, value => write(d => { d.generation ||= {}; d.generation.repair_rounds = value; }), 'number'); rounds.min = 1; rounds.max = 10; rounds.step = 1;
+  limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), field('Repair rounds', rounds), node('p', 'A repair fails only when the repairer gives up. A session that reaches the transcript limit starts a fresh round on the current graph; the round count caps spending.', 'settings-help')); settingsColumn.append(limits);
   const checklistHelp = 'Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
   for (const [group, target] of [['core', coreColumn], ['critical', criticalColumn]]) {
     if (group === 'core') tipHeading(target, 'Core checklist', `Applied in both Fast and Critical Review. ${checklistHelp}`); else tipHeading(target, 'Critical checklist', 'Additional criteria applied only during Critical Review, on top of the core checklist.');
@@ -174,6 +225,17 @@ export function renderGenerationSettings(container, initial, options = {}) {
       write(d => { d.review_checklists ||= {}; d.review_checklists[group] ||= {}; d.review_checklists[group][key] = {text:'New criterion', allow_not_applicable:false}; }); render();
     })); target.append(section);
   }
+  if (options.loadDefaultChecklists) {
+    const reset = node('div', undefined, 'settings-limits'); reset.append(node('h4', 'Review checklists'));
+    reset.append(button('Reset review checklists to defaults', async () => {
+      let defaults;
+      try { defaults = await options.loadDefaultChecklists(); } catch (cause) { return error('Could not load the default checklists: ' + cause.message); }
+      if (!confirm('Replace the Core and Critical review checklists with the defaults? Your added, edited and removed criteria in this draft will be lost. Nothing is saved until you choose Save settings.')) return;
+      write(d => { d.review_checklists = copy(defaults); }); render('Review checklists reset to the defaults. Choose Save settings to keep them.');
+    }), node('p', 'Replaces both lists with the packaged defaults. Saving changed checklists marks affected sign-offs stale.', 'settings-help')); settingsColumn.append(reset);
+  }
+  renderPromptSettings(settingsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
   settingsColumn.append(status);
+  if (options.notice) report(options.notice);
   if (options.footer) settingsColumn.append(options.footer);
 }

@@ -99,9 +99,9 @@ async def run(args):
                     concurrency=args.active,
                     retries=0,
                 )
-                for key in ("generator", "fast", "critical")
+                for key in ("draft", "fast", "critical")
             },
-            endpoint_roles={key: key for key in ("generator", "fast", "critical")},
+            endpoint_roles={key: key for key in ("draft", "fast", "critical")},
         )
         data["tools"].setdefault(
             "chat",
@@ -116,8 +116,8 @@ async def run(args):
         )
         settings = ProjectSettings.model_validate(data)
         fake = FakeProvider()
-    elif "generator" not in settings.endpoint_roles:
-        raise ValueError("Local configuration requires a Generator role")
+    elif "draft" not in settings.endpoint_roles:
+        raise ValueError("Local configuration requires a Draft role")
     args.output.mkdir(parents=True)
     GraphStore.initialize(args.output / "project.sqlite", settings)
     app = create_studio_app(args.output / "project.sqlite", provider=fake, active_limit=args.active)

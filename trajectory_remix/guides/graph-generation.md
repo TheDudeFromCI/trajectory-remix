@@ -1,7 +1,7 @@
 # Generate or review graph sources
 
-Read `get_graph_session` first. The Generator endpoint must be configured for
-`generate_graphs`; review roles are optional. Requests invoke those endpoints.
+Read `get_graph_session` first. The Draft endpoint must be configured
+for `generate_graphs`; Assembly and the review roles are optional. Requests invoke those endpoints.
 Confirm that model use is within the current task authorization.
 
 Call `generate_graphs(requests=[{"seed":137,"overrides":{"domain":"software_engineering"}}], instructions={})`
@@ -19,19 +19,17 @@ review uses `query` instead of a selected UUID and freezes all pages.
 
 Review evidence is bound to source/checklist/model identities. Source/checklist
 edits stale signoffs without resetting stages or automatically calling models.
-Malformed/provider failures are not quality verdicts. Endpoint exhaustion and
-server restart require manual Resume. Repair is one continuing session, preserving
-spot patches; failure/context exhaustion ends detached Unfinished.
+Malformed/provider failures are not quality verdicts: a trajectory that needs manual
+intervention is held while the rest of the job continues. Endpoint exhaustion and
+server restart require manual Resume. Repair continues across failing verdicts and
+fresh rounds; it fails only on `give_up` or at the round cap (detached Unfinished).
 
-Generation/review/repair never token-compile or execute synthetic tools. Actors
-see only causal open windows. Automatic chat echo can be disabled per call for
-explicit filtered/rejected outcomes. Prepared local-model checks are described
-in `docs/GRAPH-LOCAL-LLM.md`; do not run live models or benchmarks without task
-authorization.
+Generation/review/repair never token-compile or execute synthetic tools. Prepared
+local-model checks are described in `docs/GRAPH-LOCAL-LLM.md`; do not run live models
+or benchmarks without task authorization.
 
-Empty instructions use the shared adaptive `flow.yaml` policy beside the project
-SQLite file, falling back to the packaged policy. `instructions.flow_yaml` supplies
-per-run YAML; `instructions.plan` retains explicit finite recipes. The complete
-policy freezes before admission. Selection and event content are separate Generator
-requests. Branch/loop state checkpoints with accepted events; limits preserve an
-Unfinished partial source. See `docs/GRAPH-GENERATION.md` for YAML nodes and API changes.
+Generation is Draft → Assembly → Fast Review → Critical Review. Draft writes prose
+working notes; Assembly writes one compact spec that Remix builds into a graph, then
+fixes it from validator diagnostics. The prompts (agent prompt, Draft and Assembly
+instructions) are project settings (`settings.prompts`) and freeze with the run;
+`instructions` takes no keys. See `docs/GRAPH-GENERATION.md`.

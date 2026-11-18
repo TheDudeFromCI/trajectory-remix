@@ -13,6 +13,8 @@ never executed.
 
 - [Run a generation](#run-a-generation)
 - [How a trajectory is built](#how-a-trajectory-is-built)
+- [Draft and Assembly](#draft-and-assembly)
+- [Edit the prompts](#edit-the-prompts)
 - [What the model sees](#what-the-model-sees)
 - [Tools and chat during generation](#tools-and-chat-during-generation)
 - [Reviews and repair](#reviews-and-repair)
@@ -21,8 +23,9 @@ never executed.
 
 ## Run a generation
 
-1. In **Settings**, add endpoints and assign the **Generator** role (and optionally
-   **Fast** and **Critical** review roles). See [Project settings](PROJECT-SETTINGS.md).
+1. In **Settings**, add endpoints and assign the **Draft** role, and
+   optionally **Assembly**, **Fast Review** and **Critical Review**. See
+   [Project settings](PROJECT-SETTINGS.md).
 2. Open **Sampler Matrix → Proposal preview → Generate trajectories**.
 3. Choose any **pins**, a **seed** and an **attempt count**, then **Start generation**.
 
@@ -37,90 +40,130 @@ failures. There are no automatic replacements.
 
 ## How a trajectory is built
 
-The sampler picks a **proposal**. One adaptive Flow reads the entire proposal, including
-custom matrix dimensions, and builds a bounded episode with branches, loops, tools,
-authored specialist outcomes, verification and continuation as appropriate.
+The sampler picks a **proposal**. Each trajectory then goes through four stages:
 
-The private controller chooses one event envelope at a time. A separate content call
-writes that event using its causal context. This separation keeps private objectives
-out of the actor's prompt. New matrix fields reach the controller without a
-competency-name switch in Python. The project tool catalogue still defines available
-operations; matrix edits do not silently grant new tools. The controller can add new windows, independent branches
-and joins; it cannot rewrite committed events or reopen closed windows. Structural
-validation checks its choices before content generation. Targets guide construction;
-a model's finish decision is not proof of semantic coverage or training readiness.
+**Draft → Assembly → Fast Review → Critical Review**
 
-Each selection, local transition, event and echo commits with its interpreter checkpoint.
-Resume uses the frozen policy and accepted state. Loops have step and event limits;
-exhaustion retains the partial source as **Unfinished**, without a fabricated pass.
+Draft writes the whole episode as prose. Assembly turns it into a graph and fixes its
+structure. The two reviews check it against the checklists and repair what fails. The whole
+proposal reaches Draft and Assembly, including custom matrix dimensions, so new matrix fields
+need no code changes. The project tool catalogue still defines the available tools; matrix
+edits don't grant new ones. Targets guide the episode, but a passing review isn't proof of
+semantic coverage or training readiness.
 
-### Edit flow.yaml
+## Draft and Assembly
 
-Place `flow.yaml` beside the project's SQLite database to override the packaged
-[`flow.yaml`](../trajectory_remix/graph/flow.yaml). It is read when a new run starts;
-editing it never changes active runs. Alternatively pass YAML text as
-`instructions.flow_yaml`. Invalid configuration is rejected before reserving attempts.
-The complete normalized Flow, hash, proposal and tool catalogue freeze into the run.
+Draft and Assembly write a whole episode in two calls, fix its structure, then hand it to
+review and repair:
 
-The file declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
-`actor_instruction` and a `nodes` map. Nodes support:
+| Stage | Endpoint role | What happens |
+|---|---|---|
+| Draft | **Draft** | Plain-prose working notes for the whole episode: messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
+| Assembly | **Assembly** (falls back to Draft) | One compact JSON spec of windows and events, built from the draft. If the validator reports any error or warning, the same model then fixes its own graph (the *assembly fix*). |
+| Fast Review | **Fast Review** | Checklist review, with repair if it fails. |
+| Critical Review | **Critical Review** | Stricter checklist review, with repair if it fails. |
 
-| Kind | Action and transitions |
-| --- | --- |
-| `select` | Ask the private authoring controller for the next event or a finish decision; continue at `next`. |
-| `event` | Generate the selected event's content; continue at `next`. |
-| `branch` | Compare dotted `path` in the last selection with `equals`; take `then` or `otherwise`. Missing paths take `otherwise`; booleans are distinct from integers. |
-| `end` | Finish construction after a validated finish selection, then run configured reviews. |
+Draft and Assembly can share one endpoint, or you can give Assembly a stronger model for better
+structure. The Draft and Assembly calls see the proposal, the tool catalogue, the review checklist
+(core and critical) and the project's prompts (see [Edit the prompts](#edit-the-prompts)).
 
-Transitions can point backward to loop or forward to join branches. Step limits bound
-all cycles, including cycles without provider calls. Edit node instructions and add
-conditional branches to extend behavior. The last selection exposes `finished`,
-`reason`, `task` and `windows` to conditions. Controller instructions are trusted author
-configuration; generated actor instructions are replaced with `actor_instruction` to
-prevent private solution leakage. External authors may receive scoped `task.world`.
+### Assembly
 
-The default keeps decision windows open through their consumers. Closing a window
-removes it from later actor prompts; choose closure only after its final use.
+Remix builds the graph from the spec. It adds the tool listing event, tool-call IDs on results,
+chat deliveries (`:echo` events) and canonical tool arguments. It also settles slips whose
+meaning is clear: an `:echo` written for an event that has no delivery means the event itself,
+echo events the model wrote are dropped (the builder writes them), and a tools object or a wrapped
+reply is unwrapped. Then:
 
-### Custom recipes
+- A spec that still can't be built (an event listed before what it depends on, an unknown window,
+  a reused ID, a call with no tool) gets a correction that says how to fix it, up to
+  `format_retries` times.
+- A graph with any validator error or warning goes to the **assembly fix**: the Assembly model
+  sees the graph, every diagnostic, the causal views and the draft, and fixes them with the same
+  patch actions as repair (`view`, `inspect`, `patch`, `patch_window`, `remove_event`). It ends
+  with `done`, which is refused while structural errors remain, or `give_up`.
+- Giving up, running out of corrections or reaching `repair_context_bytes` hands the graph on
+  unchanged rather than failing it. Errors still left go to Fast repair; otherwise the graph goes
+  to Fast Review. The result is kept in `metadata.assembly_fix` (reason, turns, errors and
+  warnings left).
 
-Advanced users can replace the default with a frozen recipe in the run instructions:
-`{"plan": {"windows": {...}, "tasks": [...]}}`. A recipe is a branch of the same driver, not a
-separate engine. Each task has:
+The draft is kept in the trajectory's `metadata.draft`, so you can compare it with the assembled
+graph.
 
-| Field | Meaning |
-| --- | --- |
-| `id` | Stable event ID. Don't end it in `:echo`, which is reserved. |
-| `envelope` | Everything except `content`: kind, window, dependencies, masks, delivery, framing, closing. Dependencies point at earlier selected tasks. |
-| `instruction` | The authoring task for this event. Actor tasks must not contain privileged answers, future facts, expected verdicts or private summaries. |
-| `world` | Private facts for **external** authors only. Rejected on actor tasks. Omit anything not needed. |
-| `when` | Optional dotted proposal paths and equality conditions. Non-matching tasks are skipped. Broken dependencies are rejected, not rewired. |
-| `arguments` | `text` (default) returns `{"content": "…"}`. `json` returns `{"arguments": …}` for a complete known call. Use text for fragmented or intentionally invalid calls. |
+### Generate and review in separate sessions
 
-Instructions are trusted project configuration and must respect the same boundaries. The smoke
-script's `smoke_plan` has examples.
+If you can't load your generation and review models at the same time (for example two local
+models that don't fit in VRAM together), turn on **Pause after Draft and Assembly (phase barrier)**
+(`generation.phase_barrier: true`). A run then works in two phases:
+
+| Phase | What runs | When it ends |
+|---|---|---|
+| 1. Draft and Assembly | Draft, Assembly and the assembly fix. A trajectory that reaches review **parks** instead. | When every trajectory is parked, held or finished, the job **pauses** and the log says so. |
+| 2. Reviews | Resume releases the parked trajectories into Fast Review and Critical Review, with their repairs. | When every trajectory is settled. |
+
+Parked trajectories don't count toward the active-trajectory cap, so a run of 100 drafts and
+assembles all 100, not just the first 20. The phase is stored with the job, so it survives
+shutting the server down between sessions.
+
+A typical day-and-night cycle with two local models:
+
+1. Give **Draft** and **Assembly** an endpoint for the generation model, **Fast Review** an
+   endpoint for the review model on a different server or port, and **Critical Review** a hosted
+   endpoint. Turn on the phase barrier.
+2. Load the generation model and start a run. Draft and Assembly run; reviews wait.
+3. When the job pauses at the barrier, check the log and any trajectories held for attention.
+   You can shut everything down now.
+4. Next session: start the server, load the review model, open the job and click **Resume**.
+   Reviews run until the job completes.
+
+If generation hasn't finished when you want to switch, click **Start reviews now** on the job
+(`POST /api/v1/jobs/{id}/phase/review`). Assembled trajectories go to review; unfinished ones carry
+on with Draft and Assembly once their endpoint is back. An endpoint whose server is offline pauses
+itself after its retries; resume it from the job page when the model is loaded.
+
+Point the two local endpoints at **different servers or ports**. If both use one server that
+answers with whatever model is loaded, review requests can silently go to the generation model.
+
+### Edit the prompts
+
+The prompts are project settings, under **Settings → Automatic review and repair → Generation
+prompts**:
+
+| Prompt | Used by | What it's for |
+|---|---|---|
+| **Agent prompt** | Draft and Assembly | How the agent behaves. Add a persona pack here. |
+| **Draft instructions** | Draft | How to write the working notes. |
+| **Assembly instructions** | Assembly | How to lay the notes out as the compact spec, with a worked example. |
+
+**Load default prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
+you to confirm; nothing is saved until you choose **Save settings**. Runs freeze the prompts
+when they start, and each request records a prompt version: the packaged version, plus a short
+hash when you've edited them.
+
+Projects from before Draft and Assembly kept their prompts in the Flow. When such a project
+opens, a customised Flow agent prompt (for example one with a persona pack appended) moves into
+**Agent prompt** once, and the old Flow is then discarded.
 
 ## What the model sees
 
-The private selection controller sees the full proposal and committed source. It is an
-authoring role, never supervised actor output. For each content event, the actor prompt contains only **causal ancestors**, folded into the windows that are
-currently visible, with replacements applied and closed windows removed. Parallel and future
-events, metadata, the full proposal, hidden world data and review history are all excluded. There
-is no rolling chat history that could smuggle lost context back in.
+- **Draft and Assembly** see the sampled proposal, the tool catalogue, the checklists and the
+  prompts. Assembly also sees the draft. Neither sees source metadata or review history.
+- **The assembly fix** sees the assembled graph (without metadata), every diagnostic, the
+  causal views and the draft.
+- **Reviewers and repairers** see the graph, the checklist and the causal view at each event:
+  which earlier events it can see, by window. They judge each event only by what it could see.
+
+Synthetic tools are never executed. A tool result is whatever Draft wrote as its example output.
 
 ## Tools and chat during generation
 
-- Tool calls and results are written like any other event. Results are free-form, with
-  independent begin/end, instant or streamed delivery, and closing flags.
-- A completed `chat` call with `echo_chat=true` produces a masked `chat_message` from the call's
-  parsable `content`, linked by `call_id`. A pending-helper checkpoint makes restarts safe.
-  Legacy explicit-plan tasks resolve call dependencies through its echo; adaptive
-  selections refer to the committed echo ID when delivery must precede an action.
-  A linked chat echo that differs from submitted content is a structural error,
-  including after repair.
-- With `echo_chat=false`, the Flow lets you filter, reject or skip delivery through explicit tasks.
-- Malformed chat arguments only warn, and no echo is invented. Multiple fragments assemble in
-  causal order.
+- Assembly chooses the tools the agent is shown. Remix writes a **Show tools** listing before the
+  opening event: the chosen tools plus a repeatable random selection of others.
+- Tool calls and results are ordinary events. Results are free-form text.
+- A `chat` call delivers its `content` to the chatroom automatically, as a masked
+  `chat_message` with the ID `<call id>:echo`. A person's reply follows that echo. A delivery
+  that differs from the submitted content is a structural error, including after repair.
+- Malformed chat arguments only warn, and no echo is invented.
 
 ## Reviews and repair
 
@@ -144,23 +187,34 @@ endpoint, prompt version, evidence and resulting stage change.
 | Critical review (after Fast pass) passes / fails | **Validated (2)** / **Rejected (-2)** |
 | You approve | **Ready (3)**, always manual |
 
-If a review role is missing, generation still works with the Generator alone. Critical never
+If a review role is missing, generation still works with the Draft endpoint alone. Critical never
 skips Fast. Configured roles are used automatically unless the project toggle turns them off.
 
 ### Repair
 
-A failed review can enter **one** Repair & Validate session on that tier's own model. The model
-sees the original source and checklist, plus each full inspect-and-patch exchange so far, until a
-verdict or the context budget (`repair_context_bytes`, default 65,536) runs out. There is no
-compaction, second attempt or extra confirmation pass.
+A failed review enters a Repair & Validate session on that tier's own model. The model sees the
+source, the checklist and the failed review, plus each exchange so far. **A repair only fails when
+the model gives up**, saying why repair is not feasible.
 
-- *Inspect* returns a causal view of events. A *patch* merges into one event or window using the
-  expected source hash, and an event can be added or removed. Removal keeps broken references for
-  you to fix.
+| Action | What it does |
+|---|---|
+| `view` | Returns the current source with diagnostics, including earlier patches. |
+| `inspect` | Returns one event and the causal view it can see. |
+| `patch`, `patch_window` | Merges a patch into one event or window, using the expected source hash. A new event ID adds an event. |
+| `remove_event` | Deletes an event. Broken references stay for you to fix. |
+| `verdict` | A full checklist verdict. A passing verdict ends the session; a failing one keeps it open with the failing items listed. |
+| `give_up` | Ends the repair as failed, with the model's reason (`unfeasible`). |
+
+When a session's transcript reaches `repair_context_bytes` (default 65,536), or the provider's
+context runs out, a fresh **round** starts on the current graph with the last failed review. The
+`repair_rounds` setting (default 3) caps the rounds as a spending guard; reaching it fails the
+repair as `round_limit`.
+
+- Accepted patches save immediately, even if they leave editable errors.
 - Accepted patches save immediately, even if they leave editable errors. A passing final verdict
   needs a structurally valid graph.
-- On failure or context exhaustion, the trajectory is detached as Unfinished with its edits
-  and any real verdict evidence kept. No verdict is made up for a context-limit failure.
+- When the repair gives up or reaches the round cap, the trajectory is detached as Unfinished
+  with its edits and any real verdict evidence kept. The reason is in `metadata.repair_outcomes`.
 - A successful Fast repair can proceed to Critical review.
 
 ### Manual review
@@ -192,19 +246,25 @@ without calling a model.
   attached work are kept. Fix the server and use **Resume endpoint**.
 - **Format failures** (the model returned unusable JSON): a bounded number of new calls
   (`format_retries`, default 2 extra). Generation that runs out records **Unsuccessful** and may
-  go to repair. For review and repair, the job **pauses with no quality verdict**, and Resume retries
-  within the same session and budget.
-- **Local wrapper problems** pause the job instead of asking a model to fix programmatic envelopes.
+  go to repair. For review and repair, that trajectory is **held** with no quality verdict.
+- **Local wrapper problems** and **context limits** hold that trajectory too, instead of asking a
+  model to fix programmatic envelopes.
+- **Held trajectories** never stall the rest of the job: the others keep running. A held
+  trajectory shows the reason in `metadata.needs_attention` and the job log. When only held
+  trajectories remain, the job pauses. **Resume** retries every held trajectory (with a fresh
+  bounded correction); **detach** settles one as Unfinished, keeping its edits.
 - **Server restart:** jobs pause, callbacks are fenced, unaccepted text is dropped, and you
   resume manually. Completed events and repair patches survive.
 - **Cancel and detach** use the same fences as everywhere else ([Jobs](GRAPH-JOBS.md)).
 
 ## Reference
 
-**Settings** (`generation` in project settings): `fast`, `critical`, `repair` (default true),
-`format_retries` (default 2) and `repair_context_bytes` (default 65,536, a transcript bound, not
-a token estimate). Configure the `chat` tool with a JSON object input that has a string `content`
-to enable the echo helper ([example config](../examples/graph_local_llm.json)).
+**Settings** (`generation` in project settings): `phase_barrier` (default false),
+`fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
+(default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
+(default 3). Configure the `chat` tool with a JSON object input that has a string `content`
+to enable the echo helper ([example config](../examples/graph_local_llm.json)). The prompts are
+`settings.prompts`: `actor`, `draft` and `assembly`.
 
 **Endpoints:** URLs are OpenAI-compatible base URLs. Remix appends `/chat/completions`, sends a
 non-streamed structured-output request, and uses no SDK retries or redirects. Credentials come from
@@ -219,8 +279,9 @@ the same retry policy. Your local server must support the requested JSON respons
 
 | Route | Action |
 | --- | --- |
-| `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{…}}`. Needs a Generator. Returns a job. |
-| `POST /api/v1/sampler/runs` | The same driver when a Generator exists, otherwise a paused snapshot-only run. |
+| `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{}}`. Needs a Draft role. Returns a job. |
+| `POST /api/v1/sampler/runs` | The same driver when a Draft role exists, otherwise a paused snapshot-only run. |
+| `GET /api/v1/generation/prompts/default` | The packaged prompts, for Load default. Saves nothing. |
 | `POST /api/v1/reviews` | `{query, mode, repair}` or `{trajectory, expected_revision, mode, repair}`. |
 | `GET /api/v1/trajectories/{id}` | Source, ownership, diagnostics and review staleness. |
 | `/jobs`, `/attempts`, `/results`, `/history` and controls | Progress, skipped targets, saved deltas, Pause, Resume, Cancel and detach. |
@@ -231,68 +292,63 @@ driver's frozen recipe stay paused.
 **For developers.** `GenerationService(..., transport)` takes an async single-invocation transport.
 It receives a queue `Ticket`, sends only `payload.messages` and `schema` using the pinned endpoint
 config, and returns `{output, model, usage?}`, `{invalid_output: true}` or `{context_limit: true}`.
-Each event, review and repair turn is a separate FIFO item, and its original payload is kept for retry
+Each Draft, Assembly, assembly fix, review and repair turn is a separate FIFO item, and its original payload is kept for retry
 while response bodies are dropped on interruption. Provider usage is evidence only, not a source metric.
 Checks: `python -m pytest -q tests/test_graph_generation.py tests/test_graph_jobs.py
 tests/test_graph_sampling.py tests/test_graph_studio.py tests/test_graph_export.py` and
 `python tests/run_generation_frontend.py`. They use tiny fake-provider sources. Model quality,
 tool coherence, schema compatibility and context limits need the user-machine checks.
 
-### Backend API changes: adaptive Flow
-
-Frontend integration can continue using `POST /api/v1/generation/runs` with the same
-request body. Empty `instructions` now selects the adaptive YAML Flow. Existing
-`instructions.plan` recipes and already-frozen runs retain their original behavior.
-Do not send both `plan` and `flow_yaml`.
-
-New authenticated `GET /api/v1/generation/flow` returns `{flow, flow_hash}` for the
-current on-disk policy (or packaged default). Editing is through `flow.yaml` or a
-per-run `instructions.flow_yaml` string; there is no filesystem-write endpoint.
-MCP `generate_graphs` accepts the same instructions through its existing service.
-There are no source-format, settings-schema, stage or ownership changes.
-
-Provider request history now includes `operation: flow_select`, separate from
-`event`, `review` and `repair`. It uses the Generator role and ordinary FIFO limits.
-The checkpoint has an additional `flow` object with node, steps, output and task;
-consumers should treat it as opaque. Job logs report successful selections and limit
-exhaustion without copying private prompts or response bodies. `flow_outcome` metadata
-records the controller's finish explanation; it is not measured coverage. Compilation
-and semantic acceptance remain separate. No frontend files are changed by this feature.
-
 ### Context scope and local-model budgets
 
-The controller receives the **sampled proposal**, not the entire sampling matrix.
+Draft and Assembly receive the **sampled proposal**, not the entire sampling matrix.
 Source metadata (including its frozen matrix, provenance snapshots and review history)
-is retained in storage but excluded from controller prompts. Reviewers receive each
+is retained in storage but excluded from their prompts. Reviewers receive each
 source body once; their per-decision causal views list surviving event IDs by window,
 including replacement and closure effects. These are references to the source, not
 summaries that can introduce new facts.
 
-Endpoint settings now accept `context_window_tokens` (default **16384**) and
-`max_output_tokens` (default **2048**). The transport sends the latter as `max_tokens`.
+Endpoint settings now accept `context_window_tokens` (default **65536**) and
+`max_output_tokens` (default **8192**). The transport sends the latter as `max_tokens`.
 Configure these through endpoint JSON until frontend forms expose them. This is an
 additive endpoint-settings API change; the request and source schemas are unchanged.
 
 Before HTTP, the transport measures the serialized messages and response schema in
-UTF-8 bytes and reserves output tokens plus 512 framing tokens. It uses one byte per
-input token as a conservative ceiling for byte-backed tokenizers. This is deliberately
-stricter than a model-specific tokenizer: a request that could fit may be rejected.
+UTF-8 bytes and reserves output tokens plus 512 framing tokens. It estimates input tokens
+as bytes divided by the endpoint's `bytes_per_token` (default **1**, which can never
+undercount for byte-backed tokenizers but rejects many requests that would fit). English
+and compact JSON average about 3.5 bytes per token; **3** keeps a margin while using most
+of the real window. See [Provider options](PROJECT-SETTINGS.md#provider-options).
 It is not an exact Qwen chat-template count. No training tokenizer is loaded and no
 model endpoint is probed. Configure the actual model context size, rather than inflating
 it to bypass this check. Exact serving-tokenizer accounting is a future extension.
 
-Over-budget requests return a context-limit result before contacting the model. A
-non-repair operation pauses with operation/input-size/allowance in its job log; repair
-retains the existing context-limit failure behavior. Nothing is silently truncated or
-converted into a quality failure. Frozen runs keep their endpoint settings: start a
-new run to apply changed budgets or the narrower prompt recipe. Long episodes still
-need explicit context management; this change removes accidental duplication rather
-than claiming unlimited history fits a small model.
+#### Prompt order and prefix caching
+
+Requests are laid out so that an inference server with prefix (KV) caching can reuse as
+much of the previous request as possible. Caching saves prompt-processing time and cost; it
+does **not** enlarge the context window, because cached tokens still count toward
+`context_window_tokens`.
+
+- **Draft and Assembly:** the system prompt is the stage's instructions plus the agent prompt,
+  the same for every trajectory in a run. The user message holds the data.
+- **Assembly fix and repair:** each turn resends the session so far and appends the newest
+  action and its result, so every request extends the previous one.
+
+The roles always alternate (system, then user): the JSON-mode schema is joined to the
+user message rather than sent separately, because some open-weight chat templates
+reject two user messages in a row. `tests/test_prompt_cache_order.py` checks this.
+
+Over-budget requests return a context-limit result before contacting the model. Draft and
+Assembly hold their trajectory, with operation, input size and allowance in the job log; the
+assembly fix hands the graph on; repair starts a fresh round. Nothing is silently truncated or
+converted into a quality failure. Frozen runs keep their endpoint settings: start a new run to
+apply changed budgets.
 
 ### Watch a running job
 
 The existing job log shows timestamped admission, request queue/start, response,
-event commit, review verdict and trajectory outcome messages. Requests that are
+draft and assembly, review verdict and trajectory outcome messages. Requests that are
 still pending a complete model response emit an elapsed-time heartbeat every ten
 seconds. A heartbeat means the request is still awaiting a response; it does not
 claim tokens are being generated. Queue messages identify paused endpoints, and
@@ -333,5 +389,5 @@ Timeout is a client setting, never part of the JSON sent to the model. It bounds
 each complete request attempt and individual network operations. Timeouts follow
 the existing endpoint retry/exhaustion behavior; each retry gets a fresh deadline.
 It does not limit the whole generation job. All four fields freeze into new run
-settings and apply to selection, content, review and repair requests using that
+settings and apply to Draft, Assembly, review and repair requests using that
 endpoint. Edits do not alter an active run. No frontend files or routes changed.

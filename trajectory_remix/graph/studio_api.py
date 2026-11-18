@@ -10,7 +10,6 @@ from typing import Literal
 from fastapi import APIRouter, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
@@ -18,9 +17,10 @@ from starlette.routing import Route
 from .bulk import BulkService
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
-from .models import DTO, GraphSource, JsonValue, ProjectSettings
+from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checklists
 from .query_export import iter_jsonl
 from .reviews import ReviewInput
+from .static_files import RevalidatingStaticFiles
 from .studio import Studio
 from .validation import diagnose
 
@@ -182,7 +182,7 @@ def create_studio_app(
     def index():
         return (static / "graph.html").read_text().replace("__REMIX_TOKEN__", token)
 
-    app.mount("/static", StaticFiles(directory=static), name="static")
+    app.mount("/static", RevalidatingStaticFiles(directory=static), name="static")
     router = APIRouter(prefix="/api/v1")
 
     @router.get("/sampler")
@@ -203,18 +203,23 @@ def create_studio_app(
 
     @router.post("/sampler/runs", status_code=202)
     async def sampler_run(body: SamplerRun):
-        if "generator" in studio.store.settings().settings.endpoint_roles:
+        if "draft" in studio.store.settings().settings.endpoint_roles:
             job = generation.start([r.model_dump() for r in body.requests], body.instructions)
         else:
             job = sampler.run([r.model_dump() for r in body.requests], body.instructions)
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
-    @router.get("/generation/flow")
-    def generation_flow():
-        from .adaptive_flow import load_flow
+    from .prompt_migration import migrate
+    from .prompts_api import add_prompt_routes
+    from .tools_api import add_tool_routes
 
-        return load_flow(studio.store.path.parent / "flow.yaml")
+    migrate(studio.store)
+    add_tool_routes(router, studio.store)
+    add_prompt_routes(router)
+    from . import usage
+
+    app.include_router(usage.router(studio.store))
 
     @router.post("/generation/runs", status_code=202)
     async def generation_run(body: SamplerRun):
@@ -258,7 +263,7 @@ def create_studio_app(
         return dict(
             id=studio.store.project_id,
             format="kidra-graph-project/1",
-            generation_available="generator" in studio.store.settings().settings.endpoint_roles,
+            generation_available="draft" in studio.store.settings().settings.endpoint_roles,
         )
 
     @router.get("/settings")
@@ -268,6 +273,16 @@ def create_studio_app(
     @router.put("/settings")
     def settings_update(body: SettingsEdit):
         return studio.update_settings(body.settings, body.expected_revision)
+
+    @router.get("/settings/default-review-checklists")
+    def default_review_checklists():
+        """The packaged Core and Critical criteria, for the dashboard's reset action."""
+        return dict(
+            review_checklists={
+                group: {key: item.model_dump(mode="json") for key, item in items.items()}
+                for group, items in default_checklists().items()
+            }
+        )
 
     @router.get("/schema/{kind}")
     def schema(kind: Literal["source", "settings"]):

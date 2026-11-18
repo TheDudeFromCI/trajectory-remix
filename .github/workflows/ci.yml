@@ -89,6 +89,10 @@ jobs:
       - run: node tests/studio_ui_frontend.mjs
       - run: node tests/window_render_frontend.mjs
       - run: node tests/run_inputs_frontend.mjs
+      - run: node tests/provider_options_frontend.mjs
+      - run: node tests/usage_view_frontend.mjs
+      - run: node tests/tool_import_frontend.mjs
+      - run: node tests/show_tools_frontend.mjs
 
   browser:
     name: Browser workflow tests

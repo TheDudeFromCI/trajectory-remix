@@ -87,7 +87,12 @@ async def test_native_and_arbitrary_output_contracts(monkeypatch, operation, sch
     assert body["response_format"]["type"] == mode
     assert messages == [{"role": "user", "content": "visible actor context"}]
     if mode == "json_object":
-        assert json.dumps(schema) in body["messages"][-1]["content"]
+        # The fixed schema contract precedes the per-call data for prefix caching, in
+        # the same user message so roles still alternate.
+        (only,) = body["messages"]
+        assert only["role"] == "user" and only["content"].startswith("Return one JSON object")
+        assert json.dumps(schema) in only["content"]
+        assert only["content"].endswith("\n\nvisible actor context")
     else:
         assert body["messages"] == messages
         assert body["response_format"]["json_schema"]["schema"] == schema

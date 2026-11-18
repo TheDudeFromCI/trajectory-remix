@@ -6,15 +6,26 @@ from copy import deepcopy
 
 import jsonschema
 
-from . import adaptive_driver, adaptive_flow, reviews
+from . import (
+    assembly_fix,
+    draft_assembly,
+    phase_barrier,
+    repair_policy,
+    reviews,
+    spec_normalize,
+    trajectory_hold,
+)
 from .commands import merge_patch
-from .flow import append_event, causal_view, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
+from .provider import invalid_reason
 from .sampling import SamplerService
+from .schema_errors import explain
 from .storage import RevisionConflict
 from .validation import diagnose
+
+DRIVER = "draft-assembly/1"
 
 
 class GenerationService:
@@ -33,31 +44,24 @@ class GenerationService:
         frozen = self.sampler.editor()
         settings_record = self.store.settings(frozen["settings_revision"])
         settings = settings_record.settings
-        if "generator" not in settings.endpoint_roles:
-            raise ValueError("Configure the Generator endpoint in Project Settings")
+        if "draft" not in settings.endpoint_roles:
+            raise ValueError("Configure the Draft endpoint in Project Settings")
         if settings.generation.fast and "fast" in settings.endpoint_roles:
             reviews.review_schema(settings, "fast")
             if settings.generation.critical and "critical" in settings.endpoint_roles:
                 reviews.review_schema(settings, "critical")
         instructions = deepcopy(instructions)
-        if "plan" in instructions and "flow_yaml" in instructions:
-            raise ValueError("Choose plan or flow_yaml, not both")
-        if "_flow_snapshot" in instructions:
-            raise ValueError("_flow_snapshot is reserved")
-        if "plan" not in instructions:
-            instructions["_flow_snapshot"] = adaptive_flow.load_flow(
-                self.store.path.parent / "flow.yaml", instructions.get("flow_yaml")
+        retired = {"plan", "flow_yaml"} & instructions.keys()
+        if retired:
+            raise ValueError(
+                "The step-by-step Flow and fixed plans were removed; runs use Draft and Assembly"
+                " with the project's prompts (Settings). Remove: " + ", ".join(sorted(retired))
             )
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
-        plans = {p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals}
+        plans = {p["id"]: draft_assembly.plan(p["proposal"], settings) for p in proposals}
         return self.jobs.create_run(
-            dict(
-                instructions=deepcopy(instructions),
-                sampler=frozen,
-                plans=plans,
-                driver="event-flow/1",
-            ),
+            dict(instructions=instructions, sampler=frozen, plans=plans, driver=DRIVER),
             proposals,
             settings_record=settings_record,
         )
@@ -161,9 +165,11 @@ class GenerationService:
             raise Fenced("Worker epoch changed")
         # Only this handoff's explicitly prepared runs have model access. Generic
         # /runs and historical sampler snapshots cannot silently become live jobs.
-        if j["config"]["config"].get("driver") != "event-flow/1":
+        if j["config"]["config"].get("driver") != DRIVER:
             self.jobs.control(job, "pause")
-            self.jobs.append_log(job, "No event Flow snapshot; start a new generation run.")
+            self.jobs.append_log(
+                job, "This run was made by a retired generation method; start a new generation run."
+            )
             return
         self.settings_for(job)
         for offset in range(0, j["total"], 100):
@@ -310,41 +316,30 @@ class GenerationService:
                     )
             else:
                 cp = dict(serial=0, phase="event", index=0, errors=0, manual=False)
+        if trajectory_hold.held(cp, epoch):
+            return
         cp.update(_epoch=epoch, _revision=record.revision)
+        if cp.get("held"):  # Resumed: retry it, with a fresh bounded correction.
+            cp.pop("held")
+            self._save(job, trajectory_hold.unflag(source), cp)
+            return
+        if self._parked(job, ident, cp, settings):
+            return
         if cp["phase"] == "event":
-            if cp.get("echo"):
-                echo = chat_echo(source, cp.pop("echo"))
-                if echo:
-                    content = echo.pop("content")
-                    source = append_event(source, echo, {"content": content}, settings)
-                    if any(d.severity == "error" for d in diagnose(source, settings)):
-                        raise ValueError("Chat helper structural error")
-                self._save(job, source, cp)
+            if cp.get("assembled"):
+                self._after_generation(job, source, cp)
                 return
-            with self.store.connect() as db:
-                proposal = json.loads(
-                    db.execute(
-                        "SELECT proposal FROM graph_attempts WHERE trajectory_id=?", (ident,)
-                    ).fetchone()[0]
-                )
-            plan = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
-            if "flow" in plan:
-                payload = adaptive_driver.prepare(self, job, source, cp, plan, settings)
-                if payload is None:
-                    return
-            else:
-                tasks = plan["tasks"]
-                if cp["index"] >= len(tasks):
-                    self._after_generation(job, source, cp)
-                    return
-                task = deepcopy(tasks[cp["index"]])
-                task["envelope"]["after"] = [
-                    dep + ":echo" if dep + ":echo" in source.events else dep
-                    for dep in task["envelope"].get("after", [])
-                ]
-                payload = event_payload(source, task, settings, cp["errors"] > 0)
-                payload["task"] = task
-            tier = "generator"
+            payload = draft_assembly.payload(cp, self._plan(job, ident), settings)
+            tier = draft_assembly.role(settings, payload["operation"])
+        elif cp["phase"] == assembly_fix.PHASE:
+            payload = assembly_fix.payload(cp)
+            if (
+                len(canonical(payload["messages"]).encode())
+                >= settings.generation.repair_context_bytes
+            ):
+                self._end_assembly_fix(job, source, cp, "context_limit")
+                return
+            tier = cp["tier"]
         else:
             tier = cp["tier"]
             payload = reviews.payload(
@@ -358,7 +353,7 @@ class GenerationService:
                     len(canonical(payload["messages"]).encode())
                     >= settings.generation.repair_context_bytes
                 ):
-                    self._repair_failure(job, source, cp, "context_limit")
+                    self._next_round(job, source, cp)
                     return
         endpoint = settings.endpoint_roles[tier]
         payload.update(
@@ -385,12 +380,176 @@ class GenerationService:
             ),
         )
 
-    def _repair_failure(self, job, source, cp, reason, ticket=None):
+    def _next_round(self, job, source, cp, ticket=None):
+        """A repair that outgrew its context continues as a fresh round, up to the cap."""
+        settings = self.settings_for(job)
+        base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
+        if not repair_policy.new_round(cp, settings, base):
+            self._repair_failure(job, source, cp, "round_limit", ticket)
+            return
+        self._save(job, source, cp, ticket=ticket)
+        self.jobs.progress(
+            job, f"Repair round {cp['round']} started: trajectory={label(source.id)}"
+        )
+
+    def _plan(self, job, ident):
+        with self.store.connect() as db:
+            proposal = json.loads(
+                db.execute(
+                    "SELECT proposal FROM graph_attempts WHERE trajectory_id=?", (ident,)
+                ).fetchone()[0]
+            )
+        return self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
+
+    @staticmethod
+    def _can_repair(settings):
+        return settings.generation.repair and "fast" in settings.endpoint_roles
+
+    def _assembled(self, ticket, source, broken, cp):
+        """Commit an assembled graph. Structural errors go straight to Fast repair."""
+        self.jobs.progress(
+            ticket.job_id,
+            f"Graph assembled: trajectory={label(source.id)} events={len(source.events)}"
+            + (f" structural_errors={len(broken)}" if broken else ""),
+        )
+        settings = self.settings_for(ticket.job_id)
+        if assembly_fix.needed(source, settings):
+            draft = source.metadata.get("draft", "")
+            cp.update(
+                phase=assembly_fix.PHASE,
+                tier=draft_assembly.role(settings, "assembly"),
+                errors=0,
+                history=[],
+            )
+            cp["self_base"] = assembly_fix.base(source, settings, draft)
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+            return
+        self._to_review(ticket.job_id, source, broken, cp, ticket)
+
+    def _end_assembly_fix(self, job, source, cp, reason, ticket=None):
+        """Hand the graph on to review (or Fast repair if errors remain)."""
+        settings = self.settings_for(job)
+        data = source.to_dict()
+        data["metadata"]["assembly_fix"] = assembly_fix.outcome(source, settings, cp, reason)
+        source = GraphSource.model_validate(data)
+        for key in ("self_base", "history"):
+            cp.pop(key, None)
+        cp.update(phase="event", errors=0)
+        self.jobs.progress(
+            job, f"Self-repair ended ({label(reason)}): trajectory={label(source.id)}"
+        )
+        self._to_review(job, source, assembly_fix.errors(source, settings), cp, ticket)
+
+    def _assembly_fix_step(self, ticket, source, cp, body):
+        settings = self.settings_for(ticket.job_id)
+        if body["action"] == "give_up":
+            self._end_assembly_fix(ticket.job_id, source, cp, "gave_up", ticket)
+        elif body["action"] != "done":
+            self._repair_action(ticket, source, cp, body)
+        elif assembly_fix.errors(source, settings):
+            cp["history"].extend(
+                [
+                    dict(role="assistant", content=canonical(body)),
+                    assembly_fix.not_done(source, settings),
+                ]
+            )
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+        else:
+            self._end_assembly_fix(ticket.job_id, source, cp, "done", ticket)
+
+    def _to_review(self, job, source, broken, cp, ticket=None):
+        if not broken:
+            cp["assembled"] = True
+            self._save(job, source, cp, ticket=ticket)
+            return
+        settings = self.settings_for(job)
+        data = source.to_dict()
+        data["metadata"].update(
+            stage=-1, generation_failure=dict(kind="assembled_with_structural_errors")
+        )
+        source = GraphSource.model_validate(data)
+        cp.update(phase="repair", tier="fast", errors=0, history=[], round=1)
+        cp["repair_base"] = reviews.payload(source, settings, "fast", "repair")["messages"]
+        self._save(job, source, cp, ticket=ticket)
+
+    def _hold(self, job, source, cp, reason, ticket=None):
+        """Hold one trajectory for attention; the rest of the job keeps running."""
+        trajectory_hold.mark(cp, ticket.epoch if ticket else cp["_epoch"], reason)
+        self._save(job, trajectory_hold.flag(source, reason), cp, ticket=ticket)
+        self.jobs.append_log(
+            job,
+            f"Trajectory {label(source.id)} held for attention: {reason} Other trajectories"
+            " continue. Resume retries it; detach it to settle it as Unfinished.",
+        )
+
+    def _hold_owned(self, job, ident, epoch):
+        """Hold a trajectory after a local error, from its last saved checkpoint."""
+        record = self.store.read(ident)
+        cp = self.jobs.checkpoint(job, ident)
+        if cp is None:
+            raise ValueError("No checkpoint to hold")
+        cp.update(_epoch=epoch, _revision=record.revision)
+        self._hold(job, record.source, cp, "A local error interrupted it; edits are kept.")
+
+    def _parked(self, job, ident, cp, settings):
+        """With a phase barrier, a run's reviews wait until every trajectory is assembled."""
+        if cp.get("manual") or not settings.generation.phase_barrier:
+            return False
+        if not phase_barrier.waits(cp):
+            return False
+        if phase_barrier.phase(self.store, job) == phase_barrier.GENERATION:
+            if phase_barrier.modes(self.store, job).get(ident) != "parked":
+                phase_barrier.set_mode(self.store, job, ident, "parked")
+                self.jobs.progress(job, f"Trajectory parked until reviews: {label(ident)}")
+            return True
+        if phase_barrier.modes(self.store, job).get(ident) == "parked":
+            phase_barrier.set_mode(self.store, job, ident, "attached")
+        return False
+
+    def _barrier(self, job, epoch):
+        """Pause the run once every trajectory is parked (or held) before its reviews."""
+        j = self.jobs.inspect(job)
+        if j["kind"] != "run" or j["state"] != "running":
+            return
+        if not self.settings_for(job).generation.phase_barrier:
+            return
+        if phase_barrier.phase(self.store, job) != phase_barrier.GENERATION:
+            return
+        if phase_barrier.pending_attempts(self.store, job):
+            return
+        owners = phase_barrier.modes(self.store, job)
+        parked = [i for i, mode in owners.items() if mode == "parked"]
+        held = [i for i in owners if trajectory_hold.held(self.jobs.checkpoint(job, i), epoch)]
+        if not parked or len(parked) + len(held) < len(owners):
+            return
+        phase_barrier.advance(self.store, job)
+        self.jobs.control(job, "pause")
+        self.jobs.append_log(
+            job,
+            f"Phase barrier: Draft and Assembly finished for {len(parked)} trajectories"
+            + (f" ({len(held)} held for attention)" if held else "")
+            + ". Switch to the review models, then Resume to start Fast and Critical Review.",
+        )
+
+    def _pause_if_only_held(self, job, epoch):
+        owners = self._owners(job)
+        if not owners or self.jobs.inspect(job)["state"] != "running":
+            return
+        if all(trajectory_hold.held(self.jobs.checkpoint(job, i), epoch) for i in owners):
+            self.jobs.control(job, "pause")
+            self.jobs.append_log(
+                job,
+                f"Only held trajectories remain ({len(owners)}). Fix the cause, then Resume to"
+                " retry them, or detach them.",
+            )
+
+    def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
         data = source.to_dict()
         data.setdefault("metadata", {})["stage"] = -3
-        data["metadata"].setdefault("repair_outcomes", []).append(
-            dict(tier=cp["tier"], outcome=reason, source_hash=source.intrinsic_hash)
-        )
+        outcome = dict(tier=cp["tier"], outcome=reason, source_hash=source.intrinsic_hash)
+        if detail:
+            outcome["reason"] = detail
+        data["metadata"].setdefault("repair_outcomes", []).append(outcome)
         cp["phase"] = "done"
         self._save(job, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail")
 
@@ -402,14 +561,17 @@ class GenerationService:
             f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
         )
         if cp["errors"] > settings.generation.format_retries:
-            if cp["phase"] == "event":
+            if cp["phase"] == assembly_fix.PHASE:
+                self._end_assembly_fix(ticket.job_id, source, cp, "invalid_output", ticket)
+            elif cp["phase"] == "event":
                 data = source.to_dict()
                 data["metadata"]["stage"] = -1
                 data["metadata"]["generation_failure"] = {
                     "kind": "invalid_provider_output",
                     "event_index": cp["index"],
                 }
-                if settings.generation.repair and "fast" in settings.endpoint_roles:
+                # An empty graph has nothing to repair and would pass structurally.
+                if self._can_repair(settings) and source.events:
                     cp.update(phase="repair", tier="fast", errors=0, history=[])
                     cp["repair_base"] = reviews.payload(
                         GraphSource.model_validate(data), settings, "fast", "repair"
@@ -425,17 +587,18 @@ class GenerationService:
                         outcome="fail",
                     )
             else:
-                # No quality verdict exists. Consume invalid body, preserve stage,
-                # then pause for explicit Resume and a fresh bounded correction.
-                cp["errors"] = 0
-                self._save(ticket.job_id, source, cp, ticket=ticket)
-                self.jobs.control(ticket.job_id, "pause")
-                self.jobs.append_log(
+                # No quality verdict exists. Keep the stage and hold this trajectory;
+                # Resume gives it a fresh bounded correction.
+                self._hold(
                     ticket.job_id,
-                    "Review/repair output invalid; no verdict recorded. Manual Resume required.",
+                    source,
+                    cp,
+                    "Review/repair output stayed invalid after its corrections; no verdict"
+                    " recorded.",
+                    ticket,
                 )
         else:
-            if cp["phase"] == "repair":
+            if cp["phase"] in ("repair", assembly_fix.PHASE):
                 cp["history"].append(
                     dict(
                         role="user",
@@ -453,31 +616,46 @@ class GenerationService:
             raise Fenced("Source changed while request was in progress")
         settings = self.settings_for(ticket.job_id)
         if complete.get("context_limit"):
-            if cp["phase"] == "repair":
-                self._repair_failure(ticket.job_id, source, cp, "context_limit", ticket)
+            if cp["phase"] == assembly_fix.PHASE:
+                self._end_assembly_fix(ticket.job_id, source, cp, "context_limit", ticket)
+            elif cp["phase"] == "repair":
+                self._next_round(ticket.job_id, source, cp, ticket)
             else:
-                self._save(ticket.job_id, source, cp, ticket=ticket)
-                self.jobs.control(ticket.job_id, "pause")
-                self.jobs.append_log(
+                self._hold(
                     ticket.job_id,
+                    source,
+                    cp,
                     (
                         f"Local context guard ({ticket.payload['operation']}): "
-                        f"{complete['local_budget']['input_bytes']} input bytes exceed conservative "
-                        f"{complete['local_budget']['input_ceiling']}-byte allowance. "
+                        f"about {complete['local_budget']['input_tokens_estimate']} input tokens "
+                        f"({complete['local_budget']['input_bytes']} bytes at "
+                        f"{complete['local_budget']['bytes_per_token']} bytes/token) exceed the "
+                        f"{complete['local_budget']['input_ceiling']}-token allowance. "
                         "No provider call made. Reduce prompt scope or change the endpoint budget; "
                         "active runs keep frozen settings."
                         if complete.get("local_budget")
-                        else "Provider context limit; no quality verdict. Manual Resume required."
+                        else "Provider context limit; no quality verdict."
                     ),
+                    ticket,
                 )
             return
         body = complete.get("output")
         try:
-            jsonschema.Draft202012Validator(ticket.payload["schema"]).validate(body)
-            if ticket.payload["operation"] == "flow_select":
-                selected_source, selected_task, selection = adaptive_flow.accept_selection(
-                    source, body, ticket.payload["flow_plan"], settings
-                )
+            if complete.get("invalid_output"):
+                raise ValueError(invalid_reason(complete))
+            if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
+                body = spec_normalize.normalize(body)
+            problem = explain(ticket.payload["schema"], body)
+            if problem:
+                raise ValueError(problem)
+            if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
+                plan = self._plan(ticket.job_id, ticket.trajectory_id)
+                assembled, broken = draft_assembly.assemble(source, body, plan, settings)
+                if broken and not self._can_repair(settings):
+                    raise ValueError(
+                        "Structural errors; fix them: "
+                        + "; ".join(f"{d.code}: {d.message}" for d in broken[:8])
+                    )
             if cp["phase"] == "review":
                 quality = reviews.verdict(body, source)
                 if quality == "pass" and any(
@@ -486,6 +664,18 @@ class GenerationService:
                     raise ValueError("A structural error cannot receive a passing signoff")
             elif cp["phase"] == "repair" and body["action"] == "verdict":
                 quality = reviews.verdict(body["review"], source)
+                if quality == "fail":
+                    # Not a failure: the repairer keeps working, or gives up explicitly.
+                    cp["errors"] = 0
+                    cp["failed_review"] = body["review"]
+                    cp["history"].extend(
+                        [
+                            dict(role="assistant", content=canonical(body)),
+                            repair_policy.still_failing(body["review"]),
+                        ]
+                    )
+                    self._save(ticket.job_id, source, cp, ticket=ticket)
+                    return
                 if quality == "pass" and any(
                     d.severity == "error" for d in diagnose(source, settings)
                 ):
@@ -495,30 +685,25 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
-        if ticket.payload["operation"] == "flow_select":
-            cp["flow"].update(output=selection, task=selected_task)
-            adaptive_driver.advance(cp, ticket.payload["flow_plan"])
-            self._save(ticket.job_id, selected_source, cp, ticket=ticket)
-            self.jobs.progress(
-                ticket.job_id,
-                "Flow selected: " + (selected_task["id"] if selected_task else "finish"),
-            )
+        if cp["phase"] == assembly_fix.PHASE:
+            self._assembly_fix_step(ticket, source, cp, body)
             return
-        if cp["phase"] == "event":
-            task = ticket.payload["task"]
-            source = append_event(source, task, body, settings)
-            # A wrapper bug cannot be repaired by asking the model repeatedly.
-            errors = [d for d in diagnose(source, settings) if d.severity == "error"]
-            if errors:
-                raise ValueError("Flow wrapper structural error: " + errors[0].code)
-            cp["index"] += 1
-            if "flow_plan" in ticket.payload:
-                adaptive_driver.advance(cp, ticket.payload["flow_plan"])
-            cp["echo"] = task["id"]
-            self._save(ticket.job_id, source, cp, ticket=ticket)
+        if ticket.payload["operation"] == draft_assembly.DRAFT:
+            cp["draft"] = body["draft"]
+            self._save(
+                ticket.job_id, draft_assembly.with_draft(source, body["draft"]), cp, ticket=ticket
+            )
+            self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
+            return
+        if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
+            self._assembled(ticket, assembled, broken, cp)
+            return
+        if cp["phase"] == "repair" and body["action"] == "give_up":
             self.jobs.progress(
-                ticket.job_id,
-                f"Event committed: {label(task['id'])} trajectory={label(source.id)} total_events={len(source.events)}",
+                ticket.job_id, f"Repair given up as not feasible: trajectory={label(source.id)}"
+            )
+            self._repair_failure(
+                ticket.job_id, source, cp, "unfeasible", ticket, detail=body["reason"]
             )
             return
         if cp["phase"] == "repair" and body["action"] != "verdict":
@@ -563,7 +748,7 @@ class GenerationService:
             else settings.generation.repair
         )
         if result == "fail" and repair_enabled:
-            cp.update(phase="repair", errors=0, history=[])
+            cp.update(phase="repair", errors=0, history=[], round=1, failed_review=review)
             cp["repair_base"] = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
             cp["repair_base"].append(
                 dict(role="user", content=canonical({"failed_review": review}))
@@ -588,13 +773,9 @@ class GenerationService:
         ident = body.get("event_id", body.get("window_id"))
         try:
             if body["action"] == "inspect":
-                if ident not in source.events:
-                    raise ValueError("Unknown event ID")
-                reply = dict(
-                    event=source.events[ident].model_dump(mode="json"),
-                    visible=causal_view(source, source.events[ident].after),
-                    source_hash=source.intrinsic_hash,
-                )
+                reply = repair_policy.inspect(source, ident)
+            elif body["action"] == "view":
+                reply = repair_policy.view(source, settings)
             else:
                 if body["expected_source_hash"] != source.intrinsic_hash:
                     raise ValueError("Patch source hash is stale")
@@ -634,17 +815,21 @@ class GenerationService:
         except (Fenced, asyncio.CancelledError):
             pass
         except Exception:
-            # Unknown local wrapper/transport-adapter failures are resumable.
+            # Unknown local wrapper/transport-adapter failures are resumable. Hold only
+            # the trajectory involved; pause the job only if even that fails.
             if (
                 "ticket" in locals()
                 and ticket
                 and self.jobs.inspect(ticket.job_id)["state"] == "running"
             ):
-                self.jobs.control(ticket.job_id, "pause")
-                self.jobs.append_log(
-                    ticket.job_id,
-                    "Flow interrupted; completed commits retained. Manual Resume required.",
-                )
+                try:
+                    self._hold_owned(ticket.job_id, ticket.trajectory_id, ticket.epoch)
+                except Exception:
+                    self.jobs.control(ticket.job_id, "pause")
+                    self.jobs.append_log(
+                        ticket.job_id,
+                        "Generation interrupted; completed commits retained. Manual Resume required.",
+                    )
 
     def dispatch(self):
         # Claims remain the sole ordering/cap authority. Each task is one queue
@@ -675,6 +860,13 @@ class GenerationService:
             if self.jobs.inspect(job)["state"] != "running":
                 break
             for ident in self._owners(job):
-                self._prepare(job, ident, epoch)
+                try:
+                    self._prepare(job, ident, epoch)
+                except (Fenced, OwnershipConflict):
+                    raise
+                except Exception:
+                    self._hold_owned(job, ident, epoch)
+            self._pause_if_only_held(job, epoch)
+            self._barrier(job, epoch)
             self.dispatch()
             await asyncio.sleep(0.025)

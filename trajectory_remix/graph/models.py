@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from . import prompt_defaults
+
 Identifier = Annotated[str, Field(min_length=1)]
 Weight = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
@@ -254,6 +256,22 @@ class TokenizerProfile(DTO):
         return digest(self.model_dump(mode="json"))
 
 
+RESERVED_BODY_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "stream",
+        "max_tokens",
+        "max_completion_tokens",
+        "response_format",
+        "session_id",
+        "temperature",
+        "top_p",
+        "presence_penalty",
+    }
+)
+
+
 class Endpoint(DTO):
     url: Annotated[str, Field(pattern=r"^https?://[^/\s]+(?:/[^\s]*)?$")]
     model: Identifier
@@ -264,13 +282,30 @@ class Endpoint(DTO):
     top_p: Annotated[float, Field(ge=0, le=1)] | None = None
     presence_penalty: Annotated[float, Field(ge=-2, le=2)] | None = None
 
-    context_window_tokens: Annotated[int, Field(ge=1024)] = 16384
-    max_output_tokens: Annotated[int, Field(ge=1)] = 2048
+    context_window_tokens: Annotated[int, Field(ge=1024)] = 65536
+    max_output_tokens: Annotated[int, Field(ge=1)] = 8192
+    # The context guard estimates input tokens as UTF-8 bytes / bytes_per_token. 1.0 can
+    # never undercount; English and compact JSON average about 3.5 bytes per token, so
+    # 3.0 keeps a margin while letting a model's real window be used.
+    bytes_per_token: Annotated[float, Field(ge=1, le=6)] = 1.0
+    # Send the trajectory ID as session_id so routers such as OpenRouter keep one
+    # trajectory on one provider, where its prompt prefix stays cached.
+    sticky_sessions: bool = False
+    # Extra request-body fields for this provider, such as OpenRouter's reasoning or
+    # provider routing options. Fields the transport controls cannot be replaced.
+    extra_body: dict[str, JsonValue] = Field(default_factory=dict)
+    # How replies are kept to the JSON schema. "auto" uses native strict JSON schema
+    # where possible. "json_object" always uses JSON mode with the schema in the prompt.
+    # "prompt" sends no response_format at all, for servers that support neither.
+    output_mode: Literal["auto", "json_object", "prompt"] = "auto"
 
     @model_validator(mode="after")
     def context_budget(self):
         if self.max_output_tokens + 512 >= self.context_window_tokens:
             raise ValueError("Reserve input space beyond output tokens and framing")
+        reserved = set(self.extra_body) & RESERVED_BODY_FIELDS
+        if reserved:
+            raise ValueError("extra_body cannot set " + ", ".join(sorted(reserved)))
         return self
 
 
@@ -302,21 +337,47 @@ def default_checklists():
                 "world_consistency": "Observations, identities and authored tool outcomes are consistent.",
                 "coherent_reasoning": "Supervised reasoning follows evidence; distinguish intentional masked mistakes.",
                 "truthful_episode_outcome": "Progress, blocking and completion claims match observed evidence.",
+                "coordinator_role": "Kidra coordinates specialized work rather than personally performing substantial implementation or research, and delegation is proportional to task size.",
+                "authorization_respected": "Consequential actions occur only within the user's stated authority or after an observed approval; otherwise Kidra requests approval or escalates.",
             }.items()
         },
         "critical": {
-            key: Criterion(text=text)
+            # Many episodes contain no automation or infrastructure decision.
+            key: Criterion(text=text, allow_not_applicable=key == "strategic_investment_judgment")
             for key, text in {
                 "decision_quality": "Decisions consider relevant constraints, alternatives and proportional delegation.",
                 "long_horizon_continuity": "Ownership and retained context remain coherent across interruptions and participants.",
                 "exploration_and_recovery": "Critique and recovery respond to actual evidence without hindsight.",
                 "training_value": "The episode teaches useful behavior without padded boilerplate.",
+                "delegation_discipline": "No unchanged failed task is delegated again, agents are not created recursively or excessively, planning does not go unbounded, and visible budgets are respected.",
+                "strategic_investment_judgment": "Automation or infrastructure decisions weigh expected reuse, savings, build and maintenance cost and uncertainty using visible evidence, and are revisited when circumstances change.",
+                "execution_progress": "When execution is available the episode advances real work, not only plans.",
             }.items()
         },
     }
 
 
+class GenerationPrompts(DTO):
+    """The project's generation prompts; Load default restores the packaged ones."""
+
+    actor: str = Field(default_factory=prompt_defaults.actor, min_length=1)
+    draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
+    assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
+
+
 class GenerationOptions(DTO):
+    @model_validator(mode="before")
+    @classmethod
+    def drop_retired_method(cls, data):
+        # Projects saved while the step-by-step Flow existed carry a method field;
+        # Draft and Assembly is now the only way to generate.
+        if isinstance(data, dict) and "method" in data:
+            data = {k: v for k, v in data.items() if k != "method"}
+        return data
+
+    # Runs only: every trajectory finishes generation (Draft and Assembly) before any review
+    # starts; the job then pauses so models can be swapped, and Resume starts the reviews.
+    phase_barrier: bool = False
     fast: bool = True
     critical: bool = True
     repair: bool = True
@@ -324,9 +385,23 @@ class GenerationOptions(DTO):
     # An explicit byte budget for the continuing repair transcript, not a token
     # estimate or a spending limit. Provider context exhaustion also terminates it.
     repair_context_bytes: Annotated[int, Field(ge=256)] = 65536
+    # A spending guard: a repair session that outgrows repair_context_bytes starts a
+    # fresh round on the current graph, up to this many rounds in all.
+    repair_rounds: Annotated[int, Field(ge=1, le=10)] = 3
 
 
 class ProjectSettings(DTO):
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_generator_role(cls, data):
+        # Projects saved while a Generator endpoint role existed: Draft replaces it.
+        roles = data.get("endpoint_roles") if isinstance(data, dict) else None
+        if isinstance(roles, dict) and "generator" in roles:
+            roles = {k: v for k, v in roles.items() if k != "generator"}
+            roles.setdefault("draft", data["endpoint_roles"]["generator"])
+            data = {**data, "endpoint_roles": roles}
+        return data
+
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
     tools: dict[Identifier, ToolDefinition] = Field(
         default_factory=lambda: {
@@ -344,7 +419,8 @@ class ProjectSettings(DTO):
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
-    endpoint_roles: dict[Literal["generator", "fast", "critical"], Identifier] = Field(
+    # Assembly is optional: it falls back to Draft.
+    endpoint_roles: dict[Literal["draft", "assembly", "fast", "critical"], Identifier] = Field(
         default_factory=dict
     )
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
@@ -352,6 +428,7 @@ class ProjectSettings(DTO):
         default_factory=default_checklists
     )
     generation: GenerationOptions = Field(default_factory=GenerationOptions)
+    prompts: GenerationPrompts = Field(default_factory=GenerationPrompts)
     matrix: VersionedReference | None = None
     metric_registry: VersionedReference | None = None
     sampler_configuration: dict[str, JsonValue] | None = None

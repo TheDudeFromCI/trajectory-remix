@@ -15,10 +15,11 @@ Paths below are relative to `trajectory_remix/`.
 | --- | --- | --- |
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
 | Compiler/export | `graph/compiler.py`, `graph/export.py`, `graph/ktremix.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
-| Generation/review | `graph/flow.py`, `graph/generation.py`, `graph/reviews.py`, `graph/provider.py` | Frozen inputs, actor context, checklist evidence, stage transitions and single repair sessions |
+| Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/compact_spec.py`, `graph/assembly_fix.py`, `graph/reviews.py`, `graph/repair_policy.py`, `graph/provider.py` | Frozen inputs and prompts, Draft/Assembly/fix stages, checklist evidence, stage transitions and repair rounds |
+| Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `flow-panel.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -79,6 +80,10 @@ node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
+node tests/provider_options_frontend.mjs
+node tests/usage_view_frontend.mjs
+node tests/tool_import_frontend.mjs
+node tests/show_tools_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
@@ -105,10 +110,13 @@ Verify that `/tmp` artifacts and processes survived before resuming them. Open o
 update a focused PR; merge only when the current user has authorized it. A green
 suite is evidence of covered behavior, not proof of exhaustive correctness.
 
-Adaptive Flow backend regressions: `python -m pytest -q tests/test_adaptive_flow.py`.
-These scripted-provider tests exercise loops, independent tool branches and joins,
-causal actor prompts, frozen YAML/resume, typed conditions and bounded failure.
-They establish interpreter correctness, not live-model semantic coverage.
+Coordinator defaults: `python -m pytest -q tests/test_coordinator_defaults.py` checks the
+default checklist keys, that saved checklists are not rewritten, that Draft and Assembly
+receive the agent prompt verbatim, and the derived
+`strategic_investment` label. Changing a default prompt or checklist changes the checklist
+hash and marks existing sign-offs stale, so keep existing keys and update
+[PROJECT-SETTINGS](PROJECT-SETTINGS.md) and [GRAPH-GENERATION](GRAPH-GENERATION.md) together.
+It shows structure, not live-model quality.
 
 Prompt-scope regressions: `python -m pytest -q tests/test_prompt_scope.py` checks
 real stored sampler snapshots stay out of model prompts, review bodies aren't
@@ -121,3 +129,63 @@ copying model or exception bodies to logs.
 Endpoint controls: `python -m pytest -q tests/test_endpoint_sampling.py` checks
 wire omission versus explicit zeros, timeout cancellation, accepted ranges,
 settings API/schema and frozen run configuration with fake HTTP responses.
+
+Prompt cache order: `python -m pytest -q tests/test_prompt_cache_order.py` checks that
+each assembly fix request extends the previous one, that Draft requests in a run share
+their system prompt, and that the JSON-mode schema follows the system prompt, so prefix
+caches stay effective.
+
+Prompts: `python -m pytest -q tests/test_prompt_settings.py` checks that runs use and freeze
+`settings.prompts` (with a version that changes when they're edited), that settings saved
+with the retired `method` field still load, that retired `plan` and `flow_yaml` instructions
+are refused before reserving attempts, the default-prompts route, and the one-time move of a
+customised Flow agent prompt (an appended persona keeps today's default; Load default sticks).
+
+Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test_spec_normalize.py tests/test_repair_policy.py`
+checks the draft and assemble order, the draft kept in metadata, the builder's tool listing,
+chat deliveries and call IDs, corrections for specs that can't be built, the handoff of
+errors left after the assembly fix to Fast repair, and that Draft, Assembly and the fix use their
+own endpoint roles (with Draft as the fallback). `tests/test_spec_normalize.py` checks
+the settled `:echo` slips, tools objects and wrappers, and the builder's fix-it messages. It also validates the worked example in the assemble prompt
+against the schema and graph validator. Keep the prompts in `graph/draft_assembly.yaml` and the field
+descriptions in `compact_spec.schema` in sync.
+Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
+
+Phase barrier: `python -m pytest -q tests/test_phase_barrier.py` checks that every trajectory is
+drafted and assembled before any review (parked trajectories don't count toward the active cap),
+that the job pauses at the barrier and Resume runs the reviews, that the phase survives a restart,
+that starting reviews early skips the pause, and the phase routes.
+
+Held trajectories: `python -m pytest -q tests/test_trajectory_hold.py` checks that invalid review
+output or a local error holds only that trajectory while the rest finish, that the job pauses
+only when held trajectories alone remain, that Resume retries and clears `needs_attention`, and
+that detaching a held trajectory completes the job. Never pause a whole job for one trajectory.
+
+Assembly fix: `python -m pytest -q tests/test_assembly_fix.py` checks that errors and
+warnings (not a clean graph) start the fix, that `done` is refused while errors remain, and that
+giving up or invalid output hands the graph on to review without pausing.
+
+Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
+verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
+shows the patched source, that context exhaustion starts a fresh round on the current graph,
+and that `repair_rounds` caps the rounds.
+
+Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
+tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra
+request fields and their reserved names, sticky `session_id`, usage kept for cut-off and
+non-JSON replies, per-job usage totals (missing values stay missing), the example settings
+and the model checker (its cost estimate uses Draft and Assembly token counts from pilots). All HTTP is mocked;
+`scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
+`graph/usage.py` stores counts only, never prompts, responses or credentials.
+
+Output modes: `python -m pytest -q tests/test_output_modes.py` checks that `auto`,
+`json_object` and `prompt` endpoints send the right `response_format` (or none) and always
+state the schema in the prompt when the server does not enforce it.
+
+Schema corrections: `graph/schema_errors.py` turns a schema violation into a short
+correction naming each failing field (it looks inside "object or null" alternatives and
+shortens quoted values).
+
+Show tools: `python -m pytest -q tests/test_tool_listing.py` checks the repeatable random
+additions, that Assembly writes the listing as a masked event before the opening, and that
+manual authoring's listing route matches it (`graph/tool_listing.py`, `graph/tools_api.py`).

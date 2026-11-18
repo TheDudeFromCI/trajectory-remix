@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import os
 
 import httpx
@@ -56,8 +57,16 @@ def strict_schema_supported(schema):
 
 
 def response_contract(payload):
+    """(response_format, messages) for a request. response_format None means omit it.
+
+    The endpoint's output_mode chooses: "auto" uses native strict JSON schema when the
+    schema allows it and JSON mode otherwise; "json_object" always uses JSON mode with the
+    schema in the prompt; "prompt" puts the schema in the prompt and sends no
+    response_format, for servers that support neither.
+    """
+    mode = (payload.get("endpoint_config") or {}).get("output_mode", "auto")
     schema = decoding_schema(payload["schema"])
-    if strict_schema_supported(schema):
+    if mode == "auto" and strict_schema_supported(schema):
         return (
             {
                 "type": "json_schema",
@@ -71,15 +80,22 @@ def response_contract(payload):
         )
     # This is a wire-format choice, not a retry, alternate model or endpoint.
     # JSON mode still receives the complete schema and is validated after return.
-    messages = [
-        *payload["messages"],
-        {
-            "role": "user",
-            "content": "Return one JSON object matching this complete output schema. "
-            "Do not include Markdown or explanations. Schema: " + json.dumps(payload["schema"]),
-        },
-    ]
-    return {"type": "json_object"}, messages
+    # The schema never changes between calls, so it goes right after the system prompt,
+    # ahead of the per-call data, where a prefix cache can reuse it. It is joined to the
+    # first user message rather than sent separately: some open-weight chat templates
+    # reject two user messages in a row.
+    contract = (
+        "Return one JSON object matching this complete output schema. "
+        "Do not include Markdown or explanations. Schema: " + json.dumps(payload["schema"])
+    )
+    messages = [dict(m) for m in payload["messages"]]
+    first = next((m for m in messages if m["role"] != "system"), None)
+    if first is not None and first["role"] == "user":
+        first["content"] = contract + "\n\n" + first["content"]
+    else:
+        at = messages.index(first) if first is not None else len(messages)
+        messages.insert(at, {"role": "user", "content": contract})
+    return (None if mode == "prompt" else {"type": "json_object"}), messages
 
 
 def context_budget(payload, response_format, messages):
@@ -90,8 +106,9 @@ def context_budget(payload, response_format, messages):
     could fit. Never truncate evidence to make a request appear to fit.
     """
     endpoint = payload["endpoint_config"]
-    limit = endpoint.get("context_window_tokens", 16384)
-    output = endpoint.get("max_output_tokens", 2048)
+    limit = endpoint.get("context_window_tokens", 65536)
+    output = endpoint.get("max_output_tokens", 8192)
+    ratio = endpoint.get("bytes_per_token", 1.0)
     size = len(
         json.dumps(
             dict(messages=messages, response_format=response_format), ensure_ascii=False
@@ -99,10 +116,34 @@ def context_budget(payload, response_format, messages):
     )
     return dict(
         input_bytes=size,
+        bytes_per_token=ratio,
+        input_tokens_estimate=math.ceil(size / ratio),
         input_ceiling=limit - output - 512,
         context_window_tokens=limit,
         max_output_tokens=output,
     )
+
+
+def request_body(payload, trajectory_id):
+    """The exact HTTP body for a request (no credentials) and its context budget."""
+    endpoint = payload["endpoint_config"]
+    response_format, messages = response_contract(payload)
+    budget = context_budget(payload, response_format, messages)
+    body = dict(
+        # Provider options first; validation stops them replacing the fields below.
+        **endpoint.get("extra_body", {}),
+        model=endpoint["model"],
+        messages=messages,
+        stream=False,
+        max_tokens=budget["max_output_tokens"],
+        **({"response_format": response_format} if response_format else {}),
+    )
+    for key in ("temperature", "top_p", "presence_penalty"):
+        if endpoint.get(key) is not None:
+            body[key] = endpoint[key]
+    if endpoint.get("sticky_sessions"):
+        body["session_id"] = trajectory_id
+    return body, budget
 
 
 class OpenAITransport:
@@ -112,20 +153,9 @@ class OpenAITransport:
         # Credentials are process configuration; never put them in jobs/source.
         key = os.environ.get("REMIX_API_KEY_" + ticket.endpoint.upper().replace("-", "_"))
         headers = {"Authorization": "Bearer " + key} if key else {}
-        response_format, messages = response_contract(payload)
-        budget = context_budget(payload, response_format, messages)
-        if budget["input_bytes"] > budget["input_ceiling"]:
+        body, budget = request_body(payload, ticket.trajectory_id)
+        if budget["input_tokens_estimate"] > budget["input_ceiling"]:
             return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
-        body = dict(
-            model=endpoint["model"],
-            messages=messages,
-            stream=False,
-            max_tokens=budget["max_output_tokens"],
-            response_format=response_format,
-        )
-        for key in ("temperature", "top_p", "presence_penalty"):
-            if endpoint.get(key) is not None:
-                body[key] = endpoint[key]
         timeout = endpoint.get("timeout_seconds", 120.0)
         # Bound the whole attempt as well as individual network operations.
         # Queue-owned retries each get their own deadline.
@@ -144,11 +174,23 @@ class OpenAITransport:
         response.raise_for_status()
         data = response.json()
         choice = data["choices"][0]
+        # Usage is kept even for unusable replies: their tokens were still billed.
+        meta = dict(model=data.get("model"), usage=data.get("usage"))
+        # Incomplete text never leaves this local buffer; jobs never store it.
         if choice.get("finish_reason") != "stop":
-            # Incomplete text never leaves this local buffer.
-            return {"invalid_output": True, "model": data.get("model")}
+            return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"))
         try:
             output = json.loads(choice["message"]["content"])
         except (ValueError, TypeError):
-            return {"invalid_output": True, "model": data.get("model")}
-        return dict(output=output, model=data.get("model"), usage=data.get("usage"))
+            return dict(meta, invalid_output=True, finish_reason="stop")
+        return dict(meta, output=output)
+
+
+def invalid_reason(result):
+    """Correction text for an unusable reply, sent back with the retry."""
+    if result.get("finish_reason") == "length":
+        return (
+            "The previous reply was cut off at the output token limit before it finished. "
+            "Return a shorter, complete JSON object."
+        )
+    return "The previous reply was not a single valid JSON object. Return only that object."

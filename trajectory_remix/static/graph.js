@@ -3,7 +3,8 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
-import {renderFlowPanel} from './flow-panel.js';
+import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
+import {openShowTools} from './show-tools.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
@@ -215,7 +216,7 @@ export class StudioUI {
   }
   applyLock() {
     const locked = !!this.record?.owner;
-    for (const id of ['save-source', 'delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
+    for (const id of ['save-source', 'delete-sample', 'new-event', 'show-tools', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
     for (const root of ['graph-editor-fields', 'metadata-panel']) {
       const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) input.disabled = locked;
     }
@@ -248,9 +249,6 @@ export class StudioUI {
     const stale = this.record.review_status?.stale;
     $('review-stale').textContent = stale ? 'Review stale' : '';
     setAttr($('review-stale'), 'data-tip', stale ? 'Review is stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : null);
-    const outcome = this.draft.metadata?.flow_outcome, reason = outcome && typeof outcome === 'object' ? String(outcome.reason || '') : '';
-    $('flow-outcome').textContent = outcome ? (outcome.finished === false ? 'Flow stopped' : 'Flow finished') : '';
-    setAttr($('flow-outcome'), 'data-tip', outcome ? `The generation controller's own finish explanation, not measured coverage${reason ? ': ' + (reason.length > 360 ? reason.slice(0, 360) + '…' : reason) : '.'}` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
@@ -552,7 +550,7 @@ export class StudioUI {
     const settings = JSON.parse($('settings-json').value);
     const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
-    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, footer: this.reviewFoot ||= $('review-settings-foot')});
+    if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, loadDefaultPrompts: async () => api('/generation/prompts/default'), footer: this.reviewFoot ||= $('review-settings-foot')});
   }
   async openSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();
@@ -585,8 +583,8 @@ export class StudioUI {
     const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
     const box = $('generation-run-controls'); box.replaceChildren(node('h3', 'New run'));
     const roles = this.settings.endpoint_roles || {}, roleList = node('div', undefined, 'role-list');
-    for (const [role, name] of [['generator', 'Generator'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
-      const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'generator' ? 'danger' : 'faint')); roleList.append(row);
+    for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
+      const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'draft' ? 'danger' : 'faint')); roleList.append(row);
     }
     box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
@@ -599,9 +597,7 @@ export class StudioUI {
     pinBox.append(node('span', 'Pins', 'muted small'));
     if (Object.keys(pins).length) for (const [k, v] of Object.entries(pins)) pinBox.append(tag(`${k}: ${v}`, 'lilac'));
     else pinBox.append(node('span', 'None — the sampler uses saved matrix weights', 'small faint'));
-    const flowBox = node('section', undefined, 'flow-section');
-    box.append(pinBox, flowBox, node('p', 'Each run freezes its settings, matrix, pins and flow when it starts.', 'note'));
-    this.flowPanel = await renderFlowPanel(flowBox, api);
+    box.append(pinBox, node('p', 'Each run freezes its settings, prompts, matrix and pins when it starts.', 'note'));
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
       if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
@@ -612,7 +608,7 @@ export class StudioUI {
       start.disabled = true;
       try {
         const requests = Array.from({length:n}, (_, i) => ({seed:first+i, overrides:{...(sampler?.pins || {})}}));
-        const run = await api('/generation/runs', 'POST', {requests, instructions: this.flowPanel?.instructions() || {}});
+        const run = await api('/generation/runs', 'POST', {requests, instructions: {}});
         status.textContent = `Started ${n} attempts. Job ${run.job_id}`;
         $('generation-settings-dialog').close(); await this.inspectJob(run.job_id); await this.listing();
       } finally { start.disabled = false; }
@@ -671,7 +667,7 @@ export class StudioUI {
   renderToolSettings(selected = '') {
     const box = $('tool-schema-editor'); box.replaceChildren();
     box.className = 'settings-section';
-    box.append(node('h3', 'Synthetic tools'), node('p', 'Tools an agent can call in authored and generated trajectories. Forms edit the settings draft; Save settings validates it.', 'settings-help'));
+    box.append(node('h3', 'Synthetic tools'), node('p', 'Tools an agent can call in authored and generated trajectories. They are contracts only: the Draft and Assembly models write each call and its result, and nothing runs. The selector and writers read each schema, including its description. Forms edit the settings draft; Save settings validates it.', 'settings-help'));
     const data = JSON.parse($('settings-json').value); data.tools ||= {};
     const write = () => { const current = JSON.parse($('settings-json').value); current.tools = data.tools; $('settings-json').value = json(current); };
     const control = (label, value = '') => { const wrap = node('label', label), n = node('input'); n.value = value; n.setAttribute('aria-label', label); wrap.append(n); return [wrap, n]; };
@@ -686,7 +682,11 @@ export class StudioUI {
       const id = ident.value.trim(); if (!/^[a-z][a-z0-9_-]*$/.test(id) || data.tools[id]) throw new Error('Supply a unique tool ID with letters, digits, underscores or hyphens.');
       data.tools[id] = {name: id, input_schema: {type:'object',properties:{}}}; write(); this.renderToolSettings(id);
     }, 'sm'));
-    box.append(top);
+    box.append(top, ...toolImportControls((tools, replace) => {
+      const summary = describeMerge(mergeTools(data.tools, tools, {replace})); write();
+      this.renderToolSettings(select.value || Object.keys(data.tools)[0]); $('tool-schema-editor').querySelector('.tool-import')?.nextElementSibling?.replaceChildren(summary);
+      return summary;
+    }));
     const tool = data.tools[select.value];
     if (!tool) { box.append(node('div', 'No tools defined yet. Add one by ID above.', 'empty')); return; }
     const card = node('section', undefined, 'settings-card'); box.append(card);
@@ -745,6 +745,12 @@ export class StudioUI {
       if (!this.draft) return; const id = $('new-event-id').value || 'event-' + crypto.randomUUID().slice(0, 8); if (this.draft.events[id]) throw new Error('Event ID exists');
       this.stashEditor(); this.draft.events[id] = {kind: 'agent_text', window: Object.keys(this.draft.windows)[0] || 'reasoning', after: [], content: '', close_window: false, supervision: {masked: false, weight: 1}};
       this.event = id; this.renderDraft(); this.renderEvent(); this.changed();
+    });
+    on('show-tools', 'click', async () => {
+      if (!this.draft) return; this.stashEditor(); await this.loadSettings();
+      openShowTools({api, draft: this.draft, tools: this.settings.tools || {}, report: message, onAdd: ({eventId}) => {
+        this.event = eventId; this.renderDraft(); this.renderEvent(); this.changed();
+      }});
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
     on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); });

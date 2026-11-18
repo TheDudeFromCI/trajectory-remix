@@ -55,7 +55,7 @@ for you to copy, not calls this document makes.
 | Outcomes, paged | `graph_job_items` | `{"id":"JOB_UUID","limit":10,"offset":0}` |
 | Logs, by cursor | `graph_job_logs` | `{"id":"JOB_UUID","after":0,"limit":10}` |
 | Pause, resume or cancel | `control_graph_job` | `{"id":"JOB_UUID","action":"pause"}` |
-| Resume an exhausted endpoint | `resume_graph_endpoint` | `{"endpoint":"local_generator"}` |
+| Resume an exhausted endpoint | `resume_graph_endpoint` | `{"endpoint":"local_draft"}` |
 | Export Ready sources | `export_graphs` | `{"options":{"compiled":false,"minimum_stage":3}}` |
 | Export Ready, compiled | `export_graphs` | `{"profile":"training","options":{"compiled":true}}` |
 | List finished download paths | `graph_job_artifacts` | `{"id":"JOB_UUID"}` |

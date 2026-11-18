@@ -1,0 +1,50 @@
+"""Show tools listing: chosen tools plus a repeatable random selection of others."""
+
+import pytest
+from test_graph_generation import DRAFT, finish, service, spec
+
+from trajectory_remix.graph import tool_listing
+
+
+def test_random_additions_are_repeatable_and_keep_chosen_tools():
+    candidates = [f"t{i}" for i in range(40)]
+    once = tool_listing.extras("trajectory-a", "tools", candidates, 0.5)
+    assert once == tool_listing.extras("trajectory-a", "tools", candidates, 0.5)
+    assert once != tool_listing.extras("trajectory-b", "tools", candidates, 0.5)
+    assert 8 < len(once) < 32  # About half.
+    assert tool_listing.extras("t", "tools", candidates, 0) == []
+    assert tool_listing.extras("t", "tools", candidates, 1) == candidates
+
+
+@pytest.mark.asyncio
+async def test_assembly_writes_the_listing_before_the_opening(tmp_path):
+    gen, fake = service(tmp_path, fast=False)
+    fake.responses = [{"draft": DRAFT}, spec()]
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
+    listing = source.events["tools"]
+    assert listing.kind == "external_text" and source.windows[listing.window].purpose == "tools"
+    assert source.events["ask"].after == ["tools"]
+    assert {"chat", "read"} <= set(source.metadata["shown_tools"])
+
+
+def test_manual_listing_endpoint_matches_assembly(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from trajectory_remix.graph.studio_api import create_studio_app
+
+    gen, _ = service(tmp_path)
+    settings = gen.store.settings().settings
+    tools = {k: v.model_dump(mode="json") for k, v in settings.tools.items()}
+    built = tool_listing.listing(tools, "traj-1", "tools", ["read"], 0.5)
+    app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
+    with TestClient(app) as client:
+        client.headers["X-Remix-Token"] = app.state.csrf
+        body = dict(trajectory_id="traj-1", event_id="tools", tools=["read"], extra_tools=0.5)
+        served = client.post("/api/v1/tools/listing", json=body).json()
+        assert served == built  # Same trajectory and event: the same listing.
+        none = client.post("/api/v1/tools/listing", json=dict(body, extra_tools=0)).json()
+        assert none["shown"] == ["read"] and none["added"] == []
+        bad = client.post("/api/v1/tools/listing", json=dict(body, tools=["nope"]))
+        assert bad.status_code == 422 and "Unknown tool IDs: nope" in bad.json()["message"]

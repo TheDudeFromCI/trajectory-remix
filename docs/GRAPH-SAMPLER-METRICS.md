@@ -62,6 +62,22 @@ count, peak Active capacity or token exposure.
   `abs(actual − target) > max(absolute, abs(target) × relative)`. An optional `target` names a key in the
   frozen `targets.numeric_targets`.
 
+### Derived labels
+
+Some ideas cut across the matrix's families, so the original matrix cannot name them
+without being edited. A **derived label** is computed from a proposal's frozen targets and
+reported next to proposal coverage. It is never a metric definition, is never stored on a
+source, and does not change the registry digest.
+
+| Label | A proposal carries it when |
+| --- | --- |
+| `strategic_investment` | its `decision.choice` is `invest_in_automation`, `perform_manually` or `defer_investment`, **or** its event tags include `automation_candidate`, whatever its primary family. |
+
+`POST /metrics/population` returns `derived_labels`, for example
+`{"strategic_investment": {"proposals": 3, "of": 40, "basis": "proposal_targets"}}`,
+counted over the same population as proposal coverage. Like coverage, it describes
+what the sampler *intended*, not what a finished trajectory did.
+
 **Calculate Missing Metrics** runs a search-wide bulk job with frozen metric definitions. It fills only absent or
 null values, keeps source revision checks, locks, Pause and Cancel, and leaves one Undo action. It never
 tokenizes, compiles or calls a model.
@@ -82,7 +98,7 @@ All authenticated under `/api/v1`.
 | `POST /sampler/proposals` | `{seed?, world_group_id?, overrides?}`. 201 with an immutable snapshot. |
 | `GET /sampler/proposals/{uuid}` | A historical snapshot. |
 | `POST /sampler/runs` | `{requests:[…], instructions:{…}}`. 202 with a durable run job. |
-| `POST /metrics/population` | `{query:{text?, stage?, split?, tool?}, population:"all"\|"accepted"}`. Streaming aggregation. |
+| `POST /metrics/population` | `{query:{text?, stage?, split?, tool?}, population:"all"\|"accepted"}`. Streaming aggregation, with proposal coverage and [derived labels](#derived-labels). |
 | `GET /metrics/trajectories/{id}` | Definitions, observations, status, drift and original targets. |
 | `PUT /metrics/trajectories/{id}/{key}` | `{expected_revision, value, origin, profile_fingerprint?, compiler_version?}`. An explicit annotation. |
 | `POST /metrics/calculate-missing` | `{query:{…}}`. 202 with a bulk job. |
@@ -101,4 +117,4 @@ python -m pytest -q tests/test_graph_sampling.py tests/test_graph_studio.py \
 ```
 
 These use a few deterministic proposals and tiny sources. No distribution experiments, benchmarks, training or live
-model calls run, and the 25k-stored / 20-active, live-Flow and training gates remain separate.
+model calls run, and the 25k-stored / 20-active, live-generation and training gates remain separate.

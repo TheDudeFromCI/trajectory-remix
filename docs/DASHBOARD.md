@@ -55,6 +55,7 @@ are untouched, and **Raw** on any card switches back to the exact token stream.
 
 The list on the left shows every job with its kind, state and progress. Select one to see
 its progress bar, counts, controls and tabs for **Logs**, **Attempts** (generation),
+**Usage** (tokens, cached share and provider-reported cost for model jobs),
 **Results** (bulk edits and reviews) and **Files** (exports). The page updates in place
 while you watch, so it never flickers or loses your scroll position.
 
@@ -75,23 +76,23 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
 
 1. **Add a model endpoint.** Click **Settings**. On **Models & defaults**, enter an
    endpoint ID and click **Add endpoint**, then fill in the base URL, the exact model
-   name, a concurrent-request limit and a retry count. Assign the *Generator*,
-   *Fast Review* and *Critical Review* roles. One endpoint can serve every role. Details,
+   name, a concurrent-request limit and a retry count. Assign the *Draft* role, and optionally *Assembly*, *Fast Review* and *Critical Review*. One
+   endpoint can serve every role. Details,
    including credentials, are in [Project settings](PROJECT-SETTINGS.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
-   standard flow produces a chatroom reply. Removing it is your choice.
+   agent can reply in the chatroom. Removing it is your choice.
 3. **Set up review (optional).** Open the **Review Settings** tab to choose automatic
-   review and repair options and edit the Core and Critical checklists. Click
-   **Save review settings** if you change them.
-4. **Open Generate.** It shows which endpoint fills each role, any pins from the
-   Sampler, and the **Flow** that will build the trajectories.
+   review and repair options, edit the Core and Critical checklists, and edit the
+   generation prompts. Click **Save review settings** if you change them.
+4. **Open Generate.** It shows which endpoint fills each role and any pins from the
+   Sampler.
 5. **Tune the sampler (optional).** **Open Sampler** jumps to the weights and pins.
 6. **Start.** Set the number of attempts and a starting seed, then click
    **Start generation**. The new job opens in the Jobs view.
 
 ![The Generate dialog](images/dashboard/generate.png)
 
-A run **freezes** its settings, matrix, pins and flow when it starts, so later edits only
+A run **freezes** its settings, prompts, matrix and pins when it starts, so later edits only
 affect future runs. Generated trajectories are never automatically Ready.
 
 ## Tutorials
@@ -108,7 +109,9 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    windows and timeline update as you type.
 4. Need another window? Open the **Windows** tab, type a new window ID and purpose, and
    click **Add / update window**.
-5. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
+5. Want the agent to see its tools? Click **Show tools…**, tick the tools, and add the
+   listing. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
+6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
    **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
 
 You can switch to another trajectory without saving. Your draft is kept and comes back
@@ -169,26 +172,18 @@ layout is remembered in this browser.
 
 ### Choose how trajectories are built
 
-On a backend with **adaptive flows**, the Generate dialog's **Flow** section shows the
-policy that builds each trajectory: its version, a hash, its limits and an outline of its
-nodes (hover a node for its instruction).
+Every run builds trajectories in four stages: **Draft → Assembly → Fast Review → Critical
+Review** (see [Event generation](GRAPH-GENERATION.md#draft-and-assembly)). What you control is
+the prompts and the models:
 
-![The Flow outline in the Generate dialog](images/dashboard/flow.png)
+1. Open **Review Settings** and find **Generation prompts**.
+2. Edit the **Agent prompt** (how the agent behaves, and where a persona pack goes), the
+   **Draft instructions** or the **Assembly instructions**.
+3. **Load default prompts** restores the packaged prompts, after you confirm.
+4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 
-- **For every future run**, edit `flow.yaml` beside the project database. The studio has
-  no file editor for it; the next run picks it up. See
-  [Event generation](GRAPH-GENERATION.md).
-- **For one run**, open **Custom flow for this run**. It starts as the current flow written
-  as YAML. Edit it, make sure **Use this YAML for the next run only** is ticked, and start
-  the run. Invalid YAML is rejected before any attempt is reserved, and `flow.yaml` on disk
-  is not changed.
-
-Trajectories finished by the flow show a **Flow finished** tag in the trajectory bar. Hover
-it for the generation controller's own finish explanation. It describes intent, not
-measured coverage.
-
-On an older backend, the section says the server uses its built-in recipe and runs
-behave as before.
+To use a different model for a stage, assign the **Draft** or **Assembly** role to another
+endpoint in **Settings → Models & defaults**.
 
 ### Import and export
 
@@ -301,7 +296,7 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 
 | File | Responsibility |
 | --- | --- |
-| `graph.html` | App shell: header, the four views, status bar and dialogs. |
+| `graph.html` | App shell: header, the views, status bar and dialogs. |
 | `style.css` | Theme tokens (the *Dark Cyan Base* design system) and shared components: buttons, fields, widgets, tags, tabs, menus, progress bars, tooltips, dialogs, tables. |
 | `graph.css` | Layout of the shell, Editor, Jobs and Metrics views and the status bar. |
 | `sampler.css`, `project-settings.css` | The Sampler view and the settings forms. |
@@ -312,7 +307,6 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `jobs-view.js` | `JobsView`: the job list and detail panel (`StudioUI.dialogs` maps job IDs to detail panels). |
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
 | `window-render.js` | Readable window view: header fields, chat bubbles, tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
-| `flow-panel.js` | The Generate dialog's Flow section: `GET /generation/flow`, the node outline, and a lossless YAML writer for per-run `instructions.flow_yaml`. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use

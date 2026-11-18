@@ -1,0 +1,952 @@
+{
+  "tools": {
+    "subagent": {
+      "name": "Subagent",
+      "input_schema": {
+        "description": "Assign a task to a specialist subagent, or continue an existing conversation by passing its ID in resume. Returns the conversation ID and the specialist's reply.",
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Which specialist to assign, by name or ID from the visible roster."
+          },
+          "task": {
+            "type": "string"
+          },
+          "resume": {
+            "type": "string"
+          },
+          "artifacts": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "version"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "subagent_get": {
+      "name": "Subagent get",
+      "input_schema": {
+        "description": "Read a subagent conversation's status and latest reply.",
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "subagent_list": {
+      "name": "Subagent list",
+      "input_schema": {
+        "description": "List subagent conversations with their status.",
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "subagent_close": {
+      "name": "Subagent close",
+      "input_schema": {
+        "description": "Close a subagent conversation that is no longer needed.",
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "note_save": {
+      "name": "Note save",
+      "input_schema": {
+        "description": "Create or update a prioritized task note with a status and blockers.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "very high",
+              "high",
+              "medium",
+              "low",
+              "very low"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not started",
+              "doing",
+              "paused",
+              "blocked",
+              "done"
+            ]
+          },
+          "blocked_by": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "maxItems": 64,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "note_list": {
+      "name": "Note list",
+      "input_schema": {
+        "description": "List task notes by priority and status.",
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "note_delete": {
+      "name": "Note delete",
+      "input_schema": {
+        "description": "Delete a task note.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_list": {
+      "name": "File list",
+      "input_schema": {
+        "description": "List files and folders under a path.",
+        "type": "object",
+        "properties": {
+          "glob": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "file_read": {
+      "name": "File read",
+      "input_schema": {
+        "description": "Read a file, optionally a line range.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "end_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "line_numbers": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_stat": {
+      "name": "File stat",
+      "input_schema": {
+        "description": "Read a file's size, version and timestamps.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_search": {
+      "name": "File search",
+      "input_schema": {
+        "description": "Search file contents for text or a pattern.",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "glob": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "regex": {
+            "type": "boolean"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "context_lines": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_write": {
+      "name": "File write",
+      "input_schema": {
+        "description": "Create or replace a file. expected_version guards against overwriting a newer version.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "expected_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_patch": {
+      "name": "File patch",
+      "input_schema": {
+        "description": "Apply a targeted edit to part of a file.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          },
+          "expected_version": {
+            "type": "string"
+          },
+          "edits": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "old": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "new": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "old",
+                "new"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "old",
+              "new"
+            ],
+            "not": {
+              "required": [
+                "edits"
+              ]
+            }
+          },
+          {
+            "required": [
+              "edits"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "old"
+                  ]
+                },
+                {
+                  "required": [
+                    "new"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_delete": {
+      "name": "File delete",
+      "input_schema": {
+        "description": "Delete a file.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_copy": {
+      "name": "File copy",
+      "input_schema": {
+        "description": "Copy a file. The destination must not exist unless overwrite is true.",
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "expected_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_move": {
+      "name": "File move",
+      "input_schema": {
+        "description": "Move a file. The destination must not exist unless overwrite is true.",
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "expected_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_rename": {
+      "name": "File rename",
+      "input_schema": {
+        "description": "Rename a file; the same rules as file_move.",
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "expected_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "file_watch": {
+      "name": "File watch",
+      "input_schema": {
+        "description": "Wait for a path to be created, modified or deleted, up to a timeout.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "created",
+                "modified",
+                "deleted"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024
+          },
+          "timeout_ticks": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "memory_save": {
+      "name": "Memory save",
+      "input_schema": {
+        "description": "Save a fact to long-term memory for later sessions.",
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "memory_search": {
+      "name": "Memory search",
+      "input_schema": {
+        "description": "Search long-term memory.",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "skill_save": {
+      "name": "Skill save",
+      "input_schema": {
+        "description": "Save a reusable written procedure (a skill).",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "skill_load": {
+      "name": "Skill load",
+      "input_schema": {
+        "description": "Load a saved skill by name.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "skill_list": {
+      "name": "Skill list",
+      "input_schema": {
+        "description": "List saved skills.",
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "web_search": {
+      "name": "Web search",
+      "input_schema": {
+        "description": "Search the web. Returns ranked titles, URLs, page refs and snippets.",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 128
+          },
+          "max_output_bytes": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 16000
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 86400
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "web_open": {
+      "name": "Web open",
+      "input_schema": {
+        "description": "Read a web page by url or ref, from a given line.",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 68
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "start_column": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_lines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "link_offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 128
+          },
+          "max_links": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "max_output_bytes": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 16000
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 86400
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "required": [
+              "ref"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "web_find": {
+      "name": "Web find",
+      "input_schema": {
+        "description": "Find text in a web page by url or ref.",
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 68
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "context_lines": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "max_output_bytes": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 16000
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 86400
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "required": [
+              "ref"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "calculator": {
+      "name": "Calculator",
+      "input_schema": {
+        "description": "Evaluate an arithmetic expression exactly.",
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "time_now": {
+      "name": "Time now",
+      "input_schema": {
+        "description": "Read the current date and time.",
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    "timer": {
+      "name": "Timer",
+      "input_schema": {
+        "description": "Wait for a timeout, an interval, or until an alarm time.",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "timeout",
+              "interval",
+              "alarm"
+            ]
+          },
+          "ticks": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          },
+          "seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024
+          },
+          "at_tick": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          },
+          "timestamp": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "timeout_ticks": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99999
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "properties": {
+              "mode": {
+                "const": "timeout"
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "ticks"
+                ],
+                "not": {
+                  "required": [
+                    "seconds"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "seconds"
+                ],
+                "not": {
+                  "required": [
+                    "ticks"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "properties": {
+              "mode": {
+                "const": "interval"
+              },
+              "ticks": {
+                "minimum": 1
+              },
+              "seconds": {
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "count"
+            ],
+            "oneOf": [
+              {
+                "required": [
+                  "ticks"
+                ],
+                "not": {
+                  "required": [
+                    "seconds"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "seconds"
+                ],
+                "not": {
+                  "required": [
+                    "ticks"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "properties": {
+              "mode": {
+                "const": "alarm"
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "at_tick"
+                ],
+                "not": {
+                  "required": [
+                    "timestamp"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "timestamp"
+                ],
+                "not": {
+                  "required": [
+                    "at_tick"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "system_diagnostics": {
+      "name": "System diagnostics",
+      "input_schema": {
+        "description": "Read CPU, memory, GPU and operating system information.",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  }
+}

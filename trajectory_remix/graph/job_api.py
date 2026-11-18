@@ -13,6 +13,7 @@ from pydantic import Field
 from .bulk import BulkService
 from .jobs import TERMINAL, Fenced, JobService, OwnershipConflict
 from .models import DTO, JsonValue
+from .phase_api import add_phase_routes
 from .storage import GraphStore, RevisionConflict
 
 
@@ -50,7 +51,7 @@ class ExportInput(DTO):
 class JobWorker:
     """Host-owned tasks survive HTTP disconnects. No built-in model driver.
 
-    Event Flow registers async handlers and schedules through endpoint claims;
+    Generation registers async handlers and schedules through endpoint claims;
     providers never run directly from an HTTP handler.
     """
 
@@ -124,6 +125,7 @@ class JobWorker:
 
 def job_router(jobs, bulk, artifacts, worker):
     router = APIRouter(prefix="/api/v1")
+    add_phase_routes(router, jobs, worker)
 
     def accepted(job):
         return JSONResponse(dict(job_id=job, status_url=f"/api/v1/jobs/{job}"), status_code=202)

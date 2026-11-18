@@ -94,6 +94,7 @@ and a strict content security policy apply. Tokens are never put in download URL
 | Route | What it does |
 | --- | --- |
 | `GET /project`, `GET`/`PUT /settings` | Project identity, and versioned settings (`{expected_revision, settings}`). |
+| `GET /settings/default-review-checklists` | The packaged Core and Critical review criteria, used by the dashboard's reset action. Read-only; it never changes settings. |
 | `GET /schema/source`, `/schema/settings` | JSON Schema generated from the real models. |
 | `GET /trajectories` | List with `text`, `stage`, `split`, `tool`, `limit`, `offset`. |
 | `POST /diagnostics` | Validate a draft without saving or tokenizing. |

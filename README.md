@@ -42,7 +42,7 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
    [Source format](docs/GRAPH-SOURCE.md).
 2. **Studio.** Edit sources, run jobs and review work in the browser
    ([Dashboard](docs/DASHBOARD.md), [Studio reference](docs/GRAPH-STUDIO.md)).
-3. **Generate and review.** The sampler proposes a scenario, your generator model
+3. **Generate and review.** The sampler proposes a scenario, your draft and assembly models
    writes the events one at a time, and optional reviewers sign off or repair
    ([Event generation](docs/GRAPH-GENERATION.md)).
 4. **Stage.** Each trajectory has a stage from Unfinished (-3) up to **Ready (3)**.
@@ -60,6 +60,8 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 | Understand the source format | [Source format](docs/GRAPH-SOURCE.md), [Synthetic tools and chat](docs/TOOLS.md) |
 | Tune what gets generated | [Sampler Matrix](docs/SAMPLER-WORKBENCH.md), [Metrics](docs/METRICS.md) |
 | Generate, review and repair | [Event generation](docs/GRAPH-GENERATION.md) |
+| Generate with small models on OpenRouter | [OpenRouter](docs/OPENROUTER.md) |
+| Edit the generation prompts (and add a persona) | [Choose how trajectories are built](docs/DASHBOARD.md#choose-how-trajectories-are-built) |
 | Watch, pause and recover jobs | [Jobs](docs/GRAPH-JOBS.md) |
 | Export for training | [Export](docs/EXPORT.md), [Compiler](docs/GRAPH-COMPILER.md), [KTREMIX format](docs/KTREMIX.md) |
 | Try training on exported data | [Training demo](docs/KTREMIX-TRAINING-DEMO.md) |

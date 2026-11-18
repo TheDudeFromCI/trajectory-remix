@@ -114,7 +114,7 @@
       <div class="bar-row meta-row">
         <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
         <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
-        <small id="split-warning" class="tag tone-warning"></small><small id="flow-outcome" class="tag tone-mint" tabindex="0"></small><small id="review-stale" class="tag tone-warning"></small>
+        <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
         <span id="lock-slot" class="row"></span>
       </div>
     </section>
@@ -163,6 +163,7 @@
       <select id="event-picker" aria-label="Event"></select>
       <div class="widget-actions">
         <button id="new-event" class="ghost icon sm" aria-label="Add event" data-tip="Add an event to this trajectory"><svg class="ico"><use href="#i-plus"/></svg></button>
+        <button id="show-tools" class="ghost sm" data-tip="List tool schemas for the agent as a masked event, optionally with random additional tools">Show tools…</button>
         <button id="delete-event" class="ghost icon sm" aria-label="Delete event" data-tip="Delete the selected event"><svg class="ico"><use href="#i-trash"/></svg></button>
       </div>
     </div>

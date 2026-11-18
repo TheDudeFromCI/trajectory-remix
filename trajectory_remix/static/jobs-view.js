@@ -1,5 +1,6 @@
 /* Jobs view: a job list beside one job's progress, controls, logs and files.
    Everything updates in place so polling never flashes or resets scroll. */
+import {renderUsage} from './usage-view.js';
 import {kindName, KIND_TONES, JOB_TONES, makeTabs, node, progressBar, reconcile, setAttr, setText, shortId, stateWord, tag, toggleClass} from './ui-kit.js';
 
 const $ = id => document.getElementById(id);
@@ -68,6 +69,10 @@ export class JobsView {
       b.onclick = () => this.guard(async () => { await this.deps.api(`/jobs/${id}/${action}`, 'POST'); await this.refresh(id); });
       v.buttons[action] = b; v.controls.append(b);
     }
+    v.reviews = node('button', 'Start reviews now', 'sm'); v.reviews.type = 'button'; v.reviews.hidden = true;
+    v.reviews.dataset.tip = 'Phase barrier: assembled trajectories wait here for the review models. Start reviews now instead of waiting for every trajectory; unfinished ones keep generating when their endpoint is back.';
+    v.reviews.onclick = () => this.guard(async () => { await this.deps.api(`/jobs/${id}/phase/review`, 'POST'); await this.refresh(id); });
+    v.controls.append(v.reviews);
     v.clear = node('button', 'Clear job', 'sm danger'); v.clear.type = 'button'; v.clear.hidden = true;
     v.clear.dataset.tip = 'Remove this finished job, its logs and its files from the list.';
     v.clear.onclick = () => this.guard(async () => {
@@ -98,8 +103,10 @@ export class JobsView {
     v.attempts = node('div', undefined, 'job-tab');
     v.results = node('div', undefined, 'job-tab');
     v.files = node('div', undefined, 'job-tab');
+    v.usage = node('div', undefined, 'job-tab');
     v.tabs = makeTabs([
       {id: 'logs', text: 'Logs', panel: logPanel}, {id: 'attempts', text: 'Attempts', panel: v.attempts},
+      {id: 'usage', text: 'Usage', panel: v.usage},
       {id: 'results', text: 'Results', panel: v.results}, {id: 'files', text: 'Files', panel: v.files}
     ], 'Job sections');
     v.tabs.root.classList.add('job-tabs');
@@ -117,6 +124,8 @@ export class JobsView {
     setAttr(v.buttons.pause, 'disabled', j.state !== 'running'); setAttr(v.buttons.resume, 'disabled', j.state !== 'paused');
     setAttr(v.buttons.cancel, 'disabled', !['running', 'paused'].includes(j.state));
     setAttr(v.controls, 'hidden', !ACTIVE.has(j.state));
+    const phase = j.kind === 'run' && ACTIVE.has(j.state) ? await this.deps.api(`/jobs/${id}/phase`) : null;
+    setAttr(v.reviews, 'hidden', !(phase?.enabled && phase.phase === 'generation'));
     setAttr(v.clear, 'hidden', ACTIVE.has(j.state));
     if (j.created) setText(v.started, 'Started ' + new Date(j.created * 1000).toLocaleString());
     v.progress.update({value: j.progress, total: j.total, state: j.state, status: stateWord(j.state)});
@@ -129,7 +138,17 @@ export class JobsView {
     if (j.kind === 'run') await this.renderAttempts(v);
     if (j.kind === 'bulk') await this.renderResults(v);
     if (j.state === 'completed' && j.artifact && !v.signatures.files) await this.renderFiles(v, j);
+    await this.renderUsage(v, j);
     return j;
+  }
+
+  /** Model jobs only. A server without the usage route simply hides the tab. */
+  async renderUsage(v, j) {
+    const wanted = j.kind === 'run' || j.kind === 'bulk';
+    let report = null;
+    if (wanted) { try { report = await this.deps.api(`/jobs/${j.id}/usage`); } catch { report = null; } }
+    setAttr(v.tabs.tab('usage'), 'hidden', !report);
+    if (report) v.signatures.usage = renderUsage(v.usage, report, v.signatures.usage);
   }
 
   renderStats(v, j) {

@@ -12,15 +12,26 @@ node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
+node tests/provider_options_frontend.mjs
+node tests/usage_view_frontend.mjs
+node tests/tool_import_frontend.mjs
+node tests/show_tools_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 ```
 
+Coordinator-first defaults (default checklist keys, saved checklists left alone, the agent
+prompt delivered verbatim to Draft and Assembly, the derived
+`strategic_investment` label and the reset endpoint) are covered by
+`python -m pytest -q tests/test_coordinator_defaults.py`. The reset button's confirmation is
+covered in `project_settings_frontend.mjs`. These use fake providers, so they check
+structure, not prompt quality.
+
 Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations
 when nothing changed, which is what keeps the dashboard from flickering. `window_render_frontend.mjs`
-covers the readable window view (NOOP folding, chat bubbles, JSON formatting) and checks
-that the Flow YAML writer folds long text losslessly. Sampler and
+covers the readable window view (NOOP folding, chat bubbles, JSON formatting).
+`project_settings_frontend.mjs` also covers the **Generation prompts** section. `show_tools_frontend.mjs` covers the Editor's **Show tools…** dialog: the listing request, the masked event, window reuse and placement before the first events. Sampler, dashboard and
 generation browser checks use optional Node `playwright` and Chromium (`CHROMIUM_PATH`, default `/usr/bin/chromium`).
 Browser screenshots are opt-in with `UPDATE_SCREENSHOTS=1`; ordinary verification
 does not rewrite documentation images. No frontend runtime packages are required.

@@ -220,7 +220,7 @@ class SamplerService:
         self.store.update_settings(data, expected_revision)
         return self.editor()
 
-    def propose(self, *, seed=None, world_group_id=None, overrides=None, frozen=None):
+    def propose(self, *, seed=None, world_group_id=None, overrides=None, frozen=None, persist=True):
         frozen = deepcopy(self.editor() if frozen is None else frozen)
         c = frozen["configuration"]
         if seed is not None and type(seed) is not int:
@@ -238,6 +238,8 @@ class SamplerService:
             family_id=world_group_id,
             frozen=frozen,
         )
+        if not persist:  # A preview sample stays with the caller; nothing is stored.
+            return snapshot
         with self.store.connect() as db:
             db.execute(
                 "INSERT INTO graph_proposals VALUES(?,?,?)",

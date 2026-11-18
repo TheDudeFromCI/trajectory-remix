@@ -55,7 +55,7 @@ only block compiled export.
 | I want to… | You need | Where |
 | --- | --- | --- |
 | Author and review sources by hand | Nothing | |
-| Generate or run Review & Repair | An OpenAI-compatible model endpoint with the generator and reviewer roles | [Project settings](PROJECT-SETTINGS.md#configure-a-model-endpoint) |
+| Generate or run Review & Repair | An OpenAI-compatible model endpoint with the draft and reviewer roles | [Project settings](PROJECT-SETTINGS.md#configure-a-model-endpoint) |
 | Use **Tick history** preview | A tokenizer profile (opt-in) | [Project settings](PROJECT-SETTINGS.md#tokenizer-profiles) |
 | Export compiled KTREMIX | A tokenizer profile | [Export](EXPORT.md) |
 | Connect an AI agent | The `mcp` extra and a running studio | [MCP setup](MCP.md) |

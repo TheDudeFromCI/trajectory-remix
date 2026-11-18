@@ -18,12 +18,15 @@ REQUIRED = [
     "static/jobs-view.js",
     "static/metrics-view.js",
     "static/window-render.js",
-    "static/flow-panel.js",
+    "static/usage-view.js",
+    "static/tool-import.js",
+    "static/show-tools.js",
+    "static/prompt-settings.js",
     "static/style.css",
     "static/ibm-plex-sans-latin-400-normal.woff2",
     "static/fonts-LICENSE.txt",
     "Skill.md",
-    "graph/flow.yaml",
+    "graph/draft_assembly.yaml",
 ]
 
 

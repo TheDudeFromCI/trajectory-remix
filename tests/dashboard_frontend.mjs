@@ -19,18 +19,16 @@ try {
  await page.getByLabel('New endpoint ID',{exact:true}).fill('fixture');await page.getByRole('button',{name:'Add endpoint',exact:true}).click();
  await page.getByLabel('Endpoint fixture URL',{exact:true}).fill('http://127.0.0.1:1/v1');
  await page.getByLabel('Endpoint fixture model',{exact:true}).fill('fake-browser');
- await page.getByLabel('Generator endpoint',{exact:true}).selectOption('fixture');
+ await page.getByLabel('Draft endpoint',{exact:true}).selectOption('fixture');
  // Editing a tool after endpoint forms must not overwrite the shared settings draft.
  await page.getByRole('tab',{name:'Tools',exact:true}).click();
  await page.getByLabel('New tool ID',{exact:true}).fill('notes');await page.getByRole('button',{name:'Add tool to settings draft',exact:true}).click();
  assert.equal(await page.evaluate(()=>JSON.parse(document.getElementById('settings-json').value).endpoints.fixture.model),'fake-browser');
  await page.locator('#settings-dialog').evaluate(n=>n.scrollTop=0);await screenshot('settings');await page.locator('#settings-save').click();await page.waitForFunction(()=>!document.getElementById('settings-dialog').open);
- const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.generator,'fixture');assert.ok(saved.settings.tools.notes);
+ const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.draft,'fixture');assert.ok(saved.settings.tools.notes);
  await page.locator('#generation-settings-button').click();
- // The Generate dialog shows the adaptive Flow when the backend serves one, or says it uses the built-in recipe.
- const flowServed=await page.evaluate(async()=>(await fetch('/api/v1/generation/flow',{headers:{'X-Remix-Token':document.querySelector('meta[name=remix-token]').content}})).ok);
- if(flowServed){await page.locator('.flow-summary').waitFor();assert.equal(await page.locator('#generation-flow-custom').isChecked(),false);}
- else{await page.locator('.flow-section p').waitFor();assert.match(await page.locator('.flow-section').textContent(),/built-in recipe/);}
+ // The Generate dialog says what a run freezes; there is no Flow panel any more.
+ await page.locator('#generation-attempts').waitFor();assert.equal(await page.locator('.flow-section').count(),0);
  await page.locator('#generation-attempts').fill('1');
  await page.locator('#generation-start').click();await page.waitForFunction(()=>graphStudio.dialogs.size===1);
  const jobs=await api('/job-summaries'),job=jobs[0].id;

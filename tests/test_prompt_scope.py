@@ -6,8 +6,7 @@ import httpx
 import pytest
 from test_graph_generation import service
 
-from trajectory_remix.graph import reviews
-from trajectory_remix.graph.adaptive_flow import selection_payload, state
+from trajectory_remix.graph import draft_assembly, reviews
 from trajectory_remix.graph.jobs import Ticket
 from trajectory_remix.graph.provider import OpenAITransport, context_budget, response_contract
 
@@ -24,9 +23,9 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
     gen, _ = service(tmp_path)
     source, plan = initial(gen)
     assert len(json.dumps(source.metadata)) > 60000
-    payload = selection_payload(source, plan, state(plan))
+    payload = draft_assembly.payload(dict(errors=0), plan, gen.store.settings().settings)
     body = json.loads(payload["messages"][1]["content"])
-    assert "metadata" not in body["source"]
+    assert "source" not in body and "metadata" not in body
     assert body["proposal"] == plan["proposal"]
     assert "sampling_provenance" in body["proposal"]
     wire, messages = response_contract(payload)
@@ -40,18 +39,17 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
 
 @pytest.mark.asyncio
 async def test_review_frontiers_reference_bodies_once(tmp_path):
-    from test_adaptive_flow import episode
     from test_graph_generation import finish
 
-    gen, _ = service(tmp_path, episode(), fast=False)
+    gen, _ = service(tmp_path, fast=False)
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     payload = reviews.payload(source, gen.settings_for(job), "fast", "review")
     body = json.loads(payload["messages"][1]["content"])
-    assert "result-a" in body["causal_views"]["integrate"]["a"]
+    assert "got" in body["causal_views"]["note"]["w2"]
     assert "metadata" not in body["source"]
-    assert source.events["result-a"].content not in json.dumps(body["causal_views"])
+    assert source.events["got"].content not in json.dumps(body["causal_views"])
 
 
 @pytest.mark.asyncio
