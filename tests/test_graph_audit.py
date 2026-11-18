@@ -51,8 +51,8 @@ def test_bad_rest_export_options_never_reserve_job(tmp_path):
     )
 
 
-def test_fresh_projects_include_editable_chat_for_default_flow(tmp_path):
-    from trajectory_remix.graph.flow import default_plan
+def test_fresh_projects_include_editable_chat_and_default_prompts(tmp_path):
+    from trajectory_remix.graph import draft_assembly
     from trajectory_remix.graph.jobs import JobService
     from trajectory_remix.graph.models import ProjectSettings
     from trajectory_remix.graph.sampling import SamplerService
@@ -61,8 +61,8 @@ def test_fresh_projects_include_editable_chat_for_default_flow(tmp_path):
     settings = store.settings().settings
     assert settings.tools["chat"].input_schema["required"] == ["content"]
     sampler = SamplerService(JobService(store))
-    plan = default_plan(sampler.propose(seed=137)["proposal"], settings)
+    plan = draft_assembly.plan(sampler.propose(seed=137)["proposal"], settings)
     assert "chat" in plan["tools"]
-    assert plan["flow"]["nodes"]["set_scene"]["kind"] == "select"
+    assert plan["actor_instruction"] == settings.prompts.actor
     # Authors can deliberately remove or replace the default catalog.
     assert ProjectSettings(tools={}).tools == {}

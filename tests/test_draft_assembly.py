@@ -4,46 +4,12 @@ import json
 
 import pytest
 from jsonschema import Draft202012Validator
-from test_graph_generation import finish, service
+from test_graph_generation import DRAFT, finish, service, spec  # noqa: F401
 
-from trajectory_remix.graph import compact_spec, draft_assembly
+from trajectory_remix.graph import compact_spec, draft_assembly, prompt_defaults
 from trajectory_remix.graph.flow import causal_view
 from trajectory_remix.graph.models import GraphSource, ToolDefinition
 from trajectory_remix.graph.validation import diagnose
-
-DRAFT = "Working notes. " * 20
-
-
-def spec(**changes):
-    body = dict(
-        tools=["chat", "read"],
-        windows=[
-            dict(id="room", purpose="chatroom", writable=False),
-            dict(id="notes", purpose="notes", writable=True),
-            dict(id="w1", purpose="reasoning", writable=True),
-            dict(id="w2", purpose="reasoning", writable=True),
-        ],
-        events=[
-            dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
-            dict(
-                id="ack", kind="call", window="w1", after=["ask"], tool="chat",
-                arguments={"content": "Sure, checking now."},
-            ),
-            dict(id="plan", kind="think", window="w1", after=["ack"], content="Read it."),
-            dict(
-                id="look", kind="call", window="w1", after=["plan"], tool="read",
-                arguments={"path": "a.md"}, close=True,
-            ),
-            dict(id="got", kind="result", window="w2", after=["look"], content="A says yes."),
-            dict(id="note", kind="think", window="notes", after=["got"], content="A: yes."),
-            dict(
-                id="tell", kind="call", window="w2", after=["note"], tool="chat",
-                arguments={"content": "A says yes."}, close=True,
-            ),
-        ],
-    )  # fmt: skip
-    body.update(changes)
-    return body
 
 
 def draft_assembly_service(tmp_path, **opts):
@@ -65,7 +31,7 @@ async def test_draft_then_assemble_then_both_reviews(tmp_path):
     assert "ack:echo" in source.events and source.events["got"].call_id == "look"
     assert DRAFT in fake.calls[1].payload["messages"][1]["content"]
     system_message = fake.calls[1].payload["messages"][0]["content"]
-    assert draft_assembly.prompts()["assemble_instruction"] in system_message
+    assert prompt_defaults.assembly() in system_message
 
 
 @pytest.mark.asyncio
@@ -127,9 +93,7 @@ def test_assemble_prompt_example_builds_cleanly(tmp_path):
         response_window="inbox",
     )
     tools = {key: tool.model_dump(mode="json") for key, tool in settings.tools.items()}
-    example = (
-        draft_assembly.prompts()["assemble_instruction"].split("```json\n", 1)[1].split("```", 1)[0]
-    )
+    example = prompt_defaults.assembly().split("```json\n", 1)[1].split("```", 1)[0]
     body = json.loads(example)
     Draft202012Validator(compact_spec.schema(tools)).validate(body)
     base = dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
@@ -178,7 +142,7 @@ async def test_requests_carry_the_prompt_file_version(tmp_path):
     gen, fake = draft_assembly_service(tmp_path)
     fake.responses = [{"draft": DRAFT}, spec()]
     await finish(gen, gen.start([{"seed": 15}], {}))
-    assert fake.calls[0].payload["prompt_version"] == draft_assembly.prompts()["version"]
+    assert fake.calls[0].payload["prompt_version"] == prompt_defaults.packaged()["version"]
 
 
 def roles_service(tmp_path, roles):

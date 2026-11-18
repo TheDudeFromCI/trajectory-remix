@@ -35,14 +35,14 @@ async def test_slow_first_request_logs_start_and_heartbeats_before_result(tmp_pa
             await asyncio.sleep(0.01)
         log = log_text(gen.jobs, job)
         assert "Request started" in log and "Still waiting" in log
-        assert "operation=flow_select" in log and "prompt_bytes=" in log
+        assert "operation=draft" in log and "prompt_bytes=" in log
         assert "Response received" not in log
         assert not gen.store.read(ident).source.events
     finally:
         release.set()
         await running
     assert "Response received" in log_text(gen.jobs, job)
-    assert "Flow selected" in log_text(gen.jobs, job)
+    assert "Draft written" in log_text(gen.jobs, job)
 
 
 @pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def test_completed_generation_logs_events_reviews_and_settlement(tmp_path)
     await finish(gen, job)
     log = log_text(gen.jobs, job)
     assert "Trajectory admitted" in log
-    assert "Event committed" in log and "total_events=" in log
+    assert "Draft written" in log and "Graph assembled" in log and "events=" in log
     assert "entered review (fast)" in log and "fast review verdict: pass" in log
     assert "Trajectory settled" in log
     # Fixture model content must never be copied to the status log.

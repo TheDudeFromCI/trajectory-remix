@@ -14,7 +14,7 @@ with the tabs at the top and reveal detail with tabs, menus and tooltips.
 
 | Area | What it does |
 | --- | --- |
-| **View tabs** | **Editor**, **Jobs**, **Metrics**, **Sampler** and **Flow**. A badge on Jobs counts running and paused jobs. |
+| **View tabs** | **Editor**, **Jobs**, **Metrics** and **Sampler**. A badge on Jobs counts running and paused jobs. |
 | **Header actions** | **Undo** and **Redo**, the **Project** menu (import, export, preferences), the **View** menu (show or hide editor panels), **Settings** and **Generate**. **Review Settings** is a tab next to **Sampler**. |
 | **Status bar** | The latest message on the left. On the right, one chip per active job with a progress bar. Click a chip to open that job. |
 
@@ -72,50 +72,28 @@ filters as the Editor's dataset panel. See [Metrics](METRICS.md).
 The weights and rules that decide what each generated trajectory is about. It has its
 own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
 
-### The Flow view
-
-![The Flow editor with a branch node selected](images/dashboard/flow-editor.png)
-
-The **flow** is the recipe every generated trajectory follows. The Flow view draws it as a
-flowchart you can edit, and lets you walk through one generation step by step. It has two
-modes, chosen at the top:
-
-| Mode | What it does |
-| --- | --- |
-| **Edit** | The chart on the left, and tabs on the right for the selected **Node**, **Flow settings** (start node, limits, and the shared selector and actor instructions), the **YAML** it will save, and any **Problems**. |
-| **Walkthrough** | Sample one proposal and step through the flow. The chart lights up the current node, counts visits and highlights the link just taken. See [Walk through a generation step by step](#walk-through-a-generation-step-by-step). |
-
-Each node kind has its own colour:
-
-| Node | What it does with the data |
-| --- | --- |
-| **Select** (blue) | Asks the Generator what happens next. Its output, the **Selection**, says whether to finish and which event to write. |
-| **Write event** (green) | Asks the Generator to write the event the last Select chose, and adds it to the trajectory. |
-| **Branch** (purple) | Reads one field of the last Selection, such as `finished`, and follows **then** (solid) or **otherwise** (dashed). No model call. |
-| **End** (orange) | Finishes the trajectory and hands it to review. |
-| **Show tools** (yellow) | Asks the Generator which tools the episode needs, then lists them, plus a random share of the others, for the agent before the opening. Later steps only see the listed tools. |
-
 ## Set up and generate
 
 1. **Add a model endpoint.** Click **Settings**. On **Models & defaults**, enter an
    endpoint ID and click **Add endpoint**, then fill in the base URL, the exact model
-   name, a concurrent-request limit and a retry count. Assign the *Generator*,
-   *Fast Review* and *Critical Review* roles. One endpoint can serve every role. Details,
+   name, a concurrent-request limit and a retry count. Assign the *Draft* role (or
+   *Generator*), and optionally *Assembly*, *Fast Review* and *Critical Review*. One
+   endpoint can serve every role. Details,
    including credentials, are in [Project settings](PROJECT-SETTINGS.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
-   standard flow produces a chatroom reply. Removing it is your choice.
+   agent can reply in the chatroom. Removing it is your choice.
 3. **Set up review (optional).** Open the **Review Settings** tab to choose automatic
-   review and repair options and edit the Core and Critical checklists. Click
-   **Save review settings** if you change them.
-4. **Open Generate.** It shows which endpoint fills each role, any pins from the
-   Sampler, and the **Flow** that will build the trajectories.
+   review and repair options, edit the Core and Critical checklists, and edit the
+   generation prompts. Click **Save review settings** if you change them.
+4. **Open Generate.** It shows which endpoint fills each role and any pins from the
+   Sampler.
 5. **Tune the sampler (optional).** **Open Sampler** jumps to the weights and pins.
 6. **Start.** Set the number of attempts and a starting seed, then click
    **Start generation**. The new job opens in the Jobs view.
 
 ![The Generate dialog](images/dashboard/generate.png)
 
-A run **freezes** its settings, matrix, pins and flow when it starts, so later edits only
+A run **freezes** its settings, prompts, matrix and pins when it starts, so later edits only
 affect future runs. Generated trajectories are never automatically Ready.
 
 ## Tutorials
@@ -195,112 +173,18 @@ layout is remembered in this browser.
 
 ### Choose how trajectories are built
 
-On a backend with **adaptive flows**, the Generate dialog's **Flow** section shows the
-policy that builds each trajectory: its version, a hash, its limits and an outline of its
-nodes (hover a node for its instruction).
+Every run builds trajectories in four stages: **Draft → Assembly → Fast Review → Critical
+Review** (see [Event generation](GRAPH-GENERATION.md#draft-and-assembly)). What you control is
+the prompts and the models:
 
-![The Flow outline in the Generate dialog](images/dashboard/flow.png)
+1. Open **Review Settings** and find **Generation prompts**.
+2. Edit the **Agent prompt** (how the agent behaves, and where a persona pack goes), the
+   **Draft instructions** or the **Assembly instructions**.
+3. **Load default prompts** restores the packaged prompts, after you confirm.
+4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 
-- **For every future run**, edit the flow in the **Flow** tab and **Save flow**. It is
-  stored in the project database, so the project stays a single file. The next run picks
-  it up. See
-  [Edit the flow chart](#edit-the-flow-chart) and [Event generation](GRAPH-GENERATION.md).
-  **Open Flow editor** in the Generate dialog takes you there.
-- **For one run**, open **Custom flow for this run**. It starts as the current flow written
-  as YAML. Edit it, make sure **Use this YAML for the next run only** is ticked, and start
-  the run. Invalid YAML is rejected before any attempt is reserved, and the saved project
-  flow is not changed.
-
-Trajectories finished by the flow show a **Flow finished** tag in the trajectory bar. Hover
-it for the generation controller's own finish explanation. It describes intent, not
-measured coverage.
-
-On an older backend, the section says the server uses its built-in recipe and runs
-behave as before.
-
-### Edit the flow chart
-
-1. Open the **Flow** tab. The chart shows the project's saved flow, or the packaged
-   default if the project has none yet.
-2. Click a node to edit it on the **Node** tab: its ID, kind, instruction and where it
-   goes next. Renaming a node updates every link to it.
-3. To change where a node goes, drag the small dot on its bottom edge onto another node,
-   or pick the target from the list on the **Node** tab. A branch has two dots: green for
-   **then**, orange for **otherwise**.
-4. **Add node** creates a node near the selected one. **Delete node** removes it; links
-   into it become *not connected* so you can see what to fix.
-5. Problems show as a red or amber dot on the node and on the **Problems** tab. Errors
-   block saving; warnings, such as a node that can never be reached, do not.
-6. **Save flow** stores the flow in the project database. Runs already in progress keep
-   the flow they started with. **Discard** drops your draft; **Reload** loads the saved
-   flow again.
-7. To go back to the flow that ships with Remix, click **Load default** and confirm. It
-   replaces the chart with the default as an unsaved draft; click **Save flow** to use
-   it, or **Discard** to keep your own. This is how a project with a saved flow picks up
-   improvements to the default.
-
-The **Flow** tab holds settings for the whole flow: the start node, step and event
-limits, the shared prompts, and **Immediate response**. With it on, the agent answers a
-person at once ("Sure, let me look into this.") before it starts reasoning.
-
-You can also edit the text on the **YAML** tab and choose **Apply YAML to chart**. If you
-save without touching the chart afterwards, your exact text is kept, comments included.
-Once you edit the chart, the YAML is rewritten from the chart and old comments are lost.
-
-Drag nodes to arrange them; your layout is remembered in this browser. **Tidy layout**
-arranges them again: each phase runs down the page, a chain of branches joined by
-*otherwise* sits in one row like a switch, and links that loop back run along the sides.
-**Fit** zooms to show the whole chart, which is how it opens. Scroll the mouse wheel
-(or pinch on a trackpad) to zoom in on the part you point at, and drag empty space, or
-hold the middle button anywhere, to move around. If someone else saves the flow while
-you edit, saving tells you so and keeps your draft until you **Reload**.
-
-Projects from older versions kept their flow in a `flow.yaml` file beside the database.
-That file is imported into the database the first time the flow is read. After that the
-database copy is used; the file is left in place but no longer read, so you can delete it.
-
-### Walk through a generation step by step
-
-Use a walkthrough to debug generation settings: you see exactly what the Generator is
-asked at each step, what it replied, and what the flow knows afterwards.
-
-![A walkthrough showing the prompt the work selector sent](images/dashboard/flow-walkthrough.png)
-
-1. Open the **Flow** tab and choose **Walkthrough**.
-2. Enter a **Seed** (0 picks one at random) and choose **Sample & start**. Pins set on the
-   **Sampler** tab apply. The walkthrough uses the chart as drawn, unsaved edits included.
-3. Choose **Run next step** to advance one step, or **Run to end** to keep going until the
-   flow finishes. **Stop** ends a run to the end and cancels a request still waiting on the
-   model; the walkthrough stays where it was, so you can change settings and run the step
-   again.
-4. **Use current settings** (on by default) makes each step use the latest saved project
-   settings, so a raised output limit or a changed endpoint applies straight away. **Apply
-   saved settings** refreshes the next step's preview. Each step shows the settings
-   revision it used. Turn the option off to keep the settings the walkthrough started
-   with, as a real run does.
-5. Read the step on the tabs below:
-
-   | Tab | Shows |
-   | --- | --- |
-   | **Prompt** | The messages sent to the model. Tick **Show exact text sent** for the raw text; the HTTP body and output schema are below. On the newest step it shows what will be sent next. |
-   | **Reply** | The model's reply, whether it was accepted, and why not. For a reply cut off at the output limit or not in JSON, the start of what the model wrote, and any separate reasoning text, so you can see whether it was thinking. |
-   | **Flow knows** | Position, step and event counts, the last Selection (what branches read), the task waiting to be written, and any correction the next request will carry. |
-   | **Trajectory** | The events written so far; the step's new events are marked. |
-   | **Proposal** | The sampled proposal the selector reads. Actors never see it. |
-
-   **Copy** on each tab copies its contents (the Prompt tab copies the messages as text,
-   and **Copy JSON** the exact request body); each message also has its own **Copy**.
-
-6. Click a numbered chip under the chart, or use **‹** and **›**, to look back at any
-   step. **Rewind to here** drops the later steps so you can try again from that point.
-
-To test a reply without a model, switch **Call the Generator** to **Type replies myself**.
-The **Reply** tab then offers a template; your reply is checked exactly like a model's. A
-rejected reply leaves the flow where it was and adds the correction a real run would send.
-
-A walkthrough stores nothing. **Save trajectory** adds the trajectory, as it is at the
-step you are viewing, to the dataset. Model calls go straight to the Generator endpoint,
-one at a time, without the job queue's retries; a failed call is shown and can be retried.
+To use a different model for a stage, assign the **Draft** or **Assembly** role to another
+endpoint in **Settings → Models & defaults**.
 
 ### Import and export
 
@@ -424,15 +308,6 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `jobs-view.js` | `JobsView`: the job list and detail panel (`StudioUI.dialogs` maps job IDs to detail panels). |
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
 | `window-render.js` | Readable window view: header fields, chat bubbles, tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
-| `flow-panel.js` | The Generate dialog's Flow section: `GET /generation/flow`, the node outline, and a lossless YAML writer for per-run `instructions.flow_yaml`. |
-| `flow-view.js` | `FlowView`, the Flow tab controller: draft, checks, save with revision, YAML tab and mode switch. |
-| `flow-model.js` | Pure flow helpers: node kinds, links, rename/delete/kind changes and card subtitles. |
-| `flow-layout.js` | Automatic layout: rows by longest forward path, switch rows for *otherwise* chains, and ordering under parents. |
-| `flow-routes.js` | Link geometry: short drops, sideways links within a row, and shared side lanes for loops and long links. |
-| `flow-canvas.js` | The flowchart: node cards over an SVG link layer, dragging, port connections, zoom and walkthrough highlighting. |
-| `flow-inspector.js` | The Node, Flow settings and Problems forms. Typing does not rebuild the form. |
-| `flow-walkthrough.js` | `WalkthroughPanel`: sampling, stepping, history, and the Prompt, Reply, Flow knows, Trajectory and Proposal views. |
-| `flow-view.css` | Layout and styling of the Flow view. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use

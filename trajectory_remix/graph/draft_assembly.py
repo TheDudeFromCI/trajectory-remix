@@ -1,17 +1,15 @@
-"""Two-pass generation: a prose draft of the whole episode, then one assembled graph.
+"""Draft and Assembly: a prose draft of the whole episode, then one assembled graph.
 
-Pass 1 (draft) writes working notes: messages, reasoning, tool calls with example outputs.
-Pass 2 (assemble) turns them into a compact spec, which compact_spec builds into a graph.
-Review and repair then run as for any generated trajectory.
+Draft writes working notes: messages, reasoning, tool calls with example outputs.
+Assembly turns them into a compact spec, which compact_spec builds into a graph; the
+assembly fix then corrects it. Review and repair run as for any generated trajectory.
+The prompts come from the project settings (settings.prompts).
 """
 
 from copy import deepcopy
-from importlib.resources import files
 
-import yaml
-
-from . import compact_spec, reviews
-from .models import GraphSource, canonical
+from . import compact_spec, prompt_defaults, reviews
+from .models import GraphSource, canonical, digest
 from .validation import diagnose
 
 DRAFT, ASSEMBLE = "draft", "assembly"
@@ -24,8 +22,17 @@ DRAFT_SCHEMA = dict(
 )
 
 
-def prompts():
-    return yaml.safe_load(files(__package__).joinpath("draft_assembly.yaml").read_text())
+def prompts(settings):
+    """The frozen prompts for a run, with a version that changes when they are edited."""
+    chosen = settings.prompts.model_dump(mode="json")
+    base = prompt_defaults.packaged()["version"]
+    custom = chosen != type(settings.prompts)().model_dump(mode="json")
+    return dict(
+        version=f"{base}+{digest(chosen)[:12]}" if custom else base,
+        draft_instruction=chosen["draft"],
+        assemble_instruction=chosen["assembly"],
+        actor_instruction=chosen["actor"],
+    )
 
 
 def role(settings, stage):
@@ -36,15 +43,16 @@ def role(settings, stage):
     return "draft" if "draft" in roles else "generator"
 
 
-def plan(proposal, settings, snapshot):
-    """The frozen per-trajectory plan. The actor guide comes from the project flow."""
+def plan(proposal, settings):
+    """The frozen per-trajectory plan: proposal, tools and the project's prompts."""
+    frozen = prompts(settings)
     return dict(
         method="draft_assembly",
         windows={},
         proposal=deepcopy(proposal),
         tools={key: value.model_dump(mode="json") for key, value in settings.tools.items()},
-        actor_instruction=snapshot["flow"]["actor_instruction"],
-        prompts=prompts(),
+        actor_instruction=frozen["actor_instruction"],
+        prompts=frozen,
     )
 
 

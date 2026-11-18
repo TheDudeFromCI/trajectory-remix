@@ -10,7 +10,7 @@ independent of the browser's preview preference. Raw export needs no tokenizer.
 Use `inspect_graph_job` to follow that ID; other jobs are independent. REST
 provides per-job pause/resume/cancel and cursor logs. Cancellation is terminal,
 retains committed work, and fences late publication. Restart requires manual
-Resume. Model work uses configured roles through the shared event Flow.
+Resume. Model work uses the configured endpoint roles.
 
 Use `graph_job_items`, `graph_job_logs`, and explicit `control_graph_job` for
 bounded inspection and lifecycle controls. `graph_job_artifacts` lists paths.

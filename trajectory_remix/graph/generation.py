@@ -7,20 +7,15 @@ from copy import deepcopy
 import jsonschema
 
 from . import (
-    adaptive_driver,
-    adaptive_flow,
     assembly_fix,
     draft_assembly,
-    flow_store,
     phase_barrier,
     repair_policy,
     reviews,
     spec_normalize,
-    tool_listing,
     trajectory_hold,
 )
 from .commands import merge_patch
-from .flow import append_event, chat_echo, event_payload, prepare_plan
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
@@ -29,6 +24,8 @@ from .sampling import SamplerService
 from .schema_errors import explain
 from .storage import RevisionConflict
 from .validation import diagnose
+
+DRIVER = "draft-assembly/1"
 
 
 class GenerationService:
@@ -47,46 +44,24 @@ class GenerationService:
         frozen = self.sampler.editor()
         settings_record = self.store.settings(frozen["settings_revision"])
         settings = settings_record.settings
-        if settings.generation.method == "draft_assembly":
-            if not {"draft", "generator"} & settings.endpoint_roles.keys():
-                raise ValueError("Configure the Draft (or Generator) endpoint in Project Settings")
-        elif "generator" not in settings.endpoint_roles:
-            raise ValueError("Configure the Generator endpoint in Project Settings")
+        if not {"draft", "generator"} & settings.endpoint_roles.keys():
+            raise ValueError("Configure the Draft (or Generator) endpoint in Project Settings")
         if settings.generation.fast and "fast" in settings.endpoint_roles:
             reviews.review_schema(settings, "fast")
             if settings.generation.critical and "critical" in settings.endpoint_roles:
                 reviews.review_schema(settings, "critical")
         instructions = deepcopy(instructions)
-        if "plan" in instructions and "flow_yaml" in instructions:
-            raise ValueError("Choose plan or flow_yaml, not both")
-        if "_flow_snapshot" in instructions:
-            raise ValueError("_flow_snapshot is reserved")
-        if "plan" not in instructions:
-            # A per-run flow_yaml overrides the project flow stored in the database.
-            text = instructions.get("flow_yaml")
-            if "flow_yaml" not in instructions:
-                text = flow_store.project_text(self.store)
-            instructions["_flow_snapshot"] = adaptive_flow.load_flow(text=text)
+        retired = {"plan", "flow_yaml"} & instructions.keys()
+        if retired:
+            raise ValueError(
+                "The step-by-step Flow and fixed plans were removed; runs use Draft and Assembly"
+                " with the project's prompts (Settings). Remove: " + ", ".join(sorted(retired))
+            )
         # Freeze concrete plans for ALL proposals before reserving attempts.
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
-        if settings.generation.method == "draft_assembly":
-            if "plan" in instructions:
-                raise ValueError("Two-pass generation uses the project flow, not a plan")
-            snapshot = instructions["_flow_snapshot"]
-            plans = {
-                p["id"]: draft_assembly.plan(p["proposal"], settings, snapshot) for p in proposals
-            }
-        else:
-            plans = {
-                p["id"]: prepare_plan(p["proposal"], settings, instructions) for p in proposals
-            }
+        plans = {p["id"]: draft_assembly.plan(p["proposal"], settings) for p in proposals}
         return self.jobs.create_run(
-            dict(
-                instructions=deepcopy(instructions),
-                sampler=frozen,
-                plans=plans,
-                driver="event-flow/1",
-            ),
+            dict(instructions=instructions, sampler=frozen, plans=plans, driver=DRIVER),
             proposals,
             settings_record=settings_record,
         )
@@ -190,9 +165,11 @@ class GenerationService:
             raise Fenced("Worker epoch changed")
         # Only this handoff's explicitly prepared runs have model access. Generic
         # /runs and historical sampler snapshots cannot silently become live jobs.
-        if j["config"]["config"].get("driver") != "event-flow/1":
+        if j["config"]["config"].get("driver") != DRIVER:
             self.jobs.control(job, "pause")
-            self.jobs.append_log(job, "No event Flow snapshot; start a new generation run.")
+            self.jobs.append_log(
+                job, "This run was made by a retired generation method; start a new generation run."
+            )
             return
         self.settings_for(job)
         for offset in range(0, j["total"], 100):
@@ -349,45 +326,11 @@ class GenerationService:
         if self._parked(job, ident, cp, settings):
             return
         if cp["phase"] == "event":
-            if cp.get("echo"):
-                echo = chat_echo(source, cp.pop("echo"))
-                if echo:
-                    content = echo.pop("content")
-                    source = append_event(source, echo, {"content": content}, settings)
-                    if any(d.severity == "error" for d in diagnose(source, settings)):
-                        raise ValueError("Chat helper structural error")
-                self._save(job, source, cp)
+            if cp.get("assembled"):
+                self._after_generation(job, source, cp)
                 return
-            with self.store.connect() as db:
-                proposal = json.loads(
-                    db.execute(
-                        "SELECT proposal FROM graph_attempts WHERE trajectory_id=?", (ident,)
-                    ).fetchone()[0]
-                )
-            plan = self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
-            if plan.get("method") == "draft_assembly":
-                if cp.get("assembled"):
-                    self._after_generation(job, source, cp)
-                    return
-                payload = draft_assembly.payload(cp, plan, settings)
-                payload["_role"] = draft_assembly.role(settings, payload["operation"])
-            elif "flow" in plan:
-                payload = adaptive_driver.prepare(self, job, source, cp, plan, settings)
-                if payload is None:
-                    return
-            else:
-                tasks = plan["tasks"]
-                if cp["index"] >= len(tasks):
-                    self._after_generation(job, source, cp)
-                    return
-                task = deepcopy(tasks[cp["index"]])
-                task["envelope"]["after"] = [
-                    dep + ":echo" if dep + ":echo" in source.events else dep
-                    for dep in task["envelope"].get("after", [])
-                ]
-                payload = event_payload(source, task, settings, cp["errors"] > 0)
-                payload["task"] = task
-            tier = payload.pop("_role", "generator")
+            payload = draft_assembly.payload(cp, self._plan(job, ident), settings)
+            tier = draft_assembly.role(settings, payload["operation"])
         elif cp["phase"] == assembly_fix.PHASE:
             payload = assembly_fix.payload(cp)
             if (
@@ -705,14 +648,6 @@ class GenerationService:
             problem = explain(ticket.payload["schema"], body)
             if problem:
                 raise ValueError(problem)
-            if ticket.payload["operation"] == "flow_select":
-                selected_source, selected_task, selection = adaptive_flow.accept_selection(
-                    source,
-                    body,
-                    ticket.payload["flow_plan"],
-                    settings,
-                    shown=cp["flow"].get("shown_tools"),
-                )
             if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
                 plan = self._plan(ticket.job_id, ticket.trajectory_id)
                 assembled, broken = draft_assembly.assemble(source, body, plan, settings)
@@ -721,11 +656,6 @@ class GenerationService:
                         "Structural errors; fix them: "
                         + "; ".join(f"{d.code}: {d.message}" for d in broken[:8])
                     )
-            if ticket.payload["operation"] == tool_listing.OPERATION:
-                listed_flow = deepcopy(cp["flow"])
-                listed_source, listing = tool_listing.accept(
-                    source, body, ticket.payload["flow_plan"], settings, listed_flow
-                )
             if cp["phase"] == "review":
                 quality = reviews.verdict(body, source)
                 if quality == "pass" and any(
@@ -767,41 +697,6 @@ class GenerationService:
             return
         if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
             self._assembled(ticket, assembled, broken, cp)
-            return
-        if ticket.payload["operation"] == tool_listing.OPERATION:
-            cp["flow"] = listed_flow
-            adaptive_driver.advance(cp, ticket.payload["flow_plan"])
-            self._save(ticket.job_id, listed_source, cp, ticket=ticket)
-            self.jobs.progress(
-                ticket.job_id,
-                f"Tools listed: {len(listing['shown'])} shown, {len(listing['chosen'])} chosen",
-            )
-            return
-        if ticket.payload["operation"] == "flow_select":
-            cp["flow"].update(output=selection, task=selected_task)
-            adaptive_driver.advance(cp, ticket.payload["flow_plan"])
-            self._save(ticket.job_id, selected_source, cp, ticket=ticket)
-            self.jobs.progress(
-                ticket.job_id,
-                "Flow selected: " + (selected_task["id"] if selected_task else "finish"),
-            )
-            return
-        if cp["phase"] == "event":
-            task = ticket.payload["task"]
-            source = append_event(source, task, body, settings)
-            # A wrapper bug cannot be repaired by asking the model repeatedly.
-            errors = [d for d in diagnose(source, settings) if d.severity == "error"]
-            if errors:
-                raise ValueError("Flow wrapper structural error: " + errors[0].code)
-            cp["index"] += 1
-            if "flow_plan" in ticket.payload:
-                adaptive_driver.advance(cp, ticket.payload["flow_plan"])
-            cp["echo"] = task["id"]
-            self._save(ticket.job_id, source, cp, ticket=ticket)
-            self.jobs.progress(
-                ticket.job_id,
-                f"Event committed: {label(task['id'])} trajectory={label(source.id)} total_events={len(source.events)}",
-            )
             return
         if cp["phase"] == "repair" and body["action"] == "give_up":
             self.jobs.progress(
@@ -933,7 +828,7 @@ class GenerationService:
                     self.jobs.control(ticket.job_id, "pause")
                     self.jobs.append_log(
                         ticket.job_id,
-                        "Flow interrupted; completed commits retained. Manual Resume required.",
+                        "Generation interrupted; completed commits retained. Manual Resume required.",
                     )
 
     def dispatch(self):

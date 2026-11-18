@@ -50,9 +50,10 @@ const repair=byLabel(generation,'Attempt repair after review failure');repair.ch
 enter(byLabel(generation,'core criterion evidence'),'Require exact supporting events');
 enter(byLabel(generation,'New critical criterion ID'),'quality');btn(generation,'Add critical criterion').click();
 enter(byLabel(generation,'critical criterion quality'),'Avoid unsupported conclusions');
-const method=byLabel(generation,'Generation method');assert.equal(method.value,'flow');method.value='draft_assembly';method.dispatchEvent(new window.Event('change'));
+assert.equal(generation.querySelector('[aria-label="Generation method"]'),null);
+enter(byLabel(generation,'Agent prompt'),'Be Kidra.');enter(byLabel(generation,'Assembly instructions'),'Build it.');
 enter(byLabel(generation,'Repair rounds'),'4');
-assert.equal(draft.generation.method,'draft_assembly');const barrier=byLabel(generation,'Phase barrier');assert.equal(barrier.checked,false);barrier.checked=true;barrier.dispatchEvent(new window.Event('change'));assert.equal(draft.generation.phase_barrier,true);assert.equal(draft.generation.repair_rounds,4);
+assert.equal(draft.prompts.actor,'Be Kidra.');assert.equal(draft.prompts.assembly,'Build it.');const barrier=byLabel(generation,'Phase barrier');assert.equal(barrier.checked,false);barrier.checked=true;barrier.dispatchEvent(new window.Event('change'));assert.equal(draft.generation.phase_barrier,true);assert.equal(draft.generation.repair_rounds,4);
 assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists.critical.quality.text,'Avoid unsupported conclusions');
 assert.equal(draft.endpoints['local-model'].model,'tiny-local');
 btn(root,'Remove endpoint local-model').click();

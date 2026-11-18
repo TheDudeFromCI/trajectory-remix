@@ -4,7 +4,6 @@ import {Window} from 'happy-dom';
 const window = new Window();
 globalThis.document = window.document;
 const {collapseNoops, segmentWindow, splitSpeaker, formatJson, headerFields, windowBody} = await import('../trajectory_remix/static/window-render.js');
-const {toYaml} = await import('../trajectory_remix/static/flow-panel.js');
 const text = s => [...s].map(ch => ({text: ch}));
 const ctl = control => ({control});
 
@@ -50,17 +49,5 @@ assert.equal(raw.textContent, 'thinkNOOP ×3EOS');
 const formatted = windowBody([{text: 'think'}, ctl('noop'), ctl('noop'), ctl('eos')], {raw: false, purpose: 'reasoning', isAgent});
 assert.equal(formatted.querySelectorAll('.noop').length, 1); assert.match(formatted.textContent, /NOOP ×2/);
 
-// YAML writer: folded prose must unfold (YAML joins folded lines with one space) to the exact text.
-const instruction = 'You are the private authoring controller.  Keep  double spaces, unicode — and "quotes": all of it intact while folding long lines for reading. '.repeat(3).trim();
-const flow = {version: 'adaptive-flow/1', start: 'choose', max_steps: 600, nodes: {choose: {kind: 'select', next: 'done', instruction}, done: {kind: 'end'}}, tags: ['a', 'b'], empty: {}};
-const yaml = toYaml(flow);
-assert.match(yaml, /^version: "adaptive-flow\/1"$/m);
-assert.match(yaml, /^ {4}instruction: >-$/m);
-const block = yaml.split('instruction: >-\n')[1].split('\n').filter(line => line.startsWith('      ')).map(line => line.slice(6));
-assert.ok(block.length > 1 && block.every(line => line.length <= 84 && !line.startsWith(' ')));
-assert.equal(block.join(' '), instruction);
-assert.match(yaml, /^tags:\n {2}- "a"\n {2}- "b"$/m);
-assert.match(yaml, /^empty: \{\}$/m);
-assert.match(toYaml({s: 'two\nlines'}), /^s: "two\\nlines"$/);
 console.log('Window renderers and Flow YAML: NOOP folding, segments, speakers, JSON formatting, bubbles, raw mode and lossless folding passed.');
 window.happyDOM.abort();

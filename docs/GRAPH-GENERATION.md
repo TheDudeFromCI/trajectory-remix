@@ -14,6 +14,7 @@ never executed.
 - [Run a generation](#run-a-generation)
 - [How a trajectory is built](#how-a-trajectory-is-built)
 - [Draft and Assembly](#draft-and-assembly)
+- [Edit the prompts](#edit-the-prompts)
 - [What the model sees](#what-the-model-sees)
 - [Tools and chat during generation](#tools-and-chat-during-generation)
 - [Reviews and repair](#reviews-and-repair)
@@ -22,9 +23,9 @@ never executed.
 
 ## Run a generation
 
-1. In **Settings**, add endpoints and assign the **Generator** role, or the **Draft** and
-   **Assembly** roles for [Draft and Assembly](#draft-and-assembly) (and optionally
-   **Fast** and **Critical** review roles). See [Project settings](PROJECT-SETTINGS.md).
+1. In **Settings**, add endpoints and assign the **Draft** role (or **Generator**), and
+   optionally **Assembly**, **Fast Review** and **Critical Review**. See
+   [Project settings](PROJECT-SETTINGS.md).
 2. Open **Sampler Matrix → Proposal preview → Generate trajectories**.
 3. Choose any **pins**, a **seed** and an **attempt count**, then **Start generation**.
 
@@ -39,195 +40,21 @@ failures. There are no automatic replacements.
 
 ## How a trajectory is built
 
-The sampler picks a **proposal**. One adaptive Flow reads the entire proposal, including
-custom matrix dimensions, and builds a bounded episode with branches, loops, tools,
-authored specialist outcomes, verification and continuation as appropriate.
-
-The private controller chooses one event envelope at a time. A separate content call
-writes that event using its causal context. This separation keeps private objectives
-out of the actor's prompt. New matrix fields reach the controller without a
-competency-name switch in Python. The project tool catalogue still defines available
-operations; matrix edits do not silently grant new tools. The controller can add new windows, independent branches
-and joins; it cannot rewrite committed events or reopen closed windows. Structural
-validation checks its choices before content generation. Targets guide construction;
-a model's finish decision is not proof of semantic coverage or training readiness.
-
-### The default flow
-
-The packaged flow works in phases, much like the scenarios that came before it. Each
-phase has its own step instruction under one shared selector instruction, and each
-kind of event has its own writer prompt:
-
-| Phase | Nodes | What happens |
-| --- | --- | --- |
-| Set the scene | `set_scene` → `choose_tools` → `write_opening` | Define the windows and the concrete world (persona, artifacts, a roster with observable capabilities, costs and context limits, budget, acceptance criteria, what the user has and has not authorized, hidden facts), choose and list the episode's tools (see [Show tools](#show-tools)), then write the opening request or trigger. |
-| Immediate reply | `reply_first` → `opening_is_chat` → `acknowledge` → `write_reply` | When the flow's `immediate_response` is on and a person opened the episode in chat, the agent answers at once ("Sure, let me look into this.") through the chat tool, before any reasoning. A trivial request may get its full answer here. Otherwise this phase is skipped. |
-| First move | `first_move` → `plan_is_thought` → `write_plan` | The agent's first step, normally reasoning that restates the goal and plans, delegating specialist work and weighing any automation choice. A direct reply, a clarifying question or an approval request takes the general route instead. |
-| Work | `work` → routing → writer → `work` | One event at a time until the selector proposes to finish. The agent's own events are planning, delegation, review and communication; specialist output arrives as tool results or reports. Work happens in short-lived windows (see below). |
-| Verify | `wants_finish` → `verify` → `verified` → `done` | A proposed finish is audited against the proposal's objectives and the coordinator checks below. If anything is missing or violated, the verifier picks the event that fixes it and work continues. |
-
-Reasoning windows are private thinking: the actor instruction tells the agent never to
-address anyone there and to speak to people only through chat calls, including short
-progress updates as the work goes on. So a typical episode reads: request, immediate
-reply, reasoning, a plan, tool calls, a progress update, and so on.
-
-#### Short-lived windows
-
-Windows are the agent's working memory, so the default flow keeps them short-lived and
-parallel rather than writing one long transcript:
-
-| Window | Lifetime |
-| --- | --- |
-| Chatroom and document windows | Open all episode. |
-| `notes` (purpose `notes`, writable) | Open all episode. Holds the short conclusions later steps need. |
-| A reasoning window per step (`w_plan`, `w_tests`, …) | Opens for one step. The agent reasons, makes that step's tool calls, and the last call closes the window. |
-| A window for the results | Opens when results arrive, in whatever order they finish. The agent reads them, reasons, copies what matters into `notes`, makes the next calls and closes it. Results it handles separately go to separate windows, worked on in parallel. |
-
-Each request to the selector also lists `open_windows` (purpose, event count and
-characters for every open window), so it can wrap up windows that grow large. A closing
-agent event is told that its text won't be seen again, so it stays to a line.
-
-### Coordinator behavior in the default flow
-
-Trajectory Remix authors data for a multi-agent coordinator, so the packaged flow treats
-that role as the default standard. It never mentions voice or personality; that stays
-opt-in.
-
-| Topic | What the prompts ask for |
-| --- | --- |
-| Role | The agent plans, delegates, verifies and keeps continuity. When a suitable agent or tool is visible, it does not personally write production code, run extensive research or do bulk repetitive work. Delegation is proportional: a small job needs no team. |
-| Strategic investment | When work recurs, demand is uncertain, or the proposal has an automation decision, the reasoning compares build cost, expected frequency, savings per use, maintenance, opportunity cost, reliability, uncertainty and reuse from visible evidence, then invests, defers or declines, and revisits the choice when new information changes the return. Neither automation nor manual delegation is preferred by default (a script suits 1,000 files, a cheap agent suits five). |
-| Authorization | The scene defines what the user has and has not authorized. A consequential step outside that authority needs an approval request and a wait, not the action. |
-| Prohibited patterns | Re-delegating an unchanged failed task, creating agents recursively or excessively, planning without moving to execution, and ignoring visible budgets. |
-
-The authorization limits live in `task.world`, which only external authors see. The
-agent learns them from visible evidence (the user's words, a policy document, a tool
-contract), so the actor prompt stays generic. The `verify` step audits all of the above
-and sends a violation back for a fix instead of passing it.
-
-These defaults apply to projects with no saved flow. A project that already saved its
-own flow keeps it; copy what you want from the packaged
-[`flow.yaml`](../trajectory_remix/graph/flow.yaml) in the Flow tab. Tests use scripted
-providers, so they show the structure is delivered, not that the prompts improve live
-model output.
-
-Routing is a chain of branches on `task.envelope.kind` (`is_tool_call`,
-`is_tool_result`, `is_chat`, `is_external`) that sends each event to its writer:
-`write_tool_call`, `write_tool_result`, `write_chat`, `write_external` or
-`write_thought`. A writer's instruction is appended to the task, so it tells the event's
-author how that kind of event should read. For actor events it follows the
-`actor_instruction`, and it never carries private facts.
-
-#### What the backend settles for the selector
-
-Small selectors get some mechanical details wrong. Rather than spend a correction on
-them, the backend settles these itself when it accepts a selection:
-
-| Detail | What happens |
-| --- | --- |
-| A tool call without `call_id` | It uses its own event ID. |
-| A result without `call_id` | It takes the ID of the call it follows. |
-| An event that does not follow the latest event in its window | That dependency is added. |
-| A complete call to a catalogue tool | Its writer always returns JSON arguments, whatever `call_format` says. |
-| A new window's reasoning level | Matched to the project's levels ignoring case, or dropped if it names none. |
-| A window repeated exactly as it is defined | Ignored. |
-
-Other mistakes get a correction that says what to do: a reused event ID suggests a free
-one, writing to a closed window suggests a new window, and a hand-written chat delivery
-(`…:echo`) is refused because the backend writes it. The Show tools step asks for one
-true or false per tool rather than a list of IDs, because strict decoding of a list let
-models repeat IDs until the output limit.
-
-### Show tools
-
-A `tools` node asks the Generator once which catalogue tools the episode needs. It sees
-a compact index (tool ID and the schema's `description`), the proposal and the upcoming
-opening event. Remix then writes the listing itself, never the model: a masked
-`external_text` event in a window whose purpose is `tools`, with one line per tool
-(`name`, `description`, `parameters`). Every tool the Generator did not choose is also
-listed with the node's `extra_tools` chance (default 0.5), drawn from the trajectory and
-event IDs, so the same trajectory always gets the same list and the agent learns to
-ignore tools it does not need. Chosen tools are always listed.
-
-The listing is placed before the next event (normally the opening), so every later event,
-and so the agent, sees it in context. Afterwards selector requests carry only the listed
-tools' schemas instead of the whole catalogue, and a tool call to an unlisted tool is
-rejected with the list of tools that were shown. Before the listing, selectors see only
-the compact index. Flows without a `tools` node send the whole catalogue as before.
-
-Each selection, local transition, event and echo commits with its interpreter checkpoint.
-Resume uses the frozen policy and accepted state. Loops have step and event limits;
-exhaustion retains the partial source as **Unfinished**, without a fabricated pass.
-
-### Edit the flow
-
-The easiest way to edit the flow is the **Flow** tab in the dashboard: a flowchart you
-can rearrange and connect, which saves the flow into the project database for you. Its **Walkthrough** mode
-steps through one generation so you can see each prompt and reply. See
-[Edit the flow chart](DASHBOARD.md#edit-the-flow-chart) and
-[Walk through a generation step by step](DASHBOARD.md#walk-through-a-generation-step-by-step).
-
-A project's flow is stored in its SQLite database, in the one-row `graph_flow` table,
-as the YAML text you saved. With nothing saved, the packaged
-[`flow.yaml`](../trajectory_remix/graph/flow.yaml) applies. The flow is read when a new
-run starts; saving never changes active runs. A `flow.yaml` beside the database, from
-older versions, is imported once the first time the flow is read and then ignored.
-Alternatively pass YAML text as `instructions.flow_yaml` to override it for one run.
-Invalid configuration is rejected before reserving attempts.
-The complete normalized Flow, hash, proposal and tool catalogue freeze into the run.
-
-The YAML declares `version: adaptive-flow/1`, `start`, `max_steps`, `max_events`,
-`immediate_response` (default `true`), `actor_instruction`, an optional
-`selector_instruction` and a `nodes` map. With
-`selector_instruction` set, it is the system prompt of every `select` node and each
-node's own `instruction` is sent as `current_step` after the data (see
-[Prompt order and prefix caching](#prompt-order-and-prefix-caching)). Nodes support:
-
-| Kind | Action and transitions |
-| --- | --- |
-| `select` | Ask the private authoring controller for the next event or a finish decision; continue at `next`. |
-| `event` | Generate the selected event's content; continue at `next`. |
-| `branch` | Compare dotted `path` in the last selection with `equals`; take `then` or `otherwise`. A path starting with `flow.` reads the flow's own settings instead, such as `flow.immediate_response`. Missing paths take `otherwise`; booleans are distinct from integers. |
-| `end` | Finish construction after a validated finish selection, then run configured reviews. |
-| `tools` | Show tools: ask which tools the episode needs, from tool IDs and descriptions, then list them for the agent; continue at `next`. See [Show tools](#show-tools). |
-
-Transitions can point backward to loop or forward to join branches. Step limits bound
-all cycles, including cycles without provider calls. Edit node instructions and add
-conditional branches to extend behavior. The last selection exposes `finished`,
-`reason`, `task` and `windows` to conditions. Controller instructions are trusted author
-configuration; generated actor instructions are replaced with `actor_instruction` to
-prevent private solution leakage. External authors may receive scoped `task.world`.
-
-The default keeps decision windows open through their consumers. Closing a window
-removes it from later actor prompts; choose closure only after its final use.
-
-### Custom recipes
-
-Advanced users can replace the default with a frozen recipe in the run instructions:
-`{"plan": {"windows": {...}, "tasks": [...]}}`. A recipe is a branch of the same driver, not a
-separate engine. Each task has:
-
-| Field | Meaning |
-| --- | --- |
-| `id` | Stable event ID. Don't end it in `:echo`, which is reserved. |
-| `envelope` | Everything except `content`: kind, window, dependencies, masks, delivery, framing, closing. Dependencies point at earlier selected tasks. |
-| `instruction` | The authoring task for this event. Actor tasks must not contain privileged answers, future facts, expected verdicts or private summaries. |
-| `world` | Private facts for **external** authors only. Rejected on actor tasks. Omit anything not needed. |
-| `when` | Optional dotted proposal paths and equality conditions. Non-matching tasks are skipped. Broken dependencies are rejected, not rewired. |
-| `arguments` | `text` (default) returns `{"content": "…"}`. `json` returns `{"arguments": …}` for a complete known call. Use text for fragmented or intentionally invalid calls. |
-
-Instructions are trusted project configuration and must respect the same boundaries. The smoke
-script's `smoke_plan` has examples.
-
-## Draft and Assembly
-
-**Draft and Assembly** is an alternative to the step-by-step flow, and the recommended method. It
-writes a whole episode in two calls, fixes its structure, then reviews and repairs it:
+The sampler picks a **proposal**. Each trajectory then goes through four stages:
 
 **Draft → Assembly → Fast Review → Critical Review**
 
-To use it, set **Settings → Automatic review and repair → Generation method** to **Draft and
-Assembly** (`generation.method: draft_assembly`).
+Draft writes the whole episode as prose. Assembly turns it into a graph and fixes its
+structure. The two reviews check it against the checklists and repair what fails. The whole
+proposal reaches Draft and Assembly, including custom matrix dimensions, so new matrix fields
+need no code changes. The project tool catalogue still defines the available tools; matrix
+edits don't grant new ones. Targets guide the episode, but a passing review isn't proof of
+semantic coverage or training readiness.
+
+## Draft and Assembly
+
+Draft and Assembly write a whole episode in two calls, fix its structure, then hand it to
+review and repair:
 
 | Stage | Endpoint role | What happens |
 |---|---|---|
@@ -238,8 +65,7 @@ Assembly** (`generation.method: draft_assembly`).
 
 Draft and Assembly can share one endpoint, or you can give Assembly a stronger model for better
 structure. The Draft and Assembly calls see the proposal, the tool catalogue, the review checklist
-(core and critical) and the flow's `actor_instruction`, so a persona added there applies here too.
-The prompts are in `trajectory_remix/graph/draft_assembly.yaml`.
+(core and critical) and the project's prompts (see [Edit the prompts](#edit-the-prompts)).
 
 ### Assembly
 
@@ -298,30 +124,46 @@ itself after its retries; resume it from the job page when the model is loaded.
 Point the two local endpoints at **different servers or ports**. If both use one server that
 answers with whatever model is loaded, review requests can silently go to the generation model.
 
+### Edit the prompts
+
+The prompts are project settings, under **Settings → Automatic review and repair → Generation
+prompts**:
+
+| Prompt | Used by | What it's for |
+|---|---|---|
+| **Agent prompt** | Draft and Assembly | How the agent behaves. Add a persona pack here. |
+| **Draft instructions** | Draft | How to write the working notes. |
+| **Assembly instructions** | Assembly | How to lay the notes out as the compact spec, with a worked example. |
+
+**Load default prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
+you to confirm; nothing is saved until you choose **Save settings**. Runs freeze the prompts
+when they start, and each request records a prompt version: the packaged version, plus a short
+hash when you've edited them.
+
+Projects from before Draft and Assembly kept their prompts in the Flow. When such a project
+opens, a customised Flow agent prompt (for example one with a persona pack appended) moves into
+**Agent prompt** once, and the old Flow is then discarded.
+
 ## What the model sees
 
-The private selection controller sees the full proposal and the committed source, except
-that events in **closed windows** appear as outlines: their ID, kind, window and
-dependencies, with the text replaced by a note that it was written and its window closed. That text is gone for the agent,
-and dropping it keeps the controller's prompt from growing with every event ever written.
-The controller is an authoring role, never supervised actor output. For each content event, the actor prompt contains only **causal ancestors**, folded into the windows that are
-currently visible, with replacements applied and closed windows removed. Parallel and future
-events, metadata, the full proposal, hidden world data and review history are all excluded. There
-is no rolling chat history that could smuggle lost context back in.
+- **Draft and Assembly** see the sampled proposal, the tool catalogue, the checklists and the
+  prompts. Assembly also sees the draft. Neither sees source metadata or review history.
+- **The assembly fix** sees the assembled graph (without metadata), every diagnostic, the
+  causal views and the draft.
+- **Reviewers and repairers** see the graph, the checklist and the causal view at each event:
+  which earlier events it can see, by window. They judge each event only by what it could see.
+
+Synthetic tools are never executed. A tool result is whatever Draft wrote as its example output.
 
 ## Tools and chat during generation
 
-- Tool calls and results are written like any other event. Results are free-form, with
-  independent begin/end, instant or streamed delivery, and closing flags.
-- A completed `chat` call with `echo_chat=true` produces a masked `chat_message` from the call's
-  parsable `content`, linked by `call_id`. A pending-helper checkpoint makes restarts safe.
-  Legacy explicit-plan tasks resolve call dependencies through its echo; adaptive
-  selections refer to the committed echo ID when delivery must precede an action.
-  A linked chat echo that differs from submitted content is a structural error,
-  including after repair.
-- With `echo_chat=false`, the Flow lets you filter, reject or skip delivery through explicit tasks.
-- Malformed chat arguments only warn, and no echo is invented. Multiple fragments assemble in
-  causal order.
+- Assembly chooses the tools the agent is shown. Remix writes a **Show tools** listing before the
+  opening event: the chosen tools plus a repeatable random selection of others.
+- Tool calls and results are ordinary events. Results are free-form text.
+- A `chat` call delivers its `content` to the chatroom automatically, as a masked
+  `chat_message` with the ID `<call id>:echo`. A person's reply follows that echo. A delivery
+  that differs from the submitted content is a structural error, including after repair.
+- Malformed chat arguments only warn, and no echo is invented.
 
 ## Reviews and repair
 
@@ -417,11 +259,12 @@ without calling a model.
 
 ## Reference
 
-**Settings** (`generation` in project settings): `method` (`flow` or `draft_assembly`, default `flow`), `phase_barrier` (default false),
+**Settings** (`generation` in project settings): `phase_barrier` (default false),
 `fast`, `critical`, `repair` (default true), `format_retries` (default 2), `repair_context_bytes`
 (default 65,536, a transcript bound per repair round, not a token estimate) and `repair_rounds`
 (default 3). Configure the `chat` tool with a JSON object input that has a string `content`
-to enable the echo helper ([example config](../examples/graph_local_llm.json)).
+to enable the echo helper ([example config](../examples/graph_local_llm.json)). The prompts are
+`settings.prompts`: `actor`, `draft` and `assembly`.
 
 **Endpoints:** URLs are OpenAI-compatible base URLs. Remix appends `/chat/completions`, sends a
 non-streamed structured-output request, and uses no SDK retries or redirects. Credentials come from
@@ -436,8 +279,9 @@ the same retry policy. Your local server must support the requested JSON respons
 
 | Route | Action |
 | --- | --- |
-| `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{…}}`. Needs a Generator. Returns a job. |
-| `POST /api/v1/sampler/runs` | The same driver when a Generator exists, otherwise a paused snapshot-only run. |
+| `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{}}`. Needs a Draft or Generator role. Returns a job. |
+| `POST /api/v1/sampler/runs` | The same driver when a Draft or Generator role exists, otherwise a paused snapshot-only run. |
+| `GET /api/v1/generation/prompts/default` | The packaged prompts, for Load default. Saves nothing. |
 | `POST /api/v1/reviews` | `{query, mode, repair}` or `{trajectory, expected_revision, mode, repair}`. |
 | `GET /api/v1/trajectories/{id}` | Source, ownership, diagnostics and review staleness. |
 | `/jobs`, `/attempts`, `/results`, `/history` and controls | Progress, skipped targets, saved deltas, Pause, Resume, Cancel and detach. |
@@ -448,78 +292,18 @@ driver's frozen recipe stay paused.
 **For developers.** `GenerationService(..., transport)` takes an async single-invocation transport.
 It receives a queue `Ticket`, sends only `payload.messages` and `schema` using the pinned endpoint
 config, and returns `{output, model, usage?}`, `{invalid_output: true}` or `{context_limit: true}`.
-Each event, review and repair turn is a separate FIFO item, and its original payload is kept for retry
+Each Draft, Assembly, assembly fix, review and repair turn is a separate FIFO item, and its original payload is kept for retry
 while response bodies are dropped on interruption. Provider usage is evidence only, not a source metric.
 Checks: `python -m pytest -q tests/test_graph_generation.py tests/test_graph_jobs.py
 tests/test_graph_sampling.py tests/test_graph_studio.py tests/test_graph_export.py` and
 `python tests/run_generation_frontend.py`. They use tiny fake-provider sources. Model quality,
 tool coherence, schema compatibility and context limits need the user-machine checks.
 
-### Backend API changes: adaptive Flow
-
-Frontend integration can continue using `POST /api/v1/generation/runs` with the same
-request body. Empty `instructions` now selects the adaptive YAML Flow. Existing
-`instructions.plan` recipes and already-frozen runs retain their original behavior.
-Do not send both `plan` and `flow_yaml`.
-
-New authenticated `GET /api/v1/generation/flow` returns `{flow, flow_hash}` for the
-project's saved policy (or packaged default). Editing is through the Flow
-editor's save route (see [Flow editor and walkthrough API](#flow-editor-and-walkthrough-api))
-or a per-run `instructions.flow_yaml` string.
-MCP `generate_graphs` accepts the same instructions through its existing service.
-There are no source-format, settings-schema, stage or ownership changes.
-
-Provider request history now includes `operation: flow_select`, separate from
-`event`, `review` and `repair`. It uses the Generator role and ordinary FIFO limits.
-The checkpoint has an additional `flow` object with node, steps, output and task;
-consumers should treat it as opaque. Job logs report successful selections and limit
-exhaustion without copying private prompts or response bodies. `flow_outcome` metadata
-records the controller's finish explanation; it is not measured coverage. Compilation
-and semantic acceptance remain separate.
-
-### Flow editor and walkthrough API
-
-These routes back the dashboard's **Flow** tab. They need the same local session token
-as the rest of `/api/v1`.
-
-| Route | Action |
-| --- | --- |
-| `GET /generation/flow/default` | The packaged default flow in the same shape, with `origin: packaged`. Reading it saves nothing; the editor's **Load default** shows it as an unsaved draft. |
-| `GET /generation/flow` | `{flow, flow_hash}` as before, plus `text` (the saved or packaged YAML), `origin` (`project` or `packaged`), `revision`, `valid` and `diagnostics`. |
-| `POST /generation/flow/check` | `{flow}` or `{yaml}`. Returns `valid`, `diagnostics` (each with `severity`, `code`, `message`, and `node`/`field` when it has a location), the normalized `flow`, `flow_hash` and rendered `yaml`. Never raises for a bad draft. |
-| `PUT /generation/flow` | `{flow}` or `{yaml}` with `expected_revision` from the last read. Stores the flow in the project database in one transaction. `yaml` text is written verbatim; `flow` is rendered with only the fields each node kind uses. A stale revision returns 409 `flow_conflict` with `current_revision`; errors return 422 and leave the saved flow untouched. |
-| `POST /walkthrough/start` | `{seed, overrides, flow?, flow_yaml?}`. Samples one proposal (not stored) and freezes a plan exactly as a run does. Returns `{state, next}`. |
-| `POST /walkthrough/step` | `{state, mode: "call" \| "manual", response?, latest_settings?, call_id?}`. Runs one transition and returns `{state, trace, next}`. `latest_settings: true` uses the latest saved project settings instead of the walkthrough's own revision. |
-| `POST /walkthrough/describe` | `{...state}`, optional `?latest_settings=true`. Returns `next` for a state without running it, with the `settings_revision` it used. |
-| `POST /walkthrough/cancel` | `{call_id}`. Stops that step's waiting model call; the step returns with its state unchanged and `cancelled: true` is returned here. |
-| `POST /tools/listing` | `{trajectory_id, event_id, tools, extra_tools}`. Returns the Show tools listing (`chosen`, `added`, `shown`, `content`) for the Editor's **Show tools…** dialog, identical to the flow step's for the same IDs. Unknown tool IDs return 422. |
-
-Walkthrough calls (never job calls) also return the start of an unusable reply's text as
-`raw_content` and `raw_reasoning` in the trace's `response`, so a cut-off reply can be read.
-
-`next` describes the coming step: `action` (`model`, `branch`, `chat_echo`, `end`,
-`limit`, `blocked` or `done`), the node, a summary, `knows` (the interpreter's position,
-memory and draft diagnostics) and, for model steps, `request`: the payload messages,
-schema, task, endpoint, the exact HTTP body without credentials (`wire`) and the context
-budget. `trace` adds what happened: `accepted`, `error`, `response` (model, usage and
-output), the branch value read, the accepted Selection or written event, `added_events`
-and `to`.
-
-Walkthroughs use the same prompt builders and acceptance checks as runs
-(`adaptive_driver.request_payload`, `accept_selection`, `append_event`), so a step
-shows what a run would send and accept. A rejected reply keeps the state and records the
-correction; passing `format_retries` ends the walkthrough as `invalid_provider_output`,
-as a run would mark it Unsuccessful. The state lives in the browser; nothing is written
-to the dataset or job tables, and the proposal snapshot is not persisted. `call` mode
-sends one request straight to the Generator endpoint, at most one walkthrough call at a
-time, outside the job FIFO and without its retries. It is an explicit, interactive
-action; walkthrough errors are returned to the caller and never logged.
-
 ### Context scope and local-model budgets
 
-The controller receives the **sampled proposal**, not the entire sampling matrix.
+Draft and Assembly receive the **sampled proposal**, not the entire sampling matrix.
 Source metadata (including its frozen matrix, provenance snapshots and review history)
-is retained in storage but excluded from controller prompts. Reviewers receive each
+is retained in storage but excluded from their prompts. Reviewers receive each
 source body once; their per-decision causal views list surviving event IDs by window,
 including replacement and closure effects. These are references to the source, not
 summaries that can introduce new facts.
@@ -542,60 +326,29 @@ it to bypass this check. Exact serving-tokenizer accounting is a future extensio
 #### Prompt order and prefix caching
 
 Requests are laid out so that an inference server with prefix (KV) caching can reuse as
-much of the previous request as possible. Caching saves prompt-processing time and
-cost; it does **not** enlarge the context window, because cached tokens still count
-toward `context_window_tokens`.
+much of the previous request as possible. Caching saves prompt-processing time and cost; it
+does **not** enlarge the context window, because cached tokens still count toward
+`context_window_tokens`.
 
-- **Selector requests:** the flow's shared `selector_instruction` as the system prompt
-  (the same for every selector node and every trajectory), then one user message. In
-  JSON mode it starts with the fixed output schema, followed by the data from most to
-  least stable: `tools`, `proposal`, `source`, `current_step` (this node's ID and
-  instruction), `open_windows`, `remaining_events`, `previous`, `correction`. Inside
-  `source`, events are listed in causal order, so a newly committed event is usually
-  appended at the end. When a window closes, its events lose their content, so the next
-  request misses the cache once from that point; later requests share the shorter prefix.
-- **Event requests:** the fixed system prompt, then `tool`, `input_schema`, `kind`,
-  `task`, `window_purpose`, `visible`, `world` and `correction`.
-
-`current_step` deliberately comes after the source, so the instruction sits next to the
-answer, which small open-weight models follow more reliably. Moving it earlier would
-save reprocessing only the step text (a few hundred tokens) per call, at the cost of
-burying it behind the whole trajectory. A flow without `selector_instruction` keeps the
-older layout: each node's instruction is its system prompt and there is no
-`current_step`.
+- **Draft and Assembly:** the system prompt is the stage's instructions plus the agent prompt,
+  the same for every trajectory in a run. The user message holds the data.
+- **Assembly fix and repair:** each turn resends the session so far and appends the newest
+  action and its result, so every request extends the previous one.
 
 The roles always alternate (system, then user): the JSON-mode schema is joined to the
 user message rather than sent separately, because some open-weight chat templates
-reject two user messages in a row. Keep this order when changing prompt builders;
-`tests/test_prompt_cache_order.py` checks it, and the walkthrough's **Prompt** tab
-shows the exact text sent.
+reject two user messages in a row. `tests/test_prompt_cache_order.py` checks this.
 
-#### What is left out of prompts
-
-Prompts carry what the model needs and nothing that is implied:
-
-- **Default-valued fields are dropped** from events and windows, in both the selector's
-  source and the writers' visible context. An event shows its kind, window, dependencies,
-  content and anything set to a non-default value; null call IDs, false flags and default
-  delivery and supervision settings are omitted. At 100 events this saves roughly 20 KB.
-- **`previous` holds the selector's own notes**, `finished`, `reason` and the chosen
-  task's ID, not the full last Selection: the task envelope is already in the source.
-- **Writers see only causal ancestors** of the event they write. Parallel branches and
-  later events are never included; `tests/test_prompt_scope.py` checks this. Only the
-  private selector sees the whole committed source, all of which is in the past.
-
-Over-budget requests return a context-limit result before contacting the model. A
-non-repair operation holds its trajectory, with operation/input-size/allowance in the job log; repair
-retains the existing context-limit failure behavior. Nothing is silently truncated or
-converted into a quality failure. Frozen runs keep their endpoint settings: start a
-new run to apply changed budgets or the narrower prompt recipe. Long episodes still
-need explicit context management; this change removes accidental duplication rather
-than claiming unlimited history fits a small model.
+Over-budget requests return a context-limit result before contacting the model. Draft and
+Assembly hold their trajectory, with operation, input size and allowance in the job log; the
+assembly fix hands the graph on; repair starts a fresh round. Nothing is silently truncated or
+converted into a quality failure. Frozen runs keep their endpoint settings: start a new run to
+apply changed budgets.
 
 ### Watch a running job
 
 The existing job log shows timestamped admission, request queue/start, response,
-event commit, review verdict and trajectory outcome messages. Requests that are
+draft and assembly, review verdict and trajectory outcome messages. Requests that are
 still pending a complete model response emit an elapsed-time heartbeat every ten
 seconds. A heartbeat means the request is still awaiting a response; it does not
 claim tokens are being generated. Queue messages identify paused endpoints, and
@@ -636,5 +389,5 @@ Timeout is a client setting, never part of the JSON sent to the model. It bounds
 each complete request attempt and individual network operations. Timeouts follow
 the existing endpoint retry/exhaustion behavior; each retry gets a fresh deadline.
 It does not limit the whole generation job. All four fields freeze into new run
-settings and apply to selection, content, review and repair requests using that
+settings and apply to Draft, Assembly, review and repair requests using that
 endpoint. Edits do not alter an active run. No frontend files or routes changed.

@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from . import prompt_defaults
+
 Identifier = Annotated[str, Field(min_length=1)]
 Weight = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
@@ -355,9 +357,24 @@ def default_checklists():
     }
 
 
+class GenerationPrompts(DTO):
+    """The project's generation prompts; Load default restores the packaged ones."""
+
+    actor: str = Field(default_factory=prompt_defaults.actor, min_length=1)
+    draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
+    assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
+
+
 class GenerationOptions(DTO):
-    # flow: the step-by-step YAML Flow. draft_assembly: Draft, then Assembly (with its fix).
-    method: Literal["flow", "draft_assembly"] = "flow"
+    @model_validator(mode="before")
+    @classmethod
+    def drop_retired_method(cls, data):
+        # Projects saved while the step-by-step Flow existed carry a method field;
+        # Draft and Assembly is now the only way to generate.
+        if isinstance(data, dict) and "method" in data:
+            data = {k: v for k, v in data.items() if k != "method"}
+        return data
+
     # Runs only: every trajectory finishes generation (Draft and Assembly) before any review
     # starts; the job then pauses so models can be swapped, and Resume starts the reviews.
     phase_barrier: bool = False
@@ -400,6 +417,7 @@ class ProjectSettings(DTO):
         default_factory=default_checklists
     )
     generation: GenerationOptions = Field(default_factory=GenerationOptions)
+    prompts: GenerationPrompts = Field(default_factory=GenerationPrompts)
     matrix: VersionedReference | None = None
     metric_registry: VersionedReference | None = None
     sampler_configuration: dict[str, JsonValue] | None = None

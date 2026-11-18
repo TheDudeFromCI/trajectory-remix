@@ -1,7 +1,7 @@
 """One troublesome trajectory is held for attention; the rest of the job keeps running."""
 
 import pytest
-from test_graph_generation import finish, plan, service
+from test_graph_generation import finish, service
 
 from trajectory_remix.graph import reviews
 
@@ -30,7 +30,7 @@ async def test_invalid_review_holds_one_trajectory_and_the_rest_finish(tmp_path)
     gen, fake = service(tmp_path, format_retries=0, critical=False)
     broken = [True]
     gen.transport, chosen = picky(fake, broken)
-    job = gen.start([{"seed": 41}, {"seed": 42}], {"plan": plan()})
+    job = gen.start([{"seed": 41}, {"seed": 42}], {})
     await finish(gen, job)
     attempts = {a["trajectory_id"]: a for a in gen.jobs.attempts(job)}
     held = gen.store.read(chosen["id"]).source
@@ -60,7 +60,7 @@ async def test_local_error_preparing_one_trajectory_holds_only_it(tmp_path, monk
         return original(source, *args, **kwargs)
 
     monkeypatch.setattr(reviews, "payload", failing)
-    job = gen.start([{"seed": 43}, {"seed": 44}], {"plan": plan()})
+    job = gen.start([{"seed": 43}, {"seed": 44}], {})
     await finish(gen, job)
     outcomes = {a["trajectory_id"]: a["outcome"] for a in gen.jobs.attempts(job)}
     assert [o for i, o in outcomes.items() if i != chosen["id"]] == ["pass"]
@@ -72,7 +72,7 @@ async def test_local_error_preparing_one_trajectory_holds_only_it(tmp_path, monk
 async def test_a_held_trajectory_can_be_detached_to_finish_the_job(tmp_path):
     gen, fake = service(tmp_path, format_retries=0, critical=False)
     gen.transport, chosen = picky(fake, [True])
-    job = gen.start([{"seed": 45}, {"seed": 46}], {"plan": plan()})
+    job = gen.start([{"seed": 45}, {"seed": 46}], {})
     await finish(gen, job)
     gen.jobs.detach(job, chosen["id"])
     assert gen.jobs.inspect(job)["state"] == "completed"

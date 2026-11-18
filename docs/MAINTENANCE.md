@@ -15,11 +15,11 @@ Paths below are relative to `trajectory_remix/`.
 | --- | --- | --- |
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
 | Compiler/export | `graph/compiler.py`, `graph/export.py`, `graph/ktremix.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
-| Generation/review | `graph/flow.py`, `graph/generation.py`, `graph/reviews.py`, `graph/provider.py` | Frozen inputs, actor context, checklist evidence, stage transitions and single repair sessions |
-| Flow editor/walkthrough | `graph/flow_store.py` (project flow in the database; one-time `flow.yaml` import), `graph/flow_document.py`, `graph/walkthrough.py`, `graph/flow_api.py`, `graph/adaptive_driver.py` | Located diagnostics, lossless YAML, revision-checked saves, and walkthrough parity with runs (shared `request_payload`/acceptance; nothing stored) |
+| Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/compact_spec.py`, `graph/assembly_fix.py`, `graph/reviews.py`, `graph/repair_policy.py`, `graph/provider.py` | Frozen inputs and prompts, Draft/Assembly/fix stages, checklist evidence, stage transitions and repair rounds |
+| Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `flow-panel.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `flow-view.js`, `flow-model.js`, `flow-layout.js`, `flow-routes.js`, `flow-canvas.js`, `flow-inspector.js`, `flow-walkthrough.js`, `flow-view.css`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `ui-kit.js`, `views.js`, `shell.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -43,9 +43,7 @@ Paths below are relative to `trajectory_remix/`.
   ownership; detachment is permanent. Manual review/repair requires a detached
   source and one shared operation slot.
 - Keep each API request in its endpoint FIFO slot through retries. Exhaustion
-  pauses that endpoint for explicit recovery; never silently change models. The Flow
-  walkthrough is the one interactive exception: a user-initiated, single, unretried
-  Generator call that stores nothing and is never logged.
+  pauses that endpoint for explicit recovery; never silently change models.
 - A model/API failure is not a quality verdict. Record per-item review evidence
   and source/checklist identities. Repairs preserve completed spot edits, use
   the matching tier, and end on verdict or context exhaustion. Ready is manual.
@@ -82,17 +80,13 @@ node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
-node tests/flow_editor_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/usage_view_frontend.mjs
-node tests/walkthrough_controls_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/show_tools_frontend.mjs
-node tests/flow_default_frontend.mjs
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py
 python tests/run_dashboard_frontend.py
-python tests/run_flow_frontend.py
 for f in trajectory_remix/static/*.js; do node --check "$f"; done
 ruff check . && ruff format --check .
 git diff --check
@@ -116,14 +110,9 @@ Verify that `/tmp` artifacts and processes survived before resuming them. Open o
 update a focused PR; merge only when the current user has authorized it. A green
 suite is evidence of covered behavior, not proof of exhaustive correctness.
 
-Adaptive Flow backend regressions: `python -m pytest -q tests/test_adaptive_flow.py`.
-These scripted-provider tests exercise loops, independent tool branches and joins,
-causal actor prompts, frozen YAML/resume, typed conditions and bounded failure.
-They establish interpreter correctness, not live-model semantic coverage.
-
 Coordinator defaults: `python -m pytest -q tests/test_coordinator_defaults.py` checks the
-default checklist keys, that saved checklists are not rewritten, that the packaged flow
-validates and delivers `actor_instruction` verbatim to actor events, and the derived
+default checklist keys, that saved checklists are not rewritten, that Draft and Assembly
+receive the agent prompt verbatim, and the derived
 `strategic_investment` label. Changing a default prompt or checklist changes the checklist
 hash and marks existing sign-offs stale, so keep existing keys and update
 [PROJECT-SETTINGS](PROJECT-SETTINGS.md) and [GRAPH-GENERATION](GRAPH-GENERATION.md) together.
@@ -141,32 +130,16 @@ Endpoint controls: `python -m pytest -q tests/test_endpoint_sampling.py` checks
 wire omission versus explicit zeros, timeout cancellation, accepted ranges,
 settings API/schema and frozen run configuration with fake HTTP responses.
 
-Flow editor and walkthrough: `python -m pytest -q tests/test_flow_document.py
-tests/test_flow_walkthrough.py` checks located diagnostics, lossless YAML, revision
-conflicts, comment-preserving saves, and that a walkthrough sends the same prompts as a
-real run while storing nothing. `node tests/flow_editor_frontend.mjs` covers the editor
-draft and walkthrough panel; `python tests/run_flow_frontend.py` drives the Flow tab in
-Chromium with a fake Generator.
-
 Prompt cache order: `python -m pytest -q tests/test_prompt_cache_order.py` checks that
-selector and event bodies run from stable to volatile fields, new events are appended,
-and the JSON-mode schema follows the system prompt, so prefix caches stay effective.
+each assembly fix request extends the previous one, that Draft requests in a run share
+their system prompt, and that the JSON-mode schema follows the system prompt, so prefix
+caches stay effective.
 
-Immediate response and Load default: `python -m pytest -q tests/test_immediate_response.py`
-checks `flow.` branch paths, the default flow's reply-first route, the flag's validation,
-`GET /generation/flow/default` saving nothing, and the 65k/8k endpoint defaults.
-
-Selector fixes: `python -m pytest -q tests/test_envelope_errors.py` checks the details the
-backend settles for selectors (call IDs, window order, JSON arguments, reasoning levels,
-repeated windows) and the corrections for reused IDs, closed windows and hand-written chat
-deliveries.
-
-Short-lived windows: `python -m pytest -q tests/test_selector_view.py` checks that the
-selector sees closed windows' events as outlines without content, that `open_windows`
-lists only open windows, that closed work does not grow the selector prompt, that a closing
-agent event is told its text won't be seen again, and that the default flow teaches the
-window lifecycle. Keep the shared `selector_instruction` short and put step-specific
-guidance in the step's own instruction: every selector request carries the shared text.
+Prompts: `python -m pytest -q tests/test_prompt_settings.py` checks that runs use and freeze
+`settings.prompts` (with a version that changes when they're edited), that settings saved
+with the retired `method` field still load, that retired `plan` and `flow_yaml` instructions
+are refused before reserving attempts, the default-prompts route, and the one-time move of a
+customised Flow agent prompt (an appended persona keeps today's default; Load default sticks).
 
 Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test_spec_normalize.py tests/test_repair_policy.py`
 checks the draft and assemble order, the draft kept in metadata, the builder's tool listing,
@@ -200,34 +173,19 @@ and that `repair_rounds` caps the rounds.
 Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
 tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra
 request fields and their reserved names, sticky `session_id`, usage kept for cut-off and
-non-JSON replies, per-job usage totals (missing values stay missing), the provider error
-shown in the walkthrough, the example settings and the model checker. All HTTP is mocked;
+non-JSON replies, per-job usage totals (missing values stay missing), the example settings
+and the model checker (its cost estimate uses Draft and Assembly token counts from pilots). All HTTP is mocked;
 `scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
 `graph/usage.py` stores counts only, never prompts, responses or credentials.
 
 Output modes: `python -m pytest -q tests/test_output_modes.py` checks that `auto`,
 `json_object` and `prompt` endpoints send the right `response_format` (or none) and always
-state the schema in the prompt when the server does not enforce it, and that the
-walkthrough shows the exact body the transport sends (`provider.request_body`).
-
-Walkthrough controls: `python -m pytest -q tests/test_walkthrough_controls.py` checks that
-Stop cancels a waiting call without counting a format error, that `latest_settings` applies
-newly saved limits, and that only walkthrough calls (never job tickets) keep the start of a
-cut-off reply.
-
-Selection schema: `python -m pytest -q tests/test_selection_schema.py` replays a real small
-model's first reply (invented envelope fields, a recipe-only `when`, a descriptive chatroom
-purpose) and checks the selector schema describes every envelope and window field, rejects
-that reply with a correction naming the problem, and accepts the corrected form.
+state the schema in the prompt when the server does not enforce it.
 
 Schema corrections: `graph/schema_errors.py` turns a schema violation into a short
 correction naming each failing field (it looks inside "object or null" alternatives and
-shortens quoted values) for both runs and the walkthrough. The selector's tool-call format
-setting is `call_format` in its schema (internally `arguments`), because small models put
-the arguments themselves into a field named `arguments`.
+shortens quoted values).
 
-Show tools: `python -m pytest -q tests/test_tool_listing.py` checks that a `tools` node lists
-the chosen tools (plus repeatable random additions) as a masked event before the opening,
-that the agent's ancestor context includes it, that selectors get a compact index first and
-only listed schemas afterwards, that unlisted tool calls are refused, and that flows without
-a `tools` node keep sending the whole catalogue (`graph/tool_listing.py`).
+Show tools: `python -m pytest -q tests/test_tool_listing.py` checks the repeatable random
+additions, that Assembly writes the listing as a masked event before the opening, and that
+manual authoring's listing route matches it (`graph/tool_listing.py`, `graph/tools_api.py`).

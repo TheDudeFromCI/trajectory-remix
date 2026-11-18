@@ -125,11 +125,7 @@ def context_budget(payload, response_format, messages):
 
 
 def request_body(payload, trajectory_id):
-    """The exact HTTP body for a request (no credentials) and its context budget.
-
-    Shared by the transport and the walkthrough, so what the walkthrough shows is what
-    is sent.
-    """
+    """The exact HTTP body for a request (no credentials) and its context budget."""
     endpoint = payload["endpoint_config"]
     response_format, messages = response_contract(payload)
     budget = context_budget(payload, response_format, messages)
@@ -180,29 +176,14 @@ class OpenAITransport:
         choice = data["choices"][0]
         # Usage is kept even for unusable replies: their tokens were still billed.
         meta = dict(model=data.get("model"), usage=data.get("usage"))
-        # Incomplete text never leaves this local buffer, except for the interactive
-        # walkthrough, which asks to see how a reply went wrong. Jobs never store it.
-        raw = raw_preview(choice) if getattr(ticket, "keep_raw", False) else {}
+        # Incomplete text never leaves this local buffer; jobs never store it.
         if choice.get("finish_reason") != "stop":
-            return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"), **raw)
+            return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"))
         try:
             output = json.loads(choice["message"]["content"])
         except (ValueError, TypeError):
-            return dict(meta, invalid_output=True, finish_reason="stop", **raw)
+            return dict(meta, invalid_output=True, finish_reason="stop")
         return dict(meta, output=output)
-
-
-def raw_preview(choice, limit=4000):
-    """The start of a reply's text and any separate reasoning text, for the walkthrough."""
-    message = choice.get("message") or {}
-    preview = {}
-    for key, name in (("content", "raw_content"), ("reasoning_content", "raw_reasoning")):
-        value = message.get(key)
-        if key == "reasoning_content" and not value:
-            value = message.get("reasoning")  # OpenRouter's name for the same field.
-        if isinstance(value, str) and value:
-            preview[name] = value[:limit] + ("…" if len(value) > limit else "")
-    return preview
 
 
 def invalid_reason(result):

@@ -16,44 +16,40 @@ certify tool coherence, objective coverage or truthful reasoning, so record what
 3. If your server needs a key, set `REMIX_API_KEY_LOCAL_GENERATOR`, `REMIX_API_KEY_LOCAL_FAST` and
    `REMIX_API_KEY_LOCAL_CRITICAL` in the environment.
 
-## 2. Run one small case first
+## 2. Run one trajectory first
 
 ```bash
 python scripts/graph_local_llm_smoke.py --user-machine --config /path/to/local-config.json \
-  --output /tmp/remix-local-smoke-01 --cases ordinary
+  --output /tmp/remix-local-smoke-01 --count 1
 python -m trajectory_remix graph-studio \
   --dataset /tmp/remix-local-smoke-01/project.sqlite --port 8765
 ```
 
 Open the studio and inspect the source, stage, evaluations, each job's log and `report.json`. If a job or endpoint
-pauses, the script stops creating cases. Resume it in the studio yourself. Output directories are never reused, so
+pauses, the script stops. Resume it in the studio yourself. Output directories are never reused, so
 the earlier evidence stays safe.
 
 ## 3. Run the rest
 
-Use a fresh directory. This is seven attempts in total, with no parallel or load experiment:
+Use a fresh directory. Five trajectories is enough to see the usual corrections and repairs,
+with no parallel or load experiment:
 
 ```bash
 python scripts/graph_local_llm_smoke.py --user-machine --config /path/to/local-config.json \
-  --output /tmp/remix-local-smoke-02 --cases multi-user-wakeup \
-  partial-instant partial-streamed document-replacement filtered-chat rejected-chat
+  --output /tmp/remix-local-smoke-02 --count 5
 ```
 
-Look at outcomes, not just final stages:
+Look at outcomes, not just final stages. For each trajectory, check that:
 
-| Case | What to check |
-| --- | --- |
-| `ordinary` | A user enters a read-only chatroom, the agent submits chat through a tool, and there is exactly one linked, masked message echo. |
-| `multi-user-wakeup` | Alice and Bob keep their identities and ownership, and a watcher alarm fires with no fabricated request. The autonomous-to-user transition stays coherent. |
-| `partial-instant`, `partial-streamed` | An intentionally incomplete chat argument spans a document lookup, and the retrieval influences only the later fragment. Response begin/end, delivery and masks are right. |
-| `document-replacement` | A new TODO snapshot replaces the old body, later prompts use the current visible windows, and any retained fact needs an explicit visible copy. |
-| `filtered-chat` | The automatic echo is off, there's one explicitly transformed delivery, and no duplicate uncensored echo. |
-| `rejected-chat` | The echo is off and an authored rate-limit failure results in no chatroom delivery. |
+- the draft (in `metadata.draft`) reads like a real episode and covers the proposal;
+- the assembled graph keeps the draft's facts, closes its reasoning windows and has at most
+  a few assembly fix turns (`metadata.assembly_fix`);
+- chat calls have exactly one linked, masked delivery (`:echo`) in the chatroom;
+- review verdicts cite real evidence, and nothing is claimed before it is shown.
 
-For each sample, write down the case and seed, job and source IDs, endpoint and model names, final stage, criterion
+For each sample, write down the seed, job and source IDs, endpoint and model names, final stage, criterion
 evidence, unexpected pauses or format corrections, and the event IDs where prompts need work. Keep credentials out
-of reports. Actor prompts never contain the full proposal, review transcript or private world data, and the request
-table keeps frontier, source and prompt identities for debugging.
+of reports. The request table keeps source and prompt identities for debugging.
 
 ## 4. Try manual review and repair (on a copy)
 
@@ -87,7 +83,7 @@ The default prompts and free-form response construction are a baseline to iterat
 
 ## Generate from the studio with a local server
 
-Use this to check a flow end to end on your own hardware before paying for hosted
+Use this to check generation end to end on your own hardware before paying for hosted
 models: it costs nothing but runs slowly. Any OpenAI-compatible server works. Notes for
 PolyStrata and llama.cpp follow; the steps after them are the same for both.
 
@@ -96,7 +92,7 @@ PolyStrata and llama.cpp follow; the steps after them are the same for both.
 [PolyStrata](https://github.com/VecSzn/PolyStrata) serves mixture-of-experts GGUF models
 through an OpenAI-compatible API at `http://127.0.0.1:8080/v1`. Locally it accepts any
 API key and any model name. Its README does not document three things Remix relies on,
-so check them with a walkthrough step (see below) before a run:
+so check them with a one-trajectory run (see below) before a larger one:
 
 | Not documented | What to set in Remix |
 | --- | --- |
@@ -138,12 +134,12 @@ Qwen3-family hybrid models, `{"chat_template_kwargs": {"enable_thinking": false}
    Turning thinking off matches the hosted pilot and avoids replies cut off at the output
    limit. If you leave it on, raise **Max output tokens**.
 
-2. **Assign the Generator role** to the endpoint, leave the review roles empty, and save.
+2. **Assign the Draft role** to the endpoint (and **Assembly** too, or leave it to fall back to
+   Draft), leave the review roles empty, and save.
 
-3. **Check one trajectory first.** In **Flow → Walkthrough**, sample a seed and run a few
-   steps with **Call the Generator**. The first selection and the first written event should
-   both be accepted. A refused request shows the server's own error message; a reply in the
-   wrong shape shows why it was rejected on the **Reply** tab. Then choose **Run to end**.
+3. **Check one trajectory first.** In **Generate**, start 1 attempt. In **Jobs**, the log should
+   show **Draft written** and **Graph assembled**. A refused request shows the server's own
+   error message; a reply in the wrong shape shows up as a correction with the reason.
 
 4. **Run a few trajectories** from **Generate** (for example 5 attempts). In **Jobs**, the
    **Usage** tab shows tokens and time. A local server reports no cost, so that column

@@ -5,7 +5,7 @@ metric calculation, runs as a **job**. Jobs are durable: they survive closing th
 can be paused, and they come back safely after a restart. This page explains the rules they follow.
 
 The job layer builds on the [source service](GRAPH-SOURCE.md) and the
-[artifact service](EXPORT.md), and the [event Flow](GRAPH-GENERATION.md) plugs generation and review
+[artifact service](EXPORT.md), and [generation](GRAPH-GENERATION.md) plugs Draft, Assembly and review
 into it. Jobs never execute synthetic tools.
 
 ## What you need to know
