@@ -268,6 +268,7 @@ RESERVED_BODY_FIELDS = frozenset(
         "temperature",
         "top_p",
         "presence_penalty",
+        "reasoning_effort",
     }
 )
 
@@ -278,6 +279,14 @@ class Endpoint(DTO):
     concurrency: Annotated[int, Field(ge=1)] = 1
     retries: Annotated[int, Field(ge=0)] = 2
     timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    # When every retry fails the endpoint pauses. If set, it reconnects by itself after
+    # this many seconds and tries again; None leaves it paused until a manual Resume.
+    reconnect_seconds: Annotated[float, Field(gt=0)] | None = None
+    # Reasoning level sent as reasoning_effort, such as "none" (reasoning off), "low" or
+    # "high"; None omits
+    # the field so the model uses its own default.
+    # Any non-empty string is accepted, since some models use their own level names.
+    reasoning: Identifier | None = None
     temperature: Annotated[float, Field(ge=0, le=2)] | None = None
     top_p: Annotated[float, Field(ge=0, le=1)] | None = None
     presence_penalty: Annotated[float, Field(ge=-2, le=2)] | None = None

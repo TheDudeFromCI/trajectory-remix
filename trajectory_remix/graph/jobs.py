@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from . import reconnect
 from . import usage as usage_log
 from .failure_reason import endpoint_failure
 from .log_levels import check as check_level
@@ -116,6 +117,7 @@ class JobService:
         self._calls = {}
         with store.connect() as db:
             db.executescript(SCHEMA)
+            reconnect.ensure_columns(db)
             migrate_log_levels(db)
         self.configure_endpoints()
         if recover:
@@ -131,9 +133,10 @@ class JobService:
         with self.store.connect() as db:
             for ident, endpoint in settings.endpoints.items():
                 db.execute(
-                    """INSERT INTO graph_endpoints(id,concurrency,retries) VALUES(?,?,?)
-                    ON CONFLICT(id) DO UPDATE SET concurrency=excluded.concurrency,retries=excluded.retries""",
-                    (ident, endpoint.concurrency, endpoint.retries),
+                    """INSERT INTO graph_endpoints(id,concurrency,retries,reconnect_seconds)
+                    VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET concurrency=excluded.concurrency,
+                    retries=excluded.retries,reconnect_seconds=excluded.reconnect_seconds""",
+                    (ident, endpoint.concurrency, endpoint.retries, endpoint.reconnect_seconds),
                 )
 
     def _job(self, db, ident):
@@ -712,18 +715,25 @@ class JobService:
                 db.execute("UPDATE graph_requests SET retries=retries+1 WHERE id=?", (ticket.id,))
                 return True
             db.execute("UPDATE graph_endpoints SET paused=1 WHERE id=?", (ticket.endpoint,))
+            reconnect.schedule(db, ticket.endpoint, self.clock())
             db.execute(
                 "UPDATE graph_requests SET state='queued',result=NULL WHERE id=?", (ticket.id,)
             )
             self._notify(db, ticket.job_id)
             return False
 
+    def reconnect_due(self):
+        """Resume endpoints whose automatic reconnect delay has elapsed."""
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return reconnect.resume_due(db, self.clock())
+
     def resume_endpoint(self, endpoint):
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM graph_endpoints WHERE id=?", (endpoint,)).fetchone():
                 raise KeyError("Endpoint not found")
-            db.execute("UPDATE graph_endpoints SET paused=0 WHERE id=?", (endpoint,))
+            db.execute("UPDATE graph_endpoints SET paused=0,resume_at=NULL WHERE id=?", (endpoint,))
             db.execute(
                 "UPDATE graph_requests SET retries=0 WHERE endpoint=? AND state='queued'",
                 (endpoint,),
