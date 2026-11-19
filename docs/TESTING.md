@@ -60,7 +60,7 @@ skips this module; do not report training connectivity verified in that case.
 Coverage includes strict source grammar/diagnostics, metadata/profile independence,
 framing/EOS/NOOP/replacement, causal frontiers, split families, CRC/bounds, source
 CAS, locks/fencing, frozen runs, endpoint FIFO/retries/manual recovery, bulk deltas,
-log/artifact lifecycle, REST/MCP, both timeline modes, trailing debounce and stale
+log/artifact lifecycle, REST/MCP (legacy and 2026-07-28 protocols), both timeline modes, trailing debounce and stale
 responses, Workbench B structure/pins, and fake-provider generation/reviews/repair.
 The old phase visibility predicate remains only as a test oracle. Native schema
 projection regressions remain independently of the retired replay runtime.
