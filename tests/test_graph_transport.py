@@ -11,13 +11,25 @@ import pytest
 
 from trajectory_remix.graph.storage import GraphStore
 
+LEGACY_INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": {"name": "transport-test", "version": "1"},
+    },
+}
+
 
 @pytest.mark.asyncio
 async def test_official_clients_share_graph_edits_and_origin_policy(tmp_path):
     pytest.importorskip("mcp")
+    import httpx2
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
 
     root = Path(__file__).parents[1]
     path = tmp_path / "transport.sqlite"
@@ -67,13 +79,29 @@ async def test_official_clients_share_graph_edits_and_origin_policy(tmp_path):
                 )
                 assert preflight.status_code == 200
                 assert preflight.headers["access-control-allow-origin"] == "http://127.0.0.1:8123"
+                # Pre-2026 clients still get a stateful session from the manager.
+                legacy = await client.post(
+                    "/mcp",
+                    headers={
+                        "Origin": "http://127.0.0.1:8123",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json=LEGACY_INITIALIZE,
+                )
+                assert legacy.status_code == 200 and legacy.headers["mcp-session-id"]
                 ident = str(uuid4())
-                async with streamablehttp_client(
-                    base + "/mcp", headers={"Origin": "http://127.0.0.1:8123"}
-                ) as (read, write, session_id):
+                browser = httpx2.AsyncClient(
+                    headers={"Origin": "http://127.0.0.1:8123"}, trust_env=False
+                )
+                async with (
+                    browser,
+                    streamable_http_client(base + "/mcp", http_client=browser) as (
+                        read,
+                        write,
+                    ),
+                ):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
-                        assert session_id()
                         created = await session.call_tool(
                             "create_graph",
                             {
@@ -91,10 +119,10 @@ async def test_official_clients_share_graph_edits_and_origin_policy(tmp_path):
                                 },
                             },
                         )
-                        assert not created.isError
+                        assert not created.is_error
                         # The official client keeps GET/SSE open while POST calls work.
                         readback = await session.call_tool("read_graph", {"id": ident})
-                        assert readback.structuredContent["revision"] == 1
+                        assert readback.structured_content["revision"] == 1
                 params = StdioServerParameters(
                     command=sys.executable,
                     args=["-m", "trajectory_remix.mcp_server", "--url", base],
@@ -104,8 +132,8 @@ async def test_official_clients_share_graph_edits_and_origin_policy(tmp_path):
                     await session.initialize()
                     existing = await session.call_tool("read_graph", {"id": ident})
                     assert (
-                        not existing.isError
-                        and existing.structuredContent["source"]["events"]["a"]["content"]
+                        not existing.is_error
+                        and existing.structured_content["source"]["events"]["a"]["content"]
                         == "shared"
                     )
                     patch = await session.call_tool(
@@ -117,7 +145,7 @@ async def test_official_clients_share_graph_edits_and_origin_policy(tmp_path):
                             "patch": {"content": "updated"},
                         },
                     )
-                    assert not patch.isError and patch.structuredContent["revision"] == 2
+                    assert not patch.is_error and patch.structured_content["revision"] == 2
                     conflict = await session.call_tool(
                         "patch_graph_event",
                         {
@@ -127,7 +155,7 @@ async def test_official_clients_share_graph_edits_and_origin_policy(tmp_path):
                             "patch": {"content": "stale"},
                         },
                     )
-                    assert conflict.isError
+                    assert conflict.is_error
                 assert GraphStore(path).read(ident).source.events["a"].content == "updated"
         finally:
             process.terminate()

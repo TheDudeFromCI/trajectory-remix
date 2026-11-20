@@ -19,6 +19,7 @@ python -m trajectory_remix graph-studio --dataset project.sqlite \
   (`localhost` and `127.0.0.1` differ). Repeat it for several. Host and origin checks are separate from the REST API's
   local session token.
 - Without the MCP SDK installed, the dashboard works and `/mcp` explains how to install it.
+- Both current (2026-07-28) and older MCP clients can connect; the SDK picks the protocol version for each client.
 - Run Remix on loopback only. This is a trusted, single-user local service.
 
 **stdio** clients launch a small bridge that talks to the same running studio:
