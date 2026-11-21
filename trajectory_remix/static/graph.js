@@ -586,7 +586,8 @@ export class StudioUI {
     for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
       const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'draft' ? 'danger' : 'faint')); roleList.append(row);
     }
-    box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
+    box.append(roleList);
+    $('generation-endpoints-button').onclick = () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); };
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
     const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); grid.append(label); return input; };
     const saved = loadRunInputs();
