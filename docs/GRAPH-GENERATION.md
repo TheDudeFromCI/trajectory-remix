@@ -164,8 +164,9 @@ Synthetic tools are never executed. A tool result is whatever Draft wrote as its
 
 ## Tools and chat during generation
 
-- Assembly chooses the tools the agent is shown. Remix writes a **Show tools** listing before the
-  opening event: the chosen tools plus a repeatable random selection of others.
+- Assembly chooses the tools the agent is shown. Remix writes a `tool_schema` event before the
+  opening event: the chosen tools plus a repeatable random selection of others, at the
+  project's random-tool chance (Project defaults).
 - Tool calls and results are ordinary events. Results are free-form text.
 - A `chat` call delivers its `content` to the chatroom automatically, as a masked
   `chat_message` with the ID `<call id>:echo`. A person's reply follows that echo. A delivery

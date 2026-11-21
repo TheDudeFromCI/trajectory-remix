@@ -1,7 +1,7 @@
 """The compact episode spec the assemble pass writes, and its conversion to a graph source.
 
 A spec lists windows and events in causal order with short field names. The builder adds
-what follows from them: the tool listing event, tool-call IDs on results, chat deliveries
+what follows from them: the tool_schema event listing the tools, tool-call IDs on results, chat deliveries
 (:echo events) and canonical JSON tool arguments. It never invents content.
 """
 
@@ -121,7 +121,11 @@ def build(spec, base, tools, extra_tools=0.5):
     data["metadata"] = dict(base.get("metadata", {}), shown_tools=listed["shown"])
     data["windows"][LISTING] = dict(purpose=tool_listing.WINDOW_PURPOSE, agent_writable=False)
     data["events"][LISTING] = dict(
-        kind="external_text", window=LISTING, after=[], content=listed["content"]
+        kind="tool_schema",
+        window=LISTING,
+        after=[],
+        content=listed["content"],
+        extra_tools=listed["added"],
     )
     for window in spec["windows"]:
         if window["id"] in data["windows"]:

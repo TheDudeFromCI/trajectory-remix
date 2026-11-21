@@ -328,3 +328,4 @@ td.faint { color: var(--ink-faint); }
 .tool-picker legend { padding: 0 var(--space-1); font-size: 12px; }
 #tool-picker[hidden] { display: none; }
 #event-content[hidden], #panel-content .content-head[hidden] { display: none; }
+.wt-tool.random, .checkbox.random { opacity: 0.5; }

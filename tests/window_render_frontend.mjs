@@ -59,6 +59,11 @@ assert.equal(toolItems[1].querySelector('.wt-tool-desc'), null);
 assert.equal(windowBody(toolTokens, {raw: false, purpose: 'tools', isAgent}).textContent.includes('parameters'), false);
 assert.equal(windowBody(toolTokens, {raw: false, purpose: 'reasoning', isAgent}).querySelectorAll('.wt-tool').length, 0);
 assert.ok(windowBody(toolTokens, {raw: true, purpose: 'tools', isAgent}).textContent.includes('"parameters"'));
+// Random extras (tool_schema extra_tools) are grayed out, or left out when hidden in Preferences.
+const withExtras = {raw: false, purpose: 'tools', isAgent, toolExtras: () => ['fetch']};
+const items = windowBody(toolTokens, withExtras).querySelectorAll('.wt-tool');
+assert.deepEqual([...items].map(i => i.classList.contains('random')), [false, true]);
+assert.deepEqual([...windowBody(toolTokens, {...withExtras, hideExtras: true}).querySelectorAll('.wt-tool-name')].map(n => n.textContent), ['search']);
 assert.equal(windowBody([...text('{"name":"a"}\nnot json')], {raw: false, purpose: 'tools', isAgent}).querySelectorAll('.wt-tool').length, 0);
 
 console.log('Window renderers and Flow YAML: NOOP folding, segments, speakers, JSON formatting, bubbles, raw mode and lossless folding passed.');

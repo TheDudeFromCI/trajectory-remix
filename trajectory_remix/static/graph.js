@@ -4,7 +4,6 @@ import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
-import {openShowTools} from './show-tools.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
@@ -83,7 +82,7 @@ async function intrinsicHash(source) {
 export class StudioUI {
   constructor() {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('graph-preferences') || '{}'); } catch {}
-    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, ...saved};
+    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, ...saved};
     if (!Number.isFinite(this.prefs.zoom)) this.prefs.zoom = 1;
     this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
@@ -219,7 +218,7 @@ export class StudioUI {
   }
   applyLock() {
     const locked = !!this.record?.owner;
-    for (const id of ['save-source', 'delete-sample', 'new-event', 'show-tools', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
+    for (const id of ['save-source', 'delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
     for (const root of ['graph-editor-fields', 'metadata-panel']) {
       const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) input.disabled = locked;
     }
@@ -314,19 +313,23 @@ export class StudioUI {
     // renderDraft() runs before the baseline above is reset, so refresh the badge now.
     if (this.record) this.renderDirty();
   }
-  /** Only the event `tools` in the window `tools` swaps its text box for tool checkboxes. */
+  /** A tool_schema event swaps its text box for tool checkboxes; every other kind keeps the text box. */
   renderToolPicker() {
     const holder = $('tool-picker'), head = document.querySelector('#panel-content .content-head');
-    const isTools = this.event === 'tools' && $('event-window').value === 'tools' && $('event-kind').value === 'external_text' && $('content-mode').value === 'text';
-    holder.hidden = !isTools; $('event-content').hidden = isTools; if (head) head.hidden = isTools;
-    if (!isTools) { holder.replaceChildren(); return; }
-    renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
-      lineFor: async name => (await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: [name], extra_tools: 0})).content,
-      onChange: text => { $('event-content').value = text; this.stashEditor(); this.applyEvent(); this.renderToolPicker(); }});
+    const isSchema = $('event-kind').value === 'tool_schema' && $('content-mode').value === 'text';
+    holder.hidden = !isSchema; $('event-content').hidden = isSchema; if (head) head.hidden = isSchema;
+    if (!isSchema) { holder.replaceChildren(); return; }
+    const saved = this.draft.events[this.event], extras = saved?.kind === 'tool_schema' ? saved.extra_tools || [] : [];
+    renderToolPicker(holder, {text: $('event-content').value, extras, tools: this.settings?.tools || {}, hideExtras: !this.prefs.showRandomTools, disabled: !!this.record?.owner, report: message,
+      relist: async chosen => {
+        const listing = await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: chosen});
+        $('event-content').value = listing.content; this.toolExtras = {event: this.event, names: listing.added};
+        this.stashEditor(); this.applyEvent(); this.toolExtras = null; this.renderToolPicker();
+      }});
   }
   kindControls() {
     const kind = $('event-kind').value, tool = kind === 'tool_call', response = kind === 'tool_response', chat = kind === 'chat_message';
-    const external = response || kind === 'external_text';
+    const external = response || kind === 'external_text' || kind === 'tool_schema';
     for (const [id, show] of Object.entries({'call-id': tool || response || chat, 'tool-id': tool, 'chat-speaker': chat, delivery: external, chain: external || chat, 'replace-body': external, begin: tool || response, end: tool || response, 'echo-chat': tool})) $(id).closest('label').hidden = !show;
   }
   renderArguments() {
@@ -343,13 +346,14 @@ export class StudioUI {
     }
   }
   composeEvent() {
-    const kind = $('event-kind').value, external = ['external_text', 'tool_response', 'chat_message'].includes(kind);
+    const kind = $('event-kind').value, external = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes(kind);
     let content = $('event-content').value;
     if ($('content-mode').value === 'json' && !['tool_call', 'tool_response'].includes(kind)) content = JSON.parse(content);
     const e = {kind, window: $('event-window').value, after: this.draft.events[this.event]?.after || [], content,
       close_window: $('close-window').checked, supervision: {masked: $('masked').checked, weight: Number($('weight').value)}};
     if (external) e.delivery = {mode: kind === 'chat_message' ? 'instant' : $('delivery').value, chain_immediately: $('chain').checked};
-    if (kind === 'external_text' || kind === 'tool_response') e.replace_body = $('replace-body').checked;
+    if (kind === 'external_text' || kind === 'tool_schema' || kind === 'tool_response') e.replace_body = $('replace-body').checked;
+    if (kind === 'tool_schema') { const saved = this.draft.events[this.event]; e.extra_tools = this.toolExtras?.event === this.event ? this.toolExtras.names : saved?.kind === 'tool_schema' ? saved.extra_tools || [] : []; }
     if (kind === 'tool_call' || kind === 'tool_response') e.call_id = $('call-id').value;
     if (kind === 'tool_call') Object.assign(e, {tool: $('tool-id').value, insert_tool_begin: $('begin').checked, insert_tool_end: $('end').checked, echo_chat: $('echo-chat').checked});
     if (kind === 'tool_response') Object.assign(e, {insert_response_begin: $('begin').checked, insert_response_end: $('end').checked});
@@ -491,7 +495,7 @@ export class StudioUI {
     size.append(icon(popout ? 'shrink' : 'expand')); size.setAttribute('aria-label', `${popout ? 'Shrink' : 'Expand'} window ${id}`);
     size.dataset.tip = popout ? 'Shrink back to the window grid (Esc)' : 'Expand this window into a large panel';
     head.append(toggle, size);
-    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker)}));
+    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.draft.events[event]?.extra_tools || [], hideExtras: !this.prefs.showRandomTools}));
     return card;
   }
   openPopout(id) { this.popoutWindow = id; $('window-popout').hidden = false; this.renderPopout(); $('window-popout').querySelector('.window-shrink')?.focus(); }
@@ -760,7 +764,7 @@ export class StudioUI {
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
       if (e.detail === 'review-view') this.openReview().catch(message);
     });
-    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce;
+    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
     on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.renderDirty(); this.renderTimeline(); await this.listing(); });
@@ -771,14 +775,8 @@ export class StudioUI {
       this.stashEditor(); this.draft.events[id] = {kind: 'agent_text', window: Object.keys(this.draft.windows)[0] || 'reasoning', after: [], content: '', close_window: false, supervision: {masked: false, weight: 1}};
       this.event = id; this.renderDraft(); this.renderEvent(); this.changed();
     });
-    on('show-tools', 'click', async () => {
-      if (!this.draft) return; this.stashEditor(); await this.loadSettings();
-      openShowTools({api, draft: this.draft, tools: this.settings.tools || {}, report: message, onAdd: ({eventId}) => {
-        this.event = eventId; this.renderDraft(); this.renderEvent(); this.changed();
-      }});
-    });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
-    on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderToolPicker(); });
+    on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderToolPicker(); });
     on('content-mode', 'change', () => { this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
     on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
     for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
@@ -793,7 +791,7 @@ export class StudioUI {
     for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
-    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
+    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
     on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };

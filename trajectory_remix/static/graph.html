@@ -172,7 +172,6 @@
       <select id="event-picker" aria-label="Event"></select>
       <div class="widget-actions">
         <button id="new-event" class="ghost icon sm" aria-label="Add event" data-tip="Add an event to this trajectory"><svg class="ico"><use href="#i-plus"/></svg></button>
-        <button id="show-tools" class="ghost sm" data-tip="List tool schemas for the agent as a masked event, optionally with random additional tools">Show tools…</button>
         <button id="delete-event" class="ghost icon sm" aria-label="Delete event" data-tip="Delete the selected event"><svg class="ico"><use href="#i-trash"/></svg></button>
       </div>
     </div>
@@ -189,7 +188,7 @@
       <div role="tabpanel" id="panel-content" aria-labelledby="tab-content" class="panel-body">
         <div id="event-empty" class="empty">No event selected. Add one with + above.</div>
         <div class="form-grid two event-context">
-          <label>Kind <select id="event-kind"><option value="agent_text">Agent text</option><option value="external_text">External input</option><option value="tool_call">Tool call</option><option value="tool_response">Tool result</option><option value="chat_message">Chat message</option></select></label>
+          <label>Kind <select id="event-kind"><option value="agent_text">Agent text</option><option value="external_text">External input</option><option value="tool_schema">Tool schema</option><option value="tool_call">Tool call</option><option value="tool_response">Tool result</option><option value="chat_message">Chat message</option></select></label>
           <label>Window <select id="event-window"></select></label>
           <label>Call ID <input id="call-id"></label>
           <label>Tool <select id="tool-id"></select></label>
@@ -323,6 +322,7 @@
       <label>Preview tokenizer <select id="preview-profile"></select></label>
       <label>Preview delay (ms) <input id="preview-debounce" type="number" min="0" max="10000" value="500"></label>
     </div>
+    <label class="checkbox"><input id="show-random-tools" type="checkbox" checked> Show randomly added tools (grayed out) in tool schema events</label>
     <p class="note">Stored in this browser only. Tick history uses the preview tokenizer; graph authoring never needs one.</p>
   </div>
   <div class="dialog-foot"><p class="status-line" data-status></p><button id="preferences-save" class="primary">Save</button></div>

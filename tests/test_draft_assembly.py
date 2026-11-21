@@ -72,7 +72,7 @@ def test_builder_fills_in_listing_echo_and_call_ids(tmp_path):
     tools = {k: v.model_dump(mode="json") for k, v in gen.store.settings().settings.tools.items()}
     base = dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
     data = compact_spec.build(spec(), base, tools)
-    assert data["events"]["tools"]["kind"] == "external_text"
+    assert data["events"]["tools"]["kind"] == "tool_schema"
     assert data["events"]["ask"]["chat"] == {"speaker": "Ana"}
     assert data["events"]["look"]["content"] == '{"path":"a.md"}'
     assert data["events"]["look"]["close_window"] is True

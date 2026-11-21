@@ -1,4 +1,4 @@
-"""Show tools listing: chosen tools plus a repeatable random selection of others."""
+"""Tool schema listing: chosen tools plus a repeatable random selection of others."""
 
 import pytest
 from test_graph_generation import DRAFT, finish, service, spec
@@ -24,7 +24,7 @@ async def test_assembly_writes_the_listing_before_the_opening(tmp_path):
     await finish(gen, job)
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     listing = source.events["tools"]
-    assert listing.kind == "external_text" and source.windows[listing.window].purpose == "tools"
+    assert listing.kind == "tool_schema" and source.windows[listing.window].purpose == "tools"
     assert source.events["ask"].after == ["tools"]
     assert {"chat", "read"} <= set(source.metadata["shown_tools"])
 

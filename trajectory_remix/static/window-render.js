@@ -132,7 +132,7 @@ function noopChip(count) {
 }
 
 /** Formatted view: chat bubbles for chatrooms, tool name lists for tools windows, JSON blocks for tool traffic. */
-function formattedBody(tokens, {purpose, isAgent}) {
+function formattedBody(tokens, {purpose, isAgent, toolExtras = () => [], hideExtras = false}) {
   const body = node('div', undefined, 'window-formatted');
   const chat = purpose === 'chatroom', speakers = new Map();
   const tone = name => { if (!speakers.has(name)) speakers.set(name, SPEAKER_TONES[speakers.size % SPEAKER_TONES.length]); return speakers.get(name); };
@@ -161,7 +161,7 @@ function formattedBody(tokens, {purpose, isAgent}) {
       block.append(label, jsonBlock(part.text) || node('div', part.text, 'wt-text'));
       body.append(block);
     } else if (part.type === 'text') {
-      body.append((purpose === 'tools' && toolListBlock(part.text)) || jsonBlock(part.text) || node('div', part.text, 'wt-text'));
+      body.append((purpose === 'tools' && toolListBlock(part.text, {extras: toolExtras(part.event), hideExtras})) || jsonBlock(part.text) || node('div', part.text, 'wt-text'));
     } else if (part.type === 'control') {
       body.append(part.control === 'noop' ? noopChip(part.count) : node('span', controlLabel(part.control), 'token-block'));
     }

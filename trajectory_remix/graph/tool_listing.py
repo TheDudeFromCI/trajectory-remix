@@ -1,10 +1,10 @@
-"""The Show tools listing: the tools an episode's agent is shown.
+"""The tool_schema listing: the tools an episode's agent is shown.
 
 Assembly chooses the episode's tools; Remix then writes the listing itself: a masked
-external_text event in a window whose purpose is "tools", holding the chosen tools'
-schemas plus a random selection of other tools (each included with the extra_tools
-probability, seeded by the trajectory and event IDs, so the same trajectory always gets
-the same list). Manual authoring's Show tools uses the same listing.
+tool_schema event in a window whose purpose is "tools", holding the chosen tools'
+schemas plus a random selection of other tools (each included with the project's
+tool_schema_extra_chance, seeded by the trajectory and event IDs, so the same trajectory
+always gets the same list). Manual authoring's tool checkboxes use the same listing.
 """
 
 import hashlib

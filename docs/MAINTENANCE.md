@@ -84,7 +84,6 @@ node tests/provider_options_frontend.mjs
 node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/tool_import_frontend.mjs
-node tests/show_tools_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 python tests/run_layout_frontend.py
@@ -192,6 +191,6 @@ Schema corrections: `graph/schema_errors.py` turns a schema violation into a sho
 correction naming each failing field (it looks inside "object or null" alternatives and
 shortens quoted values).
 
-Show tools: `python -m pytest -q tests/test_tool_listing.py` checks the repeatable random
-additions, that Assembly writes the listing as a masked event before the opening, and that
-manual authoring's listing route matches it (`graph/tool_listing.py`, `graph/tools_api.py`).
+Tool schema: `python -m pytest -q tests/test_tool_listing.py` checks the repeatable random
+additions, that Assembly writes a `tool_schema` event (with `extra_tools`) before the opening,
+that the project's random-tool chance applies (0 disables it), and that manual authoring's listing route matches it (`graph/tool_listing.py`, `graph/tools_api.py`).

@@ -109,6 +109,7 @@ takes an optional `agent`, the specialist chosen from the roster the episode sho
 | Train / development / test fractions | Must total 1. Used when export assigns splits. |
 | Reasoning effort levels | Defaults to Low, Medium and High. |
 | Log cache size (MiB) | Project-wide retained log cap. Default 1024, blank means unlimited. |
+| Random extra tools (%) | Chance that each tool you didn't choose is still listed in a `tool_schema` event, so the agent learns to ignore unneeded tools. Default 50, `0` turns it off. Applies to Assembly and to manual tool checkboxes. |
 
 ## Review criteria
 

@@ -23,7 +23,6 @@ REQUIRED = [
     "static/tool-picker.js",
     "static/usage-view.js",
     "static/tool-import.js",
-    "static/show-tools.js",
     "static/prompt-settings.js",
     "static/checklist-settings.js",
     "static/review-pack.js",

@@ -17,14 +17,19 @@ export function parseToolListing(text) {
   return tools;
 }
 
-/** A formatted list element, or null when the text is not a tools listing. */
-export function toolListBlock(text) {
-  const tools = parseToolListing(text);
-  if (!tools) return null;
+/**
+ * A formatted list element, or null when the text is not a tools listing.
+ * Names in `extras` (tools added at random) are grayed out, or left out with hideExtras.
+ */
+export function toolListBlock(text, {extras = [], hideExtras = false} = {}) {
+  const all = parseToolListing(text);
+  if (!all) return null;
+  const tools = hideExtras ? all.filter(tool => !extras.includes(tool.name)) : all;
   const list = node('ul', undefined, 'wt-tools');
   list.setAttribute('aria-label', `${tools.length} tool${tools.length === 1 ? '' : 's'}`);
   for (const tool of tools) {
-    const item = node('li', undefined, 'wt-tool');
+    const item = node('li', undefined, 'wt-tool' + (extras.includes(tool.name) ? ' random' : ''));
+    if (extras.includes(tool.name)) item.dataset.tip = 'Added at random; not one of the chosen tools.';
     item.append(node('code', tool.name, 'wt-tool-name'));
     if (tool.description && tool.description !== tool.name) item.append(node('span', tool.description, 'wt-tool-desc small muted'));
     list.append(item);

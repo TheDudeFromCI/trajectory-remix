@@ -110,6 +110,20 @@ class ExternalText(Event):
     replace_body: bool = False
 
 
+class ToolSchema(Event):
+    """The tools the agent is shown: JSON lines of tool schemas, as masked external input.
+
+    extra_tools names the lines that were added at random rather than chosen; the
+    dashboard shows them grayed out. The compiler treats the event like external_text.
+    """
+
+    kind: Literal["tool_schema"]
+    supervision: Supervision = Field(default_factory=external_supervision)
+    delivery: Delivery = Field(default_factory=Delivery)
+    replace_body: bool = False
+    extra_tools: list[Identifier] = Field(default_factory=list)
+
+
 class ToolCall(Event):
     kind: Literal["tool_call"]
     supervision: Supervision = Field(default_factory=Supervision)
@@ -144,7 +158,8 @@ class ChatMessage(Event):
 
 
 GraphEvent = Annotated[
-    AgentText | ExternalText | ToolCall | ToolResponse | ChatMessage, Field(discriminator="kind")
+    AgentText | ExternalText | ToolSchema | ToolCall | ToolResponse | ChatMessage,
+    Field(discriminator="kind"),
 ]
 
 
@@ -441,6 +456,8 @@ class ProjectSettings(DTO):
     sampler_configuration: dict[str, JsonValue] | None = None
     split_ratios: SplitRatios = Field(default_factory=SplitRatios)
     log_cache_mib: Annotated[int, Field(ge=0)] | None = 1024
+    # Chance that each tool outside a tool_schema event's chosen tools is listed anyway (0 = never).
+    tool_schema_extra_chance: Annotated[float, Field(ge=0, le=1)] = 0.5
 
     @model_validator(mode="after")
     def references(self):

@@ -98,7 +98,8 @@ def assemble(source, body, plan, settings):
     base = source.to_dict()
     base.pop("windows", None)
     base.pop("events", None)
-    built = GraphSource.model_validate(compact_spec.build(body, base, plan["tools"]))
+    data = compact_spec.build(body, base, plan["tools"], settings.tool_schema_extra_chance)
+    built = GraphSource.model_validate(data)
     if not any(e.kind in {"agent_text", "tool_call"} for e in built.events.values()):
         raise ValueError("The episode needs at least one think or call event by the agent")
     return built, [d for d in diagnose(built, settings) if d.severity == "error"]
