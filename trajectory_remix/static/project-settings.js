@@ -1,5 +1,6 @@
 /* Form editors over the existing project-settings DTO. No network or credentials. */
 import {renderPromptSettings} from './prompt-settings.js';
+import {renderChecklistSettings} from './checklist-settings.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
@@ -201,8 +202,8 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const {current, write, input, status, error, report} = editor(container, initial, options);
   const render = notice => renderGenerationSettings(container, current(), {...(options.getSettings ? options : {...options, getSettings: current}), notice});
   const column = name => node('div', undefined, `review-column review-column-${name}`);
-  const settingsColumn = column('settings'), coreColumn = column('core'), criticalColumn = column('critical');
-  container.classList.add('review-columns'); container.append(settingsColumn, coreColumn, criticalColumn);
+  const settingsColumn = column('settings'), promptsColumn = column('prompts'), checklistColumn = column('checklist');
+  container.classList.add('review-columns'); container.append(settingsColumn, promptsColumn, checklistColumn);
   tipHeading(settingsColumn, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
   const toggle = (key, title) => {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
@@ -218,33 +219,9 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const bytes = input('Repair transcript byte limit', current().generation?.repair_context_bytes ?? 65536, value => write(d => { d.generation ||= {}; d.generation.repair_context_bytes = value; }), 'number'); bytes.min = 256; bytes.step = 1;
   const rounds = input('Repair rounds', current().generation?.repair_rounds ?? 3, value => write(d => { d.generation ||= {}; d.generation.repair_rounds = value; }), 'number'); rounds.min = 1; rounds.max = 10; rounds.step = 1;
   limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), field('Repair rounds', rounds), node('p', 'A repair fails only when the repairer gives up. A session that reaches the transcript limit starts a fresh round on the current graph; the round count caps spending.', 'settings-help')); settingsColumn.append(limits);
-  const checklistHelp = 'Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
-  for (const [group, target] of [['core', coreColumn], ['critical', criticalColumn]]) {
-    if (group === 'core') tipHeading(target, 'Core checklist', `Applied in both Fast and Critical Review. ${checklistHelp}`); else tipHeading(target, 'Critical checklist', 'Additional criteria applied only during Critical Review, on top of the core checklist.');
-    const section = node('section', undefined, 'settings-card');
-    for (const [id, criterion] of Object.entries(current().review_checklists?.[group] || {})) {
-      const row = node('div', undefined, 'settings-criterion'), text = node('textarea'); text.value = criterion.text; text.setAttribute('aria-label', `${group} criterion ${id}`);
-      text.oninput = () => write(d => { d.review_checklists[group][id].text = text.value; });
-      const allowed = node('input'); allowed.type = 'checkbox'; allowed.checked = criterion.allow_not_applicable; allowed.setAttribute('aria-label', `${group} ${id} allow not applicable`);
-      allowed.onchange = () => write(d => { d.review_checklists[group][id].allow_not_applicable = allowed.checked; });
-      row.append(field(id, text), field('Allow not applicable', allowed), button(`Remove ${group} criterion ${id}`, () => { write(d => { delete d.review_checklists[group][id]; }); render(); })); section.append(row);
-    }
-    const id = input(`New ${group} criterion ID`, '', () => {});
-    section.append(field('New criterion ID', id), button(`Add ${group} criterion`, () => {
-      const key = id.value.trim(); if (!validId(key) || Object.hasOwn(current().review_checklists?.[group] || {}, key)) return error('Use a unique criterion ID with lowercase letters, numbers, hyphens or underscores.');
-      write(d => { d.review_checklists ||= {}; d.review_checklists[group] ||= {}; d.review_checklists[group][key] = {text:'New criterion', allow_not_applicable:false}; }); render();
-    })); target.append(section);
-  }
-  if (options.loadDefaultChecklists) {
-    const reset = node('div', undefined, 'settings-limits'); reset.append(node('h4', 'Review checklists'));
-    reset.append(button('Reset review checklists to defaults', async () => {
-      let defaults;
-      try { defaults = await options.loadDefaultChecklists(); } catch (cause) { return error('Could not load the default checklists: ' + cause.message); }
-      if (!confirm('Replace the Core and Critical review checklists with the defaults? Your added, edited and removed criteria in this draft will be lost. Nothing is saved until you choose Save settings.')) return;
-      write(d => { d.review_checklists = copy(defaults); }); render('Review checklists reset to the defaults. Choose Save settings to keep them.');
-    }), node('p', 'Replaces both lists with the packaged defaults. Saving changed checklists marks affected sign-offs stale.', 'settings-help')); settingsColumn.append(reset);
-  }
-  renderPromptSettings(settingsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
+  tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
+  renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
+  renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading});
   settingsColumn.append(status);
   if (options.notice) report(options.notice);
   if (options.footer) settingsColumn.append(options.footer);
