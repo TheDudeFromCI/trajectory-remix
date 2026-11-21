@@ -237,6 +237,9 @@ td.faint { color: var(--ink-faint); }
 .role-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: 13px; }
 .pin-list { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .pin-list > .muted { margin-right: var(--space-1); }
+.barrier-list { display: grid; gap: var(--space-1); margin: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 6px; }
+.barrier-list legend { padding: 0 var(--space-1); }
+.barrier-list label { display: flex; align-items: center; gap: var(--space-2); }
 #generation-start { align-self: stretch; }
 
 /* ---------- Compact viewports ---------- */
