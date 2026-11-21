@@ -26,6 +26,12 @@ detail in the "For developers" sections or in contributor docs
 [ACCEPTANCE](docs/ACCEPTANCE.md)). Keep existing filenames and heading anchors that
 other pages link to, and update every link if you move content.
 
+## UI changes
+
+When you update the UI, send the user a screenshot of the result if you can
+(for example, capture one with the pre-installed Playwright/Chromium and share it
+with `SendUserFile`). If a screenshot isn't possible, say so and explain why.
+
 ## Code quality and formatting
 
 - **Prefer small modules.** Put new functionality in new, focused modules (one
