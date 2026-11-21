@@ -33,7 +33,7 @@ def test_duplicate_dependency_warns_without_changing_the_schedule(tmp_path):
 def test_cycle_reports_every_member_excluding_blocked_descendants():
     graph = source(
         {
-            "a": event("external_text", "a", after=["b", "c"]),
+            "a": event("agent_text", "a", after=["b", "c"]),
             "b": event("external_text", "b", after=["a"]),
             "c": event("external_text", "c", after=["b"]),
             "descendant": event("external_text", "descendant", after=["c"]),
@@ -82,7 +82,16 @@ def test_parallel_fragments_use_window_order_and_consistency_diagnostics(kind, s
         }
         inconsistent = "inconsistent_response"
 
-    graph = source(events)
+    windows = {
+        definition["window"]: dict(purpose="document", agent_writable=True)
+        for definition in events.values()
+    }
+    windows["tools"] = dict(purpose="tools", agent_writable=False)
+    events["tools"] = event("tool_schema", "tools", '{"name":"example","parameters":{}}')
+    for definition in events.values():
+        if definition["kind"] == "tool_call":
+            definition["after"].append("tools")
+    graph = source(events, windows)
     diagnostics = GraphCompiler.dry_run(graph)
     compiler = GraphCompiler(profile())
     if same_window:

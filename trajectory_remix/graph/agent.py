@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, create_model
 
+from .authoring_tools import READ_ONLY, TOOLS
 from .flow import SamplerRun
 from .models import DTO, GraphSource, JsonValue
 from .reviews import ReviewInput
@@ -103,6 +104,20 @@ TASKS = {
     ),
 }
 
+AUTHORING_TASKS = {
+    name: (
+        create_model(
+            model.__name__ + "Request",
+            __base__=model,
+            id=(str, ...),
+            **({} if name in READ_ONLY else {"expected_revision": (int, Field(ge=1))}),
+        ),
+        description,
+    )
+    for name, (model, description) in TOOLS.items()
+}
+TASKS.update(AUTHORING_TASKS)
+
 
 class GraphAgent:
     instructions = (
@@ -153,6 +168,15 @@ class GraphAgent:
             return s.listing(args.query, limit=args.limit, offset=args.offset)
         if name == "read_graph":
             return s.read(args.id)
+        if name in AUTHORING_TASKS:
+            return s.commands.author(
+                args.id,
+                name,
+                args.model_dump(
+                    mode="json", exclude_unset=True, exclude={"id", "expected_revision"}
+                ),
+                expected_revision=getattr(args, "expected_revision", None),
+            )
         if name == "create_graph":
             return result(s.commands.create(args.to_dict()))
         if name == "patch_graph":

@@ -102,6 +102,16 @@ Every Draft and Assembly request includes the whole catalogue, so a larger one c
 and tokens on every trajectory. Prefer the core set and add what your episodes need. `subagent`
 takes an optional `agent`, the specialist chosen from the roster the episode shows.
 
+## Validation
+
+Open **Project Settings → Validation** to choose which warnings the compiler dry run reports.
+All warning types start enabled. Clear a checkbox to suppress that warning for current detached
+sources and new jobs. Enabled warnings block successful signoff. Structural errors always
+remain visible and block compilation.
+
+The REST settings field is `disabled_warnings`. Existing jobs keep their saved settings.
+Changing the enabled warnings can make earlier signoffs stale.
+
 ## Defaults
 
 | Setting | Notes |

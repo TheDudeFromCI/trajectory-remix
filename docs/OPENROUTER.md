@@ -36,7 +36,7 @@ What to look for:
 | Check | Why it matters |
 | --- | --- |
 | **Ready** | Remix sends JSON-schema requests. Models without structured outputs ignore them or cannot be routed. |
-| **Cache discount** | Each assembly fix and repair turn repeats the previous one. With a discount, that cached input costs a fraction of the normal price. |
+| **Cache discount** | Each native tool turn extends the conversation for that pass. With a discount, that cached input costs a fraction of the normal price. |
 | **Reasoning** | Reasoning (thinking) tokens are billed as output. The estimate assumes medium reasoning, as in the pilots; turning it off costs less, and the checker gives the right field. |
 
 A good first choice is **Mistral Small 3.2 24B**: structured outputs, no reasoning, a

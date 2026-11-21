@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import Field
 
-from . import repair_policy
+from . import repair_policy, signoffs
 from .flow import causal_view
 from .models import DTO, GraphSource, JsonValue, canonical, digest
 from .validation import diagnose
@@ -189,7 +189,19 @@ def payload(source, settings, tier, operation, history=(), correction=False):
     )
 
 
-def signoff(source, record, settings, tier, operation, body, endpoint, model, requested_model):
+def signoff(
+    source,
+    record,
+    settings,
+    tier,
+    operation,
+    body,
+    endpoint,
+    model,
+    requested_model,
+    *,
+    native=None,
+):
     result = verdict(body, source)
     old = source.metadata.get("stage", -3)
     target = (1 if tier == "fast" else 2) if result == "pass" else (-1 if tier == "fast" else -2)
@@ -206,15 +218,17 @@ def signoff(source, record, settings, tier, operation, body, endpoint, model, re
             endpoint=endpoint,
             model=model,
             requested_model=requested_model,
-            prompt_version=VERSION,
+            prompt_version=signoffs.VERSION if native is not None else VERSION,
             source_hash=source.intrinsic_hash,
-            source_revision=record.revision,
-            intrinsic_revision=record.intrinsic_revision,
+            source_revision=record.revision + (source.intrinsic_hash != record.intrinsic_hash),
+            intrinsic_revision=record.intrinsic_revision
+            + (source.intrinsic_hash != record.intrinsic_hash),
             checklists=identities(settings),
             checklist_hash=digest(checklist(settings, tier)),
             checklist=checklist(settings, tier),
             verdict=result,
             **deepcopy(body),
+            **(native or {}),
             transition={"before": old, "after": stage},
         )
     )
@@ -235,12 +249,16 @@ def stale(source, settings):
             r for r in entries if isinstance(r, dict) and r.get("tier") in {"fast", "critical"}
         ]
     if not reviews:
+        entries = source.metadata.get("authoring_signoffs")
+        if isinstance(entries, list):
+            signoff = next((entry for entry in reversed(entries) if isinstance(entry, dict)), None)
+            if signoff:
+                reasons = signoffs.stale_reasons(source, settings, signoff)
+                return dict(stale=bool(reasons), reasons=reasons, reviewed=False, signed_off=True)
         return dict(stale=False, reasons=[], reviewed=False)
     review = reviews[-1]
     tier = review["tier"]
-    reasons = []
-    if review.get("source_hash") != source.intrinsic_hash:
-        reasons.append("source_changed")
+    reasons = signoffs.stale_reasons(source, settings, review)
     hashes = identities(settings)
     for group in ("core", "critical") if tier == "critical" else ("core",):
         if review.get("checklists", {}).get(group) != hashes[group]:

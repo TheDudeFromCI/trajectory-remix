@@ -1,4 +1,5 @@
 import {renderProjectSettings, renderGenerationSettings} from './project-settings.js';
+import {renderValidationSettings} from './validation-settings.js';
 import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
@@ -200,9 +201,14 @@ export class StudioUI {
     const id = this.id, generation = this.selectionGeneration;
     const latest = await api(`/trajectories/${id}`);
     if (id !== this.id || generation !== this.selectionGeneration) return;
-    if (latest.revision === this.record.revision && latest.owner === this.record.owner) return;
+    const settingsChanged = latest.diagnostics_settings_revision !== this.record.diagnostics_settings_revision;
+    if (latest.revision === this.record.revision && latest.owner === this.record.owner && !settingsChanged) return;
     if (this.isDirty()) {
       this.record.owner = latest.owner;
+      if (settingsChanged) {
+        this.record.diagnostics_settings_revision = latest.diagnostics_settings_revision;
+        this.scheduleDiagnostics();
+      }
       this.applyLock();
       if (latest.revision !== this.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.');
       return;
@@ -249,8 +255,8 @@ export class StudioUI {
     $('metadata-json').value = json(this.draft.metadata || {});
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
     const stale = this.record.review_status?.stale;
-    $('review-stale').textContent = stale ? 'Review stale' : '';
-    setAttr($('review-stale'), 'data-tip', stale ? 'Review is stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : null);
+    $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
+    setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
@@ -566,6 +572,7 @@ export class StudioUI {
   renderSettingsForms() {
     const settings = JSON.parse($('settings-json').value);
     const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
+    if ($('validation-settings-editor')) renderValidationSettings($('validation-settings-editor'), this.settingsRecord.validation_warnings || [], opts);
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
     if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, loadDefaultPrompts: async () => api('/generation/prompts/default'), footer: this.reviewFoot ||= $('review-settings-foot')});
   }
@@ -580,7 +587,7 @@ export class StudioUI {
   }
   async saveSettings(dialog) {
     await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
-    await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
+    await this.loadSettings(); await this.refreshSelected(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
   }
   async openReview() {
     // Keep unsaved review-settings edits when returning to the tab; otherwise show the saved settings.

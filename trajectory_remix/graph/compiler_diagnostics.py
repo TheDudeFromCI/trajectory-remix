@@ -12,6 +12,7 @@ from referencing import Registry
 from referencing.exceptions import Unresolvable
 
 from .compiler_schedule import EventSchedule, is_model_event
+from .diagnostic_policy import ERRORS, WARNINGS, disabled
 from .models import (
     DTO,
     ChatMessage,
@@ -21,6 +22,7 @@ from .models import (
     ToolResponse,
     WindowReference,
 )
+from .tool_visibility import presentations, visible_at
 
 
 def reject_constant(value):
@@ -36,6 +38,23 @@ class Diagnostic(DTO):
     related_events: list[str] = Field(default_factory=list)
 
 
+def has_content(content, *, whitespace=False):
+    if isinstance(content, str):
+        return bool(content if whitespace else content.strip())
+    return any(
+        isinstance(piece, WindowReference) or (piece.text if whitespace else piece.text.strip())
+        for piece in content
+    )
+
+
+def content_text(content):
+    if isinstance(content, str):
+        return content
+    if any(isinstance(piece, WindowReference) for piece in content):
+        raise ValueError("Logical reference in text")
+    return "".join(piece.text for piece in content)
+
+
 def dry_run(source: GraphSource, settings: ProjectSettings | None = None) -> list[Diagnostic]:
     """Check a source without assigning model ticks, token counts or physical slots."""
     return diagnose_schedule(EventSchedule(source), settings)
@@ -45,11 +64,16 @@ def diagnose_schedule(
     schedule: EventSchedule, settings: ProjectSettings | None
 ) -> list[Diagnostic]:
     diagnostics = []
+    suppressed = disabled(settings)
 
-    def emit(code, message, event=None, field=None, *, warning=False, related=(), path=None):
+    def emit(code, message, event=None, field=None, *, related=(), path=None):
+        if code in suppressed:
+            return
+        if code not in ERRORS and code not in WARNINGS:
+            raise ValueError(f"Unregistered diagnostic: {code}")
         diagnostics.append(
             Diagnostic(
-                severity="warning" if warning else "error",
+                severity="error" if code in ERRORS else "warning",
                 code=code,
                 event_id=event,
                 message=message,
@@ -62,22 +86,32 @@ def diagnose_schedule(
 
     source = schedule.source
     events = source.events
+    written = {event.window for event in events.values()}
+    if not any(
+        is_model_event(event)
+        and (
+            has_content(event.content)
+            or (isinstance(event, ToolCall) and (event.insert_tool_begin or event.insert_tool_end))
+        )
+        for event in events.values()
+    ):
+        emit("no_agent_activity", "Add meaningful agent reasoning or a tool call", path=["events"])
     for ident, dependencies in schedule.dependencies.items():
         event = events[ident]
         window = source.windows.get(event.window)
         if window is None:
             emit("missing_window", f"Unknown window: {event.window}", ident, "window")
-        elif is_model_event(event) and not window.agent_writable:
-            emit(
-                "window_not_writable",
-                "Agent output requires an agent-writable window",
-                ident,
-                "window",
-            )
         elif isinstance(event, ChatMessage) and window.purpose != "chatroom":
             emit(
                 "invalid_chat_window",
                 'Chat messages need a window whose purpose is "chatroom"',
+                ident,
+                "window",
+            )
+        if event.kind == "agent_text" and window and window.purpose == "chatroom":
+            emit(
+                "direct_chatroom_output",
+                "Agent text writes directly into the chatroom",
                 ident,
                 "window",
             )
@@ -87,7 +121,6 @@ def diagnose_schedule(
                 "Remove repeated dependency IDs",
                 ident,
                 "after",
-                warning=True,
             )
         for index, dep in enumerate(event.after):
             if dep not in events:
@@ -99,19 +132,25 @@ def diagnose_schedule(
                 )
         if isinstance(event.content, list):
             for index, piece in enumerate(event.content):
-                if isinstance(piece, WindowReference) and piece.window not in source.windows:
+                if not isinstance(piece, WindowReference):
+                    continue
+                path = ["events", ident, "content", index, "window"]
+                if piece.window not in source.windows:
                     emit(
                         "missing_window_reference",
                         f"Unknown referenced window: {piece.window}",
                         ident,
-                        path=["events", ident, "content", index, "window"],
+                        path=path,
                     )
-        if getattr(event, "replace_body", False) and not event.content:
-            emit("empty_replacement", "Replacement must insert nonempty content", ident, "content")
-        elif (
-            getattr(event, "replace_body", False)
-            and isinstance(event.content, list)
-            and not any(isinstance(p, WindowReference) or p.text for p in event.content)
+                elif piece.window not in written:
+                    emit(
+                        "unopened_window_reference",
+                        f"Referenced window never opens: {piece.window}",
+                        ident,
+                        path=path,
+                    )
+        if getattr(event, "replace_body", False) and not has_content(
+            event.content, whitespace=True
         ):
             emit("empty_replacement", "Replacement must insert nonempty content", ident, "content")
 
@@ -159,7 +198,41 @@ def diagnose_schedule(
         elif isinstance(event, ToolResponse):
             responses[event.call_id].append(ident)
     for window, ids in sorted(by_window.items()):
+        definition = source.windows.get(window)
         window_ordered = check_window_order(ids)
+        if definition and not definition.agent_writable and window_ordered:
+            opened_read_only = not is_model_event(events[ids[0]])
+            for ident in ids:
+                event = events[ident]
+                if not is_model_event(event):
+                    if event.close_window:
+                        break
+                    continue
+                emits_rows = (
+                    event.close_window
+                    or has_content(event.content, whitespace=True)
+                    or (
+                        isinstance(event, ToolCall)
+                        and (event.insert_tool_begin or event.insert_tool_end)
+                    )
+                )
+                if opened_read_only and emits_rows:
+                    emit(
+                        "read_only_window_write",
+                        "Agent output cannot be compiled after external input opens a read-only window",
+                        ident,
+                        "window",
+                        related=[ids[0]],
+                    )
+                else:
+                    emit(
+                        "window_not_writable",
+                        "Agent event uses a window marked read-only",
+                        ident,
+                        "window",
+                    )
+                if event.close_window:
+                    break
         open_frame = None
         if window_ordered:
             for ident in ids:
@@ -207,7 +280,6 @@ def diagnose_schedule(
                             "window",
                             related=[ident],
                         )
-        definition = source.windows.get(window)
         if (
             definition
             and definition.purpose in ("reasoning", "tool")
@@ -219,10 +291,10 @@ def diagnose_schedule(
                 "Reasoning/tool window remains open",
                 ids[-1],
                 "close_window",
-                warning=True,
             )
 
     submitted = {}
+    listings = presentations(source, ordered)
     for call_id, ids in sorted(calls.items()):
         ordered_call = all(left in ancestors[right] for left, right in zip(ids, ids[1:]))
         first = events[ids[0]]
@@ -235,7 +307,6 @@ def diagnose_schedule(
                     "Fragments must share tool and request window",
                     ident,
                     "call_id",
-                    warning=True,
                 )
             if event.insert_tool_begin != (index == 0):
                 emit(
@@ -282,10 +353,9 @@ def diagnose_schedule(
                             ) as error:
                                 emit(
                                     "tool_input_schema",
-                                    f"Submitted arguments could not be validated: {str(error)[:1000]}",
+                                    f"Submitted arguments do not match the configured JSON schema: {getattr(error, 'message', str(error))[:1000]}",
                                     ident,
                                     "content",
-                                    warning=True,
                                 )
                         else:
                             emit(
@@ -293,12 +363,32 @@ def diagnose_schedule(
                                 "Arguments contain logical references; schema check deferred",
                                 ident,
                                 "content",
-                                warning=True,
                             )
             if event.close_window and not finished:
                 cancelled = True
+            names, visible = visible_at(listings, ancestors[ident])
+            if not visible:
+                emit(
+                    "missing_tool_listing",
+                    "Show a tool listing before this call and add it as a dependency",
+                    ident,
+                    "after",
+                )
             if settings is not None and event.tool not in settings.tools:
-                emit("unknown_tool", f"Unknown tool: {event.tool}", ident, "tool")
+                emit(
+                    "unknown_tool",
+                    f"Tool is absent from Project Settings: {event.tool}",
+                    ident,
+                    "tool",
+                )
+            elif visible and event.tool not in names:
+                emit(
+                    "unknown_tool",
+                    f"Tool is absent from the visible listing: {event.tool}",
+                    ident,
+                    "tool",
+                    related=visible,
+                )
         # Intentionally abandoned prefixes (including invalid JSON) are legal.
 
     for call_id, ids in sorted(responses.items()):
@@ -327,7 +417,6 @@ def diagnose_schedule(
                     "Response fragments must share a window",
                     ident,
                     "window",
-                    warning=True,
                 )
             submission = submitted.get(call_id)
             if submission is None or submission not in ancestors[ident]:
@@ -351,6 +440,7 @@ def diagnose_schedule(
                         "window",
                     )
 
+    delivered = set()
     for ident in ordered:
         event = events[ident]
         if isinstance(event, ChatMessage) and event.call_id is not None:
@@ -361,6 +451,14 @@ def diagnose_schedule(
                     "Chat echo requires an ancestor submitted request",
                     ident,
                     "call_id",
+                )
+            elif events[submission].tool != "chat":
+                emit(
+                    "invalid_chat_echo_source",
+                    "Chat echo links to a tool other than chat",
+                    ident,
+                    "call_id",
+                    related=[submission],
                 )
             elif not all(events[i].echo_chat for i in calls[event.call_id]):
                 emit(
@@ -373,10 +471,11 @@ def diagnose_schedule(
                 # Repairs must preserve exact linked automatic deliveries.
                 fragment_ids = sorted(calls[event.call_id], key=lambda key: len(ancestors[key]))
                 fragments = [events[key] for key in fragment_ids]
-                if fragments[-1].tool != "chat":
-                    continue
+                delivered.add(event.call_id)
                 try:
-                    arguments = json.loads("".join(fragment.content for fragment in fragments))
+                    arguments = json.loads(
+                        "".join(content_text(fragment.content) for fragment in fragments)
+                    )
                 except (ValueError, TypeError):
                     continue  # Submission diagnostics handle malformed arguments.
                 if isinstance(arguments, dict) and arguments.get("content") != event.content:
@@ -386,4 +485,16 @@ def diagnose_schedule(
                         ident,
                         "content",
                     )
+    for call_id, ident in submitted.items():
+        if (
+            events[ident].tool == "chat"
+            and all(events[i].echo_chat for i in calls[call_id])
+            and call_id not in delivered
+        ):
+            emit(
+                "missing_chat_echo",
+                "Add a linked chat delivery after submission or disable echo",
+                ident,
+                "echo_chat",
+            )
     return sorted(diagnostics, key=lambda d: (str(d.path), d.code))

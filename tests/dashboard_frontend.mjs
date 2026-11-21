@@ -25,8 +25,16 @@ try {
  await page.getByRole('tab',{name:'Tools',exact:true}).click();
  await page.getByLabel('New tool ID',{exact:true}).fill('notes');await page.getByRole('button',{name:'Add tool to settings draft',exact:true}).click();
  assert.equal(await page.evaluate(()=>JSON.parse(document.getElementById('settings-json').value).endpoints.fixture.model),'fake-browser');
+ await page.getByRole('tab',{name:'Validation',exact:true}).click();
+ const warning=page.getByRole('checkbox',{name:'Open window',exact:true});
+ assert.equal(await warning.isChecked(),true);
+ await warning.uncheck();
+ if(process.env.VALIDATION_SCREENSHOT) {
+  await page.locator('#settings-panel-validation').evaluate(n=>n.scrollTop=0);
+  await page.screenshot({path:process.env.VALIDATION_SCREENSHOT});
+ }
  await page.locator('#settings-dialog').evaluate(n=>n.scrollTop=0);await screenshot('settings');await page.locator('#settings-save').click();await page.waitForFunction(()=>!document.getElementById('settings-dialog').open);
- const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.draft,'fixture');assert.ok(saved.settings.tools.notes);
+ const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.draft,'fixture');assert.ok(saved.settings.tools.notes);assert.deepEqual(saved.settings.disabled_warnings,['open_window']);
  await page.locator('#generation-settings-button').click();
  // The Generate dialog says what a run freezes; there is no Flow panel any more.
  await page.locator('#generation-attempts').waitFor();assert.equal(await page.locator('.flow-section').count(),0);

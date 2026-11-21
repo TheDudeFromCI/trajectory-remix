@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 
+from . import authoring, signoffs
+from .authoring_tools import READ_ONLY
 from .storage import GraphStore, SourceRecord
 from .validation import Diagnostic, diagnose
 
@@ -44,6 +46,62 @@ class GraphCommands:
 
     def read(self, trajectory_id: str, revision: int | None = None):
         return self._result(self.store.read(trajectory_id, revision))
+
+    def author(self, trajectory_id, name, arguments, expected_revision=None):
+        read_only = name in READ_ONLY
+        with self.store.connect() as db:
+            db.execute("BEGIN" if read_only else "BEGIN IMMEDIATE")
+            record = self.store._read(db, trajectory_id)
+            if not read_only:
+                self.store._check_revision(trajectory_id, expected_revision, record)
+                self.store._check_owner(db, trajectory_id)
+            job_owned = read_only and self.store._owner(db, trajectory_id) is not None
+            snapshot = self.store._settings(db, record.settings_revision if job_owned else None)
+            source, settings = record.source, snapshot.settings
+            accepted = True
+            if name == "signoff":
+                draft = source.metadata.get("draft")
+                draft_visible = isinstance(draft, str) and bool(draft)
+                try:
+                    verdict, evidence = signoffs.validate(
+                        source,
+                        settings,
+                        signoffs.criteria({}, draft_visible),
+                        arguments,
+                    )
+                except ValueError as error:
+                    accepted, reply = False, dict(error=str(error))
+                else:
+                    source = signoffs.record(
+                        source,
+                        settings,
+                        evidence,
+                        operation="mcp",
+                        verdict=verdict,
+                        draft_visible=draft_visible,
+                        provenance=dict(
+                            source_revision=record.revision,
+                            settings_revision=snapshot.revision,
+                        ),
+                    )
+                    reply = dict(outcome=verdict)
+            else:
+                source, reply = authoring.apply(source, settings, name, arguments)
+            if not read_only and source.to_dict() != record.source.to_dict():
+                record = self.store._commit(
+                    db,
+                    source,
+                    record,
+                    dict(operation=name, channel="mcp"),
+                    settings_revision=snapshot.revision,
+                )
+            return reply | dict(
+                accepted=accepted,
+                source_hash=source.intrinsic_hash,
+                revision=record.revision,
+                settings_revision=snapshot.revision,
+                diagnostics=authoring.findings(source, settings),
+            )
 
     def create(self, source: dict, *, provenance: dict | None = None):
         return self._result(self.store.create(source, provenance))

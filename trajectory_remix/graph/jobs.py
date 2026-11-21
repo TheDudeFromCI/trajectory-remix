@@ -243,7 +243,13 @@ class JobService:
                 "SELECT 1 FROM graph_trajectory_revisions WHERE trajectory_id=?", (source.id,)
             ).fetchone():
                 raise OwnershipConflict("Source identity already exists")
-            self.store._commit(db, source, None, {"job_id": job, "attempt_id": attempt["id"]})
+            self.store._commit(
+                db,
+                source,
+                None,
+                {"job_id": job, "attempt_id": attempt["id"]},
+                settings_revision=json.loads(j["config"]).get("settings_revision"),
+            )
             db.execute(
                 "INSERT INTO graph_owners VALUES(?,?,'attached',?)", (source.id, job, j["epoch"])
             )
@@ -333,7 +339,7 @@ class JobService:
                 if prior["identity"] != identity:
                     raise ValueError("Idempotency key reused with different acceptance")
                 return dict(prior)
-            self._fence(db, job, epoch, trajectory)
+            current_job = self._fence(db, job, epoch, trajectory)
             if request is not None:
                 r = db.execute("SELECT * FROM graph_requests WHERE id=?", (request_id,)).fetchone()
                 if (
@@ -348,7 +354,17 @@ class JobService:
                     raise Fenced("Request is not ready for acceptance")
             old = self.store._read(db, trajectory)
             self.store._check_revision(trajectory, expected_revision, old)
-            record = self.store._commit(db, source, old, {"job_id": job, "step": step})
+            configuration = json.loads(current_job["config"])
+            settings_revision = configuration.get(
+                "settings_revision", configuration.get("options", {}).get("settings_revision")
+            )
+            record = self.store._commit(
+                db,
+                source,
+                old,
+                {"job_id": job, "step": step},
+                settings_revision=settings_revision,
+            )
             db.execute(
                 "INSERT INTO graph_steps VALUES(?,?,?,?,?,?,?)",
                 (

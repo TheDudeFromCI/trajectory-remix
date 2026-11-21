@@ -388,6 +388,13 @@ class GenerationPrompts(DTO):
     draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
     assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
 
+    @field_validator("assembly")
+    @classmethod
+    def upgrade_packaged_assembly(cls, value):
+        # The previous shipped default requested a compact JSON spec. Keep custom guidance.
+        old_default = "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b"
+        return prompt_defaults.assembly() if digest(value) == old_default else value
+
 
 class GenerationOptions(DTO):
     @model_validator(mode="before")
@@ -403,6 +410,8 @@ class GenerationOptions(DTO):
     fast: bool = True
     critical: bool = True
     repair: bool = True
+    review_include_draft: bool = False
+    max_authoring_exchanges: Annotated[int, Field(ge=1)] = 10
     format_retries: Annotated[int, Field(ge=0, le=5)] = 2
     # An explicit byte budget for the continuing repair transcript, not a token
     # estimate or a spending limit. Provider context exhaustion also terminates it.
@@ -458,6 +467,7 @@ class ProjectSettings(DTO):
     log_cache_mib: Annotated[int, Field(ge=0)] | None = 1024
     # Chance that each tool outside a tool_schema event's chosen tools is listed anyway (0 = never).
     tool_schema_extra_chance: Annotated[float, Field(ge=0, le=1)] = 0.5
+    disabled_warnings: list[Identifier] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def references(self):

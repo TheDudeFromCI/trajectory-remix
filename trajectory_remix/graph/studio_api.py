@@ -328,11 +328,13 @@ def create_studio_app(
         )
 
     @router.post("/diagnostics")
-    def draft_diagnostics(body: GraphSource):
+    def draft_diagnostics(body: GraphSource, settings_revision: int | None = Query(None, ge=1)):
+        settings = studio.store.settings(settings_revision)
         return dict(
             source=body.to_dict(),
             source_hash=body.intrinsic_hash,
-            diagnostics=jsonable_encoder(diagnose(body, studio.store.settings().settings)),
+            settings_revision=settings.revision,
+            diagnostics=jsonable_encoder(diagnose(body, settings.settings)),
         )
 
     @router.post("/trajectories", status_code=201)
@@ -385,7 +387,11 @@ def create_studio_app(
 
     @router.get("/trajectories/{ident}/diagnostics")
     def diagnostics(ident: str):
-        return dict(diagnostics=studio.read(ident)["diagnostics"])
+        value = studio.read(ident)
+        return dict(
+            diagnostics=value["diagnostics"],
+            settings_revision=value["diagnostics_settings_revision"],
+        )
 
     @router.post("/trajectories/{ident}/preview")
     def preview(ident: str, body: PreviewInput):

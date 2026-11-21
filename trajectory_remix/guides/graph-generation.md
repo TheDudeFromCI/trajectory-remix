@@ -21,15 +21,16 @@ Review evidence is bound to source/checklist/model identities. Source/checklist
 edits stale signoffs without resetting stages or automatically calling models.
 Malformed/provider failures are not quality verdicts: a trajectory that needs manual
 intervention is held while the rest of the job continues. Endpoint exhaustion and
-server restart require manual Resume. Repair continues across failing verdicts and
-fresh rounds; it fails only on `give_up` or at the round cap (detached Unfinished).
+server restart require manual Resume. Repair uses one continuing tool conversation.
+An unfeasible signoff, a context limit or the exchange cap ends repair as Unfinished
+with its partial edits saved.
 
 Generation/review/repair never token-compile or execute synthetic tools. Prepared
 local-model checks are described in `docs/GRAPH-LOCAL-LLM.md`; do not run live models
 or benchmarks without task authorization.
 
 Generation is Draft → Assembly → Fast Review → Critical Review. Draft writes prose
-working notes; Assembly writes one compact spec that Remix builds into a graph, then
-fixes it from validator diagnostics. The prompts (agent prompt, Draft and Assembly
+working notes. Assembly edits the graph with native tools and signs off after every
+error and enabled warning is resolved. The prompts (agent prompt, Draft and Assembly
 instructions) are project settings (`settings.prompts`) and freeze with the run;
 `instructions` takes no keys. See `docs/GRAPH-GENERATION.md`.

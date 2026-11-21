@@ -2,7 +2,7 @@
 
 import pytest
 import yaml
-from test_graph_generation import DRAFT, finish, service, spec
+from test_graph_generation import finish, service
 
 from trajectory_remix.graph import prompt_defaults, prompt_migration
 from trajectory_remix.graph.models import GenerationPrompts, ProjectSettings
@@ -19,7 +19,6 @@ def edit_prompts(gen, **prompts):
 async def test_runs_use_and_freeze_the_project_prompts(tmp_path):
     gen, fake = service(tmp_path, fast=False)
     edit_prompts(gen, actor="Be Kidra, the persona.", draft="Write the notes.")
-    fake.responses = [{"draft": DRAFT}, spec()]
     job = gen.start([{"seed": 137}], {})
     edit_prompts(gen, actor="Edited after the run started.")
     await finish(gen, job)

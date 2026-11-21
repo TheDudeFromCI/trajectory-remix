@@ -2,7 +2,7 @@
 
 import pytest
 from test_draft_assembly import DRAFT, spec
-from test_graph_generation import finish, service
+from test_graph_generation import finish, frozen_legacy_run, service
 
 from trajectory_remix.graph import assembly_fix
 
@@ -32,7 +32,7 @@ def fix(t):
 async def run(tmp_path, responses, **opts):
     gen, fake = service(tmp_path, method="draft_assembly", **opts)
     fake.responses = [{"draft": DRAFT}, *responses]
-    job = gen.start([{"seed": 21}], {})
+    job = frozen_legacy_run(gen, [{"seed": 21}], {})
     await finish(gen, job)
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     return gen, job, source, [c.payload["operation"] for c in fake.calls], fake

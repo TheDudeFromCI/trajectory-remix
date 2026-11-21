@@ -8,10 +8,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from trajectory_remix.graph import reviews
+from trajectory_remix.graph import compact_spec, draft_assembly, phase_barrier, reviews
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.flow import causal_view
-from trajectory_remix.graph.generation import GenerationService
+from trajectory_remix.graph.generation import LEGACY_DRIVER, GenerationService
 from trajectory_remix.graph.jobs import Fenced, JobService, OwnershipConflict
 from trajectory_remix.graph.models import GraphSource
 from trajectory_remix.graph.sampling import SamplerService
@@ -152,6 +152,82 @@ def chat_spec():
     )
 
 
+def tool_message(*calls):
+    return dict(
+        role="assistant",
+        content=None,
+        tool_calls=[
+            dict(
+                id=f"fixture-{i}",
+                type="function",
+                function=dict(name=name, arguments=json.dumps(args)),
+            )
+            for i, (name, args) in enumerate(calls)
+        ],
+    )
+
+
+def native_report(payload, event_ids, status="pass"):
+    parameters = next(
+        t["function"]["parameters"] for t in payload["tools"] if t["function"]["name"] == "signoff"
+    )
+    return (
+        "signoff",
+        dict(
+            status="complete",
+            summary="offline fixture",
+            items={
+                key: dict(
+                    status=status, evidence="Observed causal evidence.", event_ids=list(event_ids)
+                )
+                for key in parameters["properties"]["items"]["properties"]
+            },
+        ),
+    )
+
+
+def native_assembly(payload, ident, body=None, *, signoff=True):
+    data = json.loads(payload["messages"][1]["content"])
+    catalogue = data["tools"]
+    body = body or (spec() if "read" in catalogue else chat_spec())
+    source = compact_spec.build(
+        body, {"id": ident, "format": "kidra-trajectory-graph/1"}, catalogue, 0
+    )
+    calls = [("post_tool_schema", {"tool_ids": body["tools"]})]
+    calls.extend(
+        ("configure_window", {"window_id": window, **definition})
+        for window, definition in source["windows"].items()
+        if window != "tools"
+    )
+    calls.extend(
+        ("create_event", {"event_id": event, **definition})
+        for event, definition in source["events"].items()
+        if event != "tools"
+    )
+    if signoff:
+        calls.append(native_report(payload, list(source["events"])[-2:]))
+    return tool_message(*calls)
+
+
+def frozen_legacy_run(gen, requests, instructions):
+    frozen = gen.sampler.editor()
+    snapshot = gen.store.settings(frozen["settings_revision"])
+    proposals = [gen.sampler.propose(**request, frozen=frozen) for request in requests]
+    return gen.jobs.create_run(
+        dict(
+            driver=LEGACY_DRIVER,
+            instructions=instructions,
+            sampler=frozen,
+            barriers=phase_barrier.validate(None),
+            plans={
+                p["id"]: draft_assembly.plan(p["proposal"], snapshot.settings) for p in proposals
+            },
+        ),
+        proposals,
+        settings_record=snapshot,
+    )
+
+
 class Fake:
     def __init__(self):
         self.calls = []
@@ -164,7 +240,14 @@ class Fake:
             value = self.responses.pop(0)
             if callable(value):
                 value = value(ticket)
-            return {"output": value, "model": "actual-fixture"}
+            return {"message" if "tools" in p else "output": value, "model": "actual-fixture"}
+        if "tools" in p:
+            if p["operation"] == "assembly":
+                message = native_assembly(p, ticket.trajectory_id)
+            else:
+                graph = json.loads(p["messages"][1]["content"])["graph"]
+                message = tool_message(native_report(p, list(graph["events"])[-1:]))
+            return {"message": message, "model": "actual-fixture"}
         if p["operation"] == "draft":
             body = {"draft": DRAFT}
         elif p["operation"] == "assembly":
@@ -284,7 +367,7 @@ async def test_malformed_review_pauses_without_verdict(tmp_path):
     gen, fake = service(tmp_path, format_retries=0)
     fake.responses = [
         {"draft": DRAFT},
-        spec(),
+        lambda t: native_assembly(t.payload, t.trajectory_id),
         {"items": {}},
     ]
     job = gen.start([{"seed": 137}], {})
@@ -311,17 +394,11 @@ async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path):
     )
     record = gen.store.create(source)
     fake.responses = [
-        lambda t: {
-            "action": "patch",
-            "event_id": "x",
-            "expected_source_hash": t.payload["source_hash"],
-            "patch": {"content": "repaired"},
-        },
-        lambda t: {"action": "inspect", "event_id": "x"},
-        lambda t: {
-            "action": "verdict",
-            "review": report(t.payload, "pass", ["x"]),
-        },
+        tool_message(
+            ("update_event", {"event_id": "x", "content": "repaired", "close_window": True})
+        ),
+        tool_message(("view_event", {"event_id": "x"})),
+        lambda t: tool_message(native_report(t.payload, ["x"])),
     ]
     job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
     await finish(gen, job)
@@ -359,14 +436,7 @@ def test_manual_detach_settles_progress_history_and_fences_late_result(tmp_path,
     if repaired:
         gen.jobs.request_result(
             ticket,
-            {
-                "output": {
-                    "action": "patch",
-                    "event_id": "x",
-                    "expected_source_hash": ticket.payload["source_hash"],
-                    "patch": {"content": "repaired"},
-                }
-            },
+            {"message": tool_message(("update_event", {"event_id": "x", "content": "repaired"}))},
         )
         gen.consume(ticket)
         gen._prepare(job, ident)
@@ -383,7 +453,7 @@ def test_manual_detach_settles_progress_history_and_fences_late_result(tmp_path,
     assert gen.store.read(ident).source.metadata["stage"] == -1  # No invented verdict.
     with pytest.raises(Fenced):
         gen.jobs.request_result(
-            ticket, {"output": {"action": "verdict", "review": report(ticket.payload)}}
+            ticket, {"message": tool_message(native_report(ticket.payload, ["x"]))}
         )
     with pytest.raises(Fenced):
         gen.jobs.accept(job, ticket.epoch, ident, "late", current.source, current.revision, {})
@@ -422,7 +492,9 @@ def test_manual_detach_keeps_other_items_running_and_cannot_be_resettled(tmp_pat
     assert gen.jobs.inspect(job)["progress"] == 1
     assert gen._owners(job) == [second]
     with pytest.raises(Fenced):
-        gen.jobs.request_result(ticket, {"output": report(ticket.payload)})
+        gen.jobs.request_result(
+            ticket, {"message": tool_message(native_report(ticket.payload, []))}
+        )
     # A concurrent admission/driver failure must not overwrite the terminal item.
     with gen.store.connect() as db:
         item = next(i for i in gen.bulk.results(job) if i["trajectory_id"] == first)
@@ -444,8 +516,8 @@ async def test_manual_force_staleness_skips_locks(tmp_path):
         dict(
             format="kidra-trajectory-graph/1",
             id=str(uuid4()),
-            windows={},
-            events={},
+            windows={"notes": dict(purpose="notes", agent_writable=True)},
+            events={"note": dict(kind="agent_text", window="notes", content="Ready")},
             metadata={"stage": 3},
         )
     )
@@ -627,9 +699,9 @@ async def test_automatic_fast_failure_repair_then_critical(tmp_path):
     gen, fake = service(tmp_path)
     fake.responses = [
         {"draft": DRAFT},
-        spec(),
-        lambda t: report(t.payload, "fail"),
-        lambda t: {"action": "verdict", "review": report(t.payload, "pass")},
+        lambda t: native_assembly(t.payload, t.trajectory_id),
+        lambda t: tool_message(native_report(t.payload, ["plan"], "fail")),
+        lambda t: tool_message(native_report(t.payload, ["plan"])),
     ]
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
@@ -644,7 +716,7 @@ async def test_automatic_fast_failure_repair_then_critical(tmp_path):
 
 @pytest.mark.asyncio
 async def test_invalid_review_evidence_never_publishes_pass(tmp_path):
-    gen, fake = service(tmp_path, format_retries=0)
+    gen, fake = service(tmp_path, max_authoring_exchanges=1)
     record = gen.store.create(
         dict(
             format="kidra-trajectory-graph/1",
@@ -654,12 +726,13 @@ async def test_invalid_review_evidence_never_publishes_pass(tmp_path):
             metadata={"stage": 0},
         )
     )
-    fake.responses = [lambda t: report(t.payload, "pass", ["missing-event"])]
+    fake.responses = [lambda t: tool_message(native_report(t.payload, ["missing-event"]))]
     job = gen.start_review({}, repair=False)
     await finish(gen, job)
     source = gen.store.read(record.source.id).source
     assert source.metadata["stage"] == 0 and "evaluations" not in source.metadata
-    assert gen.jobs.inspect(job)["state"] == "paused"
+    assert gen.jobs.inspect(job)["state"] == "completed"
+    assert source.metadata["review_outcomes"][-1]["outcome"] == "exchange_limit"
 
 
 @pytest.mark.asyncio
@@ -677,13 +750,8 @@ async def test_manual_repair_structurally_broken_draft(tmp_path):
         )
     )
     fake.responses = [
-        lambda t: {
-            "action": "patch",
-            "event_id": "x",
-            "expected_source_hash": t.payload["source_hash"],
-            "patch": {"after": []},
-        },
-        lambda t: {"action": "verdict", "review": report(t.payload, "pass", ["x"])},
+        tool_message(("update_event", {"event_id": "x", "after": [], "close_window": True})),
+        lambda t: tool_message(native_report(t.payload, ["x"])),
     ]
     job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
     await finish(gen, job)

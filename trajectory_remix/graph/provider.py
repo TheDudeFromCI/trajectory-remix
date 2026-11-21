@@ -110,9 +110,11 @@ def context_budget(payload, response_format, messages):
     limit = endpoint.get("context_window_tokens", 65536)
     output = endpoint.get("max_output_tokens", 8192)
     ratio = endpoint.get("bytes_per_token", 1.0)
+    wire_contract = {"tools": payload["tools"], "tool_choice": "auto"} if "tools" in payload else {}
     size = len(
         json.dumps(
-            dict(messages=messages, response_format=response_format), ensure_ascii=False
+            dict(messages=messages, response_format=response_format, **wire_contract),
+            ensure_ascii=False,
         ).encode()
     )
     return dict(
@@ -128,17 +130,29 @@ def context_budget(payload, response_format, messages):
 def request_body(payload, trajectory_id):
     """The exact HTTP body for a request (no credentials) and its context budget."""
     endpoint = payload["endpoint_config"]
-    response_format, messages = response_contract(payload)
+    native = "tools" in payload
+    response_format, messages = (
+        (None, payload["messages"]) if native else response_contract(payload)
+    )
     budget = context_budget(payload, response_format, messages)
+    extras = endpoint.get("extra_body", {})
+    if native:
+        extras = {
+            k: v
+            for k, v in extras.items()
+            if k not in {"tools", "tool_choice", "parallel_tool_calls"}
+        }
     body = dict(
         # Provider options first; validation stops them replacing the fields below.
-        **endpoint.get("extra_body", {}),
+        **extras,
         model=endpoint["model"],
         messages=messages,
         stream=False,
         max_tokens=budget["max_output_tokens"],
         **({"response_format": response_format} if response_format else {}),
     )
+    if native:
+        body.update(tools=payload["tools"], tool_choice="auto")
     for key in ("temperature", "top_p", "presence_penalty"):
         if endpoint.get(key) is not None:
             body[key] = endpoint[key]
@@ -147,6 +161,53 @@ def request_body(payload, trajectory_id):
     if endpoint.get("sticky_sessions"):
         body["session_id"] = trajectory_id
     return body, budget
+
+
+def assistant_message(message):
+    """Keep only complete, replayable assistant messages and their native calls."""
+    if (
+        not isinstance(message, dict)
+        or not {"content", "tool_calls"} & message.keys()
+        or not isinstance(message.get("content"), (str, type(None)))
+    ):
+        raise ValueError("Expected an assistant message")
+    calls = message.get("tool_calls", [])
+    if not isinstance(calls, list):
+        raise ValueError("Expected a list of native tool calls")
+    clean = dict(role="assistant", content=message.get("content"))
+    if isinstance(message.get("reasoning_content"), str):
+        clean["reasoning_content"] = message["reasoning_content"]
+    if calls:
+        ids, normalized = set(), []
+        for call in calls:
+            if not isinstance(call, dict) or call.get("type", "function") != "function":
+                raise ValueError("Expected native function calls")
+            ident, function = call.get("id"), call.get("function")
+            if (
+                not isinstance(ident, str)
+                or not ident
+                or ident in ids
+                or not isinstance(function, dict)
+                or not isinstance(function.get("name"), str)
+                or not function["name"]
+                or not isinstance(function.get("arguments"), str)
+            ):
+                raise ValueError("A native tool call needs a unique ID, name and arguments")
+            ids.add(ident)
+            normalized.append(
+                dict(
+                    id=ident,
+                    type="function",
+                    function=dict(
+                        name=function["name"],
+                        arguments=function["arguments"],
+                    ),
+                )
+            )
+        clean["tool_calls"] = normalized
+    elif clean["content"] is None:
+        clean["content"] = ""
+    return clean
 
 
 class OpenAITransport:
@@ -179,6 +240,16 @@ class OpenAITransport:
         choice = data["choices"][0]
         # Usage is kept even for unusable replies: their tokens were still billed.
         meta = dict(model=data.get("model"), usage=data.get("usage"))
+        if "tools" in payload:
+            finish = choice.get("finish_reason")
+            if finish in {"stop", "tool_calls"}:
+                try:
+                    message = assistant_message(choice["message"])
+                    if finish != "tool_calls" or message.get("tool_calls"):
+                        return dict(meta, message=message)
+                except (KeyError, ValueError):
+                    pass
+            return dict(meta, invalid_output=True, finish_reason=finish)
         # Incomplete text never leaves this local buffer; jobs never store it.
         if choice.get("finish_reason") != "stop":
             return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"))

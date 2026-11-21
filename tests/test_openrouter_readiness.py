@@ -9,7 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from test_graph_generation import DRAFT, Fake, chat_spec, finish, service
+from test_graph_generation import DRAFT, Fake, finish, native_assembly, service
 
 from trajectory_remix.graph import usage
 from trajectory_remix.graph.jobs import Ticket
@@ -230,18 +230,18 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
         text = user["content"]
         if text.startswith("Return one JSON object"):
             text = text.split("\n\n", 1)[1]
-        data = json.loads(text)
-        if system["content"].startswith("You assembled"):  # The assembly fix.
-            output = {"action": "done"}
-        elif "notes" in data:  # Assembly: the compact spec.
-            output = chat_spec()
-        else:  # Draft.
-            output = {"draft": DRAFT}
+        json.loads(text)
+        if "tools" in body:
+            message = native_assembly(body, body["session_id"])
+            finish_reason = "tool_calls"
+        else:
+            message = {"content": json.dumps({"draft": DRAFT})}
+            finish_reason = "stop"
         return httpx.Response(
             200,
             json={
                 "model": body["model"],
-                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(output)}}],
+                "choices": [{"finish_reason": finish_reason, "message": message}],
                 "usage": OPENROUTER_USAGE,
             },
         )

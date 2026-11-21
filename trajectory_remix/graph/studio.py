@@ -13,9 +13,11 @@ from threading import Lock
 from fastapi.encoders import jsonable_encoder
 
 from .bulk import BulkService
-from .commands import GraphCommands
+from .commands import GraphCommands, GraphResult
+from .diagnostic_policy import choices
 from .jobs import page
 from .models import GraphSource, ProjectSettings, digest
+from .validation import diagnose
 
 
 def result(value):
@@ -28,6 +30,7 @@ def result(value):
         intrinsic_revision=record.intrinsic_revision,
         metadata_revision=record.metadata_revision,
         settings_revision=record.settings_revision,
+        diagnostics_settings_revision=record.settings_revision,
         diagnostics=jsonable_encoder(value.diagnostics),
         has_errors=value.has_errors,
     )
@@ -62,14 +65,19 @@ class Studio:
     def settings(self):
         r = self.store.settings()
         return dict(
-            settings=r.settings.model_dump(mode="json"), revision=r.revision, commit_id=r.commit_id
+            settings=r.settings.model_dump(mode="json"),
+            revision=r.revision,
+            commit_id=r.commit_id,
+            validation_warnings=choices(),
         )
 
     def present(self, value):
         from .reviews import stale
 
         return result(value) | dict(
-            review_status=stale(value.record.source, self.store.settings().settings)
+            review_status=stale(
+                value.record.source, self.store.settings(value.record.settings_revision).settings
+            )
         )
 
     def update_settings(self, settings, expected_revision):
@@ -78,25 +86,21 @@ class Studio:
         return self.settings()
 
     def read(self, ident, revision=None):
-        value = result(self.commands.read(ident, revision))
-        with self.store.connect() as db:
-            owner = db.execute(
-                "SELECT job_id FROM graph_owners WHERE trajectory_id=?", (ident,)
-            ).fetchone()
         from .reviews import stale
 
-        settings = self.store.settings().settings
-        source = GraphSource.model_validate(value["source"])
-        if revision is None:
-            # Current-schema warnings are not pinned to an old source commit.
-            # Explicit historical revisions retain their original diagnostics.
-            from .validation import diagnose
-
-            diagnostics = diagnose(source, settings)
-            value["diagnostics"] = jsonable_encoder(diagnostics)
-            value["has_errors"] = any(d.severity == "error" for d in diagnostics)
-        review = stale(source, settings)
-        return value | dict(owner=owner[0] if owner else None, review_status=review)
+        with self.store.connect() as db:
+            db.execute("BEGIN")
+            record = self.store._read(db, ident, revision)
+            owner = self.store._owner(db, ident)
+            snapshot = self.store._settings(
+                db, record.settings_revision if revision or owner else None
+            )
+        source, settings = record.source, snapshot.settings
+        return result(GraphResult(record, diagnose(source, settings))) | dict(
+            owner=owner,
+            review_status=stale(source, settings),
+            diagnostics_settings_revision=snapshot.revision,
+        )
 
     def graph(self, ident):
         value = self.read(ident)

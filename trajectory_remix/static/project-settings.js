@@ -209,16 +209,16 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const settingsColumn = column('settings'), promptsColumn = column('prompts'), checklistColumn = column('checklist');
   container.classList.add('review-columns'); container.append(settingsColumn, promptsColumn, checklistColumn);
   tipHeading(settingsColumn, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
-  const toggle = (key, title) => {
-    const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? true; n.setAttribute('aria-label', title);
+  const toggle = (key, title, fallback = true) => {
+    const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? fallback; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
-  const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Response and repair limits'));
+  settingsColumn.append(toggle('review_include_draft','Include Draft in review and repair', false));
+  const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Authoring limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
-  const bytes = input('Repair transcript byte limit', current().generation?.repair_context_bytes ?? 65536, value => write(d => { d.generation ||= {}; d.generation.repair_context_bytes = value; }), 'number'); bytes.min = 256; bytes.step = 1;
-  const rounds = input('Repair rounds', current().generation?.repair_rounds ?? 3, value => write(d => { d.generation ||= {}; d.generation.repair_rounds = value; }), 'number'); rounds.min = 1; rounds.max = 10; rounds.step = 1;
-  limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), field('Repair rounds', rounds), node('p', 'A repair fails only when the repairer gives up. A session that reaches the transcript limit starts a fresh round on the current graph; the round count caps spending.', 'settings-help')); settingsColumn.append(limits);
+  const exchanges = input('Maximum exchanges per pass', current().generation?.max_authoring_exchanges ?? 10, value => write(d => { d.generation ||= {}; d.generation.max_authoring_exchanges = value; }), 'number'); exchanges.min = 1; exchanges.step = 1;
+  limits.append(field('Format correction retries', retries), field('Maximum exchanges per pass', exchanges), node('p', 'Assembly, review, and repair each use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
   renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
   renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading});
