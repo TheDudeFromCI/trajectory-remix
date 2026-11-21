@@ -25,13 +25,13 @@
 .settings-feedback { color: var(--ink-muted); font-size: 12px; }
 .settings-feedback.error { color: var(--danger); }
 .checklist-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding-left: var(--space-4); list-style: disc; }
-.checklist-item { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+.checklist-item { display: list-item; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
 .checklist-item::marker { color: var(--ink-muted); }
 .checklist-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .checklist-text { font: 400 14px/20px var(--font-sans); overflow-wrap: anywhere; }
 .checklist-id { color: var(--ink-muted); font-size: 12px; }
 .checklist-item textarea { min-height: 72px; font: 400 14px/20px var(--font-sans); }
-.checklist-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.checklist-actions { margin-top: var(--space-2); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .criterion-marker { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 12px; }
 .checklist-actions > button { height: 26px; padding: 0 var(--space-2); font-size: 12px; }
 .checklist-actions > button.danger { color: var(--danger); }
