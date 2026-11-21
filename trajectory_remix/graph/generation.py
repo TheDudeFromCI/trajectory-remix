@@ -56,7 +56,7 @@ class GenerationService:
         settings = settings_record.settings
         if "draft" not in settings.endpoint_roles:
             raise ValueError("Configure the Draft endpoint in Project Settings")
-        for tier in reviews.automatic_tiers(settings):
+        for tier in reviews.automatic_tiers(settings.generation, settings.endpoint_roles):
             reviews.review_schema(settings, tier)
         instructions = deepcopy(instructions)
         retired = {"plan", "flow_yaml"} & instructions.keys()
@@ -176,7 +176,7 @@ class GenerationService:
         data = source.to_dict()
         data["metadata"]["stage"] = 0
         source = GraphSource.model_validate(data)
-        tiers = reviews.automatic_tiers(settings)
+        tiers = reviews.automatic_tiers(settings.generation, settings.endpoint_roles)
         if tiers:
             self._phase(job, source, cp, "review", tiers[0])
         else:
@@ -917,7 +917,7 @@ class GenerationService:
             not cp["manual"]
             and result == "pass"
             and cp["tier"] == "fast"
-            and "critical" in reviews.automatic_tiers(settings)
+            and "critical" in reviews.automatic_tiers(settings.generation, settings.endpoint_roles)
         )
         if cp["phase"] == "repair":
             if result == "fail":

@@ -43,6 +43,13 @@ export function reconcile(container, items, key, create, update) {
   wanted.forEach((el, index) => { if (container.children[index] !== el) container.insertBefore(el, container.children[index] || null); });
 }
 
+export function jobProgress(job) {
+  const stages = job.stage_progress;
+  return stages
+    ? {value: stages.completed, total: stages.total, state: job.state, unit: 'stages'}
+    : {value: job.progress, total: job.total, state: job.state};
+}
+
 /** Progress bar: create once, update with value/total and a state word. */
 export function progressBar(label = '') {
   const root = node('div', undefined, 'progress'), row = node('div', undefined, 'progress-row');
@@ -50,19 +57,19 @@ export function progressBar(label = '') {
   const track = node('div', undefined, 'progress-track'), fill = node('div', undefined, 'progress-fill');
   track.setAttribute('role', 'progressbar'); track.setAttribute('aria-valuemin', '0'); track.append(fill);
   row.append(name, status, pct); root.append(row, track);
-  root.update = ({value = 0, total = 0, state = '', status: text = '', label: title}) => {
+  root.update = ({value = 0, total = 0, state = '', status: text = '', label: title, unit}) => {
     if (title !== undefined) setText(name, title);
     const tone = JOB_TONES[state] || 'accent', fraction = total > 0 ? Math.min(1, value / total) : 0;
     const indeterminate = total <= 0 && state === 'running';
     if (fill.classList.contains('indeterminate') !== indeterminate) fill.classList.toggle('indeterminate', indeterminate);
     const color = `var(--${TONE_VARS[tone] || tone})`;
     if (fill.style.getPropertyValue('--tone') !== color) fill.style.setProperty('--tone', color);
-    const width = indeterminate ? '' : (state === 'completed' ? 100 : fraction * 100) + '%';
+    const width = indeterminate ? '' : (state === 'completed' && !unit ? 100 : fraction * 100) + '%';
     if (fill.style.width !== width) fill.style.width = width;
     setText(status, text);
-    setText(pct, total > 0 ? `${value}/${total}` : state ? stateWord(state) : '');
+    setText(pct, total > 0 ? `${value}/${total}${unit ? ' ' + unit : ''}` : state ? stateWord(state) : '');
     setAttr(track, 'aria-valuemax', total || null); setAttr(track, 'aria-valuenow', total ? value : null);
-    setAttr(track, 'aria-label', `${title ?? name.textContent} ${stateWord(state)} ${total ? value + ' of ' + total : ''}`.trim());
+    setAttr(track, 'aria-label', `${title ?? name.textContent} ${stateWord(state)} ${total ? value + ' of ' + total + (unit ? ' ' + unit : '') : ''}`.trim());
   };
   return root;
 }

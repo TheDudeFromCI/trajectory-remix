@@ -7,7 +7,7 @@ import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} fr
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
-import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
+import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
 const $ = id => document.getElementById(id);
 const copy = value => structuredClone(value);
@@ -663,8 +663,9 @@ export class StudioUI {
       chip.append(dot, name, bar); chip.parts = {dot, name, bar}; return chip;
     }, (chip, job) => {
       setAttr(chip.parts.dot, 'class', `dot tone-${KIND_TONES[job.kind] || 'accent'}`);
-      setText(chip.parts.name, kindName(job.kind)); chip.parts.bar.update({value: job.progress, total: job.total, state: job.state});
-      setAttr(chip, 'aria-label', `${kindName(job.kind)} job ${job.state} ${job.progress} of ${job.total}. Open in Jobs`);
+      const progress = jobProgress(job), {value, total, unit} = progress;
+      setText(chip.parts.name, kindName(job.kind)); chip.parts.bar.update(progress);
+      setAttr(chip, 'aria-label', `${kindName(job.kind)} job ${job.state} ${value} of ${total}${unit ? ' ' + unit : ''}. Open in Jobs`);
       toggleClass(chip, 'paused', job.state === 'paused');
     });
     const badge = $('jobs-running-badge');

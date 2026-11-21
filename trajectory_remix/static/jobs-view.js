@@ -1,7 +1,7 @@
 /* Jobs view: a job list beside one job's progress, controls, logs and files.
    Everything updates in place so polling never flashes or resets scroll. */
 import {renderUsage} from './usage-view.js';
-import {kindName, KIND_TONES, JOB_TONES, makeTabs, node, progressBar, reconcile, setAttr, setText, shortId, stateWord, tag, toggleClass} from './ui-kit.js';
+import {jobProgress, kindName, KIND_TONES, JOB_TONES, makeTabs, node, progressBar, reconcile, setAttr, setText, shortId, stateWord, tag, toggleClass} from './ui-kit.js';
 
 const $ = id => document.getElementById(id);
 const PAGE = 50;
@@ -49,7 +49,7 @@ export class JobsView {
     el.update = j => {
       setAttr(dot, 'class', `dot tone-${KIND_TONES[j.kind] || 'accent'}`);
       setText(name, kindName(j.kind)); setText(state, stateWord(j.state)); setAttr(state, 'class', `tag tone-${JOB_TONES[j.state] || 'muted'}`);
-      bar.update({value: j.progress, total: j.total, state: j.state});
+      bar.update(jobProgress(j));
       setAttr(el, 'aria-selected', String(j.id === this.selected)); toggleClass(el, 'selected', j.id === this.selected);
     };
     return el;
@@ -137,7 +137,7 @@ export class JobsView {
     setAttr(v.reviews, 'hidden', !(phase?.enabled && phase.phase === 'generation'));
     setAttr(v.clear, 'hidden', ACTIVE.has(j.state));
     if (j.created) setText(v.started, 'Started ' + new Date(j.created * 1000).toLocaleString());
-    v.progress.update({value: j.progress, total: j.total, state: j.state, status: stateWord(j.state)});
+    v.progress.update({...jobProgress(j), status: stateWord(j.state)});
     this.renderStats(v, j);
     setAttr(v.tabs.tab('attempts'), 'hidden', j.kind !== 'run');
     setAttr(v.tabs.tab('results'), 'hidden', j.kind !== 'bulk');

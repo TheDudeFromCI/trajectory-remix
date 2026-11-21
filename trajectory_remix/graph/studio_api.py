@@ -412,14 +412,7 @@ def create_studio_app(
 
     @router.get("/job-summaries")
     def job_summaries(limit: int = Query(50, ge=1, le=1000), offset: int = Query(0, ge=0)):
-        with studio.store.connect() as db:
-            return [
-                dict(r)
-                for r in db.execute(
-                    "SELECT id,kind,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
-                    (limit, offset),
-                )
-            ]
+        return studio.jobs.summaries(limit=limit, offset=offset)
 
     @router.get("/jobs/{job}/manifest")
     def manifest(job: str):

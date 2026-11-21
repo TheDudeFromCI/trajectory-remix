@@ -38,6 +38,11 @@ The job's page in the **Jobs** view shows pending, active and finished outcome c
 endpoint Resume controls. A run of N attempts reserves N identities and ends with N outcomes, including
 failures. There are no automatic replacements.
 
+The generation progress bar counts completed stages. Five trajectories with Draft, Assembly,
+Fast and Critical enabled have 20 planned stages. Accepted results advance the count once per
+stage. Skipped review roles are excluded, and early failures leave the uncompleted stages
+visible in the total. The attempt counts still show how many trajectories settled.
+
 ## How a trajectory is built
 
 The sampler picks a **proposal**. Each trajectory then goes through four stages:

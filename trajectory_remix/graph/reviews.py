@@ -266,12 +266,8 @@ def stale(source, settings):
     return dict(stale=bool(reasons), reasons=reasons, reviewed=True)
 
 
-def automatic_tiers(settings):
-    return tuple(
-        tier
-        for tier in ("fast", "critical")
-        if getattr(settings.generation, tier) and tier in settings.endpoint_roles
-    )
+def automatic_tiers(options, roles):
+    return tuple(tier for tier in ("fast", "critical") if getattr(options, tier) and tier in roles)
 
 
 def manual_operation(stage, mode, repair, settings):

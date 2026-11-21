@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {Window} from 'happy-dom';
 const window = new Window();
 for (const key of ['document', 'MutationObserver', 'CustomEvent', 'Event']) globalThis[key] = window[key];
-const {reconcile, progressBar, node} = await import('../trajectory_remix/static/ui-kit.js');
+const {reconcile, progressBar, jobProgress, node} = await import('../trajectory_remix/static/ui-kit.js');
 const {JobsView} = await import('../trajectory_remix/static/jobs-view.js');
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 async function mutations(target, run) {
@@ -62,5 +62,10 @@ assert.equal(view.panels.get('job-1').reviews.hidden, false);
 responses['/jobs/job-1/phase'] = {enabled: true, phase: 'review'};
 await view.refresh('job-1');
 assert.equal(view.panels.get('job-1').reviews.hidden, true);
+// Generation bars count real stage completions, even after a failed attempt settles.
+bar.update(jobProgress({kind:'run',state:'completed',progress:1,total:1,stage_progress:{completed:1,total:4}}));
+assert.equal(bar.querySelector('.progress-pct').textContent,'1/4 stages');
+assert.equal(bar.querySelector('.progress-fill').style.width,'25%');
+assert.equal(bar.querySelector('[role=progressbar]').getAttribute('aria-valuemax'),'4');
 console.log('Studio UI: keyed rows, idempotent progress and flicker-free job refresh passed.');
 window.happyDOM.abort();

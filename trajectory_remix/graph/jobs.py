@@ -16,6 +16,7 @@ from .log_levels import check as check_level
 from .log_levels import migrate as migrate_log_levels
 from .models import GraphSource, canonical, digest
 from .progress import observed_request, request_label
+from .stage_progress import attach as attach_stage_progress
 from .storage import GraphStore
 
 TERMINAL = {"completed", "cancelled", "failed"}
@@ -820,11 +821,25 @@ class JobService:
             result[key] = json.loads(result[key])
         return result
 
+    def summaries(self, *, limit, offset):
+        with self.store.connect() as db:
+            db.execute("BEGIN")
+            rows = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id,kind,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
+            ]
+            attach_stage_progress(db, rows)
+            return rows
+
     def inspect(self, job, *, include_config=True):
         with self.store.connect() as db:
             if include_config:
                 result = self._decode_job(self._job(db, job))
             else:
+                db.execute("BEGIN")
                 row = db.execute(
                     "SELECT id,kind,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?",
                     (job,),
@@ -832,6 +847,7 @@ class JobService:
                 if row is None:
                     raise KeyError(job)
                 result = dict(row)
+                attach_stage_progress(db, [result])
             result["requests"] = [
                 dict(r)
                 for r in db.execute(

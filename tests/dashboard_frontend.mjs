@@ -43,6 +43,8 @@ try {
  const jobs=await api('/job-summaries'),job=jobs[0].id;
  await page.waitForFunction(()=>!document.getElementById('jobs-view').hidden);
  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#job-detail .job-panel')?.dataset.state==='run · paused');
+ assert.match(await page.locator('#job-detail .progress-pct').first().textContent(), /^[0-2]\/2 stages$/);
+ if(process.env.GENERATION_PROGRESS_SCREENSHOT) await page.screenshot({path:process.env.GENERATION_PROGRESS_SCREENSHOT});
  await screenshot('jobs');await close();
  const attempt=(await api(`/jobs/${job}/attempts`))[0];
  await page.evaluate(async id=>await graphStudio.select(id,true),attempt.trajectory_id);
