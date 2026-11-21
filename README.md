@@ -22,8 +22,15 @@ content**. Remix never executes them.
 ## Quick start
 
 ```bash
+# Install the project
+git clone https://github.com/TheDudeFromCI/trajectory-remix.git
+cd trajectory-remix
 python -m pip install -e '.[mcp,export]'
+
+# Create the project file
 python -m trajectory_remix graph-init --dataset project.sqlite
+
+# Launch the studio server
 python -m trajectory_remix graph-studio --dataset project.sqlite
 ```
 
@@ -72,14 +79,6 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 
 ## Good to know
 
-- **Old projects are not supported.** The previous replay/tick-anchor format and the
-  executable sandbox are gone, with no reader or migration. Imports reject them, so
-  keep old datasets separately if you need the history. See
-  [From the old replay format](docs/REPLAY-FORMAT.md).
 - **Model calls only happen when you ask.** Generation and review use the endpoints
   you configure. Credentials come from environment variables and are never saved in
   projects.
-- **Verification status.** The deterministic tests pass, and the demo training run
-  met its gates on one CPU run ([results](docs/VALIDATION-RESULTS.md)). Full-scale
-  (25k stored / 20 active) and local-model quality acceptance are still pending, and
-  nothing here is a performance or quality guarantee.
