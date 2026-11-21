@@ -49,5 +49,17 @@ assert.equal(raw.textContent, 'thinkNOOP ×3EOS');
 const formatted = windowBody([{text: 'think'}, ctl('noop'), ctl('noop'), ctl('eos')], {raw: false, purpose: 'reasoning', isAgent});
 assert.equal(formatted.querySelectorAll('.noop').length, 1); assert.match(formatted.textContent, /NOOP ×2/);
 
+// Tools windows list tool names (never the raw schema); other purposes and Raw mode are unchanged.
+const listing = '{"name":"search","description":"Find docs","parameters":{"type":"object"}}\n{"name":"fetch","description":"fetch","parameters":{}}';
+const toolTokens = [ctl('ctx_begin'), ...text('tools'), ctl('ctx_end'), ...text(listing)];
+const toolItems = windowBody(toolTokens, {raw: false, purpose: 'tools', isAgent}).querySelectorAll('.wt-tool');
+assert.deepEqual([...toolItems].map(i => i.querySelector('.wt-tool-name').textContent), ['search', 'fetch']);
+assert.equal(toolItems[0].querySelector('.wt-tool-desc').textContent, 'Find docs');
+assert.equal(toolItems[1].querySelector('.wt-tool-desc'), null);
+assert.equal(windowBody(toolTokens, {raw: false, purpose: 'tools', isAgent}).textContent.includes('parameters'), false);
+assert.equal(windowBody(toolTokens, {raw: false, purpose: 'reasoning', isAgent}).querySelectorAll('.wt-tool').length, 0);
+assert.ok(windowBody(toolTokens, {raw: true, purpose: 'tools', isAgent}).textContent.includes('"parameters"'));
+assert.equal(windowBody([...text('{"name":"a"}\nnot json')], {raw: false, purpose: 'tools', isAgent}).querySelectorAll('.wt-tool').length, 0);
+
 console.log('Window renderers and Flow YAML: NOOP folding, segments, speakers, JSON formatting, bubbles, raw mode and lossless folding passed.');
 window.happyDOM.abort();

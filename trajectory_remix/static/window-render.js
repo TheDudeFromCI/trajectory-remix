@@ -1,6 +1,7 @@
 /* Readable window rendering: chat bubbles, formatted JSON and collapsed NOOP runs.
    Purely visual. The token stream is never changed; "Raw" mode shows it as is. */
 import {node, tag} from './ui-kit.js';
+import {toolListBlock} from './tool-list-view.js';
 
 const SPEAKER_TONES = ['sky', 'peach', 'lilac', 'butter', 'rose', 'mint'];
 const PAIRS = {msg_begin: 'msg_end', tool_begin: 'tool_end', response_begin: 'response_end'};
@@ -130,7 +131,7 @@ function noopChip(count) {
   return chip;
 }
 
-/** Formatted view: chat bubbles for chatrooms, JSON blocks for tool traffic. */
+/** Formatted view: chat bubbles for chatrooms, tool name lists for tools windows, JSON blocks for tool traffic. */
 function formattedBody(tokens, {purpose, isAgent}) {
   const body = node('div', undefined, 'window-formatted');
   const chat = purpose === 'chatroom', speakers = new Map();
@@ -160,7 +161,7 @@ function formattedBody(tokens, {purpose, isAgent}) {
       block.append(label, jsonBlock(part.text) || node('div', part.text, 'wt-text'));
       body.append(block);
     } else if (part.type === 'text') {
-      body.append(jsonBlock(part.text) || node('div', part.text, 'wt-text'));
+      body.append((purpose === 'tools' && toolListBlock(part.text)) || jsonBlock(part.text) || node('div', part.text, 'wt-text'));
     } else if (part.type === 'control') {
       body.append(part.control === 'noop' ? noopChip(part.count) : node('span', controlLabel(part.control), 'token-block'));
     }
