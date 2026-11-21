@@ -112,3 +112,20 @@ const plain=document.createElement('div');document.body.append(plain);renderGene
 assert.equal(btn(plain,'Reset review checklists to defaults'),undefined);
 console.log('Project/generation settings forms: endpoint CRUD, roles, shared drafts, checklists, tokenizer import and callback state passed.');
 window.happyDOM.abort();
+// Review pack export/import
+{
+  const {buildPack, parsePack} = await import('../trajectory_remix/static/review-pack.js');
+  const src = {prompts:{actor:'A',draft:'D',assembly:'S'},review_checklists:{core:{evidence:{text:'E',allow_not_applicable:true}},critical:{deep:{text:'X'}}}};
+  const pack = buildPack(src);
+  assert.deepEqual(pack.review_checklists.critical.deep,{text:'X',allow_not_applicable:false});
+  assert.deepEqual(parsePack(JSON.stringify(pack)),{prompts:pack.prompts,review_checklists:pack.review_checklists});
+  assert.throws(()=>parsePack('nope'),/not valid JSON/);
+  assert.throws(()=>parsePack('{"format":"x"}'),/not a Trajectory Remix/);
+  const dup = structuredClone(pack); dup.review_checklists.core.deep={text:'Y'};
+  assert.throws(()=>parsePack(JSON.stringify(dup)),/both Core and Critical/);
+  const bad = structuredClone(pack); bad.review_checklists.core['Bad Id']={text:'Y'};
+  assert.throws(()=>parsePack(JSON.stringify(bad)),/Criterion ID/);
+  const g = document.createElement('div'); document.body.append(g);
+  let d2 = structuredClone(src); renderGenerationSettings(g,d2,{getSettings:()=>d2,onChange:v=>{d2=v;}});
+  assert.ok(btn(g,'Export pack')&&btn(g,'Import pack'));
+}
