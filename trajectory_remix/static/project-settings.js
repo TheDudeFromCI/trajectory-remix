@@ -218,7 +218,9 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Authoring limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
   const exchanges = input('Maximum exchanges per pass', current().generation?.max_authoring_exchanges ?? 10, value => write(d => { d.generation ||= {}; d.generation.max_authoring_exchanges = value; }), 'number'); exchanges.min = 1; exchanges.step = 1;
-  limits.append(field('Format correction retries', retries), field('Maximum exchanges per pass', exchanges), node('p', 'Assembly, review, and repair each use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
+  const retriesField = field('Format correction retries', retries);
+  retriesField.dataset.tip = 'When a Draft or Assembly pass fails due to model generation issues, how many retries should be attempted?';
+  limits.append(retriesField, field('Maximum exchanges per pass', exchanges), node('p', 'Assembly, review, and repair each use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
   renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
   renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading});
