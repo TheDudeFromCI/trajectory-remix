@@ -145,6 +145,12 @@ $('window-id').value='b'; $('window-id').dispatchEvent(new Event('change'));
 assert.equal($('window-left-open').checked,false);
 await ui.restore(true); assert.equal(ui.record.source.windows.a.intentionally_left_open ?? false,false);
 await ui.restore(false); assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
+// Deleting the selected trajectory must clear the event panel immediately.
+await ui.select(ack.source.id); ui.selectEvent('a'); assert.notEqual($('event-content').value,'');
+globalThis.confirm=()=>true; window.confirm=()=>true;
+$('delete-sample').click(); await until(()=>ui.id===null);
+assert.equal($('event-content').value,''); assert.equal($('event-picker').value,'');
+assert.ok($('event-editor-panel').classList.contains('no-event'));
 ui.stopped=true;clearTimeout(ui.pollTimer);clearTimeout(ui.validationTimer);ui.preview.invalidate();if(ui.playing)clearInterval(ui.playing);
 assert.ok(paths.every(path => path.startsWith('/api/v1/')));
 console.log('Graph DOM/API: dependency editing, graph/tick scrub, debounce fencing/cache, partial tool content, chat, JSON recovery, split separation, independent jobs and CAS drafts passed.');
