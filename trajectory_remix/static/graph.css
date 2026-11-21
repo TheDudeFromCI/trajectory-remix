@@ -227,7 +227,7 @@ td.faint { color: var(--ink-faint); }
 /* ---------- Dialog content ---------- */
 .settings-tabs { flex: 1; min-height: 0; }
 .settings-tabs .dialog-body { flex: 1; }
-.generation-layout { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-height: 0; }
+.generation-layout { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: auto; }
 .generation-run { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); overflow: auto; }
 .review-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); align-items: start; overflow: auto; }
 .review-run { display: flex; flex-direction: column; gap: var(--space-3); }
