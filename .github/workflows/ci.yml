@@ -93,7 +93,7 @@ jobs:
       - run: node tests/endpoint_collapse_frontend.mjs
       - run: node tests/usage_view_frontend.mjs
       - run: node tests/tool_import_frontend.mjs
-      - run: node tests/show_tools_frontend.mjs
+      - run: node tests/tool_picker_frontend.mjs
       - run: node tests/job_log_levels_frontend.mjs
 
   browser:

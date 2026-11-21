@@ -32,19 +32,21 @@ it:
 ### Show the agent its tools
 
 Before an agent calls a tool, a trajectory can show it which tools exist. In the Editor,
-click **Show tools…** next to the event editor's **+** button:
+add an event, set its **Kind** to **Tool schema** and put it in a window whose purpose is
+`tools`:
 
-1. Tick the tools to list. Each tool's description is shown beside its ID.
-2. Optionally tick **Randomly add additional tools** and set the chance for each. Unticked
-   tools are then added at random, so the agent also learns to ignore tools it doesn't need.
-3. Check the **Event ID** and **Window**. The listing goes in a window whose purpose is
-   `tools`; a new one is created if the trajectory has none.
-4. Leave **Place it before the first event** ticked so the agent sees the listing, then click
-   **Add listing to draft** and save.
+1. Tick the tools to list on the **Content** tab. The text box is replaced by one checkbox
+   per project tool. Each tick writes that tool's description and parameters to the
+   event.
+2. Some other tools are added at random, so the agent also learns to ignore tools it
+   doesn't need. They show grayed out and can't be ticked. Set the chance in
+   **Settings → Project defaults** (0 turns it off), or hide them in **Preferences**.
+3. Make the first events of the trajectory follow the listing, so the agent sees it.
 
-The listing is a masked `external_text` event with one JSON line per tool (name, description,
-parameters). It is exactly what Assembly writes during generation, and
-the random additions repeat: the same trajectory ID and event ID always add the same tools.
+A `tool_schema` event is masked external input with one JSON line per tool (name,
+description, parameters). It is what Assembly writes during generation, and the random
+additions repeat: the same trajectory ID and event ID always add the same tools. The
+`extra_tools` field names the lines that were added at random.
 
 ### Partial and abandoned calls
 

@@ -11,12 +11,12 @@ python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
+node tests/tool_picker_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/tool_import_frontend.mjs
-node tests/show_tools_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 python tests/run_layout_frontend.py
 python tests/run_sampler_frontend.py
@@ -39,7 +39,7 @@ Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations
 when nothing changed, which is what keeps the dashboard from flickering. `window_render_frontend.mjs`
 covers the readable window view (NOOP folding, chat bubbles, JSON formatting).
-`project_settings_frontend.mjs` also covers the **Generation prompts** section. `show_tools_frontend.mjs` covers the Editor's **Show tools…** dialog: the listing request, the masked event, window reuse and placement before the first events. `job_log_levels_frontend.mjs` covers
+`project_settings_frontend.mjs` also covers the **Generation prompts** section. `tool_picker_frontend.mjs` covers the tool checkboxes that replace the text box for `tool_schema` events: chosen versus random tools, relisting, hidden extras, tools missing from the project, failed requests and the locked state. `job_log_levels_frontend.mjs` covers
 the coloured job log lines. `run_layout_frontend.py` drives a real browser through the splitters, the collapsible trajectory bar
 and the timeline controls that move to the status bar, and checks real layout rather than DOM state. Layout, sampler, dashboard and
 generation browser checks use optional Node `playwright` and Chromium (`CHROMIUM_PATH`, default `/usr/bin/chromium`).

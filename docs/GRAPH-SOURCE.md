@@ -61,6 +61,7 @@ Every event has `kind`, `window`, `after` (default `[]`), `content`, `supervisio
 | --- | --- | --- |
 | `agent_text` | | no |
 | `external_text` | `delivery`, `replace_body` | yes |
+| `tool_schema` | `delivery`, `replace_body`, `extra_tools` (tools added at random) | yes |
 | `tool_call` | `call_id`, `tool`, `insert_tool_begin`, `insert_tool_end`, `echo_chat` | no |
 | `tool_response` | `call_id`, `delivery`, `replace_body`, `insert_response_begin`, `insert_response_end` | yes |
 | `chat_message` | `chat: {"speaker": "…"}`, optional `call_id`, `delivery` | yes |

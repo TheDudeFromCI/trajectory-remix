@@ -108,8 +108,9 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    windows and timeline update as you type.
 4. Need another window? Open the **Windows** tab, type a new window ID and purpose, and
    click **Add / update window**.
-5. Want the agent to see its tools? Click **Show tools…**, tick the tools, and add the
-   listing. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
+5. Want the agent to see its tools? Add an event of kind **Tool schema** in a `tools`
+   window and tick the tools. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
+   Randomly added tools are grayed out; hide them under **Preferences**.
 6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
    **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
 
@@ -334,7 +335,7 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |
 | `jobs-view.js` | `JobsView`: the job list and detail panel (`StudioUI.dialogs` maps job IDs to detail panels). |
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
-| `window-render.js` | Readable window view: header fields, chat bubbles, tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
+| `window-render.js` | Readable window view: header fields, chat bubbles, tool name lists for `tools` windows (`tool-list-view.js`), tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use

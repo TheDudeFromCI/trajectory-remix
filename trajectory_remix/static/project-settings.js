@@ -190,6 +190,8 @@ export function renderProjectSettings(container, initial, options = {}) {
   }
   const cap = input('Log cache limit MiB', current().log_cache_mib, value => write(d => { d.log_cache_mib = value; }), 'number'); cap.min = 0; cap.step = 1; cap.placeholder = 'Unlimited';
   grid.append(field('Log cache limit (MiB; blank = unlimited)', cap));
+  const chance = input('Random extra tools percent', Math.round((current().tool_schema_extra_chance ?? 0.5) * 100), value => write(d => { d.tool_schema_extra_chance = Math.min(100, Math.max(0, value ?? 0)) / 100; }), 'number'); chance.min = 0; chance.max = 100; chance.step = 1;
+  grid.append(field('Random extra tools in tool schema events (% chance each; 0 = none)', chance));
   const levels = input('Reasoning effort levels', (current().reasoning_levels || []).join(', '), value => write(d => { d.reasoning_levels = value.split(',').map(v => v.trim()).filter(Boolean); }));
   grid.append(field('Reasoning effort levels, comma separated', levels));
   other.append(grid, node('p', 'Split fractions must total 1. Changing settings never rewrites existing trajectories.', 'settings-help')); container.append(other, status);
