@@ -1,6 +1,7 @@
 /* Form editors over the existing project-settings DTO. No network or credentials. */
 import {renderPromptSettings} from './prompt-settings.js';
 import {renderChecklistSettings} from './checklist-settings.js';
+import {persistCollapse} from './collapse-state.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
@@ -93,8 +94,8 @@ export function renderProjectSettings(container, initial, options = {}) {
   heading(container, 'Model endpoints', 'Add an OpenAI-compatible base URL and model, then assign its role. Settings affect future jobs; existing jobs retain their frozen configuration.');
   const endpoints = node('div', undefined, 'settings-cards'); container.append(endpoints);
   for (const [id, endpoint] of Object.entries(current().endpoints || {})) {
-    const card = node('section', undefined, 'settings-card'), grid = node('div', undefined, 'settings-grid');
-    card.append(node('h4', id));
+    const card = node('details', undefined, 'settings-card'), grid = node('div', undefined, 'settings-grid');
+    card.append(node('summary', id)); persistCollapse(card, `endpoint:${id}`);
     const edit = (key, value) => write(d => { d.endpoints[id][key] = value; });
     grid.append(field('Base URL', input(`Endpoint ${id} URL`, endpoint.url, v => edit('url', v), 'url')),
       field('Model identifier', input(`Endpoint ${id} model`, endpoint.model, v => edit('model', v))));

@@ -13,6 +13,7 @@ node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs
+node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/show_tools_frontend.mjs

@@ -1,0 +1,22 @@
+/* Endpoint cards collapse, and the choice persists in localStorage across renders. */
+import assert from 'node:assert/strict';
+import {Window} from 'happy-dom';
+const window = new Window(); globalThis.document = window.document;
+const store = new Map();
+globalThis.localStorage = {getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v))};
+const {renderProjectSettings} = await import('../trajectory_remix/static/project-settings.js');
+const root = document.createElement('div'); document.body.append(root);
+const ep = {url: 'http://x/v1', model: 'm', concurrency: 1, retries: 2, context_window_tokens: 32768, max_output_tokens: 2048};
+let draft = {endpoints: {alpha: {...ep}, beta: {...ep}}, endpoint_roles: {}, tools: {}};
+const render = () => renderProjectSettings(root, draft, {getSettings: () => draft, onChange: v => { draft = v; }});
+const card = id => [...root.querySelectorAll('details.settings-card')].find(c => c.querySelector('summary').textContent === id);
+render();
+assert.ok(card('alpha').open && card('beta').open);
+card('alpha').open = false; card('alpha').dispatchEvent(new window.Event('toggle'));
+render();
+assert.equal(card('alpha').open, false);
+assert.equal(card('beta').open, true);
+card('alpha').open = true; card('alpha').dispatchEvent(new window.Event('toggle'));
+render();
+assert.equal(card('alpha').open, true);
+console.log('endpoint collapse ok');
