@@ -149,6 +149,15 @@ class GenerationService:
             outcome=outcome,
             bulk_position=cp.get("bulk_position"),
         )
+        if accepted.get("repeated_exchange_limit"):
+            endpoint = label(cp["exchange_limit_endpoint"])
+            exchanges = cp["authoring_session"]["exchanges"]
+            self.jobs.progress(
+                job,
+                f"Endpoint {endpoint} reached the {exchanges}-exchange limit twice in this job. "
+                "Consider increasing Maximum exchanges per pass in Review Settings for new runs.",
+                "warning",
+            )
         if outcome is not None:
             self.jobs.progress(
                 job,
@@ -874,6 +883,8 @@ class GenerationService:
             f"{label(phase)} ended: {label(reason)} trajectory={label(source.id)}",
             "warning",
         )
+        if reason == "exchange_limit":
+            cp["exchange_limit_endpoint"] = ticket.endpoint
         cp["phase"] = "done"
         self._save(
             ticket.job_id, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail"

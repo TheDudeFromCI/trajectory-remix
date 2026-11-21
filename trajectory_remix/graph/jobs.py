@@ -434,11 +434,22 @@ class JobService:
                     ).fetchone():
                         db.execute("UPDATE graph_jobs SET state='completed' WHERE id=?", (job,))
             self._notify(db, job)
-            return dict(
+            result = dict(
                 db.execute(
                     "SELECT * FROM graph_steps WHERE job_id=? AND step=?", (job, step)
                 ).fetchone()
             )
+            endpoint = checkpoint.get("exchange_limit_endpoint")
+            if endpoint is not None:
+                hits = db.execute(
+                    """SELECT count(*) FROM (
+                           SELECT 1 FROM graph_checkpoints WHERE job_id=?
+                           AND json_extract(checkpoint, '$.exchange_limit_endpoint')=? LIMIT 3
+                       )""",
+                    (job, endpoint),
+                ).fetchone()[0]
+                result["repeated_exchange_limit"] = hits == 2
+            return result
 
     def _detach(self, db, job, trajectory, outcome):
         db.execute("DELETE FROM graph_owners WHERE trajectory_id=? AND job_id=?", (trajectory, job))

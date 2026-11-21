@@ -1,4 +1,4 @@
-version: draft-assembly/2
+version: draft-assembly/3
 # The agent's behaviour guide. Both Draft and Assembly see it; a persona pack goes here.
 actor_instruction: >-
   The agent acts only on visible evidence and the tool contract.
@@ -18,45 +18,78 @@ actor_instruction: >-
   Distinguish intentions, reported results, verified outcomes and remaining blockers.
   Never use hidden author targets or predict an unobserved tool outcome.
 draft_instruction: |-
-  Write working notes for one synthetic episode, from the opening to the final state.
-  Return a JSON object with one field, "draft", containing at least 200 characters of
-  plain prose. Leave graph windows and event IDs to the next pass.
+  # Draft a synthetic episode
 
-  Turn the proposal's objectives, dimensions, constraints, event tags and numeric
-  targets into things the episode actually shows. Use the checklist to check coverage.
-  Set up concrete starting evidence and write the person's messages in their own words.
-  When a person opens the conversation, give the agent a brief chat reply before private
-  reasoning. Write the agent's messages in its voice and keep its reasoning private.
+  **Deliverable:** one JSON object with a "draft" string of at least 200 characters.
+  Write the whole episode in prose. Assembly will assign event and window IDs.
 
-  Walk through what happens. Include what the agent delegates and why, the exact
-  arguments for each call, and which steps run independently. Give each tool that
-  returns data a realistic output and say when it arrives. Results can arrive out of
-  order, fail or be incomplete.
-  Use tools from the catalogue for their stated purpose and follow their input schemas.
-  Keep names, IDs returned by tools, task ownership and state consistent. Repeat a call or
-  message only when there is a concrete reason and show what prompted it.
+  ## Plan from the proposal
+  - Identify the user's request, the starting evidence, the required decisions, and
+    the final state. Turn sampled objectives, constraints, and numeric targets into
+    observable actions. Keep the sampled targets out of the agent's visible world.
+  - Write the user's and agent's actual messages. When the user opens the episode,
+    draft a brief acknowledgment before private reasoning.
+  - Specify each synthetic call by its catalogue ID and exact arguments. Describe
+    the result text, which call it answers, and when the result becomes visible.
 
-  At each action or message, use only evidence available to the agent at that point.
-  Show the observation before anything that relies on it, including approval, a cited
-  result or a verification claim. Later evidence cannot justify earlier work, and a
-  report from someone else is not independent verification. Record conclusions worth
-  keeping and end with what is confirmed, what remains open and any next step. If
-  correction is nonempty, fix the stated problem in the complete draft.
+  ## Check the handoff to Assembly
+  - Follow the causal order: evidence, decision, action, and observation. Specify
+    which actions are independent and which must wait for a result or approval.
+  - Distinguish a specialist's report from evidence that verifies it. Keep names,
+    returned IDs, budgets, and task ownership consistent across the episode.
+  - Show what the agent can conclude at the end and any remaining blocker. If a
+    correction is present, incorporate it in the complete Draft.
 
 assemble_instruction: |-
-  Turn the Draft into one episode using the native authoring tools. Keep its facts,
-  outcomes and voice. Fill gaps with the smallest consistent details needed to show
-  the proposal. Use catalogue tools and their actual argument schemas.
+  # Assemble a complete trajectory
 
-  Show the tools the agent needs with post_tool_schema. Use post_chat_message for
-  user messages and synthetic agent chat. Acknowledge a person who opens the
-  conversation before private reasoning. Give independent steps separate windows
-  and order each pair of writers to the same window by causal dependency.
+  ## Plan the graph
+  Read the Draft for the opening, decisions, actions, and final outcome. Pick stable
+  event and window IDs and sketch the prerequisites for each decision. Use the
+  proposal and checklist to check coverage. Preserve the Draft's material facts
+  and outcomes.
 
-  Use after to connect each decision to the observations that justify it. Put
-  a tool response after the fragment that submits that call and reuse its call ID.
-  Use the configured response window when the tool declares one. Retain evidence
-  in a suitable window until its last consumer, then close temporary windows.
+  ## Write events efficiently
+  - Group several ready edits in a reply. Calls run in listed order, so a later call
+    can use an ID created earlier in that reply. Create the episode in coherent
+    batches instead of spending a reply on every window or event.
+  - Use create_event for reasoning, observations, and synthetic requests and results.
+    It creates a missing window. Set window_properties only on its first use if the
+    default needs changing. Use configure_window for an existing window, to set
+    optional properties, or to acknowledge a window intentionally left open.
+  - Use short window purposes such as chatroom, reasoning, document, and tool.
+    Pass JSON strings once, as in {"window":"work","kind":"agent_text"}.
+    Omit optional fields you are leaving unchanged. Use JSON null to clear a
+    nullable field. Keep descriptive prose in content.
+  - Use post_chat_message for user and agent chat. Agent chat creates a synthetic
+    chat request and its delivery. The event_id you give the tool names the delivery,
+    so the next event can depend on that ID.
+  - Use post_tool_schema with exact project tool IDs. Display names are for people
+    reading the catalogue. Known tool calls add missing schemas automatically.
+    For a generic tool_call, content holds the JSON text of the synthetic arguments.
+    A tool_response reuses its call_id and depends on the event that submits it.
+    Use the configured response window when the tool specifies one.
 
-  Inspect the graph topology, correct all reported errors and enabled warnings,
-  and call signoff with event IDs showing completeness and fidelity to the Draft.
+  ## Check visibility and close working windows
+  - after names real event IDs. Add dependencies on the observations a decision uses.
+    Order all writers to the same window. Give independent actions separate windows
+    where appropriate. Keep evidence available through its last consumer.
+  - Keep external observations masked and supervise agent outputs unless the sample
+    calls for a different mask. Close temporary windows when their work is done.
+    Use update_event to fix a specific edit. After deleting an event, repair any
+    dependencies that pointed to it.
+
+  ## Example opening batch
+  These are arguments for successive native calls. Use the tool names supplied by
+  the provider and adapt the content to the Draft.
+  1. post_chat_message {"event_id":"ask","origin":"user","speaker":"Sam","content":"How many boxes remain?"}
+  2. post_chat_message {"event_id":"ack","origin":"agent","speaker":"Kidra","content":"I'll check the inventory.","after":["ask"]}
+  3. create_event {"event_id":"inventory","window":"records","kind":"external_text","content":"Inventory lists three boxes.","after":["ack"]}
+  4. post_chat_message {"event_id":"answer","origin":"agent","speaker":"Kidra","content":"The inventory lists three boxes.","after":["inventory"]}
+  5. view_diagnostics {}
+
+  ## Sign off
+  Use view_graph to check coverage and view_event or view_window for specific
+  evidence. Use view_diagnostics after edits to check errors and enabled warnings.
+  Fix reported problems and verify the final graph. Call signoff with completeness
+  and Draft-fidelity evidence, citing actual event IDs. Put signoff last in its batch.

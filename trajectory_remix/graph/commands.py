@@ -95,12 +95,13 @@ class GraphCommands:
                     dict(operation=name, channel="mcp"),
                     settings_revision=snapshot.revision,
                 )
+            if "diagnostics" not in reply:
+                reply["diagnostics"] = authoring.findings(source, settings)
             return reply | dict(
                 accepted=accepted,
                 source_hash=source.intrinsic_hash,
                 revision=record.revision,
                 settings_revision=snapshot.revision,
-                diagnostics=authoring.findings(source, settings),
             )
 
     def create(self, source: dict, *, provenance: dict | None = None):

@@ -235,6 +235,8 @@ def _view(source, name, arguments):
 def apply(source, settings, name, arguments):
     """Return a new validated source and tool reply; schema errors leave the old source intact."""
     args = TOOLS[name][0].model_validate(arguments)
+    if name == "view_diagnostics":
+        return source, dict(diagnostics=findings(source, settings))
     if name in READ_ONLY:
         return source, _view(source, name, args)
     data = source.to_dict()

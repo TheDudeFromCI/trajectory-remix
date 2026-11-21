@@ -388,12 +388,20 @@ class GenerationPrompts(DTO):
     draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
     assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
 
-    @field_validator("assembly")
+    @field_validator("draft", "assembly")
     @classmethod
-    def upgrade_packaged_assembly(cls, value):
-        # The previous shipped default requested a compact JSON spec. Keep custom guidance.
-        old_default = "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b"
-        return prompt_defaults.assembly() if digest(value) == old_default else value
+    def upgrade_packaged_prompt(cls, value, info):
+        # Only replace exact shipped defaults. Custom guidance stays with the project.
+        previous = {
+            "draft": {"3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a"},
+            "assembly": {
+                "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b",
+                "325bbdc768a88d57609bd1cc38f2dec2b61632f395de754a096d3d35518dee51",
+            },
+        }
+        if digest(value) in previous[info.field_name]:
+            return getattr(prompt_defaults, info.field_name)()
+        return value
 
 
 class GenerationOptions(DTO):

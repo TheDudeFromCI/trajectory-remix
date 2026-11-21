@@ -48,6 +48,7 @@ for you to copy, not calls this document makes.
 | One short guide | `get_authoring_guide` | `{"topic":"dependencies"}` |
 | Find drafts | `list_graphs` | `{"query":{"stage":-3},"limit":10,"offset":0}` |
 | Inspect a source | `read_graph` | `{"id":"UUID"}` |
+| Inspect errors and enabled warnings | `view_diagnostics` | `{"id":"UUID"}` |
 | Inspect topology | `view_graph` | `{"id":"UUID"}` |
 | Inspect event text | `view_event` | `{"id":"UUID","event_id":"think"}` |
 | Create an event | `create_event` | `{"id":"UUID","expected_revision":2,"event_id":"note","window":"notes","kind":"agent_text","content":"Confirmed."}` |

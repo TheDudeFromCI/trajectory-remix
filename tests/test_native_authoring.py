@@ -311,7 +311,7 @@ def test_rest_mcp_and_signoff_use_the_same_warning_snapshot(tmp_path):
                 "/api/mcp/call", json={"name": name, "arguments": {"id": graph.id, **args}}
             )
 
-        current = mcp("view_graph").json()
+        current = mcp("view_diagnostics").json()
         assert current["diagnostics"] == record["diagnostics"] and len(current["diagnostics"]) == 1
         args = dict(
             status="complete",

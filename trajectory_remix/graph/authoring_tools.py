@@ -87,6 +87,10 @@ class ViewGraph(DTO):
     pass
 
 
+class ViewDiagnostics(DTO):
+    pass
+
+
 class Evidence(DTO):
     status: Literal["pass", "fail", "not_applicable"]
     evidence: str = Field(min_length=1)
@@ -130,13 +134,17 @@ TOOLS = {
         ViewGraph,
         "Read event IDs, kinds, windows and dependencies without event bodies.",
     ),
+    "view_diagnostics": (
+        ViewDiagnostics,
+        "Run validation on the graph at this point in the tool batch. Returns current errors and enabled warnings.",
+    ),
     "signoff": (
         Signoff,
         "Complete the pass with evidence for every requested criterion. Use unfeasible with a reason to end a failed attempt.",
     ),
 }
 
-READ_ONLY = frozenset({"view_event", "view_window", "view_graph"})
+READ_ONLY = frozenset({"view_event", "view_window", "view_graph", "view_diagnostics"})
 
 
 def provider_tools(*, editable, signoff_parameters):

@@ -79,6 +79,10 @@ for editing events and windows, inspecting their causal dependencies, writing ch
 tool schemas. A reply can request several tools. Remix applies them in reply order and saves the
 result and conversation together. An edit can leave a working draft with diagnostics.
 
+Use `view_diagnostics` in a tool batch to check the graph after preceding calls and before
+later edits. Remix returns that snapshot with the batch's other tool results on the next
+model turn.
+
 Assembly is complete when `signoff` accepts evidence for completeness and fidelity to the
 Draft. Resolve all errors and enabled warnings first. A regular text reply leaves the same
 conversation open. The Draft and signoff stay with the trajectory in `metadata.draft` and
@@ -205,6 +209,8 @@ history. Failing criteria keep the repair open so it can continue.
   as Unfinished with its edits and the failure in `metadata.repair_outcomes`.
 - The endpoint context limit and **Maximum exchanges per pass** also end the pass with its
   saved edits. The default is ten exchanges. A reply containing several tool calls counts once.
+  If the same endpoint hits the exchange limit twice in a job, Jobs logs a warning with the
+  setting to adjust for new runs.
 - A successful automatic Fast repair can proceed to Critical review.
 
 ### Manual review
