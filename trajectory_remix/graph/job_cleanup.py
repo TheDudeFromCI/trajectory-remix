@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from . import phase_barrier
 from .jobs import TERMINAL, OwnershipConflict
 
 # Child tables keyed directly by job_id, deleted before the job row itself.
 _BY_JOB = (
+    "graph_job_phases",
     "graph_job_logs",
     "graph_log_cursors",
     "graph_checkpoints",
@@ -24,6 +26,7 @@ def clear_job(jobs, artifacts, job):
             raise OwnershipConflict("Cancel the job before clearing it")
         if db.execute("SELECT 1 FROM graph_owners WHERE job_id=?", (job,)).fetchone():
             raise OwnershipConflict("Job still owns trajectories")
+        db.execute(phase_barrier.TABLE)  # created lazily; may not exist yet
         for table in _BY_JOB:
             db.execute(f"DELETE FROM {table} WHERE job_id=?", (job,))  # noqa: S608
         db.execute(
