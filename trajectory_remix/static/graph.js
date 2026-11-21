@@ -797,7 +797,15 @@ export class StudioUI {
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
     on('scrubber', 'input', e => scrub(e.target.value)); on('tick-number', 'change', e => scrub(e.target.value));
     on('first-tick', 'click', () => scrub(0)); on('prev-tick', 'click', () => scrub(this.position - 1)); on('next-tick', 'click', () => scrub(this.position + 1)); on('last-tick', 'click', () => scrub($('scrubber').max));
-    on('play', 'click', () => { if (this.playing) { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; } else { $('play').textContent = 'Pause'; this.playing = setInterval(() => scrub(this.position >= Number($('scrubber').max) ? 0 : this.position + 1), 500); } });
+    const lastTick = () => Number($('scrubber').max);
+    const pausePlayback = () => { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; };
+    on('play', 'click', () => {
+      if (this.playing) return pausePlayback();
+      if (this.position >= lastTick()) scrub(0); // Pressing Play at the end restarts from the beginning.
+      $('play').textContent = 'Pause';
+      // Playback does not loop: it pauses on reaching the last tick.
+      this.playing = setInterval(() => { scrub(Math.min(this.position + 1, lastTick())); if (this.position >= lastTick()) pausePlayback(); }, 500);
+    });
     on('settings-button', 'click', () => this.openSettings());
     if ($('generation-settings-button')) on('generation-settings-button', 'click', () => this.openGenerationSettings());
     if ($('generation-sampler-button')) on('generation-sampler-button', 'click', () => { $('generation-settings-dialog').close(); $('sampler-tab').click(); });
