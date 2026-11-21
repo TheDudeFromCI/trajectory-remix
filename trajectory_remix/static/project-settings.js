@@ -13,12 +13,18 @@ const controls = ['bos', 'eos', 'noop', 'ctx_begin', 'ctx_end', 'tool_begin', 't
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
 /** Mirrors the server's Endpoint rules; returns an error message or ''. */
 export function tokenBudgetProblem(context, output) {
-  const whole = v => Number.isInteger(v) && v > 0;
-  if (!whole(context) || !whole(output)) return 'Context limit and max output tokens must be positive whole numbers.';
-  if (context < 1024) return 'Context limit must be at least 1024 tokens.';
-  if (output + 512 >= context) return 'Max output tokens + 512 must be less than the context limit.';
+  const off = v => v === -1;
+  if (![context, output].every(Number.isInteger)) return 'Context limit and max output tokens must be whole numbers (-1 for no limit).';
+  if (!off(context) && context < 1024) return 'Context limit must be -1 (no limit) or at least 1024.';
+  if (!off(output) && output < 1) return 'Max output tokens must be -1 (no limit) or at least 1.';
+  if (!off(context) && !off(output) && output + 512 >= context) return 'Max output tokens + 512 must be less than the context limit.';
   return '';
 }
+/** Hover help for the endpoint token limits; -1 leaves a limit to the provider. */
+export const TOKEN_LIMIT_TIPS = {
+  context_window_tokens: 'The model\'s context window. Before each request Remix estimates the prompt size (bytes ÷ bytes per token) and stops instead of sending a request that would not fit beside the max output tokens and a 512-token margin, so a server that silently cuts long prompts cannot drop part of a trajectory. -1 (the default) skips this check and leaves it to the provider.',
+  max_output_tokens: 'Sent as max_tokens. Caps each single response, including reasoning and tool calls, not the whole pass. With a context limit set, this many tokens are also held back from it on every request. A response that hits the cap is cut off and retried (Incomplete response retries). -1 (the default) sends no max_tokens and holds nothing back, so the provider\'s own limit applies.',
+};
 /** Request fields the transport sets itself; extra_body may not replace them. */
 export const RESERVED_BODY_FIELDS = ['model', 'messages', 'stream', 'max_tokens', 'max_completion_tokens', 'response_format', 'session_id', 'temperature', 'top_p', 'presence_penalty', 'reasoning_effort'];
 /** Mirrors the server's extra_body rules; returns [value, ''] or [undefined, error]. */
@@ -33,12 +39,12 @@ export function parseExtraBody(text) {
 /** Options for hosted routers such as OpenRouter: token estimate, sticky sessions, extra fields. */
 function providerOptions(id, endpoint, edit, input) {
   const box = node('details', undefined, 'settings-subsection'); box.append(node('summary', 'Provider options'));
-  box.open = (endpoint.bytes_per_token ?? 1) !== 1 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0 || (endpoint.output_mode ?? 'auto') !== 'auto';
+  box.open = (endpoint.bytes_per_token ?? 3) !== 3 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0 || (endpoint.output_mode ?? 'auto') !== 'auto';
   const grid = node('div', undefined, 'settings-grid');
-  const ratio = input(`Endpoint ${id} bytes_per_token`, endpoint.bytes_per_token ?? 1, v => edit('bytes_per_token', v), 'number');
+  const ratio = input(`Endpoint ${id} bytes_per_token`, endpoint.bytes_per_token ?? 3, v => edit('bytes_per_token', v), 'number');
   ratio.min = 1; ratio.max = 6; ratio.step = 0.1;
   const ratioField = field('Bytes per token (context estimate)', ratio);
-  ratioField.append(node('span', '1 never undercounts but rejects prompts that would fit. English and JSON average about 3.5; 3 keeps a margin.', 'settings-help'));
+  ratioField.append(node('span', 'Used only when a context limit is set. English and JSON average about 3.5; the default 3 keeps a margin. 1 never undercounts but rejects prompts that would fit.', 'settings-help'));
   const sticky = node('input'); sticky.type = 'checkbox'; sticky.checked = !!endpoint.sticky_sessions; sticky.setAttribute('aria-label', `Endpoint ${id} sticky sessions`);
   sticky.onchange = () => edit('sticky_sessions', sticky.checked);
   const stickyField = node('label', undefined, 'checkbox'); stickyField.append(sticky, ' Sticky sessions (send the trajectory ID as session_id)');
@@ -102,15 +108,16 @@ export function renderProjectSettings(container, initial, options = {}) {
       field('Model identifier', input(`Endpoint ${id} model`, endpoint.model, v => edit('model', v))));
     const budget = node('p', '', 'settings-help'); budget.setAttribute('role', 'alert');
     const checkBudget = () => {
-      const {context_window_tokens: ctx, max_output_tokens: out} = current().endpoints[id], problem = tokenBudgetProblem(ctx, out);
+      const {context_window_tokens: ctx = -1, max_output_tokens: out = -1} = current().endpoints[id], problem = tokenBudgetProblem(ctx, out);
       budget.textContent = problem; budget.classList.toggle('error', Boolean(problem));
       for (const n of budget.fields || []) n.setAttribute('aria-invalid', problem ? 'true' : 'false');
     };
     const tokenFields = [];
     for (const [key, name, min] of [['concurrency', 'Concurrent requests', 1], ['retries', 'Transport retries', 0],
-      ['context_window_tokens', 'Context limit (tokens)', 1024], ['max_output_tokens', 'Max output tokens', 1]]) {
-      const n = input(`Endpoint ${id} ${key}`, endpoint[key], v => { edit(key, v); checkBudget(); }, 'number'); n.min = min; n.step = 1; grid.append(field(name, n));
-      if (key.endsWith('_tokens')) tokenFields.push(n);
+      ['context_window_tokens', 'Context limit (tokens)', -1], ['max_output_tokens', 'Max output tokens', -1]]) {
+      const n = input(`Endpoint ${id} ${key}`, endpoint[key] ?? (key.endsWith('_tokens') ? -1 : undefined), v => { edit(key, v); checkBudget(); }, 'number'); n.min = min; n.step = 1;
+      const label = field(name, n); grid.append(label);
+      if (key.endsWith('_tokens')) { tokenFields.push(n); label.dataset.tip = TOKEN_LIMIT_TIPS[key]; }
     }
     budget.fields = tokenFields; checkBudget();
     const timeout = input(`Endpoint ${id} timeout_seconds`, endpoint.timeout_seconds ?? 120, v => { if (v > 0) edit('timeout_seconds', v); }, 'number'); timeout.min = 0; timeout.step = 1;
@@ -139,7 +146,7 @@ export function renderProjectSettings(container, initial, options = {}) {
   addition.append(field('New endpoint ID', ident), button('Add endpoint', () => {
     const id = ident.value.trim();
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
-    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:65536, max_output_tokens:8192}; }); render();
+    write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:-1, max_output_tokens:-1}; }); render();
   })); container.append(addition);
   heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Assembly falls back to Draft. Fast Review and Critical Review also perform their corresponding repairs. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');

@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from . import prompt_defaults
+from . import prompt_defaults, token_limits
 
 Identifier = Annotated[str, Field(min_length=1)]
 Weight = Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -306,12 +306,14 @@ class Endpoint(DTO):
     top_p: Annotated[float, Field(ge=0, le=1)] | None = None
     presence_penalty: Annotated[float, Field(ge=-2, le=2)] | None = None
 
-    context_window_tokens: Annotated[int, Field(ge=1024)] = 65536
-    max_output_tokens: Annotated[int, Field(ge=1)] = 8192
+    # Token limits; -1 (the default) disables one and leaves it to the provider. See
+    # token_limits for how each is used.
+    context_window_tokens: Annotated[int, Field(ge=token_limits.DISABLED)] = token_limits.DISABLED
+    max_output_tokens: Annotated[int, Field(ge=token_limits.DISABLED)] = token_limits.DISABLED
     # The context guard estimates input tokens as UTF-8 bytes / bytes_per_token. 1.0 can
     # never undercount; English and compact JSON average about 3.5 bytes per token, so
     # 3.0 keeps a margin while letting a model's real window be used.
-    bytes_per_token: Annotated[float, Field(ge=1, le=6)] = 1.0
+    bytes_per_token: Annotated[float, Field(ge=1, le=6)] = 3.0
     # Send the trajectory ID as session_id so routers such as OpenRouter keep one
     # trajectory on one provider, where its prompt prefix stays cached.
     sticky_sessions: bool = False
@@ -325,8 +327,9 @@ class Endpoint(DTO):
 
     @model_validator(mode="after")
     def context_budget(self):
-        if self.max_output_tokens + 512 >= self.context_window_tokens:
-            raise ValueError("Reserve input space beyond output tokens and framing")
+        problem = token_limits.problem(self.context_window_tokens, self.max_output_tokens)
+        if problem:
+            raise ValueError(problem)
         reserved = set(self.extra_body) & RESERVED_BODY_FIELDS
         if reserved:
             raise ValueError("extra_body cannot set " + ", ".join(sorted(reserved)))

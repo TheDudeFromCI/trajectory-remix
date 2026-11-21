@@ -8,6 +8,7 @@ import os
 import httpx
 
 from ..structured_output import decoding_schema
+from . import token_limits
 from .failure_reason import key_variable
 
 
@@ -107,9 +108,9 @@ def context_budget(payload, response_format, messages):
     could fit. Never truncate evidence to make a request appear to fit.
     """
     endpoint = payload["endpoint_config"]
-    limit = endpoint.get("context_window_tokens", 65536)
-    output = endpoint.get("max_output_tokens", 8192)
-    ratio = endpoint.get("bytes_per_token", 1.0)
+    limit = endpoint.get("context_window_tokens", token_limits.DISABLED)
+    output = endpoint.get("max_output_tokens", token_limits.DISABLED)
+    ratio = endpoint.get("bytes_per_token", 3.0)
     wire_contract = {"tools": payload["tools"], "tool_choice": "auto"} if "tools" in payload else {}
     size = len(
         json.dumps(
@@ -121,7 +122,7 @@ def context_budget(payload, response_format, messages):
         input_bytes=size,
         bytes_per_token=ratio,
         input_tokens_estimate=math.ceil(size / ratio),
-        input_ceiling=limit - output - 512,
+        input_ceiling=token_limits.input_ceiling(limit, output),
         context_window_tokens=limit,
         max_output_tokens=output,
     )
@@ -148,9 +149,10 @@ def request_body(payload, trajectory_id):
         model=endpoint["model"],
         messages=messages,
         stream=False,
-        max_tokens=budget["max_output_tokens"],
         **({"response_format": response_format} if response_format else {}),
     )
+    if budget["max_output_tokens"] != token_limits.DISABLED:
+        body["max_tokens"] = budget["max_output_tokens"]
     if native:
         body.update(tools=payload["tools"], tool_choice="auto")
     for key in ("temperature", "top_p", "presence_penalty"):
@@ -218,7 +220,7 @@ class OpenAITransport:
         key = os.environ.get(key_variable(ticket.endpoint))
         headers = {"Authorization": "Bearer " + key} if key else {}
         body, budget = request_body(payload, ticket.trajectory_id)
-        if budget["input_tokens_estimate"] > budget["input_ceiling"]:
+        if token_limits.exceeds(budget):
             return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
         timeout = endpoint.get("timeout_seconds", 120.0)
         # Bound the whole attempt as well as individual network operations.

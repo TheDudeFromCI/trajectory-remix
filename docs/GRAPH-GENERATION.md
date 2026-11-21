@@ -289,16 +289,25 @@ mock the provider; actual quality and model compatibility require a model run.
 Draft and Assembly receive the sampled proposal. Reviewers inspect event text as needed
 using window and event tools. The initial prompts omit frozen matrix and run history.
 
-Endpoint settings now accept `context_window_tokens` (default **65536**) and
-`max_output_tokens` (default **8192**). The transport sends the latter as `max_tokens`.
-Configure them in Project Settings for each endpoint.
+Each endpoint has two optional token limits, set in Project Settings. Both default to
+**-1**, which means no limit: Remix leaves it to the provider.
+
+| Setting | When set | When -1 (default) |
+|---|---|---|
+| `max_output_tokens` (**Max output tokens**) | Sent as `max_tokens`. It caps **each response**, not the whole pass, and reasoning and tool calls count toward it. A response that hits it is cut off and retried under **Incomplete response retries**. | No `max_tokens` is sent; the provider's own limit applies. |
+| `context_window_tokens` (**Context limit**) | Checked before every request, as described below. A request that would not fit is never sent. | No local check. A provider that reports a context error still ends the pass as a context limit. |
+
+The local check exists because some servers silently cut the start of a prompt that is too
+long instead of returning an error, which would hide part of the trajectory from the model.
 
 Before HTTP, the transport measures the serialized messages and response or tool schema in
-UTF-8 bytes and reserves output tokens plus 512 framing tokens. It estimates input tokens
-as bytes divided by the endpoint's `bytes_per_token` (default **1**, which can never
-undercount for byte-backed tokenizers but rejects many requests that would fit). English
-and compact JSON average about 3.5 bytes per token; **3** keeps a margin while using most
-of the real window. See [Provider options](PROJECT-SETTINGS.md#provider-options).
+UTF-8 bytes. It estimates input tokens as bytes divided by the endpoint's `bytes_per_token`
+(default **3**). English and compact JSON average about 3.5 bytes per token, so 3 keeps a
+margin while using most of the real window; **1** can never undercount for byte-backed
+tokenizers but rejects many requests that would fit. The request must fit in the context
+limit minus the max output tokens (when set, since that room is held back for the reply on
+every request) minus 512 framing tokens. See
+[Provider options](PROJECT-SETTINGS.md#provider-options).
 It is not an exact Qwen chat-template count. No training tokenizer is loaded and no
 model endpoint is probed. Configure the actual model context size, rather than inflating
 it to bypass this check. Exact serving-tokenizer accounting is a future extension.
@@ -315,7 +324,7 @@ does **not** enlarge the context window, because cached tokens still count towar
 - **Native turns:** each request extends the accepted conversation with the assistant's
   tool calls, paired tool results and any user-role correction.
 
-Over-budget requests stop before contacting the model. A native pass settles with any
+When a context limit is set, over-budget requests stop before contacting the model. A native pass settles with any
 edits made so far. Frozen runs keep their endpoint settings, including context limits.
 
 ### Watch a running job

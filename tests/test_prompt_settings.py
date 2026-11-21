@@ -136,8 +136,9 @@ def test_new_matrix_dimensions_reach_draft_and_assembly(tmp_path):
     assert "quantum_potatoes" in json.dumps(payload["messages"])
 
 
-def test_endpoints_default_to_a_65k_context_and_8k_output():
+def test_endpoints_default_to_provider_token_limits():
     from trajectory_remix.graph.models import Endpoint
 
     endpoint = Endpoint.model_validate(dict(url="http://127.0.0.1:8000/v1", model="m"))
-    assert endpoint.context_window_tokens == 65536 and endpoint.max_output_tokens == 8192
+    assert endpoint.context_window_tokens == -1 and endpoint.max_output_tokens == -1
+    assert endpoint.bytes_per_token == 3.0
