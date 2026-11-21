@@ -15,6 +15,7 @@ try {
  const screenshot=async name=>{if(process.env.UPDATE_SCREENSHOTS==='1'){await fs.mkdir(new URL('../docs/images/dashboard-restored/',import.meta.url),{recursive:true});await page.screenshot({path:new URL(`../docs/images/dashboard-restored/${name}.png`,import.meta.url).pathname,fullPage:true});}};
  await page.goto(process.argv[2]);await page.waitForFunction(()=>globalThis.graphStudio?.settingsRecord);
  assert.equal(await page.locator('#jobs-button').isVisible(),true);
+ await page.locator('#project-menu summary').click();
  await page.locator('#settings-button').click();
  await page.getByLabel('New endpoint ID',{exact:true}).fill('fixture');await page.getByRole('button',{name:'Add endpoint',exact:true}).click();
  await page.getByLabel('Endpoint fixture URL',{exact:true}).fill('http://127.0.0.1:1/v1');
