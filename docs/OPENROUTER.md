@@ -80,8 +80,8 @@ Why these settings:
   scatter across providers and miss the cache.
 - **`require_parameters: true`** routes only to providers that honour the structured
   output request. Without it, a provider may ignore it and the reply will need retries.
-- **Bytes per token 3** lets the context check use most of the 32k window. At the default
-  of 1, a prompt of about 30 KB (roughly 9k real tokens) would already be refused.
+- **Bytes per token 3** (the default) lets the context check use most of the 32k window.
+  At 1, a prompt of about 30 KB (roughly 9k real tokens) would already be refused.
 
 ## 3. Check one trajectory first
 

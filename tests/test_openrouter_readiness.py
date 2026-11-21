@@ -75,7 +75,9 @@ def test_bytes_per_token_lets_a_real_window_be_used():
         operation="event",
         messages=[dict(role="user", content="x" * 20000)],
         schema=SCHEMA,
-        endpoint_config=dict(context_window_tokens=16384, max_output_tokens=2048),
+        endpoint_config=dict(
+            context_window_tokens=16384, max_output_tokens=2048, bytes_per_token=1.0
+        ),
     )
     strict = context_budget(payload, {"type": "json_object"}, payload["messages"])
     assert strict["input_tokens_estimate"] > strict["input_ceiling"]  # 1 byte = 1 token.

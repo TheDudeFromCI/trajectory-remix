@@ -29,9 +29,10 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
     assert body["proposal"] == plan["proposal"]
     assert "sampling_provenance" in body["proposal"]
     wire, messages = response_contract(payload)
-    payload["endpoint_config"] = (
-        gen.settings_for(gen.jobs.listing()[0]["id"]).endpoints["g"].model_dump(mode="json")
-    )
+    endpoint = gen.settings_for(gen.jobs.listing()[0]["id"]).endpoints["g"]
+    # The prior strict defaults: a 65k window, 8k output and 1 byte per token.
+    strict = dict(context_window_tokens=65536, max_output_tokens=8192, bytes_per_token=1.0)
+    payload["endpoint_config"] = endpoint.model_copy(update=strict).model_dump(mode="json")
     budget = context_budget(payload, wire, messages)
     assert budget["input_bytes"] < budget["input_ceiling"]
     assert len(json.dumps(source.metadata)) > 60000  # Storage unchanged.
@@ -67,6 +68,7 @@ async def test_oversized_prompt_stops_before_http_without_truncation(monkeypatch
             model="local",
             context_window_tokens=16384,
             max_output_tokens=2048,
+            bytes_per_token=1.0,
         ),
     )
     ticket = Ticket("id", "job", "source", "endpoint", "step", 1, "lease", payload)

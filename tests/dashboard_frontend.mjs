@@ -20,6 +20,8 @@ try {
  await page.getByLabel('New endpoint ID',{exact:true}).fill('fixture');await page.getByRole('button',{name:'Add endpoint',exact:true}).click();
  await page.getByLabel('Endpoint fixture URL',{exact:true}).fill('http://127.0.0.1:1/v1');
  await page.getByLabel('Endpoint fixture model',{exact:true}).fill('fake-browser');
+ // Tooltips inside the modal settings dialog must render above it, not behind it.
+ await page.getByLabel('Endpoint fixture max_output_tokens',{exact:true}).hover();await page.waitForFunction(()=>{const t=document.getElementById('tooltip');return t.classList.contains('show')&&t.closest('dialog[open]')&&/max_tokens/.test(t.textContent);});
  await page.getByLabel('Draft endpoint',{exact:true}).selectOption('fixture');
  // Editing a tool after endpoint forms must not overwrite the shared settings draft.
  await page.getByRole('tab',{name:'Tools',exact:true}).click();

@@ -35,6 +35,20 @@ models.
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
 future work.
 
+### Token limits
+
+Each endpoint card also has two optional limits. Hover over either field for a summary.
+Both default to **-1**, which means no limit: the provider decides.
+
+| Field | What it does when set |
+| --- | --- |
+| **Max output tokens** | Caps each single response (sent as `max_tokens`). Reasoning and tool calls count toward it. It does not cap the whole pass. |
+| **Context limit (tokens)** | Remix checks every request against it before sending, and stops instead of sending one that will not fit. Max output tokens, when set, is held back from it on every request. |
+
+Set the context limit if your server silently cuts long prompts instead of returning an
+error. See [Context scope and local-model budgets](GRAPH-GENERATION.md#context-scope-and-local-model-budgets)
+for the details.
+
 ### Provider options
 
 Open **Provider options** on an endpoint card for settings that matter mostly with
@@ -42,7 +56,7 @@ hosted routers such as OpenRouter. For a full walk-through, see [OpenRouter](OPE
 
 | Option | What it does |
 | --- | --- |
-| **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. The default, 1, can never undercount but rejects prompts that would fit. English and JSON average about 3.5 bytes per token, so **3** keeps a margin while letting you use the model's real window. |
+| **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. Used only when a **Context limit** is set. English and JSON average about 3.5 bytes per token, so the default, **3**, keeps a margin while letting you use the model's real window. 1 can never undercount but rejects prompts that would fit. |
 | **Structured output** | How replies are held to the JSON schema. **Auto** uses native JSON-schema output where possible. **JSON object** always uses JSON mode with the schema written into the prompt. **Prompt only** sends no `response_format`, for servers that support neither. |
 | **Sticky sessions** | Sends the trajectory ID as `session_id`, so a router keeps each trajectory on one provider and its prompt stays cached. |
 | **Extra request fields** | A JSON object added to every request, for example `{"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}`. Fields Remix sets itself (model, messages, response format, output limit, sampling and `session_id`) cannot be overridden. |
