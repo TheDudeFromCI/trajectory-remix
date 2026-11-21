@@ -393,10 +393,14 @@ class GenerationPrompts(DTO):
     def upgrade_packaged_prompt(cls, value, info):
         # Only replace exact shipped defaults. Custom guidance stays with the project.
         previous = {
-            "draft": {"3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a"},
+            "draft": {
+                "3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a",
+                "379f799bc52e67227994ec99bd671a194b2cabd11558d584e897551f2b0bd250",
+            },
             "assembly": {
                 "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b",
                 "325bbdc768a88d57609bd1cc38f2dec2b61632f395de754a096d3d35518dee51",
+                "9cdbe536af2c43734bb288e2d14ced358643bde21a3106b8a8ba9eae81ed6d87",
             },
         }
         if digest(value) in previous[info.field_name]:

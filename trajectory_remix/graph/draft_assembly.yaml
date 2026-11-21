@@ -1,4 +1,4 @@
-version: draft-assembly/3
+version: draft-assembly/4
 # The agent's behaviour guide. Both Draft and Assembly see it; a persona pack goes here.
 actor_instruction: >-
   The agent acts only on visible evidence and the tool contract.
@@ -17,6 +17,24 @@ actor_instruction: >-
   Do not claim execution, inspection or completion without visible supporting results.
   Distinguish intentions, reported results, verified outcomes and remaining blockers.
   Never use hidden author targets or predict an unobserved tool outcome.
+trajectory_guide: |-
+  ## What is a parallel trajectory?
+
+  A parallel trajectory is one authored episode represented as a graph of events
+  in logical windows. A window is a stream of context, such as a chatroom,
+  private reasoning, a document, or a tool interaction. Each event writes to one
+  window. Several windows can be active at the same time.
+
+  An event's `after` list names its prerequisites. An action can use evidence
+  from another window when a dependency path makes that evidence available and
+  the window still retains it. Independent branches can overlap. The order in
+  which you author them does not make one branch depend on the other.
+
+  For example, a request can start two independent inventory checks in separate
+  windows. Each result follows its own request. A final comparison depends on
+  both results. Keep the result windows open through that comparison. If the
+  second check actually needs the first result, add that dependency.
+
 draft_instruction: |-
   # Draft a synthetic episode
 

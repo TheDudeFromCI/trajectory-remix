@@ -34,6 +34,17 @@ def test_defaults_come_from_the_packaged_file():
     assert prompts.assembly == prompt_defaults.assembly()
 
 
+@pytest.mark.asyncio
+async def test_draft_and_assembly_receive_the_parallel_trajectory_guide(tmp_path):
+    gen, fake = service(tmp_path, fast=False)
+    await finish(gen, gen.start([{"seed": 137}], {}))
+    assert [ticket.payload["operation"] for ticket in fake.calls] == ["draft", "assembly"]
+    guide = prompt_defaults.packaged()["trajectory_guide"]
+    assert "A final comparison depends on" in guide
+    for ticket in fake.calls:
+        assert ticket.payload["messages"][0]["content"].count(guide) == 1
+
+
 def test_settings_saved_with_the_retired_method_still_load():
     settings = ProjectSettings.model_validate({"generation": {"method": "flow", "fast": False}})
     assert settings.generation.fast is False and "method" not in settings.generation.model_dump()
