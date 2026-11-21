@@ -22,8 +22,10 @@ def actor():
 
 
 def draft():
-    return packaged()["draft_instruction"]
+    prompts = packaged()
+    return prompts["trajectory_guide"] + "\n\n" + prompts["draft_instruction"]
 
 
 def assembly():
-    return packaged()["assemble_instruction"]
+    prompts = packaged()
+    return prompts["trajectory_guide"] + "\n\n" + prompts["assemble_instruction"]

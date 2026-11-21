@@ -1,4 +1,5 @@
 import {renderProjectSettings, renderGenerationSettings} from './project-settings.js';
+import {renderValidationSettings} from './validation-settings.js';
 import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
@@ -6,7 +7,7 @@ import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} fr
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
-import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
+import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
 const $ = id => document.getElementById(id);
 const copy = value => structuredClone(value);
@@ -200,9 +201,14 @@ export class StudioUI {
     const id = this.id, generation = this.selectionGeneration;
     const latest = await api(`/trajectories/${id}`);
     if (id !== this.id || generation !== this.selectionGeneration) return;
-    if (latest.revision === this.record.revision && latest.owner === this.record.owner) return;
+    const settingsChanged = latest.diagnostics_settings_revision !== this.record.diagnostics_settings_revision;
+    if (latest.revision === this.record.revision && latest.owner === this.record.owner && !settingsChanged) return;
     if (this.isDirty()) {
       this.record.owner = latest.owner;
+      if (settingsChanged) {
+        this.record.diagnostics_settings_revision = latest.diagnostics_settings_revision;
+        this.scheduleDiagnostics();
+      }
       this.applyLock();
       if (latest.revision !== this.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.');
       return;
@@ -249,8 +255,8 @@ export class StudioUI {
     $('metadata-json').value = json(this.draft.metadata || {});
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
     const stale = this.record.review_status?.stale;
-    $('review-stale').textContent = stale ? 'Review stale' : '';
-    setAttr($('review-stale'), 'data-tip', stale ? 'Review is stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : null);
+    $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
+    setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
@@ -460,10 +466,15 @@ export class StudioUI {
     } else for (const id of order.filter(id => visible.has(id))) {
       const e = this.draft.events[id], w = ensure(e.window), add = token => w.tokens.push({...token, event: id});
       if (e.replace_body) w.tokens = [];
-      if (!w.tokens.length) w.tokens.push({control: 'ctx_begin'}, {text: this.draft.windows[e.window]?.purpose || e.window}, {control: 'ctx_end'});
+      if (!w.tokens.length) {
+        // Same JSON shape as the compiled header; the slot is only known after scheduling.
+        const win = this.draft.windows[e.window] || {};
+        w.tokens.push({control: 'ctx_begin'}, {text: JSON.stringify({purpose: win.purpose || e.window, reasoning_effort: win.reasoning_effort ?? null})}, {control: 'ctx_end'});
+      }
       const tool = e.kind === 'tool_call', response = e.kind === 'tool_response', chat = e.kind === 'chat_message';
       if (tool && e.insert_tool_begin || response && e.insert_response_begin || chat) add({control: chat ? 'msg_begin' : tool ? 'tool_begin' : 'response_begin'});
       if (chat) add({text: e.chat.speaker + ': '});
+      if (tool && e.insert_tool_begin) add({text: JSON.stringify(e.tool) + ':'});  // as compiled: "tool":args
       add({text: typeof e.content === 'string' ? e.content : e.content.map(p => p.kind === 'text' ? p.text : `[${p.window}]`).join('')});
       if (tool && e.insert_tool_end || response && e.insert_response_end || chat) add({control: chat ? 'msg_end' : tool ? 'tool_end' : 'response_end'});
       if (e.close_window) { add({control: 'eos'}); w.closed = true; }
@@ -566,6 +577,7 @@ export class StudioUI {
   renderSettingsForms() {
     const settings = JSON.parse($('settings-json').value);
     const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
+    if ($('validation-settings-editor')) renderValidationSettings($('validation-settings-editor'), this.settingsRecord.validation_warnings || [], opts);
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
     if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, loadDefaultPrompts: async () => api('/generation/prompts/default'), footer: this.reviewFoot ||= $('review-settings-foot')});
   }
@@ -580,7 +592,7 @@ export class StudioUI {
   }
   async saveSettings(dialog) {
     await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
-    await this.loadSettings(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
+    await this.loadSettings(); await this.refreshSelected(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
   }
   async openReview() {
     // Keep unsaved review-settings edits when returning to the tab; otherwise show the saved settings.
@@ -656,8 +668,9 @@ export class StudioUI {
       chip.append(dot, name, bar); chip.parts = {dot, name, bar}; return chip;
     }, (chip, job) => {
       setAttr(chip.parts.dot, 'class', `dot tone-${KIND_TONES[job.kind] || 'accent'}`);
-      setText(chip.parts.name, kindName(job.kind)); chip.parts.bar.update({value: job.progress, total: job.total, state: job.state});
-      setAttr(chip, 'aria-label', `${kindName(job.kind)} job ${job.state} ${job.progress} of ${job.total}. Open in Jobs`);
+      const progress = jobProgress(job), {value, total, unit} = progress;
+      setText(chip.parts.name, kindName(job.kind)); chip.parts.bar.update(progress);
+      setAttr(chip, 'aria-label', `${kindName(job.kind)} job ${job.state} ${value} of ${total}${unit ? ' ' + unit : ''}. Open in Jobs`);
       toggleClass(chip, 'paused', job.state === 'paused');
     });
     const badge = $('jobs-running-badge');

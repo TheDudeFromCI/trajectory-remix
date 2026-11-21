@@ -48,7 +48,12 @@ for you to copy, not calls this document makes.
 | One short guide | `get_authoring_guide` | `{"topic":"dependencies"}` |
 | Find drafts | `list_graphs` | `{"query":{"stage":-3},"limit":10,"offset":0}` |
 | Inspect a source | `read_graph` | `{"id":"UUID"}` |
-| Change dependencies | `patch_graph_event` | `{"id":"UUID","event_id":"think","expected_revision":2,"patch":{"after":["input"]}}` |
+| Inspect errors and enabled warnings | `view_diagnostics` | `{"id":"UUID"}` |
+| Inspect topology | `view_graph` | `{"id":"UUID"}` |
+| Inspect event text | `view_event` | `{"id":"UUID","event_id":"think"}` |
+| Create an event | `create_event` | `{"id":"UUID","expected_revision":2,"event_id":"note","window":"notes","kind":"agent_text","content":"Confirmed."}` |
+| Post initial tool schemas | `post_tool_schema` | `{"id":"UUID","expected_revision":3,"tool_ids":["chat"]}` |
+| Change dependencies | `update_event` | `{"id":"UUID","event_id":"think","expected_revision":2,"after":["input"]}` |
 | Mark an intentional Auto split | `patch_graph` | `{"id":"UUID","expected_revision":3,"patch":{"metadata":{"split":"Auto"}}}` |
 | Generate (only when authorized) | `generate_graphs` | `{"requests":[{"seed":137,"overrides":{"domain":"software_engineering"}}],"instructions":{}}` |
 | Review a saved detached source | `review_graphs` | `{"trajectory":"UUID","expected_revision":4,"mode":"standard","repair":true}` |
@@ -61,7 +66,9 @@ for you to copy, not calls this document makes.
 | Export Ready, compiled | `export_graphs` | `{"profile":"training","options":{"compiled":true}}` |
 | List finished download paths | `graph_job_artifacts` | `{"id":"JOB_UUID"}` |
 
-There are also `create_graph` and the other lifecycle tasks. `get_authoring_guide` topics are `start`, `dependencies`,
+Use `configure_window` to set window properties, `post_chat_message` to add user or
+agent chat, and `signoff` to record manual authoring evidence. `create_graph` can initialize
+a detached draft with empty windows and events. `get_authoring_guide` topics are `start`, `dependencies`,
 `tools-chat`, `generation` and `export`.
 
 ## Behavior to know

@@ -1,15 +1,9 @@
 """Two-pass generation: a prose draft, one assembled graph, then review and repair."""
 
-import json
-
 import pytest
-from jsonschema import Draft202012Validator
-from test_graph_generation import DRAFT, finish, service, spec  # noqa: F401
+from test_graph_generation import DRAFT, finish, frozen_legacy_run, service, spec, tangled_spec  # noqa: F401
 
 from trajectory_remix.graph import compact_spec, draft_assembly, prompt_defaults
-from trajectory_remix.graph.flow import causal_view
-from trajectory_remix.graph.models import GraphSource, ToolDefinition
-from trajectory_remix.graph.validation import diagnose
 
 
 def draft_assembly_service(tmp_path, **opts):
@@ -20,7 +14,7 @@ def draft_assembly_service(tmp_path, **opts):
 async def test_draft_then_assemble_then_both_reviews(tmp_path):
     gen, fake = draft_assembly_service(tmp_path)
     fake.responses = [{"draft": DRAFT}, spec()]
-    job = gen.start([{"seed": 11}], {})
+    job = frozen_legacy_run(gen, [{"seed": 11}], {})
     await finish(gen, job)
     attempt = gen.jobs.attempts(job)[0]
     source = gen.store.read(attempt["trajectory_id"]).source
@@ -40,7 +34,7 @@ async def test_unusable_spec_gets_a_correction(tmp_path):
     broken = spec()
     broken["events"][2] = dict(broken["events"][2], after=["missing"])
     fake.responses = [{"draft": DRAFT}, broken, spec()]
-    job = gen.start([{"seed": 12}], {})
+    job = frozen_legacy_run(gen, [{"seed": 12}], {})
     await finish(gen, job)
     retry = fake.calls[2].payload
     assert (
@@ -53,13 +47,11 @@ async def test_unusable_spec_gets_a_correction(tmp_path):
 @pytest.mark.asyncio
 async def test_errors_left_after_the_assembly_fix_go_to_fast_repair(tmp_path):
     gen, fake = draft_assembly_service(tmp_path)
-    tangled = spec()
-    # Two writers in one window with no order between them is a structural error.
-    tangled["events"][2] = dict(tangled["events"][2], after=["ask"])
+    tangled = tangled_spec()
     reason = "The fixture cannot be repaired; the episode needs rewriting."
     give_up = {"action": "give_up", "reason": reason}
     fake.responses = [{"draft": DRAFT}, tangled, give_up, give_up]  # Assembly fix, then repair.
-    job = gen.start([{"seed": 13}], {})
+    job = frozen_legacy_run(gen, [{"seed": 13}], {})
     await finish(gen, job)
     assert [c.payload["operation"] for c in fake.calls[2:4]] == ["assembly_fix", "repair"]
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
@@ -75,37 +67,14 @@ def test_builder_fills_in_listing_echo_and_call_ids(tmp_path):
     assert data["events"]["tools"]["kind"] == "tool_schema"
     assert data["events"]["ask"]["chat"] == {"speaker": "Ana"}
     assert data["events"]["look"]["content"] == '{"path":"a.md"}'
-    assert data["events"]["look"]["close_window"] is True
+    assert data["events"]["close_read"]["close_window"] is True
     assert data["events"]["ack:echo"]["window"] == "room"
 
 
-def test_assemble_prompt_example_builds_cleanly(tmp_path):
-    gen, _ = service(tmp_path)
-    settings = gen.store.settings().settings
-    settings.tools["read"] = ToolDefinition(
-        name="Read",
-        input_schema={
-            "type": "object",
-            "properties": {"path": {"type": "string"}},
-            "required": ["path"],
-            "additionalProperties": False,
-        },
-        response_window="inbox",
-    )
-    tools = {key: tool.model_dump(mode="json") for key, tool in settings.tools.items()}
-    example = prompt_defaults.assembly().split("```json\n", 1)[1].split("```", 1)[0]
-    body = json.loads(example)
-    Draft202012Validator(compact_spec.schema(tools)).validate(body)
-    base = dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
-    source = GraphSource.model_validate(compact_spec.build(body, base, tools))
-
-    assert diagnose(source, settings) == []
-    assert source.events["read-n"].after == source.events["read-s"].after == ["ack:echo"]
-    assert source.events["got-n"].call_id == "read-n"
-    assert source.events["got-s"].call_id == "read-s"
-    visible = causal_view(source, ["report"])
-    assert "notes" in visible
-    assert "inbox" not in visible
+def test_packaged_assembly_prompt_describes_the_native_workflow():
+    guidance = prompt_defaults.assembly()
+    for tool in ("post_tool_schema", "post_chat_message", "signoff"):
+        assert tool in guidance
 
 
 @pytest.mark.parametrize(
@@ -140,7 +109,6 @@ async def test_a_failed_draft_is_not_sent_to_repair(tmp_path):
 @pytest.mark.asyncio
 async def test_requests_carry_the_prompt_file_version(tmp_path):
     gen, fake = draft_assembly_service(tmp_path)
-    fake.responses = [{"draft": DRAFT}, spec()]
     await finish(gen, gen.start([{"seed": 15}], {}))
     assert fake.calls[0].payload["prompt_version"] == prompt_defaults.packaged()["version"]
 
@@ -172,20 +140,19 @@ def roles_service(tmp_path, roles):
 )
 async def test_draft_assembly_and_fix_use_their_own_roles(tmp_path, roles, expected):
     gen, fake = roles_service(tmp_path, roles)
-    tangled = spec()
-    tangled["events"][2] = dict(tangled["events"][2], after=["ask"])
+    tangled = tangled_spec()
     fix = {
         "action": "patch",
-        "event_id": "plan",
+        "event_id": "got",
         "expected_source_hash": None,
-        "patch": {"after": ["ack"]},
+        "patch": {"after": ["look"]},
     }
 
     def patch(t):
         return dict(fix, expected_source_hash=t.payload["source_hash"])
 
     fake.responses = [{"draft": DRAFT}, tangled, patch, {"action": "done"}]
-    await finish(gen, gen.start([{"seed": 16}], {}))
+    await finish(gen, frozen_legacy_run(gen, [{"seed": 16}], {}))
     assert [c.endpoint for c in fake.calls[:3]] == expected
 
 

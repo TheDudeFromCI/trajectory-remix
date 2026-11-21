@@ -26,12 +26,33 @@ def render(tools, ids):
     """One tool per line: name, description and parameters, as the agent will read them."""
     lines = []
     for ident in ids:
-        schema = deepcopy(tools[ident].get("input_schema") or {})
-        text = schema.pop("description", None) if isinstance(schema, dict) else None
+        schema = deepcopy(tools[ident].get("input_schema", {}))
+        text = schema.get("description") if isinstance(schema, dict) else None
         entry = {"name": ident, "description": text or tools[ident].get("name", ident)}
         entry["parameters"] = schema
         lines.append(json.dumps(entry, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(lines)
+
+
+def presented_ids(content):
+    """Read tool declarations from typed events and legacy tools-window input."""
+    ids = set()
+    if isinstance(content, list):
+        if any(piece.kind != "text" for piece in content):
+            return ids
+        content = "".join(piece.text for piece in content)
+    for line in content.splitlines():
+        try:
+            entry = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("name"), str)
+            and isinstance(entry.get("parameters"), (dict, bool))
+        ):
+            ids.add(entry["name"])
+    return ids
 
 
 def listing(tools, trajectory_id, event_id, chosen, chance):

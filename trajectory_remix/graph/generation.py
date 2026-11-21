@@ -8,10 +8,12 @@ import jsonschema
 
 from . import (
     assembly_fix,
+    authoring_session,
     draft_assembly,
     phase_barrier,
     repair_policy,
     reviews,
+    signoffs,
     spec_normalize,
     trajectory_hold,
 )
@@ -20,13 +22,14 @@ from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
-from .provider import invalid_reason
+from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
 from .schema_errors import explain
 from .storage import RevisionConflict
 from .validation import diagnose
 
-DRIVER = "draft-assembly/1"
+DRIVER = "draft-assembly/2"
+LEGACY_DRIVER = "draft-assembly/1"
 
 
 class GenerationService:
@@ -41,6 +44,11 @@ class GenerationService:
             config["settings"] if "settings" in config else config["options"]["settings"]
         )
 
+    @staticmethod
+    def _driver(job):
+        config = job["config"]
+        return config.get("config", config.get("options", {})).get("driver")
+
     def start(self, requests, instructions, barriers=None):
         barriers = phase_barrier.validate(barriers)
         frozen = self.sampler.editor()
@@ -48,10 +56,8 @@ class GenerationService:
         settings = settings_record.settings
         if "draft" not in settings.endpoint_roles:
             raise ValueError("Configure the Draft endpoint in Project Settings")
-        if settings.generation.fast and "fast" in settings.endpoint_roles:
-            reviews.review_schema(settings, "fast")
-            if settings.generation.critical and "critical" in settings.endpoint_roles:
-                reviews.review_schema(settings, "critical")
+        for tier in reviews.automatic_tiers(settings.generation, settings.endpoint_roles):
+            reviews.review_schema(settings, tier)
         instructions = deepcopy(instructions)
         retired = {"plan", "flow_yaml"} & instructions.keys()
         if retired:
@@ -79,11 +85,18 @@ class GenerationService:
     ):
         if mode not in {"standard", "force_fast", "force_critical"} or type(repair) is not bool:
             raise ValueError("Invalid review mode")
-        settings = self.store.settings().settings
+        snapshot = self.store.settings()
+        settings = snapshot.settings
         for tier in ("fast", "critical"):
             if tier in settings.endpoint_roles:
                 reviews.review_schema(settings, tier)
-        options = dict(mode=mode, repair=repair, settings=settings.model_dump(mode="json"))
+        options = dict(
+            mode=mode,
+            repair=repair,
+            settings=settings.model_dump(mode="json"),
+            settings_revision=snapshot.revision,
+            driver=DRIVER,
+        )
         if trajectory is None:
             return self.bulk.start(query, "review_repair", options)
         with self.store.connect() as db:
@@ -136,6 +149,15 @@ class GenerationService:
             outcome=outcome,
             bulk_position=cp.get("bulk_position"),
         )
+        if accepted.get("repeated_exchange_limit"):
+            endpoint = label(cp["exchange_limit_endpoint"])
+            exchanges = cp["authoring_session"]["exchanges"]
+            self.jobs.progress(
+                job,
+                f"Endpoint {endpoint} reached the {exchanges}-exchange limit twice in this job. "
+                "Consider increasing Maximum exchanges per pass in Review Settings for new runs.",
+                "warning",
+            )
         if outcome is not None:
             self.jobs.progress(
                 job,
@@ -163,8 +185,9 @@ class GenerationService:
         data = source.to_dict()
         data["metadata"]["stage"] = 0
         source = GraphSource.model_validate(data)
-        if settings.generation.fast and "fast" in settings.endpoint_roles:
-            self._phase(job, source, cp, "review", "fast")
+        tiers = reviews.automatic_tiers(settings.generation, settings.endpoint_roles)
+        if tiers:
+            self._phase(job, source, cp, "review", tiers[0])
         else:
             self._phase(job, source, cp, "done", outcome="pass")
 
@@ -174,7 +197,7 @@ class GenerationService:
             raise Fenced("Worker epoch changed")
         # Only this handoff's explicitly prepared runs have model access. Generic
         # /runs and historical sampler snapshots cannot silently become live jobs.
-        if j["config"]["config"].get("driver") != DRIVER:
+        if self._driver(j) not in {DRIVER, LEGACY_DRIVER}:
             self.jobs.control(job, "pause")
             self.jobs.append_log(
                 job,
@@ -232,15 +255,14 @@ class GenerationService:
                             )
                             continue
                         record = self.store._read(db, ident)
+                        settings = self.settings_for(job)
                         operation = reviews.manual_operation(
                             record.source.metadata.get("stage", -3),
                             j["config"]["options"]["mode"],
                             j["config"]["options"]["repair"],
+                            settings,
                         )
-                        if (
-                            not operation
-                            or operation[0] not in self.settings_for(job).endpoint_roles
-                        ):
+                        if not operation or operation[0] not in settings.endpoint_roles:
                             self.bulk._settle_item(
                                 db,
                                 job,
@@ -264,7 +286,7 @@ class GenerationService:
                         _epoch=j["epoch"],
                         _revision=record.revision,
                     )
-                    if operation[1] == "repair":
+                    if operation[1] == "repair" and self._driver(j) != DRIVER:
                         cp.update(
                             history=[],
                             repair_base=reviews.payload(
@@ -296,9 +318,9 @@ class GenerationService:
         source = record.source
         cp = self.jobs.checkpoint(job, ident)
         settings = self.settings_for(job)
-        epoch = self.jobs.inspect(job)["epoch"] if epoch is None else epoch
+        j = self.jobs.inspect(job)
+        epoch = j["epoch"] if epoch is None else epoch
         if cp is None:  # Crash immediately after atomic start_attempt is safe.
-            j = self.jobs.inspect(job)
             if j["kind"] == "bulk":
                 with self.store.connect() as db:
                     item = db.execute(
@@ -309,6 +331,7 @@ class GenerationService:
                     source.metadata.get("stage", -3),
                     j["config"]["options"]["mode"],
                     j["config"]["options"]["repair"],
+                    settings,
                 )
                 cp = dict(
                     serial=0,
@@ -318,7 +341,7 @@ class GenerationService:
                     manual=True,
                     bulk_position=item[0],
                 )
-                if cp["phase"] == "repair":
+                if cp["phase"] == "repair" and self._driver(j) != DRIVER:
                     cp.update(
                         history=[],
                         repair_base=reviews.payload(source, settings, cp["tier"], "repair")[
@@ -336,10 +359,30 @@ class GenerationService:
             return
         if self._parked(job, ident, cp):
             return
-        if cp["phase"] == "event":
-            if cp.get("assembled"):
-                self._after_generation(job, source, cp)
-                return
+        phase = cp["phase"]
+        if phase == "event" and cp.get("assembled"):
+            self._after_generation(job, source, cp)
+            return
+        if self._driver(j) == DRIVER and (
+            phase in ("review", "repair") or (phase == "event" and "draft" in cp)
+        ):
+            session = cp.get("authoring_session")
+            if session is None:
+                plan = self._plan(job, ident) if phase == "event" else None
+                session = authoring_session.begin(
+                    source,
+                    settings,
+                    "assembly" if plan else phase,
+                    cp.get("tier"),
+                    plan=plan,
+                    prior=cp.get("failed_review") if phase == "repair" else None,
+                )
+                if plan:
+                    session["prompt_version"] = plan["prompts"]["version"]
+                cp["authoring_session"] = session
+            tier = draft_assembly.role(settings, "assembly") if phase == "event" else cp["tier"]
+            payload = authoring_session.payload(session)
+        elif phase == "event":
             payload = draft_assembly.payload(cp, self._plan(job, ident), settings)
             tier = draft_assembly.role(settings, payload["operation"])
         elif cp["phase"] == assembly_fix.PHASE:
@@ -629,6 +672,9 @@ class GenerationService:
         if record.revision != ticket.payload["source_revision"]:
             raise Fenced("Source changed while request was in progress")
         settings = self.settings_for(ticket.job_id)
+        if "tools" in ticket.payload:
+            self._consume_native(ticket, record, settings, source, cp, complete)
+            return
         if complete.get("context_limit"):
             if cp["phase"] == assembly_fix.PHASE:
                 self._end_assembly_fix(ticket.job_id, source, cp, "context_limit", ticket)
@@ -726,6 +772,141 @@ class GenerationService:
             self._repair_action(ticket, source, cp, body)
             return
         review = body["review"] if cp["phase"] == "repair" else body
+        self._finish_review(ticket, record, settings, source, cp, complete, review)
+
+    def _consume_native(self, ticket, record, settings, source, cp, complete):
+        session = cp["authoring_session"]
+        if complete.get("context_limit"):
+            budget = complete.get("local_budget")
+            detail = (
+                f"Estimated input of {budget['input_tokens_estimate']} tokens exceeds the "
+                f"{budget['input_ceiling']}-token allowance."
+                if budget
+                else "The provider reported a context limit."
+            )
+            self._authoring_failure(ticket, source, cp, "context_limit", detail=detail)
+            return
+        try:
+            if complete.get("invalid_output"):
+                raise ValueError("The provider returned an incomplete native reply")
+            message = assistant_message(complete.get("message"))
+        except ValueError:
+            session["exchanges"] += 1
+            cp["errors"] += 1
+            if session["exchanges"] >= settings.generation.max_authoring_exchanges:
+                self._authoring_failure(ticket, source, cp, "exchange_limit")
+                return
+            if cp["errors"] > settings.generation.format_retries:
+                if session["phase"] == "review":
+                    self._hold(
+                        ticket.job_id,
+                        source,
+                        cp,
+                        "Review output stayed invalid; no verdict recorded.",
+                        ticket,
+                    )
+                else:
+                    self._authoring_failure(ticket, source, cp, "invalid_output")
+                return
+            session["messages"].append(
+                dict(
+                    role="user",
+                    content="The prior reply was incomplete. Return complete native tool calls or signoff.",
+                )
+            )
+            terminal = None
+        else:
+            cp["errors"] = 0
+            source, terminal = authoring_session.step(source, settings, session, message)
+        if terminal is None:
+            if session["exchanges"] >= settings.generation.max_authoring_exchanges:
+                self._authoring_failure(ticket, source, cp, "exchange_limit")
+            else:
+                self._save(ticket.job_id, source, cp, ticket=ticket)
+            return
+        result, evidence = terminal
+        if result == "unfeasible":
+            self._authoring_failure(ticket, source, cp, result, detail=evidence["summary"])
+            return
+        cp.pop("authoring_session")
+        if session["phase"] == "assembly":
+            live = self.jobs.inspect(ticket.job_id)["config"]
+            source = signoffs.record(
+                source,
+                settings,
+                evidence,
+                operation="assembly",
+                verdict=result,
+                draft_visible=session["draft_visible"],
+                provenance=dict(
+                    source_revision=record.revision
+                    + (record.intrinsic_hash != source.intrinsic_hash),
+                    settings_revision=live["settings_revision"],
+                    endpoint=ticket.endpoint,
+                    model=complete.get("model"),
+                    requested_model=settings.endpoints[ticket.endpoint].model,
+                    prompt_version=session["prompt_version"],
+                    exchanges=session["exchanges"],
+                ),
+            )
+            self.jobs.progress(
+                ticket.job_id,
+                f"Graph assembled: trajectory={label(source.id)} events={len(source.events)}",
+            )
+            cp["assembled"] = True
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+        else:
+            self._finish_review(
+                ticket, record, settings, source, cp, complete, evidence, native=session
+            )
+
+    def _authoring_failure(self, ticket, source, cp, reason, detail=None):
+        session = cp["authoring_session"]
+        phase = session["phase"]
+        data = source.to_dict()
+        metadata = data.setdefault("metadata", {})
+        if phase != "review":
+            metadata["stage"] = -3
+        key = f"{phase}_outcomes"
+        outcomes = metadata[key] if isinstance(metadata.get(key), list) else []
+        outcome = dict(
+            tier=session["tier"],
+            outcome=reason,
+            source_hash=source.intrinsic_hash,
+            exchanges=session["exchanges"],
+        )
+        if detail:
+            outcome["reason"] = detail
+        metadata[key] = outcomes + [outcome]
+        self.jobs.progress(
+            ticket.job_id,
+            f"{label(phase)} ended: {label(reason)} trajectory={label(source.id)}",
+            "warning",
+        )
+        if reason == "exchange_limit":
+            cp["exchange_limit_endpoint"] = ticket.endpoint
+        cp["phase"] = "done"
+        self._save(
+            ticket.job_id, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail"
+        )
+
+    def _finish_review(
+        self, ticket, record, settings, source, cp, complete, review, *, native=None
+    ):
+        provenance = None
+        if native is not None:
+            config = self.jobs.inspect(ticket.job_id)["config"]
+            provenance = signoffs.stamp(
+                source,
+                settings,
+                draft_visible=native["draft_visible"],
+                binds_review_option=True,
+            ) | dict(
+                settings_revision=config.get(
+                    "settings_revision", config.get("options", {}).get("settings_revision")
+                ),
+                exchanges=native["exchanges"],
+            )
         source, result = reviews.signoff(
             source,
             record,
@@ -736,22 +917,24 @@ class GenerationService:
             ticket.endpoint,
             complete.get("model"),
             settings.endpoints[ticket.endpoint].model,
+            native=provenance,
         )
         self.jobs.progress(
             ticket.job_id,
             f"{label(cp['tier'])} {label(cp['phase'])} verdict: {label(result)} trajectory={label(source.id)}",
             "success" if result == "pass" else "warning",
         )
+        next_critical = (
+            not cp["manual"]
+            and result == "pass"
+            and cp["tier"] == "fast"
+            and "critical" in reviews.automatic_tiers(settings.generation, settings.endpoint_roles)
+        )
         if cp["phase"] == "repair":
             if result == "fail":
                 self._repair_failure(ticket.job_id, source, cp, "negative_verdict", ticket)
             else:
-                if (
-                    not cp["manual"]
-                    and cp["tier"] == "fast"
-                    and settings.generation.critical
-                    and "critical" in settings.endpoint_roles
-                ):
+                if next_critical:
                     cp.update(phase="review", tier="critical", errors=0)
                     self._save(ticket.job_id, source, cp, ticket=ticket)
                 else:
@@ -765,19 +948,17 @@ class GenerationService:
             else settings.generation.repair
         )
         if result == "fail" and repair_enabled:
-            cp.update(phase="repair", errors=0, history=[], round=1, failed_review=review)
-            cp["repair_base"] = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
-            cp["repair_base"].append(
-                dict(role="user", content=canonical({"failed_review": review}))
-            )
+            cp.update(phase="repair", errors=0, failed_review=review)
+            if native is None:
+                cp.update(history=[], round=1)
+                cp["repair_base"] = reviews.payload(source, settings, cp["tier"], "repair")[
+                    "messages"
+                ]
+                cp["repair_base"].append(
+                    dict(role="user", content=canonical({"failed_review": review}))
+                )
             self._save(ticket.job_id, source, cp, ticket=ticket)
-        elif (
-            not manual
-            and result == "pass"
-            and cp["tier"] == "fast"
-            and settings.generation.critical
-            and "critical" in settings.endpoint_roles
-        ):
+        elif next_critical:
             cp.update(tier="critical", errors=0)
             self._save(ticket.job_id, source, cp, ticket=ticket)
         else:

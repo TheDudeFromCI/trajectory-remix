@@ -1,7 +1,6 @@
 """Per-job phase barriers: wait before Assembly, Fast review or Critical review."""
 
 import pytest
-from test_draft_assembly import DRAFT, spec
 from test_graph_generation import Fake, finish, service
 
 from trajectory_remix.graph import phase_barrier
@@ -9,20 +8,6 @@ from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import JobService
 from trajectory_remix.graph.sampling import SamplerService
-
-
-def by_operation(fake):
-    async def call(t):
-        operation = t.payload["operation"]
-        if operation == "draft":
-            fake.calls.append(t)
-            return {"output": {"draft": DRAFT}, "model": "fixture"}
-        if operation == "assembly":
-            fake.calls.append(t)
-            return {"output": spec(), "model": "fixture"}
-        return await fake(t)
-
-    return call
 
 
 def operations(fake):
@@ -36,7 +21,6 @@ def logs(gen, job):
 async def to_barrier(tmp_path, count=4, barriers=None):
     # service() caps active trajectories at 2; parked ones must not count toward it.
     gen, fake = service(tmp_path, method="draft_assembly")
-    gen.transport = by_operation(fake)
     barriers = barriers or {"fast": True}
     job = gen.start([{"seed": 50 + i} for i in range(count)], {}, barriers)
     await finish(gen, job)
@@ -73,7 +57,6 @@ async def test_the_barrier_survives_a_server_restart(tmp_path):
 @pytest.mark.asyncio
 async def test_without_the_barrier_reviews_follow_assembly_directly(tmp_path):
     gen, fake = service(tmp_path, method="draft_assembly")
-    gen.transport = by_operation(fake)
     job = gen.start([{"seed": 60}, {"seed": 61}], {})
     await finish(gen, job)
     assert gen.jobs.inspect(job)["state"] == "completed"
@@ -125,7 +108,6 @@ def test_start_reviews_needs_a_barrier(tmp_path):
 @pytest.mark.asyncio
 async def test_starting_reviews_early_lets_the_run_finish_without_pausing(tmp_path):
     gen, fake = service(tmp_path, method="draft_assembly")
-    gen.transport = by_operation(fake)
     job = gen.start([{"seed": 72}, {"seed": 73}], {}, {"fast": True, "critical": True})
     phase_barrier.advance(gen.store, job)
     await finish(gen, job)

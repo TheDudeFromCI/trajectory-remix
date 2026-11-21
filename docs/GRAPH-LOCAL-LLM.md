@@ -43,7 +43,7 @@ Look at outcomes, not just final stages. For each trajectory, check that:
 
 - the draft (in `metadata.draft`) reads like a real episode and covers the proposal;
 - the assembled graph keeps the draft's facts, closes its reasoning windows and has at most
-  a few assembly fix turns (`metadata.assembly_fix`);
+  a native Assembly signoff (`metadata.authoring_signoffs`);
 - chat calls have exactly one linked, masked delivery (`:echo`) in the chatroom;
 - review verdicts cite real evidence, and nothing is claimed before it is shown.
 

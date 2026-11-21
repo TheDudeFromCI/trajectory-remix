@@ -2,7 +2,7 @@
 
 import pytest
 import yaml
-from test_graph_generation import DRAFT, finish, service, spec
+from test_graph_generation import finish, service
 
 from trajectory_remix.graph import prompt_defaults, prompt_migration
 from trajectory_remix.graph.models import GenerationPrompts, ProjectSettings
@@ -19,7 +19,6 @@ def edit_prompts(gen, **prompts):
 async def test_runs_use_and_freeze_the_project_prompts(tmp_path):
     gen, fake = service(tmp_path, fast=False)
     edit_prompts(gen, actor="Be Kidra, the persona.", draft="Write the notes.")
-    fake.responses = [{"draft": DRAFT}, spec()]
     job = gen.start([{"seed": 137}], {})
     edit_prompts(gen, actor="Edited after the run started.")
     await finish(gen, job)
@@ -33,6 +32,17 @@ def test_defaults_come_from_the_packaged_file():
     prompts = GenerationPrompts()
     assert prompts.actor == prompt_defaults.actor()
     assert prompts.assembly == prompt_defaults.assembly()
+
+
+@pytest.mark.asyncio
+async def test_draft_and_assembly_receive_the_parallel_trajectory_guide(tmp_path):
+    gen, fake = service(tmp_path, fast=False)
+    await finish(gen, gen.start([{"seed": 137}], {}))
+    assert [ticket.payload["operation"] for ticket in fake.calls] == ["draft", "assembly"]
+    guide = prompt_defaults.packaged()["trajectory_guide"]
+    assert "A final comparison depends on" in guide
+    for ticket in fake.calls:
+        assert ticket.payload["messages"][0]["content"].count(guide) == 1
 
 
 def test_settings_saved_with_the_retired_method_still_load():
@@ -126,8 +136,9 @@ def test_new_matrix_dimensions_reach_draft_and_assembly(tmp_path):
     assert "quantum_potatoes" in json.dumps(payload["messages"])
 
 
-def test_endpoints_default_to_a_65k_context_and_8k_output():
+def test_endpoints_default_to_provider_token_limits():
     from trajectory_remix.graph.models import Endpoint
 
     endpoint = Endpoint.model_validate(dict(url="http://127.0.0.1:8000/v1", model="m"))
-    assert endpoint.context_window_tokens == 65536 and endpoint.max_output_tokens == 8192
+    assert endpoint.context_window_tokens == -1 and endpoint.max_output_tokens == -1
+    assert endpoint.bytes_per_token == 3.0

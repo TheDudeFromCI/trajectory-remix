@@ -1,7 +1,7 @@
 """Prompts are ordered for prefix caching: stable fields first, new turns appended."""
 
 import pytest
-from test_graph_generation import DRAFT, finish, service, spec
+from test_graph_generation import DRAFT, finish, frozen_legacy_run, service, tangled_spec
 
 from trajectory_remix.graph.provider import response_contract
 
@@ -13,19 +13,18 @@ def wire(payload):
 @pytest.mark.asyncio
 async def test_each_assembly_fix_request_extends_the_previous_one(tmp_path):
     gen, fake = service(tmp_path, fast=False)
-    tangled = spec()
-    tangled["events"][2] = dict(tangled["events"][2], after=["ask"])
+    tangled = tangled_spec()
 
     def patch(t):
         return {
             "action": "patch",
-            "event_id": "plan",
+            "event_id": "got",
             "expected_source_hash": t.payload["source_hash"],
-            "patch": {"after": ["ack"]},
+            "patch": {"after": ["look"]},
         }
 
     fake.responses = [{"draft": DRAFT}, tangled, patch, {"action": "done"}]
-    await finish(gen, gen.start([{"seed": 137}], {}))
+    await finish(gen, frozen_legacy_run(gen, [{"seed": 137}], {}))
     first, second = [c.payload for c in fake.calls if c.payload["operation"] == "assembly_fix"]
     assert wire(second).startswith(wire(first))
 

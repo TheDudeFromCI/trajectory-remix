@@ -2,8 +2,8 @@
 
 The compiler turns a dependency graph into the row-by-row training form: which tokens appear
 when, what each token may see, and what it is trained to predict. You only need this page to
-understand **Tick history** previews, export behavior and compile errors. Authoring never calls
-it.
+understand **Tick history** previews, export behavior and compile errors. Graph authoring runs a
+structural dry run that shares the compiler's dependency schedule and needs no tokenizer profile.
 
 The compiler reads the [source format](GRAPH-SOURCE.md). It doesn't execute tools, call models,
 change sources or settings, or calculate stored metrics. Its output feeds [Export](EXPORT.md) and
@@ -18,6 +18,7 @@ from trajectory_remix.graph import GraphSource
 from trajectory_remix.graph.compiler import GraphCompiler
 
 source = GraphSource.model_validate(source_json)
+diagnostics = GraphCompiler.dry_run(source, settings)
 compiler = GraphCompiler(
     settings.tokenizer_profiles[profile_id], settings=settings, active_limit=8, seed=17
 )
@@ -25,6 +26,7 @@ arrays, identity = compiler.compile(source)
 preview = compiler.preview(source, max_frames=500)
 ```
 
+- `dry_run` returns source diagnostics without assigning ticks, token counts or physical slots.
 - `compile` returns the arrays [KTREMIX](KTREMIX.md) stores, plus a small identity/debug map.
 - `preview` returns a bounded list of frames (`tick`, `inputs`, `outputs`), a `truncated` flag
   and a cache key covering compiler version, source hash, profile fingerprint, capacity and seed.

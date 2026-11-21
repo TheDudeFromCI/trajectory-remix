@@ -1,9 +1,10 @@
-"""Repair fails only when the repairer gives up, or at the round cap."""
+"""Native repair keeps a single durable conversation through settlement."""
 
+import json
 from uuid import uuid4
 
 import pytest
-from test_graph_generation import finish, plan, report, service
+from test_graph_generation import finish, native_report, plan, service, tool_message
 
 
 def detached(gen):
@@ -18,100 +19,89 @@ def detached(gen):
     )
 
 
-def patch(t):
-    return {
-        "action": "patch",
-        "event_id": "x",
-        "expected_source_hash": t.payload["source_hash"],
-        "patch": {"content": "repaired"},
-    }
+def patch():
+    return tool_message(
+        ("update_event", {"event_id": "x", "content": "repaired", "close_window": True})
+    )
 
 
 def verdict(status):
-    return lambda t: {"action": "verdict", "review": report(t.payload, status, ["x"])}
+    return lambda t: tool_message(native_report(t.payload, ["x"], status))
 
 
 async def run(gen, record):
     job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
     await finish(gen, job)
-    return gen.store.read(record.source.id).source
+    return gen.store.read(record.source.id).source, gen.jobs.checkpoint(job, record.source.id)
 
 
 @pytest.mark.asyncio
-async def test_failing_verdict_keeps_the_session_open(tmp_path):
+async def test_failing_evidence_keeps_the_session_open(tmp_path):
     gen, fake = service(tmp_path, critical=False)
     record = detached(gen)
-    fake.responses = [verdict("fail"), patch, verdict("pass")]
-    source = await run(gen, record)
+    fake.responses = [verdict("fail"), patch(), verdict("pass")]
+    source, _ = await run(gen, record)
     assert source.metadata["stage"] == 1 and source.events["x"].content == "repaired"
-    told = fake.calls[1].payload["messages"][-1]["content"]
-    assert "still_failing" in told and "give_up" in told
-    system = fake.calls[0].payload["messages"][0]["content"]
-    assert "computed from its after list" in system
+    messages = fake.calls[1].payload["messages"]
+    assert messages[:2] == fake.calls[0].payload["messages"]
+    assert "unfeasible" in messages[-2]["content"]
+    assert messages[-1]["role"] == "user"
 
 
 @pytest.mark.asyncio
-async def test_give_up_is_the_failure_and_keeps_its_reason(tmp_path):
+async def test_unfeasible_signoff_is_failed_and_keeps_its_reason(tmp_path):
     gen, fake = service(tmp_path, critical=False)
     record = detached(gen)
-    reason = "The opening contradicts every later event; no spot patch can fix it."
-    fake.responses = [verdict("fail"), {"action": "give_up", "reason": reason}]
-    source = await run(gen, record)
+    reason = "The opening contradicts every later event; no spot edit can fix it."
+    fake.responses = [
+        verdict("fail"),
+        tool_message(("signoff", {"status": "unfeasible", "summary": reason})),
+    ]
+    source, _ = await run(gen, record)
     outcome = source.metadata["repair_outcomes"][-1]
     assert source.metadata["stage"] == -3
     assert outcome["outcome"] == "unfeasible" and outcome["reason"] == reason
 
 
 @pytest.mark.asyncio
-async def test_view_returns_the_current_source(tmp_path):
+async def test_views_show_saved_tool_edits(tmp_path):
     gen, fake = service(tmp_path, critical=False)
     record = detached(gen)
-    fake.responses = [patch, {"action": "view"}, verdict("pass")]
+    fake.responses = [patch(), tool_message(("view_event", {"event_id": "x"})), verdict("pass")]
     await run(gen, record)
-    shown = fake.calls[2].payload["messages"][-1]["content"]
-    assert '"repaired"' in shown and "diagnostics" in shown
+    shown = fake.calls[2].payload["messages"][-1]
+    assert shown["role"] == "tool"
+    assert json.loads(shown["content"])["event"]["content"] == "repaired"
 
 
-def limited(fake, at):
-    original = fake.__call__
-
-    async def call(t):
-        if len(fake.calls) in at:
-            fake.calls.append(t)
-            return {"context_limit": True}
-        return await original(t)
-
-    return call
-
-
+@pytest.mark.parametrize("reason", ["context_limit", "exchange_limit"])
 @pytest.mark.asyncio
-async def test_context_limit_starts_a_fresh_round_on_the_current_graph(tmp_path):
-    gen, fake = service(tmp_path, critical=False)
+async def test_limits_preserve_partial_graph_and_history_without_starting_over(tmp_path, reason):
+    ceiling = 1 if reason == "exchange_limit" else 10
+    gen, fake = service(tmp_path, critical=False, max_authoring_exchanges=ceiling)
     record = detached(gen)
-    fake.responses = [patch, verdict("pass")]
-    gen.transport = limited(fake, {1})
-    source = await run(gen, record)
-    assert source.metadata["stage"] == 1
-    fresh = fake.calls[2].payload["messages"]
-    assert '"repaired"' in fresh[1]["content"]  # The new round starts from the patched graph.
+    fake.responses = [patch()]
+    if reason == "context_limit":
 
+        async def capped(ticket):
+            if fake.calls:
+                fake.calls.append(ticket)
+                return {"context_limit": True}
+            return await fake(ticket)
 
-@pytest.mark.asyncio
-async def test_round_cap_is_the_only_other_failure(tmp_path):
-    gen, fake = service(tmp_path, critical=False, repair_rounds=1)
-    record = detached(gen)
-    fake.responses = [patch]
-    gen.transport = limited(fake, {1})
-    source = await run(gen, record)
+        gen.transport = capped
+    source, checkpoint = await run(gen, record)
     assert source.metadata["stage"] == -3
-    assert source.metadata["repair_outcomes"][-1]["outcome"] == "round_limit"
+    assert source.events["x"].content == "repaired"
+    assert source.metadata["repair_outcomes"][-1]["outcome"] == reason
+    assert checkpoint["authoring_session"]["exchanges"] == 1
+    assert len(fake.calls) == (2 if reason == "context_limit" else 1)
 
 
 def test_review_prompt_survives_an_event_in_an_unknown_window():
     from trajectory_remix.graph import repair_policy, reviews
     from trajectory_remix.graph.models import GraphSource
 
-    # A repair patch can add an event in a window that does not exist yet.
     source = GraphSource.model_validate(
         dict(
             format="kidra-trajectory-graph/1",

@@ -1,4 +1,4 @@
-version: draft-assembly/1
+version: draft-assembly/5
 # The agent's behaviour guide. Both Draft and Assembly see it; a persona pack goes here.
 actor_instruction: >-
   The agent acts only on visible evidence and the tool contract.
@@ -17,88 +17,101 @@ actor_instruction: >-
   Do not claim execution, inspection or completion without visible supporting results.
   Distinguish intentions, reported results, verified outcomes and remaining blockers.
   Never use hidden author targets or predict an unobserved tool outcome.
+trajectory_guide: |-
+  ## What is a parallel trajectory?
+
+  A parallel trajectory is one authored episode represented as a graph of events
+  in logical windows. A window is a stream of context, such as a chatroom,
+  private reasoning, a document, or a tool interaction. Each event writes to one
+  window. Several windows can be active at the same time.
+
+  An event's `after` list names its prerequisites. An action can use evidence
+  from another window when a dependency path makes that evidence available and
+  the window still retains it. Independent branches can overlap. The order in
+  which you author them does not make one branch depend on the other.
+
+  For example, a request can start two independent inventory checks in separate
+  windows. Each result follows its own request. A final comparison depends on
+  both results. Keep the result windows open through that comparison. If the
+  second check actually needs the first result, add that dependency.
+
 draft_instruction: |-
-  Write working notes for one synthetic episode, from the opening to the final state.
-  Return a JSON object with one field, "draft", containing at least 200 characters of
-  plain prose. Leave graph windows and event IDs to the next pass.
+  # Draft a synthetic episode
 
-  Turn the proposal's objectives, dimensions, constraints, event tags and numeric
-  targets into things the episode actually shows. Use the checklist to check coverage.
-  Set up concrete starting evidence and write the person's messages in their own words.
-  When a person opens the conversation, give the agent a brief chat reply before private
-  reasoning. Write the agent's messages in its voice and keep its reasoning private.
+  **Deliverable:** one JSON object with a "draft" string of at least 200 characters.
+  Write the whole episode in prose. Assembly will assign event and window IDs.
 
-  Walk through what happens. Include what the agent delegates and why, the exact
-  arguments for each call, and which steps run independently. Give each tool that
-  returns data a realistic output and say when it arrives. Results can arrive out of
-  order, fail or be incomplete.
-  Use tools from the catalogue for their stated purpose and follow their input schemas.
-  Keep names, IDs returned by tools, task ownership and state consistent. Repeat a call or
-  message only when there is a concrete reason and show what prompted it.
+  ## Plan from the proposal
+  - Identify the user's request, the starting evidence, the required decisions, and
+    the final state. Turn sampled objectives, constraints, and numeric targets into
+    observable actions. Keep the sampled targets out of the agent's visible world.
+  - Write the user's and agent's actual messages. When the user opens the episode,
+    draft a brief acknowledgment before private reasoning.
+  - Specify each synthetic call by its catalogue ID and exact arguments. Describe
+    the result text, which call it answers, and when the result becomes visible.
 
-  At each action or message, use only evidence available to the agent at that point.
-  Show the observation before anything that relies on it, including approval, a cited
-  result or a verification claim. Later evidence cannot justify earlier work, and a
-  report from someone else is not independent verification. Record conclusions worth
-  keeping and end with what is confirmed, what remains open and any next step. If
-  correction is nonempty, fix the stated problem in the complete draft.
+  ## Check the handoff to Assembly
+  - Follow the causal order: evidence, decision, action, and observation. Specify
+    which actions are independent and which must wait for a result or approval.
+  - Distinguish a specialist's report from evidence that verifies it. Keep names,
+    returned IDs, budgets, and task ownership consistent across the episode.
+  - Show what the agent can conclude at the end and any remaining blocker. If a
+    correction is present, incorporate it in the complete Draft.
 
 assemble_instruction: |-
-  Turn the notes into one episode. Preserve their facts, outcomes and voice. Fill gaps
-  with the smallest consistent details needed to show the proposal and checklist.
-  If correction is nonempty, fix the stated problem. Return only the complete JSON spec.
+  # Assemble a complete trajectory
 
-  List the catalogue IDs the agent needs in tools. Define windows with unique IDs and
-  leave the ID "tools" to the builder for both windows and events. Use a read-only
-  chatroom for user messages, read-only document windows for given material or unsolicited
-  reports, and one writable notes window for lasting conclusions. Put every think and
-  call in a writable window. When a person opens the episode, acknowledge them with a
-  chat call in its own short-lived window before any private reasoning. Speak to people
-  through chat calls with arguments {"content": "..."}.
+  ## Plan the graph
+  Read the Draft for the opening, decisions, actions, and final outcome. Pick stable
+  event and window IDs and sketch the prerequisites for each decision. Use the
+  proposal and checklist to check coverage. Preserve the Draft's material facts
+  and outcomes.
 
-  Use a fresh reasoning window for each step. Give independent steps separate windows
-  and shared prerequisites where appropriate. Put results in fresh windows as they arrive,
-  in whatever order they arrive. If the tool declares response_window, define and use
-  that exact window ID. Order successive writers in each window through after, directly
-  or through other events. Copy evidence or conclusions later steps need into notes
-  before their window closes, and have those steps depend on the relevant notes. Set
-  close: true on the last event in each short-lived window. Closed content is no longer
-  visible to later actions, and a closed window cannot receive more events.
+  ## Write events efficiently
+  - Group several ready edits in a reply. Calls run in listed order, so a later call
+    can use an ID created earlier in that reply. Create the episode in coherent
+    batches instead of spending a reply on every window or event.
+  - Use create_event for reasoning, observations, and synthetic requests and results.
+    It creates a missing window. Set window_properties only on its first use if the
+    default needs changing. Use configure_window for an existing window, to set
+    optional properties, or to acknowledge a window intentionally left open.
+  - Use short window purposes such as chatroom, reasoning, document, and tool.
+    Pass JSON strings once, as in {"window":"work","kind":"agent_text"}.
+    Omit optional fields you are leaving unchanged. Use JSON null to clear a
+    nullable field. Keep descriptive prose in content.
+  - Use post_chat_message for user and agent chat. Agent chat creates a synthetic
+    chat request and its delivery. The event_id you give the tool names the delivery,
+    so the next event can depend on that ID.
+  - Use post_tool_schema with exact project tool IDs. Display names are for people
+    reading the catalogue. Open the tools window at the beginning with an empty
+    after list. Known tool calls add missing schemas automatically.
+    For a generic tool_call, content holds the JSON text of the synthetic arguments.
+    A tool_response reuses its call_id and depends on the event that submits it.
+    Give each call its own window and keep reasoning in a dedicated window. The
+    usual tool window contains the call, its response, then closure. Keep the
+    window open until the last event that needs the response. Use the configured
+    response window when the tool specifies one.
 
-  Give each event a unique ID and list it after all its dependencies. In after, name
-  earlier events that provide the evidence or state it uses. List order alone gives no
-  visibility. A branch cannot rely on another branch until it depends on that evidence.
-  Check every claim and action against the evidence visible at that point. Add any
-  missing dependency or move the claim or action until the evidence is available.
+  ## Check visibility and close working windows
+  - after names real event IDs. Add dependencies on the observations a decision uses.
+    Order all writers to the same window. Give independent actions separate windows
+    where appropriate. Keep evidence available through its last consumer.
+  - Keep external observations masked and supervise agent outputs unless the sample
+    calls for a different mask. Close temporary windows when their work is done.
+    Use update_event to fix a specific edit. After deleting an event, repair any
+    dependencies that pointed to it.
 
-  Use catalogue tool IDs from tools and arguments objects that match input_schema. Each
-  result must depend on the earlier call it answers, with at most one result per call.
-  Put the answered event in after to infer its call ID. If specifying call explicitly,
-  use the same call ID on the result as on the call, which defaults to its event ID.
-  For a person's reply to a chat call, put "<chat event ID>:echo" in after so the reply
-  follows delivery. Only chat calls have an echo: follow a person's message, a document,
-  a result or any other call by its own ID, and never write an echo event yourself. The builder creates that echo, the tools listing, default links to
-  the listing for empty after arrays, and canonical JSON for arguments.
+  ## Example opening batch
+  These are arguments for successive native calls. Use the tool names supplied by
+  the provider and adapt the content to the Draft.
+  1. post_chat_message {"event_id":"ask","origin":"user","speaker":"Sam","content":"How many boxes remain?"}
+  2. post_chat_message {"event_id":"ack","origin":"agent","speaker":"Kidra","content":"I'll check the inventory.","after":["ask"]}
+  3. create_event {"event_id":"inventory","window":"records","kind":"external_text","content":"Inventory lists three boxes.","after":["ack"]}
+  4. post_chat_message {"event_id":"answer","origin":"agent","speaker":"Kidra","content":"The inventory lists three boxes.","after":["inventory"]}
+  5. view_diagnostics {}
 
-  Fictional example. The read tool takes a path and routes both results to "inbox".
-  The reads are independent, the second returns first, and the report follows the notes.
-  Use the actual catalogue and scenario for your episode.
-  ```json
-  {"tools":["chat","read"],"windows":[
-    {"id":"room","purpose":"chatroom","writable":false},
-    {"id":"acknowledge","purpose":"reasoning","writable":true},
-    {"id":"north","purpose":"reasoning","writable":true},
-    {"id":"south","purpose":"reasoning","writable":true},
-    {"id":"inbox","purpose":"reasoning","writable":true},
-    {"id":"notes","purpose":"notes","writable":true}
-  ],"events":[
-    {"id":"ask","kind":"user","window":"room","after":[],"speaker":"Lee","content":"What time does each library close?"},
-    {"id":"ack","kind":"call","window":"acknowledge","after":["ask"],"tool":"chat","arguments":{"content":"I'll check both schedules."},"close":true},
-    {"id":"read-n","kind":"call","window":"north","after":["ack:echo"],"tool":"read","arguments":{"path":"north.txt"},"close":true},
-    {"id":"read-s","kind":"call","window":"south","after":["ack:echo"],"tool":"read","arguments":{"path":"south.txt"},"close":true},
-    {"id":"got-s","kind":"result","window":"inbox","after":["read-s"],"content":"South library closes at 6 pm."},
-    {"id":"got-n","kind":"result","window":"inbox","after":["read-n","got-s"],"content":"North library closes at 8 pm."},
-    {"id":"remember","kind":"think","window":"notes","after":["got-n"],"content":"Posted closing times: North 8 pm, South 6 pm."},
-    {"id":"report","kind":"call","window":"inbox","after":["remember"],"tool":"chat","arguments":{"content":"The schedules list North at 8 pm and South at 6 pm."},"close":true}
-  ]}
-  ```
+  ## Sign off
+  Use view_graph to check coverage and view_event or view_window for specific
+  evidence. Use view_diagnostics after edits to check errors and enabled warnings.
+  Fix reported problems and verify the final graph. Call signoff with completeness
+  and Draft-fidelity evidence, citing actual event IDs. Put signoff last in its batch.
