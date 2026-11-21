@@ -2,16 +2,9 @@
 
 import pytest
 from test_draft_assembly import DRAFT, spec
-from test_graph_generation import finish, frozen_legacy_run, service
+from test_graph_generation import finish, frozen_legacy_run, service, tangled_spec
 
 from trajectory_remix.graph import assembly_fix
-
-
-def tangled():
-    body = spec()
-    # Two writers in one window with no order between them: a structural error.
-    body["events"][2] = dict(body["events"][2], after=["ask"])
-    return body
 
 
 def left_open():
@@ -23,9 +16,9 @@ def left_open():
 def fix(t):
     return {
         "action": "patch",
-        "event_id": "plan",
+        "event_id": "got",
         "expected_source_hash": t.payload["source_hash"],
-        "patch": {"after": ["ack"]},
+        "patch": {"after": ["look"]},
     }
 
 
@@ -40,7 +33,7 @@ async def run(tmp_path, responses, **opts):
 
 @pytest.mark.asyncio
 async def test_generator_fixes_errors_then_reviews_run(tmp_path):
-    gen, job, source, ops, fake = await run(tmp_path, [tangled(), fix, {"action": "done"}])
+    gen, job, source, ops, fake = await run(tmp_path, [tangled_spec(), fix, {"action": "done"}])
     assert ops[2:4] == [assembly_fix.OPERATION] * 2 and "repair" not in ops
     assert source.metadata["stage"] == 2
     assert source.metadata["assembly_fix"]["reason"] == "done"
@@ -51,7 +44,7 @@ async def test_generator_fixes_errors_then_reviews_run(tmp_path):
 
 @pytest.mark.asyncio
 async def test_done_is_refused_while_errors_remain(tmp_path):
-    responses = [tangled(), {"action": "done"}, fix, {"action": "done"}]
+    responses = [tangled_spec(), {"action": "done"}, fix, {"action": "done"}]
     gen, job, source, ops, fake = await run(tmp_path, responses)
     refused = fake.calls[3].payload["messages"][-1]["content"]
     assert '"accepted":false' in refused and "unordered_window_writers" in refused

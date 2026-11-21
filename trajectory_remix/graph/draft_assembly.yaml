@@ -1,4 +1,4 @@
-version: draft-assembly/4
+version: draft-assembly/5
 # The agent's behaviour guide. Both Draft and Assembly see it; a persona pack goes here.
 actor_instruction: >-
   The agent acts only on visible evidence and the tool contract.
@@ -83,10 +83,14 @@ assemble_instruction: |-
     chat request and its delivery. The event_id you give the tool names the delivery,
     so the next event can depend on that ID.
   - Use post_tool_schema with exact project tool IDs. Display names are for people
-    reading the catalogue. Known tool calls add missing schemas automatically.
+    reading the catalogue. Open the tools window at the beginning with an empty
+    after list. Known tool calls add missing schemas automatically.
     For a generic tool_call, content holds the JSON text of the synthetic arguments.
     A tool_response reuses its call_id and depends on the event that submits it.
-    Use the configured response window when the tool specifies one.
+    Give each call its own window and keep reasoning in a dedicated window. The
+    usual tool window contains the call, its response, then closure. Keep the
+    window open until the last event that needs the response. Use the configured
+    response window when the tool specifies one.
 
   ## Check visibility and close working windows
   - after names real event IDs. Add dependencies on the observations a decision uses.

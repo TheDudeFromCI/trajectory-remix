@@ -167,6 +167,9 @@ Synthetic tool outputs are authored event content. Remix performs no tool execut
   depend on the initial listing directly or through their other prerequisites.
 - Author results as `tool_response` events. Use the same call ID and depend on the event that
   submits the call.
+- Give each call its own tool window. Author its response there when the tool configuration
+  allows it, then close the window once its last consumer has used the result. Keep reasoning
+  in a separate window. The initial tools window opens with an empty dependency list.
 - `post_chat_message` writes a masked user message or creates an agent's synthetic `chat`
   request in a short-lived window, followed by a matching delivery. The supplied event ID
   identifies the delivery.

@@ -34,6 +34,18 @@ WARNINGS = {
         "Interleaved framing",
         "Content crosses an unfinished tool call or response.",
     ),
+    "multiple_tool_calls_in_window": (
+        "Multiple tool calls in one window",
+        "Distinct tool calls share one window. Give each call its own window.",
+    ),
+    "reasoning_in_tool_window": (
+        "Reasoning in a tool window",
+        "Agent reasoning shares a window with a tool call or result. Use a dedicated reasoning window.",
+    ),
+    "tools_window_has_dependencies": (
+        "Tools window opens late",
+        "The event that opens a tools window depends on other events.",
+    ),
     "open_window": (
         "Open window",
         "A reasoning or tool window remains open without an acknowledgment.",

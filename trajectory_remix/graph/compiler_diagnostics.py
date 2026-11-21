@@ -199,7 +199,40 @@ def diagnose_schedule(
             responses[event.call_id].append(ident)
     for window, ids in sorted(by_window.items()):
         definition = source.windows.get(window)
+        first_call_events = {}
+        has_result = False
+        for ident in ids:
+            event = events[ident]
+            if isinstance(event, ToolCall):
+                first_call_events.setdefault(event.call_id, ident)
+            elif isinstance(event, ToolResponse):
+                has_result = True
+        if len(first_call_events) > 1:
+            emit(
+                "multiple_tool_calls_in_window",
+                f"Window {window} contains {len(first_call_events)} distinct tool calls. Give each call its own window.",
+                path=["windows", window],
+                related=first_call_events.values(),
+            )
+        if first_call_events or has_result or (definition and definition.purpose == "tool"):
+            for ident in ids:
+                event = events[ident]
+                if event.kind == "agent_text" and has_content(event.content):
+                    emit(
+                        "reasoning_in_tool_window",
+                        "Move reasoning to a dedicated window and preserve its causal dependencies.",
+                        ident,
+                        "window",
+                    )
         window_ordered = check_window_order(ids)
+        if definition and definition.purpose == "tools" and window_ordered and events[ids[0]].after:
+            emit(
+                "tools_window_has_dependencies",
+                "Open the tools window at the start by giving its first event an empty after list.",
+                ids[0],
+                "after",
+                related=events[ids[0]].after,
+            )
         if definition and not definition.agent_writable and window_ordered:
             opened_read_only = not is_model_event(events[ids[0]])
             for ident in ids:

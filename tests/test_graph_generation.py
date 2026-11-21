@@ -105,28 +105,38 @@ def spec(**changes):
             dict(id="room", purpose="chatroom", writable=False),
             dict(id="notes", purpose="notes", writable=True),
             dict(id="w1", purpose="reasoning", writable=True),
-            dict(id="w2", purpose="reasoning", writable=True),
+            dict(id="w2", purpose="tool", writable=True),
+            dict(id="ack_request", purpose="tool", writable=True),
+            dict(id="tell_request", purpose="tool", writable=True),
         ],
         events=[
             dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
             dict(
-                id="ack", kind="call", window="w1", after=["ask"], tool="chat",
-                arguments={"content": "Sure, checking now."},
+                id="ack", kind="call", window="ack_request", after=["ask"], tool="chat",
+                arguments={"content": "Sure, checking now."}, close=True,
             ),
-            dict(id="plan", kind="think", window="w1", after=["ack"], content="Read it."),
+            dict(id="plan", kind="think", window="w1", after=["ack"], content="Read it.", close=True),
             dict(
-                id="look", kind="call", window="w1", after=["plan"], tool="read",
-                arguments={"path": "a.md"}, close=True,
+                id="look", kind="call", window="w2", after=["plan"], tool="read",
+                arguments={"path": "a.md"},
             ),
             dict(id="got", kind="result", window="w2", after=["look"], content="A says yes."),
             dict(id="note", kind="think", window="notes", after=["got"], content="A: yes."),
+            dict(id="close_read", kind="think", window="w2", after=["note"], content="", close=True),
             dict(
-                id="tell", kind="call", window="w2", after=["note"], tool="chat",
+                id="tell", kind="call", window="tell_request", after=["note"], tool="chat",
                 arguments={"content": "A says yes."}, close=True,
             ),
         ],
     )  # fmt: skip
     body.update(changes)
+    return body
+
+
+def tangled_spec():
+    body = spec()
+    # The result and call write to one window without a causal order.
+    body["events"][4].update(after=["plan"], call="look")
     return body
 
 
@@ -137,14 +147,17 @@ def chat_spec():
         windows=[
             dict(id="room", purpose="chatroom", writable=False),
             dict(id="w1", purpose="reasoning", writable=True),
+            dict(id="ack_request", purpose="tool", writable=True),
         ],
         events=[
             dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
-            dict(id="think", kind="think", window="w1", after=["ask"], content="Reply."),
+            dict(
+                id="think", kind="think", window="w1", after=["ask"], content="Reply.", close=True
+            ),
             dict(
                 id="ack",
                 kind="call",
-                window="w1",
+                window="ack_request",
                 after=["think"],
                 tool="chat",
                 arguments={"content": "Hello!"},

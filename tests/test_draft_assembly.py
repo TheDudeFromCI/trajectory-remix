@@ -1,7 +1,7 @@
 """Two-pass generation: a prose draft, one assembled graph, then review and repair."""
 
 import pytest
-from test_graph_generation import DRAFT, finish, frozen_legacy_run, service, spec  # noqa: F401
+from test_graph_generation import DRAFT, finish, frozen_legacy_run, service, spec, tangled_spec  # noqa: F401
 
 from trajectory_remix.graph import compact_spec, draft_assembly, prompt_defaults
 
@@ -47,9 +47,7 @@ async def test_unusable_spec_gets_a_correction(tmp_path):
 @pytest.mark.asyncio
 async def test_errors_left_after_the_assembly_fix_go_to_fast_repair(tmp_path):
     gen, fake = draft_assembly_service(tmp_path)
-    tangled = spec()
-    # Two writers in one window with no order between them is a structural error.
-    tangled["events"][2] = dict(tangled["events"][2], after=["ask"])
+    tangled = tangled_spec()
     reason = "The fixture cannot be repaired; the episode needs rewriting."
     give_up = {"action": "give_up", "reason": reason}
     fake.responses = [{"draft": DRAFT}, tangled, give_up, give_up]  # Assembly fix, then repair.
@@ -69,7 +67,7 @@ def test_builder_fills_in_listing_echo_and_call_ids(tmp_path):
     assert data["events"]["tools"]["kind"] == "tool_schema"
     assert data["events"]["ask"]["chat"] == {"speaker": "Ana"}
     assert data["events"]["look"]["content"] == '{"path":"a.md"}'
-    assert data["events"]["look"]["close_window"] is True
+    assert data["events"]["close_read"]["close_window"] is True
     assert data["events"]["ack:echo"]["window"] == "room"
 
 
@@ -142,13 +140,12 @@ def roles_service(tmp_path, roles):
 )
 async def test_draft_assembly_and_fix_use_their_own_roles(tmp_path, roles, expected):
     gen, fake = roles_service(tmp_path, roles)
-    tangled = spec()
-    tangled["events"][2] = dict(tangled["events"][2], after=["ask"])
+    tangled = tangled_spec()
     fix = {
         "action": "patch",
-        "event_id": "plan",
+        "event_id": "got",
         "expected_source_hash": None,
-        "patch": {"after": ["ack"]},
+        "patch": {"after": ["look"]},
     }
 
     def patch(t):
