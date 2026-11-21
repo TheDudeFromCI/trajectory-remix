@@ -294,6 +294,7 @@ td.faint { color: var(--ink-faint); }
 .j-bool, .j-null { color: var(--pastel-lilac); }
 .j-punct, .j-other { color: var(--ink-faint); }
 .wt-block { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border: 1px solid var(--border); border-left: 2px solid var(--tone); border-radius: var(--radius-sm); }
+.wt-tool-id { color: var(--ink); font-size: 12px; }
 .wt-block-head { display: flex; align-items: center; gap: var(--space-2); }
 .wt-block.open { border-style: dashed; border-left-style: solid; }
 .wt-bubble { display: flex; flex-direction: column; gap: 2px; align-self: flex-start; max-width: 85%; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm); background: var(--surface-200); }

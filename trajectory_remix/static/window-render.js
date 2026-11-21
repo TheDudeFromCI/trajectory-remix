@@ -156,9 +156,12 @@ function formattedBody(tokens, {purpose, isAgent, toolExtras = () => [], hideExt
       const block = node('div', undefined, `wt-block ${part.type}` + (part.open ? ' open' : ''));
       const label = node('div', undefined, 'wt-block-head');
       label.append(node('span', LABELS[part.type + '_begin'], 'wt-label'));
+      // A call's text is `"tool_id":arguments`; show the tool in the label, arguments below.
+      const call = part.type === 'tool' && part.text.trimStart().startsWith('"') ? splitSpeaker(part.text) : {speaker: '', text: part.text};
+      if (call.speaker) label.append(node('span', call.speaker, 'wt-tool-id mono'));
       if (part.open) label.append(tag('Streaming', 'accent'));
       if (part.noops) label.append(noopChip(part.noops));
-      block.append(label, jsonBlock(part.text) || node('div', part.text, 'wt-text'));
+      block.append(label, jsonBlock(call.text) || node('div', call.text, 'wt-text'));
       body.append(block);
     } else if (part.type === 'text') {
       body.append((purpose === 'tools' && toolListBlock(part.text, {extras: toolExtras(part.event), hideExtras})) || jsonBlock(part.text) || node('div', part.text, 'wt-text'));
