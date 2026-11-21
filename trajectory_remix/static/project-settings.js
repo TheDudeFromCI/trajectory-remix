@@ -1,6 +1,7 @@
 /* Form editors over the existing project-settings DTO. No network or credentials. */
 import {renderPromptSettings} from './prompt-settings.js';
 import {renderChecklistSettings} from './checklist-settings.js';
+import {renderReviewPack} from './review-pack.js';
 import {persistCollapse} from './collapse-state.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
@@ -219,6 +220,8 @@ export function renderGenerationSettings(container, initial, options = {}) {
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
   renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
   renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading});
+  tipHeading(settingsColumn, 'Prompt and checklist pack', 'Export the prompts and checklist as a JSON file, or import one shared from another project.');
+  renderReviewPack(settingsColumn, {current, write, error, render});
   settingsColumn.append(status);
   if (options.notice) report(options.notice);
   if (options.footer) settingsColumn.append(options.footer);

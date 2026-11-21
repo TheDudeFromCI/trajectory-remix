@@ -24,6 +24,7 @@ REQUIRED = [
     "static/show-tools.js",
     "static/prompt-settings.js",
     "static/checklist-settings.js",
+    "static/review-pack.js",
     "static/style.css",
     "static/ibm-plex-sans-latin-400-normal.woff2",
     "static/fonts-LICENSE.txt",
