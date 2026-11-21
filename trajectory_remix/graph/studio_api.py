@@ -204,7 +204,9 @@ def create_studio_app(
     @router.post("/sampler/runs", status_code=202)
     async def sampler_run(body: SamplerRun):
         if "draft" in studio.store.settings().settings.endpoint_roles:
-            job = generation.start([r.model_dump() for r in body.requests], body.instructions)
+            job = generation.start(
+                [r.model_dump() for r in body.requests], body.instructions, body.barriers
+            )
         else:
             job = sampler.run([r.model_dump() for r in body.requests], body.instructions)
         studio.worker.kick(job)
@@ -223,7 +225,9 @@ def create_studio_app(
 
     @router.post("/generation/runs", status_code=202)
     async def generation_run(body: SamplerRun):
-        job = generation.start([r.model_dump() for r in body.requests], body.instructions)
+        job = generation.start(
+            [r.model_dump() for r in body.requests], body.instructions, body.barriers
+        )
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 

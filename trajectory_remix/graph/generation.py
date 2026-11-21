@@ -41,7 +41,8 @@ class GenerationService:
             config["settings"] if "settings" in config else config["options"]["settings"]
         )
 
-    def start(self, requests, instructions):
+    def start(self, requests, instructions, barriers=None):
+        barriers = phase_barrier.validate(barriers)
         frozen = self.sampler.editor()
         settings_record = self.store.settings(frozen["settings_revision"])
         settings = settings_record.settings
@@ -62,7 +63,13 @@ class GenerationService:
         proposals = [self.sampler.propose(**r, frozen=frozen) for r in requests]
         plans = {p["id"]: draft_assembly.plan(p["proposal"], settings) for p in proposals}
         return self.jobs.create_run(
-            dict(instructions=instructions, sampler=frozen, plans=plans, driver=DRIVER),
+            dict(
+                instructions=instructions,
+                sampler=frozen,
+                plans=plans,
+                driver=DRIVER,
+                barriers=barriers,
+            ),
             proposals,
             settings_record=settings_record,
         )
@@ -327,7 +334,7 @@ class GenerationService:
             cp.pop("held")
             self._save(job, trajectory_hold.unflag(source), cp)
             return
-        if self._parked(job, ident, cp, settings):
+        if self._parked(job, ident, cp):
             return
         if cp["phase"] == "event":
             if cp.get("assembled"):
@@ -498,29 +505,24 @@ class GenerationService:
         cause = f" ({local_failure(error)}; traceback in the server output)" if error else ""
         self._hold(job, record.source, cp, f"A local error interrupted it{cause}; edits are kept.")
 
-    def _parked(self, job, ident, cp, settings):
-        """With a phase barrier, a run's reviews wait until every trajectory is assembled."""
-        if cp.get("manual") or not settings.generation.phase_barrier:
-            return False
-        if not phase_barrier.waits(cp):
-            return False
-        if phase_barrier.phase(self.store, job) == phase_barrier.GENERATION:
+    def _parked(self, job, ident, cp):
+        """A trajectory waits at an enabled barrier until every trajectory has reached it."""
+        gate = phase_barrier.gate(cp)
+        enabled = phase_barrier.configured(self.jobs.inspect(job))
+        opened = phase_barrier.phase(self.store, job)
+        if gate in phase_barrier.closed(enabled, opened):
             if phase_barrier.modes(self.store, job).get(ident) != "parked":
                 phase_barrier.set_mode(self.store, job, ident, "parked")
-                self.jobs.progress(job, f"Trajectory parked until reviews: {label(ident)}")
+                self.jobs.progress(job, f"Trajectory parked before {gate}: {label(ident)}")
             return True
         if phase_barrier.modes(self.store, job).get(ident) == "parked":
             phase_barrier.set_mode(self.store, job, ident, "attached")
         return False
 
     def _barrier(self, job, epoch):
-        """Pause the run once every trajectory is parked (or held) before its reviews."""
+        """Pause the run once every trajectory is parked (or held) at a barrier."""
         j = self.jobs.inspect(job)
-        if j["kind"] != "run" or j["state"] != "running":
-            return
-        if not self.settings_for(job).generation.phase_barrier:
-            return
-        if phase_barrier.phase(self.store, job) != phase_barrier.GENERATION:
+        if j["state"] != "running" or not phase_barrier.configured(j):
             return
         if phase_barrier.pending_attempts(self.store, job):
             return
@@ -529,13 +531,15 @@ class GenerationService:
         held = [i for i in owners if trajectory_hold.held(self.jobs.checkpoint(job, i), epoch)]
         if not parked or len(parked) + len(held) < len(owners):
             return
-        phase_barrier.advance(self.store, job)
+        gates = [phase_barrier.gate(self.jobs.checkpoint(job, i)) for i in parked]
+        gate = min(gates, key=phase_barrier.GATES.index)
+        phase_barrier.advance(self.store, job, phase_barrier.GATES.index(gate) + 1)
         self.jobs.control(job, "pause")
         self.jobs.append_log(
             job,
-            f"Phase barrier: Draft and Assembly finished for {len(parked)} trajectories"
+            f"Phase barrier before {gate}: {len(parked)} trajectories are waiting"
             + (f" ({len(held)} held for attention)" if held else "")
-            + ". Switch to the review models, then Resume to start Fast and Critical Review.",
+            + f". Switch to the {gate} model if you need to, then Resume to continue.",
             level="warning",
         )
 

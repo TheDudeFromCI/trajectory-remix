@@ -31,9 +31,9 @@ into it. Jobs never execute synthetic tools.
   review it marks the item `detached`, and edits already committed stay in Undo history. A job
   finishes when nothing is pending or working, even if it was paused when the last detach happened.
 - **Resume** is rejected for finished jobs.
-- **Phase barrier:** with `generation.phase_barrier` on, a run parks each trajectory before its
-  reviews (parked trajectories don't count toward the active-trajectory cap) and pauses once all
-  are drafted and assembled. See
+- **Phase barriers:** a run can wait before Assembly, Fast review or Critical review (chosen in
+  Generate trajectories, per job). Trajectories park at an enabled barrier (parked ones don't
+  count toward the active-trajectory cap) and the job pauses once all have arrived. See
   [Generate and review in separate sessions](GRAPH-GENERATION.md#generate-and-review-in-separate-sessions).
 - **Held trajectories:** a trajectory that needs manual intervention (output that stays invalid,
   a context limit, a local error) is held, and the rest of the job keeps running. The job pauses
@@ -106,7 +106,7 @@ All under `/api/v1` and authenticated like the rest of the studio. The headless 
 | `GET /jobs/{id}/attempts` | Frozen attempts and outcomes |
 | `POST /jobs/{id}/pause`, `/resume`, `/cancel` | Per-job control |
 | `POST /jobs/{id}/detach/{trajectory}` | Permanent detach |
-| `GET /jobs/{id}/phase`, `POST /jobs/{id}/phase/review` | A run's [phase barrier](GRAPH-GENERATION.md#generate-and-review-in-separate-sessions): read it, or start the reviews early |
+| `GET /jobs/{id}/phase`, `POST /jobs/{id}/phase/review` | A run's [phase barrier](GRAPH-GENERATION.md#generate-and-review-in-separate-sessions): read them, or skip the waiting barriers |
 | `POST /endpoints/{id}/resume` | Explicit endpoint recovery |
 | `POST /bulk` `{query, action, config}` | 202 with a frozen-target job |
 | `GET /jobs/{id}/results`, `/history` | Paged results and settled changes |
