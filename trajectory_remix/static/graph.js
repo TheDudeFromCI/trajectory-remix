@@ -466,10 +466,15 @@ export class StudioUI {
     } else for (const id of order.filter(id => visible.has(id))) {
       const e = this.draft.events[id], w = ensure(e.window), add = token => w.tokens.push({...token, event: id});
       if (e.replace_body) w.tokens = [];
-      if (!w.tokens.length) w.tokens.push({control: 'ctx_begin'}, {text: this.draft.windows[e.window]?.purpose || e.window}, {control: 'ctx_end'});
+      if (!w.tokens.length) {
+        // Same JSON shape as the compiled header; the slot is only known after scheduling.
+        const win = this.draft.windows[e.window] || {};
+        w.tokens.push({control: 'ctx_begin'}, {text: JSON.stringify({purpose: win.purpose || e.window, reasoning_effort: win.reasoning_effort ?? null})}, {control: 'ctx_end'});
+      }
       const tool = e.kind === 'tool_call', response = e.kind === 'tool_response', chat = e.kind === 'chat_message';
       if (tool && e.insert_tool_begin || response && e.insert_response_begin || chat) add({control: chat ? 'msg_begin' : tool ? 'tool_begin' : 'response_begin'});
       if (chat) add({text: e.chat.speaker + ': '});
+      if (tool && e.insert_tool_begin) add({text: JSON.stringify(e.tool) + ':'});  // as compiled: "tool":args
       add({text: typeof e.content === 'string' ? e.content : e.content.map(p => p.kind === 'text' ? p.text : `[${p.window}]`).join('')});
       if (tool && e.insert_tool_end || response && e.insert_response_end || chat) add({control: chat ? 'msg_end' : tool ? 'tool_end' : 'response_end'});
       if (e.close_window) { add({control: 'eos'}); w.closed = true; }
