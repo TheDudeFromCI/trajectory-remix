@@ -106,6 +106,8 @@ body.resizing * { cursor: inherit !important; }
 /* Timeline */
 .timeline-controls { flex-wrap: wrap; row-gap: var(--space-1); }
 .timeline-controls h2 { flex: none; }
+.timeline-zoom { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+.timeline-zoom input { width: 90px; }
 .transport { gap: 2px; }
 #tick-number { width: 64px; height: 26px; margin-left: var(--space-1); font-family: var(--font-mono); font-size: 12px; }
 #max-tick { margin-left: var(--space-1); }

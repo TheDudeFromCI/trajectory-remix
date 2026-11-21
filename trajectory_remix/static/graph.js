@@ -82,7 +82,9 @@ async function intrinsicHash(source) {
 export class StudioUI {
   constructor() {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('graph-preferences') || '{}'); } catch {}
-    this.prefs = {mode: 'graph', profile: '', debounce: 500, ...saved};
+    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, ...saved};
+    if (!Number.isFinite(this.prefs.zoom)) this.prefs.zoom = 1;
+    this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
     if (!Number.isFinite(this.prefs.debounce) || this.prefs.debounce < 0) this.prefs.debounce = 500;
     this.offset = 0; this.position = 0; this.drafts = new Map(); this.jobs = new Map(); this.dialogs = new Map(); this.recorded = new Set(); this.ownedBulk = new Set();
@@ -383,7 +385,7 @@ export class StudioUI {
       $('window-grid').replaceChildren(node('div', 'Select a trajectory from the dataset, or create one with +.', 'empty'));
       return;
     }
-    const order = graphOrder(this.draft), ticks = this.prefs.mode === 'ticks';
+    const order = graphOrder(this.draft), ticks = this.prefs.mode === 'ticks', zoom = this.prefs.zoom;
     const frames = this.frames || [];
     const max = Math.max(0, (ticks ? frames.length : order.length) - 1);
     this.position = Math.min(max, Math.max(0, this.position));
@@ -397,8 +399,8 @@ export class StudioUI {
     for (const id of order) {
       const event = this.draft.events[id]; depth[id] = Math.max(0, ...event.after.map(dep => (depth[dep] ?? -1) + 1));
       const span = spans.get(id);
-      positions.set(id, {x: GUTTER + (ticks ? 12 + (span?.[0] || 0) * 7 : 12 + depth[id] * 185),
-        y: 10 + lanes.indexOf(event.window) * 44, width: ticks ? Math.max(28, ((span?.[1] || 0) - (span?.[0] || 0) + 1) * 7) : 165});
+      positions.set(id, {x: GUTTER + (ticks ? 12 + (span?.[0] || 0) * 7 * zoom : 12 + depth[id] * 185 * zoom),
+        y: 10 + lanes.indexOf(event.window) * 44, width: ticks ? Math.max(28, ((span?.[1] || 0) - (span?.[0] || 0) + 1) * 7 * zoom) : Math.max(60, 165 * zoom)});
     }
     const chart = node('div', undefined, 'timeline-lanes');
     const width = Math.max(450, ...[...positions.values()].map(p => p.x + p.width + 20));
@@ -429,7 +431,7 @@ export class StudioUI {
       n.style.setProperty('--tone', `var(--pastel-${this.windowTone(e.window)})`);
       Object.assign(n.style, {left: p.x + 'px', top: p.y + 'px', width: p.width + 'px'}); chart.append(n);
     }
-    if (ticks) { const line = node('div', undefined, 'timeline-cursor'); line.style.left = (GUTTER + 12 + this.position * 7) + 'px'; chart.append(line); }
+    if (ticks) { const line = node('div', undefined, 'timeline-cursor'); line.style.left = (GUTTER + 12 + this.position * 7 * zoom) + 'px'; chart.append(line); }
     if (!order.length) chart.append(node('div', 'No events yet. Add one with + in the event editor.', 'timeline-empty'));
     $('timeline').replaceChildren(chart);
     const windows = new Map();
@@ -747,7 +749,7 @@ export class StudioUI {
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
       if (e.detail === 'review-view') this.openReview().catch(message);
     });
-    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('preview-debounce').value = this.prefs.debounce;
+    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
     on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.renderDirty(); this.renderTimeline(); await this.listing(); });
@@ -781,6 +783,7 @@ export class StudioUI {
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
     on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
+    on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
     on('scrubber', 'input', e => scrub(e.target.value)); on('tick-number', 'change', e => scrub(e.target.value));

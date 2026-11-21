@@ -92,6 +92,11 @@ assert.ok($('window-grid').querySelector('.window-tokens'));
 $('window-grid').querySelector('.window-raw').click();
 const tickNode=$('timeline').querySelector('button'); assert.ok(tickNode.title.includes('Depends on:'));
 $('first-tick').click(); assert.equal(ui.position,0);
+// Zoom slider rescales the timeline horizontally and persists.
+const zoomWidth=()=>parseFloat($('timeline').querySelector('.timeline-lanes').style.width);
+const baseWidth=zoomWidth(); $('timeline-zoom').value='2'; $('timeline-zoom').dispatchEvent(new Event('input'));
+assert.equal(ui.prefs.zoom,2); assert.ok(zoomWidth()>baseWidth);
+$('timeline-zoom').value='1'; $('timeline-zoom').dispatchEvent(new Event('input')); assert.equal(zoomWidth(),baseWidth);
 assert.equal($('export-profile').value,'');
 // Multiple independent dialogs and polling never steal selected draft/event.
 const selected = ui.id, selectedEvent=ui.event; $('event-content').value='unsaved'; $('event-content').dispatchEvent(new Event('input'));
