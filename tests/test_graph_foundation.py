@@ -322,7 +322,7 @@ def test_tool_schema_warning_only_after_submission_and_no_contamination():
 def test_invalid_framing_and_submission(event, field, value, expected):
     raw = tool_source()
     raw["events"][event][field] = value
-    assert expected in codes(raw, settings())
+    assert expected in {d.code for d in diagnose(GraphSource.model_validate(raw), settings())}
 
 
 def test_output_after_closure_and_resubmission():
