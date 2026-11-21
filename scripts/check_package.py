@@ -20,6 +20,7 @@ REQUIRED = [
     "static/metrics-view.js",
     "static/window-render.js",
     "static/tool-list-view.js",
+    "static/tool-picker.js",
     "static/usage-view.js",
     "static/tool-import.js",
     "static/show-tools.js",

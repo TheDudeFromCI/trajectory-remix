@@ -109,7 +109,10 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
 4. Need another window? Open the **Windows** tab, type a new window ID and purpose, and
    click **Add / update window**.
 5. Want the agent to see its tools? Click **Show tools…**, tick the tools, and add the
-   listing. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
+   listing. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools). To change
+   a listing later, select its event: when the event is external input in a `tools`
+   window, the **Content** tab shows a checkbox per project tool. Ticking one adds its
+   schema line to the content, and unticking removes it. The text below stays editable.
 6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
    **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
 

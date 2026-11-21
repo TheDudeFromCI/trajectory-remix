@@ -5,6 +5,7 @@ import {windowBody} from './window-render.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {openShowTools} from './show-tools.js';
+import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {icon, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
@@ -309,9 +310,16 @@ export class StudioUI {
     this.editorBaseline = this.editorState();
     const stashed = this.editors.get(this.event);
     if (stashed) for (const [id, value] of Object.entries(stashed)) { if (typeof value === 'boolean') $(id).checked = value; else $(id).value = value; }
-    this.kindControls(); this.renderArguments(); this.renderDependencies();
+    this.kindControls(); this.renderArguments(); this.renderToolPicker(); this.renderDependencies();
     // renderDraft() runs before the baseline above is reset, so refresh the badge now.
     if (this.record) this.renderDirty();
+  }
+  renderToolPicker() {
+    const holder = $('tool-picker'), isTools = $('event-kind').value === 'external_text' && this.draft?.windows[$('event-window').value]?.purpose === 'tools' && $('content-mode').value === 'text';
+    holder.hidden = !isTools; if (!isTools) { holder.replaceChildren(); return; }
+    renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
+      lineFor: async name => (await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: [name], extra_tools: 0})).content,
+      onChange: text => { $('event-content').value = text; this.stashEditor(); this.applyEvent(); this.renderToolPicker(); }});
   }
   kindControls() {
     const kind = $('event-kind').value, tool = kind === 'tool_call', response = kind === 'tool_response', chat = kind === 'chat_message';
@@ -767,10 +775,10 @@ export class StudioUI {
       }});
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
-    on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); });
-    on('content-mode', 'change', () => { this.stashEditor(); this.renderArguments(); });
-    on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); });
-    for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); });
+    on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderToolPicker(); });
+    on('content-mode', 'change', () => { this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
+    on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
+    for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
     on('tool-id', 'change', () => this.renderArguments());
     on('dependency-add', 'click', () => this.addDependency($('dependency-picker').value));
     on('window-id', 'change', () => this.renderWindow());
