@@ -2,7 +2,7 @@ import {renderProjectSettings, renderGenerationSettings} from './project-setting
 import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
-import {loadRunInputs, persistInput, resolveSeed} from './run-inputs.js';
+import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {openShowTools} from './show-tools.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -588,7 +588,8 @@ export class StudioUI {
     for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast review'], ['critical', 'Critical review']]) {
       const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'draft' ? 'danger' : 'faint')); roleList.append(row);
     }
-    box.append(roleList, button('Configure model endpoints', () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); }, 'sm ghost'));
+    box.append(roleList);
+    $('generation-endpoints-button').onclick = () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); };
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
     const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); grid.append(label); return input; };
     const saved = loadRunInputs();
@@ -599,7 +600,18 @@ export class StudioUI {
     pinBox.append(node('span', 'Pins', 'muted small'));
     if (Object.keys(pins).length) for (const [k, v] of Object.entries(pins)) pinBox.append(tag(`${k}: ${v}`, 'lilac'));
     else pinBox.append(node('span', 'None — the sampler uses saved matrix weights', 'small faint'));
-    box.append(pinBox, node('p', 'Each run freezes its settings, prompts, matrix and pins when it starts.', 'note'));
+    const barrierBox = node('fieldset', undefined, 'barrier-list'); barrierBox.append(node('legend', 'Phase barriers', 'muted small'));
+    const barriers = {};
+    for (const [gate, text, tip] of [
+      ['assembly', 'Pause before Assembly', 'Every trajectory finishes Draft first; the job then pauses so you can switch models. Resume starts Assembly.'],
+      ['fast', 'Pause before Fast review', 'Every trajectory is assembled first; the job then pauses. Resume starts Fast review.'],
+      ['critical', 'Pause before Critical review', 'Every trajectory passes Fast review first; the job then pauses. Resume starts Critical review.'],
+    ]) {
+      const label = node('label'), box_ = node('input'); box_.type = 'checkbox'; box_.id = `generation-barrier-${gate}`; box_.checked = loadBarriers()[gate];
+      box_.onchange = () => saveBarriers({[gate]: box_.checked}); label.dataset.tip = tip; label.append(box_, ` ${text}`);
+      barriers[gate] = box_; barrierBox.append(label);
+    }
+    box.append(pinBox, barrierBox, node('p', 'Each run freezes its settings, prompts, matrix and pins when it starts.', 'note'));
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
       if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
@@ -610,7 +622,7 @@ export class StudioUI {
       start.disabled = true;
       try {
         const requests = Array.from({length:n}, (_, i) => ({seed:first+i, overrides:{...(sampler?.pins || {})}}));
-        const run = await api('/generation/runs', 'POST', {requests, instructions: {}});
+        const run = await api('/generation/runs', 'POST', {requests, instructions: {}, barriers: Object.fromEntries(Object.entries(barriers).map(([gate, input]) => [gate, input.checked]))});
         status.textContent = `Started ${n} attempts. Job ${run.job_id}`;
         $('generation-settings-dialog').close(); await this.inspectJob(run.job_id); await this.listing();
       } finally { start.disabled = false; }

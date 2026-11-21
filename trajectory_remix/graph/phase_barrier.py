@@ -1,36 +1,78 @@
-"""Phase barrier: every trajectory finishes Draft and Assembly before any review starts.
+"""Phase barriers: a run can wait before Assembly, Fast review or Critical review.
 
-With generation.phase_barrier on, a run has two phases:
+Each barrier is chosen per job when the run starts (`barriers` in the run's frozen config).
+A gate is the point a trajectory reaches next:
 
-0. Draft and Assembly. A trajectory that reaches review parks: its owner row becomes
-   mode 'parked', which does not count toward the active-trajectory cap, so later
-   attempts can start. When no attempt is pending and every owned trajectory is parked
-   or held, the run moves to phase 1 and the job pauses, so models can be swapped.
-1. Reviews. Resume releases the parked trajectories into Fast and Critical Review.
+- assembly: Draft is done, Assembly is next.
+- fast: the graph is assembled, Fast review (or Fast repair) is next.
+- critical: Fast passed, Critical review (or Critical repair) is next.
 
-The phase is stored per job, so it survives a server restart.
+A trajectory that reaches an enabled, closed gate parks: its owner row becomes mode 'parked',
+which does not count toward the active-trajectory cap, so later attempts can start. When no
+attempt is pending and every owned trajectory is parked or held, the gate opens and the job
+pauses, so models can be swapped. Resume releases the parked trajectories.
+
+The number of opened gates is stored per job, so it survives a server restart.
 """
 
 TABLE = """CREATE TABLE IF NOT EXISTS graph_job_phases (
  job_id TEXT PRIMARY KEY REFERENCES graph_jobs(id), phase INTEGER NOT NULL)"""
-GENERATION, REVIEW = 0, 1
+GATES = ("assembly", "fast", "critical")
+OPEN_ALL = len(GATES)
 REVIEW_PHASES = {"review", "repair"}
 
 
 def phase(store, job):
+    """How many gates are open: gates with a lower index let trajectories through."""
     with store.connect() as db:
         db.execute(TABLE)
         row = db.execute("SELECT phase FROM graph_job_phases WHERE job_id=?", (job,)).fetchone()
-    return row[0] if row else GENERATION
+    return row[0] if row else 0
 
 
-def advance(store, job):
+def advance(store, job, to=OPEN_ALL):
     with store.connect() as db:
         db.execute(TABLE)
         db.execute(
-            "INSERT INTO graph_job_phases VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET phase=?",
-            (job, REVIEW, REVIEW),
+            "INSERT INTO graph_job_phases VALUES(?,?)"
+            " ON CONFLICT(job_id) DO UPDATE SET phase=MAX(phase, excluded.phase)",
+            (job, to),
         )
+
+
+def validate(barriers):
+    """The barriers a run asks for: a dict of gate name to boolean."""
+    if barriers is None:
+        return {}
+    if not isinstance(barriers, dict) or set(barriers) - set(GATES):
+        raise ValueError("barriers must name only: " + ", ".join(GATES))
+    if any(type(value) is not bool for value in barriers.values()):
+        raise ValueError("Each barrier must be true or false")
+    return {gate: barriers.get(gate, False) for gate in GATES}
+
+
+def configured(job):
+    """The gates a job's frozen config enables (empty for manual reviews and old jobs)."""
+    if job["kind"] != "run":
+        return []
+    barriers = job["config"]["config"].get("barriers") or {}
+    return [gate for gate in GATES if barriers.get(gate)]
+
+
+def closed(enabled, opened):
+    """Enabled gates that have not opened yet."""
+    return [gate for gate in enabled if GATES.index(gate) >= opened]
+
+
+def gate(cp):
+    """The gate this checkpoint's next step belongs to, or None."""
+    if not cp or cp.get("manual"):
+        return None
+    if cp.get("phase") == "event":
+        return "assembly" if "draft" in cp and not cp.get("assembled") else None
+    if cp.get("phase") in REVIEW_PHASES and cp.get("tier") in GATES:
+        return cp["tier"]
+    return None
 
 
 def set_mode(store, job, trajectory, mode):
@@ -57,8 +99,3 @@ def pending_attempts(store, job):
                 (job,),
             ).fetchone()
         )
-
-
-def waits(cp):
-    """True when this checkpoint's next step belongs to the review phase."""
-    return bool(cp) and cp.get("phase") in REVIEW_PHASES
