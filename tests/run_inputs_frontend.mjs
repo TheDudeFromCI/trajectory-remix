@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 const store = new Map();
 globalThis.localStorage = {getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v))};
-const {loadRunInputs, saveRunInputs, persistInput, resolveSeed} = await import('../trajectory_remix/static/run-inputs.js');
+const {loadRunInputs, saveRunInputs, persistInput, resolveSeed, loadBarriers, saveBarriers} = await import('../trajectory_remix/static/run-inputs.js');
 
 assert.deepEqual(loadRunInputs(), {attempts: 100, seed: 0}, 'defaults use seed 0');
 saveRunInputs({seed: 42});
@@ -24,3 +24,10 @@ store.clear();
 assert.deepEqual(loadRunInputs({attempts: 1}), {attempts: 1, seed: 0}, 'caller default applies when nothing is saved');
 saveRunInputs({attempts: 9});
 assert.equal(loadRunInputs({attempts: 1}).attempts, 9, 'saved value wins over caller default');
+
+store.clear();
+assert.deepEqual(loadBarriers(), {assembly: false, fast: false, critical: false}, 'barriers default off');
+saveBarriers({fast: true});
+assert.deepEqual(loadBarriers(), {assembly: false, fast: true, critical: false}, 'barrier choices are remembered');
+store.set('generation-run-barriers', '{not json');
+assert.deepEqual(loadBarriers(), {assembly: false, fast: false, critical: false}, 'corrupt barrier storage falls back');

@@ -54,7 +54,7 @@ responses['/jobs/job-1?include_config=false'] = {...job, state: 'paused', progre
 await view.refresh('job-1');
 assert.equal(view.panels.get('job-1').root, panel); assert.equal(panel.dataset.state, 'run · paused');
 assert.equal(view.panels.get('job-1').buttons.resume.disabled, false);
-// Start reviews now shows only for a run with a phase barrier that is still generating.
+// Skip barriers shows only for a run with a phase barrier that is still generating.
 assert.equal(view.panels.get('job-1').reviews.hidden, true);
 responses['/jobs/job-1/phase'] = {enabled: true, phase: 'generation'};
 await view.refresh('job-1');

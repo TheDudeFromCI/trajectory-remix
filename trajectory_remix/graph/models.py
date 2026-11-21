@@ -380,13 +380,11 @@ class GenerationOptions(DTO):
     def drop_retired_method(cls, data):
         # Projects saved while the step-by-step Flow existed carry a method field;
         # Draft and Assembly is now the only way to generate.
-        if isinstance(data, dict) and "method" in data:
-            data = {k: v for k, v in data.items() if k != "method"}
+        # phase_barrier moved to the Generate trajectories panel (chosen per job).
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k not in {"method", "phase_barrier"}}
         return data
 
-    # Runs only: every trajectory finishes generation (Draft and Assembly) before any review
-    # starts; the job then pauses so models can be swapped, and Resume starts the reviews.
-    phase_barrier: bool = False
     fast: bool = True
     critical: bool = True
     repair: bool = True

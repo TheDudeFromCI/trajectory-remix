@@ -14,6 +14,8 @@ class ProposalInput(DTO):
 class SamplerRun(DTO):
     requests: list[ProposalInput] = Field(min_length=1, max_length=1000)
     instructions: dict[str, JsonValue] = Field(default_factory=dict)
+    # Per-job phase barriers: wait before "assembly", "fast" or "critical" (all default off).
+    barriers: dict[str, bool] = Field(default_factory=dict)
 
 
 def causal_view(source, after, compact=False):

@@ -25,5 +25,19 @@ export function persistInput(input, name) {
   });
 }
 
+const BARRIER_KEY = 'generation-run-barriers';
+const GATES = ['assembly', 'fast', 'critical'];
+
+/** Remembered phase-barrier choices for the Generate trajectories panel (all off by default). */
+export function loadBarriers() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(BARRIER_KEY) || '{}') || {}; } catch { saved = {}; }
+  return Object.fromEntries(GATES.map(gate => [gate, saved[gate] === true]));
+}
+
+export function saveBarriers(patch) {
+  try { localStorage.setItem(BARRIER_KEY, JSON.stringify({...loadBarriers(), ...patch})); } catch { /* storage unavailable */ }
+}
+
 /** Seed 0 means "pick a random starting seed". */
 export const resolveSeed = seed => (seed === 0 ? 1 + Math.floor(Math.random() * 2 ** 31) : seed);

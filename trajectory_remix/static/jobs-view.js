@@ -78,8 +78,8 @@ export class JobsView {
       b.onclick = () => this.guard(async () => { await this.deps.api(`/jobs/${id}/${action}`, 'POST'); await this.refresh(id); });
       v.buttons[action] = b; v.controls.append(b);
     }
-    v.reviews = node('button', 'Start reviews now', 'sm'); v.reviews.type = 'button'; v.reviews.hidden = true;
-    v.reviews.dataset.tip = 'Phase barrier: assembled trajectories wait here for the review models. Start reviews now instead of waiting for every trajectory; unfinished ones keep generating when their endpoint is back.';
+    v.reviews = node('button', 'Skip barriers', 'sm'); v.reviews.type = 'button'; v.reviews.hidden = true;
+    v.reviews.dataset.tip = 'Phase barriers: trajectories wait at the barriers chosen for this job. Skip them to continue now instead of waiting for every trajectory; unfinished ones keep generating when their endpoint is back.';
     v.reviews.onclick = () => this.guard(async () => { await this.deps.api(`/jobs/${id}/phase/review`, 'POST'); await this.refresh(id); });
     v.controls.append(v.reviews);
     v.clear = node('button', 'Clear job', 'sm danger'); v.clear.type = 'button'; v.clear.hidden = true;
