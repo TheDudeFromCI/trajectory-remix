@@ -8,7 +8,7 @@ const PROMPTS = [
 ];
 
 export function renderPromptSettings(target, {current, write, error, render, loadDefault}) {
-  const box = node('div', undefined, 'settings-limits'); box.append(node('h4', 'Generation prompts'), node('p', 'Runs freeze the prompts when they start; edits apply to new runs.', 'settings-help'));
+  const box = node('div', undefined, 'settings-limits');
   for (const [key, title, help] of PROMPTS) {
     const label = node('label', title), text = node('textarea');
     text.value = current().prompts?.[key] ?? ''; text.rows = 8; text.setAttribute('aria-label', title);
