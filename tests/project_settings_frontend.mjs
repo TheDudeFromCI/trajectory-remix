@@ -51,7 +51,7 @@ byLabel(generation,'Edit criterion evidence').click();
 enter(byLabel(generation,'criterion evidence'),'Require exact supporting events');
 enter(byLabel(generation,'New criterion ID'),'quality');btn(generation,'Add criterion').click();
 assert.ok(draft.review_checklists.core.quality);
-const crit=byLabel(generation,'criterion quality is critical');crit.checked=true;crit.dispatchEvent(new window.Event('change'));
+const crit=byLabel(generation,'criterion quality is core');crit.checked=false;crit.dispatchEvent(new window.Event('change'));
 assert.ok(draft.review_checklists.critical.quality&&!draft.review_checklists.core.quality);
 byLabel(generation,'Edit criterion quality').click();
 enter(byLabel(generation,'criterion quality'),'Avoid unsupported conclusions');
@@ -61,7 +61,7 @@ byLabel(generation,'Delete criterion quality').click();assert.ok(!draft.review_c
 byLabel(generation,'New criterion ID').value='';enter(byLabel(generation,'New criterion ID'),'quality');btn(generation,'Add criterion').click();
 enter(byLabel(generation,'New criterion ID'),'quality');
 byLabel(generation,'Edit criterion quality').click();enter(byLabel(generation,'criterion quality'),'Avoid unsupported conclusions');
-const crit2=byLabel(generation,'criterion quality is critical');crit2.checked=true;crit2.dispatchEvent(new window.Event('change'));
+const crit2=byLabel(generation,'criterion quality is core');crit2.checked=false;crit2.dispatchEvent(new window.Event('change'));
 assert.equal(generation.querySelector('[aria-label="Generation method"]'),null);
 enter(byLabel(generation,'Agent prompt'),'Be Kidra.');enter(byLabel(generation,'Assembly instructions'),'Build it.');
 enter(byLabel(generation,'Repair rounds'),'4');
@@ -100,7 +100,7 @@ assert.deepEqual(Object.keys(reviewDraft.review_checklists.core),['mine']);asser
 answer=true;
 await btn(resetBox,'Reset review checklists to defaults').onclick();
 assert.equal(asked.length,2);assert.deepEqual(reviewDraft.review_checklists,packaged);
-assert.ok(byLabel(resetBox,'criterion causal_evidence is critical')&&!byLabel(resetBox,'criterion mine is critical'));
+assert.ok(byLabel(resetBox,'criterion causal_evidence is core')&&!byLabel(resetBox,'criterion mine is core'));
 assert.match(resetBox.textContent,/reset to the defaults\. Choose Save settings/);
 // A failed default lookup changes nothing and does not ask.
 reviewDraft={generation:{},review_checklists:{core:{mine:{text:'Custom',allow_not_applicable:false}},critical:{}}};asked=[];

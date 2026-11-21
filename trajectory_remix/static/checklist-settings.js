@@ -2,7 +2,7 @@
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
 const GROUPS = ['core', 'critical'];
-const HELP = 'Core criteria apply in both Fast and Critical Review. Critical criteria apply only during Critical Review. Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
+const HELP = 'Core criteria apply in both Fast and Critical Review. Unchecking Core limits a criterion to the more detailed Critical Review. Each review returns evidence for every criterion. Checklist changes mark affected signoffs stale; they do not automatically re-review trajectories.';
 
 const marker = (label, aria, checked, change) => {
   const box = node('input'); box.type = 'checkbox'; box.checked = checked; box.setAttribute('aria-label', aria); box.onchange = () => change(box.checked);
@@ -19,9 +19,9 @@ function criterionItem(id, group, criterion, {write, render}) {
   const actions = node('div', undefined, 'checklist-actions');
   const allowed = marker('N/A allowed', `criterion ${id} allow not applicable`, !!criterion.allow_not_applicable,
     value => write(d => { d.review_checklists[group][id].allow_not_applicable = value; }));
-  const critical = marker('Critical', `criterion ${id} is critical`, group === 'critical', value => {
+  const core = marker('Core', `criterion ${id} is core`, group === 'core', value => {
     write(d => {
-      const lists = d.review_checklists, to = value ? 'critical' : 'core', from = value ? 'core' : 'critical';
+      const lists = d.review_checklists, to = value ? 'core' : 'critical', from = value ? 'critical' : 'core';
       lists[to] ||= {}; lists[to][id] = lists[from][id]; delete lists[from][id];
     });
     render();
@@ -34,7 +34,7 @@ function criterionItem(id, group, criterion, {write, render}) {
     text.hidden = true; text.after(editor); edit.textContent = 'Done'; editor.focus();
   });
   const del = iconButton('Delete', `Delete criterion ${id}`, () => { write(d => { delete d.review_checklists[group][id]; }); render(); }, 'danger');
-  actions.append(allowed, critical, edit, del); li.append(body, actions); return li;
+  actions.append(allowed, core, edit, del); li.append(body, actions); return li;
 }
 
 export function renderChecklistSettings(target, {current, write, input, error, render, loadDefault, tipHeading}) {
