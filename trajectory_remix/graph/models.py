@@ -427,11 +427,22 @@ class ProjectSettings(DTO):
     def migrate_generator_role(cls, data):
         # Projects saved while a Generator endpoint role existed: Draft replaces it.
         roles = data.get("endpoint_roles") if isinstance(data, dict) else None
-        if isinstance(roles, dict) and "generator" in roles:
-            roles = {k: v for k, v in roles.items() if k != "generator"}
-            roles.setdefault("draft", data["endpoint_roles"]["generator"])
-            data = {**data, "endpoint_roles": roles}
-        return data
+        if not isinstance(roles, dict):
+            return data
+        endpoints = data.get("endpoints", {})
+        roles = {
+            key: value
+            for key, value in roles.items()
+            if key not in ("fast", "critical")
+            or (
+                value is not None
+                and (value != "none" or (isinstance(endpoints, dict) and "none" in endpoints))
+            )
+        }
+        if "generator" in roles:
+            old_role = roles.pop("generator")
+            roles.setdefault("draft", old_role)
+        return {**data, "endpoint_roles": roles}
 
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
     tools: dict[Identifier, ToolDefinition] = Field(

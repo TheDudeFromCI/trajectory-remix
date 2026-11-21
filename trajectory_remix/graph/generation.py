@@ -56,10 +56,8 @@ class GenerationService:
         settings = settings_record.settings
         if "draft" not in settings.endpoint_roles:
             raise ValueError("Configure the Draft endpoint in Project Settings")
-        if settings.generation.fast and "fast" in settings.endpoint_roles:
-            reviews.review_schema(settings, "fast")
-            if settings.generation.critical and "critical" in settings.endpoint_roles:
-                reviews.review_schema(settings, "critical")
+        for tier in reviews.automatic_tiers(settings):
+            reviews.review_schema(settings, tier)
         instructions = deepcopy(instructions)
         retired = {"plan", "flow_yaml"} & instructions.keys()
         if retired:
@@ -178,8 +176,9 @@ class GenerationService:
         data = source.to_dict()
         data["metadata"]["stage"] = 0
         source = GraphSource.model_validate(data)
-        if settings.generation.fast and "fast" in settings.endpoint_roles:
-            self._phase(job, source, cp, "review", "fast")
+        tiers = reviews.automatic_tiers(settings)
+        if tiers:
+            self._phase(job, source, cp, "review", tiers[0])
         else:
             self._phase(job, source, cp, "done", outcome="pass")
 
@@ -247,15 +246,14 @@ class GenerationService:
                             )
                             continue
                         record = self.store._read(db, ident)
+                        settings = self.settings_for(job)
                         operation = reviews.manual_operation(
                             record.source.metadata.get("stage", -3),
                             j["config"]["options"]["mode"],
                             j["config"]["options"]["repair"],
+                            settings,
                         )
-                        if (
-                            not operation
-                            or operation[0] not in self.settings_for(job).endpoint_roles
-                        ):
+                        if not operation or operation[0] not in settings.endpoint_roles:
                             self.bulk._settle_item(
                                 db,
                                 job,
@@ -324,6 +322,7 @@ class GenerationService:
                     source.metadata.get("stage", -3),
                     j["config"]["options"]["mode"],
                     j["config"]["options"]["repair"],
+                    settings,
                 )
                 cp = dict(
                     serial=0,
@@ -914,16 +913,17 @@ class GenerationService:
             f"{label(cp['tier'])} {label(cp['phase'])} verdict: {label(result)} trajectory={label(source.id)}",
             "success" if result == "pass" else "warning",
         )
+        next_critical = (
+            not cp["manual"]
+            and result == "pass"
+            and cp["tier"] == "fast"
+            and "critical" in reviews.automatic_tiers(settings)
+        )
         if cp["phase"] == "repair":
             if result == "fail":
                 self._repair_failure(ticket.job_id, source, cp, "negative_verdict", ticket)
             else:
-                if (
-                    not cp["manual"]
-                    and cp["tier"] == "fast"
-                    and settings.generation.critical
-                    and "critical" in settings.endpoint_roles
-                ):
+                if next_critical:
                     cp.update(phase="review", tier="critical", errors=0)
                     self._save(ticket.job_id, source, cp, ticket=ticket)
                 else:
@@ -947,13 +947,7 @@ class GenerationService:
                     dict(role="user", content=canonical({"failed_review": review}))
                 )
             self._save(ticket.job_id, source, cp, ticket=ticket)
-        elif (
-            not manual
-            and result == "pass"
-            and cp["tier"] == "fast"
-            and settings.generation.critical
-            and "critical" in settings.endpoint_roles
-        ):
+        elif next_critical:
             cp.update(tier="critical", errors=0)
             self._save(ticket.job_id, source, cp, ticket=ticket)
         else:

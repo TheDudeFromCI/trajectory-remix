@@ -20,6 +20,8 @@ from trajectory_remix.graph.studio_api import create_studio_app
 
 
 def settings(**options):
+    if options.get("fast") is False:
+        options.setdefault("critical", False)
     return dict(
         endpoints={
             k: dict(url="http://127.0.0.1:1/v1", model=k, retries=0) for k in ("g", "f", "c")

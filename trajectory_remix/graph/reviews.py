@@ -266,11 +266,22 @@ def stale(source, settings):
     return dict(stale=bool(reasons), reasons=reasons, reviewed=True)
 
 
-def manual_operation(stage, mode, repair):
+def automatic_tiers(settings):
+    return tuple(
+        tier
+        for tier in ("fast", "critical")
+        if getattr(settings.generation, tier) and tier in settings.endpoint_roles
+    )
+
+
+def manual_operation(stage, mode, repair, settings):
     if mode != "standard":
         return mode.removeprefix("force_"), "review"
     if stage == 0:
-        return "fast", "review"
+        tier = next(
+            (tier for tier in ("fast", "critical") if tier in settings.endpoint_roles), None
+        )
+        return (tier, "review") if tier else None
     if stage == 1:
         return "critical", "review"
     if repair and stage in (-1, -2):

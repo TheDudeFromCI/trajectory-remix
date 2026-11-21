@@ -89,7 +89,7 @@ models that don't fit in VRAM together), use the **Phase barriers** checkboxes i
 |---|---|---|
 | Pause before Assembly | finished Draft | Assembly |
 | Pause before Fast review | been assembled | Fast review, with its repairs |
-| Pause before Critical review | passed Fast review | Critical review, with its repairs |
+| Pause before Critical review | reached Critical review | Critical review, with its repairs |
 
 With a barrier on, a trajectory that reaches it **parks** instead of going on. When every
 trajectory is parked, held or finished, the job **pauses** and the log says so. With several
@@ -181,11 +181,12 @@ tier, model, endpoint and transition.
 | --- | --- |
 | Generation completes | Unfinished → **Pending (0)** |
 | Fast review passes / fails | **Candidate (1)** / **Unsuccessful (-1)** |
-| Critical review (after Fast pass) passes / fails | **Validated (2)** / **Rejected (-2)** |
+| Critical review passes / fails | **Validated (2)** / **Rejected (-2)** |
 | You approve | **Ready (3)**, always manual |
 
-If a review role is missing, generation still works with the Draft endpoint alone. Critical never
-skips Fast. Configured roles are used automatically unless the project toggle turns them off.
+Automatic review skips unassigned or disabled roles. If only Critical is enabled and assigned,
+it starts directly after Assembly and covers Core + Critical. When both steps run, Critical waits
+for a Fast pass. With both roles skipped, successful Assembly leaves the trajectory Pending.
 
 ### Repair
 
@@ -210,7 +211,7 @@ The dashboard always uses Standard mode. Force modes are available through the R
 
 | Mode | Behavior |
 | --- | --- |
-| **Standard** | Pending gets Fast only. Candidate gets Critical. Failed stages repair at their own tier if repair is on. Everything else is skipped. |
+| **Standard** | Pending uses the first assigned review role. Candidate gets Critical. Failed stages repair at their own tier if repair is on. Everything else is skipped. |
 | **Force Fast / Critical** | Ignores stage limits. A pass keeps a higher existing stage, and failures follow normal transitions. |
 
 Ownership is always enforced, and a locked source is skipped. Closing the dialog doesn't stop the

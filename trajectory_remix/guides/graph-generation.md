@@ -12,7 +12,7 @@ attempt is created for failure or detachment.
 
 Read a detached source and its revision before
 `review_graphs(trajectory="UUID",expected_revision=REV,mode="standard",repair=true)`.
-Standard reviews Pending with Fast only, Candidate with Critical, and repairs
+Standard reviews Pending with Fast if assigned, otherwise with Critical. It reviews Candidate with Critical and repairs
 failed stages at their tier. Other stages skip. Use `force_fast` or
 `force_critical` only when requested. Locks cannot be overridden. Search-wide
 review uses `query` instead of a selected UUID and freezes all pages.

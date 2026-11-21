@@ -213,7 +213,7 @@ export function renderGenerationSettings(container, initial, options = {}) {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? fallback; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
-  settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review after Fast succeeds'), toggle('repair','Attempt repair after review failure'));
+  settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review'), toggle('repair','Attempt repair after review failure'));
   settingsColumn.append(toggle('review_include_draft','Include Draft in review and repair', false));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Authoring limits'));
   const retries = input('Format correction retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
