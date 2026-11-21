@@ -1,5 +1,5 @@
-/* Tool checkboxes for the event editor: when an event sits in a `tools` window, the listing
-   can be edited by ticking tools. Each tool is one JSON line in the event's text; ticking
+/* Tool checkboxes for the event editor: for the event `tools` in the window `tools`, the listing
+   is edited by ticking tools instead of typing. Each tool is one JSON line in the event's text; ticking
    adds the server-rendered line (POST /tools/listing), unticking removes it. */
 import {node} from './ui-kit.js';
 

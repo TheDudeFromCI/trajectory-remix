@@ -327,3 +327,4 @@ td.faint { color: var(--ink-faint); }
 .tool-picker { display: flex; flex-direction: column; gap: var(--space-1); margin: 0 0 var(--space-2); padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 180px; overflow: auto; }
 .tool-picker legend { padding: 0 var(--space-1); font-size: 12px; }
 #tool-picker[hidden] { display: none; }
+#event-content[hidden], #panel-content .content-head[hidden] { display: none; }

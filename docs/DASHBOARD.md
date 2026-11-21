@@ -110,9 +110,10 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    click **Add / update window**.
 5. Want the agent to see its tools? Click **Show tools…**, tick the tools, and add the
    listing. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools). To change
-   a listing later, select its event: when the event is external input in a `tools`
-   window, the **Content** tab shows a checkbox per project tool. Ticking one adds its
-   schema line to the content, and unticking removes it. The text below stays editable.
+   a listing later, select the event `tools` in the window `tools`: the **Content** tab
+   shows a checkbox per project tool instead of the text box. Ticking one adds its
+   schema line to the content, and unticking removes it. Every other event keeps the
+   normal text box.
 6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
    **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
 

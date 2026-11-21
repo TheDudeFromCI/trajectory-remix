@@ -314,9 +314,12 @@ export class StudioUI {
     // renderDraft() runs before the baseline above is reset, so refresh the badge now.
     if (this.record) this.renderDirty();
   }
+  /** Only the event `tools` in the window `tools` swaps its text box for tool checkboxes. */
   renderToolPicker() {
-    const holder = $('tool-picker'), isTools = $('event-kind').value === 'external_text' && this.draft?.windows[$('event-window').value]?.purpose === 'tools' && $('content-mode').value === 'text';
-    holder.hidden = !isTools; if (!isTools) { holder.replaceChildren(); return; }
+    const holder = $('tool-picker'), head = document.querySelector('#panel-content .content-head');
+    const isTools = this.event === 'tools' && $('event-window').value === 'tools' && $('event-kind').value === 'external_text' && $('content-mode').value === 'text';
+    holder.hidden = !isTools; $('event-content').hidden = isTools; if (head) head.hidden = isTools;
+    if (!isTools) { holder.replaceChildren(); return; }
     renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
       lineFor: async name => (await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: [name], extra_tools: 0})).content,
       onChange: text => { $('event-content').value = text; this.stashEditor(); this.applyEvent(); this.renderToolPicker(); }});
