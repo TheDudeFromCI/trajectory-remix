@@ -37,7 +37,7 @@ function criterionItem(id, group, criterion, {write, render}) {
   actions.append(allowed, core, edit, del); li.append(body, actions); return li;
 }
 
-export function renderChecklistSettings(target, {current, write, input, error, render, loadDefault, tipHeading}) {
+export function renderChecklistSettings(target, {current, write, input, error, render, loadDefault, tipHeading, actions = null}) {
   tipHeading(target, 'Review checklist', HELP);
   const lists = current().review_checklists || {}, list = node('ul', undefined, 'checklist-list');
   for (const group of GROUPS) for (const [id, criterion] of Object.entries(lists[group] || {})) list.append(criterionItem(id, group, criterion, {write, render}));
@@ -50,11 +50,11 @@ export function renderChecklistSettings(target, {current, write, input, error, r
   })); target.append(add);
   if (!loadDefault) return;
   const reset = node('div', undefined, 'settings-limits');
-  reset.append(iconButton('Reset review checklists to defaults', 'Reset review checklists to defaults', async () => {
+  reset.append(iconButton('Load Default Checklist', 'Load Default Checklist', async () => {
     let defaults;
     try { defaults = await loadDefault(); } catch (cause) { return error('Could not load the default checklists: ' + cause.message); }
     if (!confirm('Replace the Core and Critical review checklists with the defaults? Your added, edited and removed criteria in this draft will be lost. Nothing is saved until you choose Save settings.')) return;
     write(d => { d.review_checklists = structuredClone(defaults); }); render('Review checklists reset to the defaults. Choose Save settings to keep them.');
   }), node('p', 'Replaces the whole list with the packaged defaults. Saving changed checklists marks affected sign-offs stale.', 'settings-help'));
-  target.append(reset);
+  (actions || target).append(reset);
 }

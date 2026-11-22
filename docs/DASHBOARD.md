@@ -196,7 +196,7 @@ the prompts and the models:
 1. Open **Review Settings** and find **Generation prompts**.
 2. Edit the **Agent prompt** (how the agent behaves, and where a persona pack goes), the
    **Draft instructions** or the **Assembly instructions**.
-3. **Load default prompts** restores the packaged prompts, after you confirm.
+3. **Load Default Prompts** restores the packaged prompts, after you confirm.
 4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 
 To use a different model for a stage, assign the **Draft** or **Assembly** role to another
