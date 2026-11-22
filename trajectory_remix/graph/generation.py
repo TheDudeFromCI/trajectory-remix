@@ -11,6 +11,7 @@ from . import (
     draft_assembly,
     phase_barrier,
     reviews,
+    scaling,
     signoffs,
     trajectory_hold,
 )
@@ -391,21 +392,29 @@ class GenerationService:
         if self._parked(job, ident, cp):
             return
         phase = cp["phase"]
+        plan = self._plan(job, ident) if phase == "event" else None
+        segmented = bool((plan or {}).get("scaling")) or scaling.is_scaled(source)
         if phase == "event" and cp.get("assembled"):
             self._after_generation(job, source, cp)
             return
         if phase == "review" or (phase == "event" and "draft" in cp):
             session = cp.get("authoring_session")
             if session is None:
-                plan = self._plan(job, ident) if phase == "event" else None
                 session = authoring_session.begin(
-                    source, settings, "assembly" if plan else phase, cp.get("tier"), plan=plan
+                    source,
+                    settings,
+                    "assembly" if plan else phase,
+                    cp.get("tier"),
+                    plan=plan,
+                    segmented=segmented,
                 )
+                if segmented:
+                    scaling.begin_pass(source, cp, session)
                 cp["authoring_session"] = session
             tier = draft_assembly.role(settings, "assembly") if phase == "event" else cp["tier"]
             payload = authoring_session.payload(session)
         elif phase == "event":
-            payload = draft_assembly.payload(cp, self._plan(job, ident))
+            payload = draft_assembly.payload(cp, plan)
             tier = draft_assembly.role(settings, draft_assembly.DRAFT)
         elif phase == assistant.PHASE:
             tier = cp["tier"]
@@ -421,8 +430,9 @@ class GenerationService:
         else:
             return
         endpoint = settings.endpoint_roles[tier]
+        endpoint_config = settings.endpoints[endpoint].model_dump(mode="json")
         payload.update(
-            endpoint_config=settings.endpoints[endpoint].model_dump(mode="json"),
+            endpoint_config=scaling.budget(endpoint_config) if segmented else endpoint_config,
             checkpoint=cp,
             source_revision=record.revision,
             source_hash=source.intrinsic_hash,
@@ -580,15 +590,40 @@ class GenerationService:
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
-        cp["draft"] = body["draft"]
-        self._save(
-            ticket.job_id, draft_assembly.with_draft(source, body["draft"]), cp, ticket=ticket
+        cp.pop("flow_error", None)
+        plan = self._plan(ticket.job_id, source.id)
+        if "scaling" in plan:
+            source = scaling.consume_draft(cp, source, plan, body)
+        else:
+            cp["draft"] = body["draft"]
+            source = draft_assembly.with_draft(source, body["draft"])
+        self._save(ticket.job_id, source, cp, ticket=ticket)
+        if "draft" in cp:
+            self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
+
+    def _restart_scaled_pass(self, ticket, source, cp):
+        """Discard a full transcript and retain the accepted graph and section boundary."""
+        session = cp["authoring_session"]
+        state = cp.get("scale_pass")
+        if not state or not session["exchanges"] or state["resets"] >= 2:
+            return False
+        state["resets"] += 1
+        state["exchanges"] += session["exchanges"]
+        cp.pop("authoring_session")
+        cp["errors"] = 0
+        self._save(ticket.job_id, source, cp, ticket=ticket)
+        self.jobs.progress(
+            ticket.job_id,
+            f"Restarting {label(session['phase'])} section {state['index'] + 1} with saved edits: "
+            f"trajectory={label(source.id)}",
         )
-        self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
+        return True
 
     def _consume_native(self, ticket, record, settings, source, cp, complete):
         session = cp["authoring_session"]
         if complete.get("context_limit"):
+            if self._restart_scaled_pass(ticket, source, cp):
+                return
             budget = complete.get("local_budget")
             detail = (
                 f"Estimated input of {budget['input_tokens_estimate']} tokens exceeds the "
@@ -606,6 +641,8 @@ class GenerationService:
             session["exchanges"] += 1
             cp["errors"] += 1
             if session["exchanges"] >= settings.generation.max_authoring_exchanges:
+                if self._restart_scaled_pass(ticket, source, cp):
+                    return
                 self._authoring_failure(ticket, source, cp, "exchange_limit")
                 return
             if cp["errors"] > settings.generation.format_retries:
@@ -632,11 +669,26 @@ class GenerationService:
             source, terminal = authoring_session.step(source, settings, session, message)
         if terminal is None:
             if session["exchanges"] >= settings.generation.max_authoring_exchanges:
+                if self._restart_scaled_pass(ticket, source, cp):
+                    return
                 self._authoring_failure(ticket, source, cp, "exchange_limit")
             else:
                 self._save(ticket.job_id, source, cp, ticket=ticket)
             return
         result, evidence = terminal
+        if result == "section":
+            source = scaling.checkpoint(source, cp, session, evidence)
+            index = cp["scale_pass"]["index"] + (0 if evidence["complete"] else 1)
+            self.jobs.progress(
+                ticket.job_id,
+                f"{label(session['phase'])} section {index} checkpointed"
+                f"{' (partial)' if not evidence['complete'] else ''}: trajectory={label(source.id)}",
+            )
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+            return
+        if state := cp.pop("scale_pass", None):
+            session["exchanges"] += state["exchanges"]
+            source = scaling.with_counts(source)
         if result == "unfeasible" and session["phase"] == "assembly":
             self._authoring_failure(ticket, source, cp, result, detail=evidence["summary"])
             return

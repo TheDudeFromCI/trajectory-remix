@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 
-from . import endpoint_prompts
+from . import endpoint_prompts, scaling, scaling_reads
 from .authoring_session import apply_tool, tool_reply
 from .authoring_tools import TOOLS, editing_tools
 from .models import canonical
@@ -82,7 +82,7 @@ def begin(source, settings, comments, prior=None):
     else:
         system = endpoint_prompts.system(settings.prompts.actor, settings.prompts.authoring)
         messages = [dict(role="system", content=system), dict(role="user", content=user)]
-    return dict(
+    session = dict(
         phase=PHASE,
         tier=ROLE,
         prompt_version=VERSION,
@@ -91,15 +91,25 @@ def begin(source, settings, comments, prior=None):
         replies={},
         messages=messages,
     )
+    if scaling.is_scaled(source):
+        session["scaling"] = True
+        session["messages"][-1]["content"] += (
+            "\n\nThis is a long trajectory. Start with the comment targets. Page through "
+            "bounded graph and event reads and edit only the relevant source."
+        )
+    return session
 
 
 def payload(session):
+    tools = editing_tools()
+    if session.get("scaling"):
+        tools = scaling_reads.tools(tools)
     return dict(
         operation=PHASE,
         tier=ROLE,
         prompt_version=session["prompt_version"],
         messages=session["messages"],
-        tools=[*editing_tools(), reply_tool(session["comment_ids"])],
+        tools=[*tools, reply_tool(session["comment_ids"])],
     )
 
 
@@ -123,8 +133,12 @@ def _call(source, settings, session, call):
         args = json.loads(call["function"]["arguments"])
         if name == "reply":
             reply = _record(session, args)
+        elif session.get("scaling") and name in scaling_reads.READS:
+            reply = scaling_reads.read(source, settings, session, name, args)
         elif name in TOOLS and name != "signoff":
             source, reply = apply_tool(source, settings, name, args)
+            if session.get("scaling") and "diagnostics" in reply:
+                reply["diagnostics"] = scaling_reads.page(reply["diagnostics"], 0)
         else:
             raise ValueError("This tool is unavailable in this session")
         reply.update(accepted=True, source_hash=source.intrinsic_hash)

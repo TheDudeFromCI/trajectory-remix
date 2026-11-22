@@ -14,6 +14,7 @@ never executed.
 - [Run a generation](#run-a-generation)
 - [How a trajectory is built](#how-a-trajectory-is-built)
 - [Draft and Assembly](#draft-and-assembly)
+- [Long-trajectory experiment](#long-trajectory-experiment)
 - [Edit the prompts](#edit-the-prompts)
 - [What the model sees](#what-the-model-sees)
 - [Tools and chat during generation](#tools-and-chat-during-generation)
@@ -88,6 +89,32 @@ Draft. Resolve all errors and enabled warnings first. A regular text reply leave
 conversation open. The Draft and signoff stay with the trajectory in `metadata.draft` and
 `metadata.authoring_signoffs`. Jobs started before review and repair became one step pause with a
 message; start a new run or review instead.
+
+## Long-trajectory experiment
+
+Turn on **Enable long-trajectory experiment** in **Review Settings** and save before
+starting a generation job. The experiment uses the complexity already selected by the
+sampler. Trivial and small proposals aim for about 32,500 content tokens and 2,000
+supervised agent tokens. Medium proposals aim for about 65,000 and 4,000. Large
+proposals aim for about 130,000 and 8,000. These guide the models. Actual lengths can vary.
+
+Draft creates an outline, then writes one prose section per call. Assembly checkpoints
+each section into the same graph and opens a fresh conversation for the next section.
+Reviews inspect and repair one section at a time, then check the combined graph at
+signoff. Reads can fetch exact event text, causal evidence and Draft sections in pages.
+The Jobs log shows section checkpoints and conversation restarts. The stage progress
+bar advances when the entire stage completes.
+
+**Approximate tokens per section** controls the size of the planned sections. The default
+is 4,000. The endpoint's context and output limits bound each request. When the limits are
+unset, the experiment uses a 32,768-token context and reserves up to 8,192 output tokens.
+If a conversation runs out of context or exchanges, a fresh conversation can resume the
+section from the saved graph. Repeated failures end the pass with the accepted edits saved.
+
+Character-based estimates appear in the full source export's scaling metadata. Compiled
+exports add exact body counts using the export tokenizer, supervised agent tokens, and
+compiled row and peak visibility measurements to the manifest. Check the realized
+lengths and loader footprint before using the resulting data for training.
 
 ### Generate and review in separate sessions
 

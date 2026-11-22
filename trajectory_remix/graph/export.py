@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import ktremix as k
+from . import scaling
 from .compiler import CONTRACT, VERSION, Cancelled, GraphCompiler
 from .models import GraphSource, ProjectSettings
 
@@ -260,7 +261,7 @@ class ArtifactService:
                 if cancelled():
                     raise Cancelled("Export cancelled")
 
-            files, assets = [], []
+            files, assets, scale_metrics = [], [], {}
             if options.compiled:
                 _publish_json(directory / "profile.json", compiler.profile.model_dump())
                 # Exact serialization whose hash is embedded in every shard.
@@ -302,7 +303,16 @@ class ArtifactService:
                         def samples():
                             for source in chunk:
                                 check()
-                                columns, _ = compiler.compile(source, cancelled=cancelled)
+                                started = time.perf_counter()
+                                columns, metrics = compiler.compile(source, cancelled=cancelled)
+                                if scaling.is_scaled(source):
+                                    compile_seconds = round(time.perf_counter() - started, 3)
+                                    scale_metrics[source.id] = scaling.compiled_counts(
+                                        source, compiler, columns
+                                    ) | dict(
+                                        peak_active_windows=metrics["peak_active_windows"],
+                                        compile_seconds=compile_seconds,
+                                    )
                                 yield (
                                     source.id,
                                     columns,
@@ -353,6 +363,12 @@ class ArtifactService:
                 compiled=options.compiled,
                 selection=asdict(options),
             )
+            if scale_metrics:
+                manifest["scaling"] = dict(
+                    samples=scale_metrics,
+                    mean_episode_tokens=sum(m["episode_tokens"] for m in scale_metrics.values())
+                    / len(scale_metrics),
+                )
             _publish_json(directory / "manifest.json", manifest)
             with zipfile.ZipFile(
                 directory / "download.zip.partial", "x", compression=zipfile.ZIP_STORED
