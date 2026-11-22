@@ -410,7 +410,7 @@ def create_studio_app(
             return [
                 dict(r)
                 for r in db.execute(
-                    "SELECT id,kind,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
                     (limit, offset),
                 )
             ]

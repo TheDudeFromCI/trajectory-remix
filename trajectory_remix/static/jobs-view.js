@@ -48,7 +48,7 @@ export class JobsView {
     el.dataset.tip = job.id;
     el.update = j => {
       setAttr(dot, 'class', `dot tone-${KIND_TONES[j.kind] || 'accent'}`);
-      setText(name, kindName(j.kind)); setText(state, stateWord(j.state)); setAttr(state, 'class', `tag tone-${JOB_TONES[j.state] || 'muted'}`);
+      setText(name, kindName(j.kind, j.action)); setText(state, stateWord(j.state)); setAttr(state, 'class', `tag tone-${JOB_TONES[j.state] || 'muted'}`);
       bar.update({value: j.progress, total: j.total, state: j.state});
       setAttr(el, 'aria-selected', String(j.id === this.selected)); toggleClass(el, 'selected', j.id === this.selected);
     };
@@ -115,8 +115,8 @@ export class JobsView {
     v.usage = node('div', undefined, 'job-tab');
     v.tabs = makeTabs([
       {id: 'logs', text: 'Logs', panel: logPanel}, {id: 'attempts', text: 'Attempts', panel: v.attempts},
-      {id: 'usage', text: 'Usage', panel: v.usage},
-      {id: 'results', text: 'Results', panel: v.results}, {id: 'files', text: 'Files', panel: v.files}
+      {id: 'results', text: 'Results', panel: v.results}, {id: 'usage', text: 'Usage', panel: v.usage},
+      {id: 'files', text: 'Files', panel: v.files}
     ], 'Job sections');
     v.tabs.root.classList.add('job-tabs');
     v.root.append(head, summary, v.tabs.root);
@@ -127,7 +127,7 @@ export class JobsView {
     const v = this.panels.get(id); if (!v) return;
     const j = await this.deps.api(`/jobs/${id}?include_config=false`);
     setAttr(v.kindDot, 'class', `dot tone-${KIND_TONES[j.kind] || 'accent'}`);
-    setText(v.title, `${kindName(j.kind)} job`);
+    setText(v.title, `${kindName(j.kind, j.action)} job`);
     setText(v.stateTag, stateWord(j.state)); setAttr(v.stateTag, 'class', `tag tone-${JOB_TONES[j.state] || 'muted'}`);
     setAttr(v.root, 'data-state', `${j.kind} · ${j.state}`);
     setAttr(v.buttons.pause, 'disabled', j.state !== 'running'); setAttr(v.buttons.resume, 'disabled', j.state !== 'paused');

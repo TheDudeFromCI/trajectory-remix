@@ -656,8 +656,8 @@ export class StudioUI {
       chip.append(dot, name, bar); chip.parts = {dot, name, bar}; return chip;
     }, (chip, job) => {
       setAttr(chip.parts.dot, 'class', `dot tone-${KIND_TONES[job.kind] || 'accent'}`);
-      setText(chip.parts.name, kindName(job.kind)); chip.parts.bar.update({value: job.progress, total: job.total, state: job.state});
-      setAttr(chip, 'aria-label', `${kindName(job.kind)} job ${job.state} ${job.progress} of ${job.total}. Open in Jobs`);
+      setText(chip.parts.name, kindName(job.kind, job.action)); chip.parts.bar.update({value: job.progress, total: job.total, state: job.state});
+      setAttr(chip, 'aria-label', `${kindName(job.kind, job.action)} job ${job.state} ${job.progress} of ${job.total}. Open in Jobs`);
       toggleClass(chip, 'paused', job.state === 'paused');
     });
     const badge = $('jobs-running-badge');

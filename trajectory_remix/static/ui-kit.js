@@ -70,9 +70,11 @@ export function progressBar(label = '') {
 const TONE_VARS = {accent: 'accent', success: 'success', warning: 'warning', danger: 'danger', muted: 'ink-muted', faint: 'ink-faint'};
 export const JOB_TONES = {running: 'accent', queued: 'muted', paused: 'warning', completed: 'success', failed: 'danger', cancelled: 'faint'};
 export const KIND_TONES = {run: 'mint', bulk: 'lilac', export: 'sky', import: 'peach', log_export: 'butter', sampler: 'rose'};
-export const KIND_NAMES = {run: 'Generation', bulk: 'Bulk / review', export: 'Export', import: 'Import', log_export: 'Log export', sampler: 'Sampler run'};
+export const KIND_NAMES = {run: 'Generation', bulk: 'Bulk', export: 'Export', import: 'Import', log_export: 'Log export', sampler: 'Sampler run'};
 export const stateWord = state => state ? state[0].toUpperCase() + state.slice(1) : '';
-export const kindName = kind => KIND_NAMES[kind] || stateWord(String(kind || 'job').replaceAll('_', ' '));
+export const BULK_ACTION_NAMES = {review_repair: 'Review', delete: 'Deletion', stage: 'Stage change', split: 'Split', metrics: 'Metrics'};
+/** Display name for a job; bulk jobs are named after what they do. */
+export const kindName = (kind, action) => (kind === 'bulk' && BULK_ACTION_NAMES[action]) || KIND_NAMES[kind] || stateWord(String(kind || 'job').replaceAll('_', ' '));
 
 export const STAGES = {
   '-3': ['Unfinished', 'faint'], '-2': ['Rejected', 'danger'], '-1': ['Unsuccessful', 'warning'],
