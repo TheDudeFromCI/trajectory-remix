@@ -16,7 +16,7 @@ export function renderPromptSettings(target, {current, write, error, render, loa
     label.append(text); box.append(label, node('p', help, 'settings-help'));
   }
   if (loadDefault) {
-    const reset = node('button', 'Load default prompts'); reset.type = 'button';
+    const reset = node('button', 'Load Default Prompts'); reset.type = 'button';
     reset.onclick = async () => {
       let defaults;
       try { defaults = await loadDefault(); } catch (cause) { return error('Could not load the default prompts: ' + cause.message); }
