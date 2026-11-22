@@ -79,7 +79,7 @@ export const JOB_TONES = {running: 'accent', queued: 'muted', paused: 'warning',
 export const KIND_TONES = {run: 'mint', bulk: 'lilac', export: 'sky', import: 'peach', log_export: 'butter', sampler: 'rose'};
 export const KIND_NAMES = {run: 'Generation', bulk: 'Bulk', export: 'Export', import: 'Import', log_export: 'Log export', sampler: 'Sampler run'};
 export const stateWord = state => state ? state[0].toUpperCase() + state.slice(1) : '';
-export const BULK_ACTION_NAMES = {review_repair: 'Review', delete: 'Deletion', stage: 'Stage change', split: 'Split', metrics: 'Metrics'};
+export const BULK_ACTION_NAMES = {review_repair: 'Review', assistant: 'Assistant', delete: 'Deletion', stage: 'Stage change', split: 'Split', metrics: 'Metrics'};
 /** Display name for a job; bulk jobs are named after what they do. */
 export const kindName = (kind, action) => (kind === 'bulk' && BULK_ACTION_NAMES[action]) || KIND_NAMES[kind] || stateWord(String(kind || 'job').replaceAll('_', ' '));
 

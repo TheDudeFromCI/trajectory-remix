@@ -102,56 +102,14 @@ def causal_evidence(source):
 def payload(source, settings, tier, operation, history=(), correction=False):
     schema = review_schema(settings, tier)
     if operation == "repair":
-        actions = [
-            dict(
-                type="object",
-                properties={
-                    "action": {"const": "patch"},
-                    "event_id": {"type": "string"},
-                    "expected_source_hash": {"type": "string"},
-                    "patch": {"type": "object"},
-                },
-                required=["action", "event_id", "expected_source_hash", "patch"],
-                additionalProperties=False,
-            ),
-            dict(
-                type="object",
-                properties={"action": {"const": "inspect"}, "event_id": {"type": "string"}},
-                required=["action", "event_id"],
-                additionalProperties=False,
-            ),
-            dict(
-                type="object",
-                properties={"action": {"const": "verdict"}, "review": schema},
-                required=["action", "review"],
-                additionalProperties=False,
-            ),
-        ]
-        actions.extend(
-            [
-                dict(
-                    type="object",
-                    properties={
-                        "action": {"const": "patch_window"},
-                        "window_id": {"type": "string"},
-                        "expected_source_hash": {"type": "string"},
-                        "patch": {"type": "object"},
-                    },
-                    required=["action", "window_id", "expected_source_hash", "patch"],
-                    additionalProperties=False,
-                ),
-                dict(
-                    type="object",
-                    properties={
-                        "action": {"const": "remove_event"},
-                        "event_id": {"type": "string"},
-                        "expected_source_hash": {"type": "string"},
-                    },
-                    required=["action", "event_id", "expected_source_hash"],
-                    additionalProperties=False,
-                ),
-            ]
+        edits = repair_policy.edit_actions()
+        verdict_action = dict(
+            type="object",
+            properties={"action": {"const": "verdict"}, "review": schema},
+            required=["action", "review"],
+            additionalProperties=False,
         )
+        actions = [*edits[:2], verdict_action, *edits[2:]]
         actions.extend(repair_policy.actions())
         schema = {"oneOf": actions}
     # Reviewer evidence is privileged, never reused by event_payload.

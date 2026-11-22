@@ -40,9 +40,16 @@ try {
   assert.equal(reviewed.source.metadata.stage,1);
   assert.equal(reviewed.source.metadata.evaluations.length,1); // Standard Pending is Fast only.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
+  await page.locator('#trajectory-menu summary').click(); await page.locator('#duplicate-sample').click();
+  await page.waitForFunction(id=>graphStudio.record && graphStudio.record.source.id !== id,record.source.id);
+  const duplicateId = await page.evaluate(()=>graphStudio.record.source.id);
+  assert.deepEqual((await get(`/trajectories/${duplicateId}`)).source, {...reviewed.source,id:duplicateId});
   await page.locator('#trajectory-menu summary').click(); await page.locator('#review-repair-source').click();
   await page.waitForFunction(()=>[...graphStudio.jobs.values()].filter(j=>j.kind==='bulk'&&j.state==='completed').length>=2);
-  assert.equal((await get(`/trajectories/${record.source.id}`)).source.metadata.stage,2);
+  const duplicateReview = (await get(`/trajectories/${duplicateId}`)).source.metadata;
+  assert.equal(duplicateReview.stage,2);
+  assert.equal(duplicateReview.evaluations.at(-1).prompt_version,'native-review/1');
+  assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source,reviewed.source);
   // More → Export downloads the open trajectory's source as JSON.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
   await page.locator('#trajectory-menu summary').click();

@@ -478,10 +478,11 @@ class ProjectSettings(DTO):
     reasoning_levels: list[Identifier] = Field(default_factory=lambda: ["Low", "Medium", "High"])
     tokenizer_profiles: dict[Identifier, TokenizerProfile] = Field(default_factory=dict)
     endpoints: dict[Identifier, Endpoint] = Field(default_factory=dict)
-    # Assembly is optional: it falls back to Draft.
-    endpoint_roles: dict[Literal["draft", "assembly", "fast", "critical"], Identifier] = Field(
-        default_factory=dict
-    )
+    # Assembly is optional: it falls back to Draft. Assistant answers reviewer comments
+    # ("Send to agent") and is separate from the four generation roles.
+    endpoint_roles: dict[
+        Literal["draft", "assembly", "fast", "critical", "assistant"], Identifier
+    ] = Field(default_factory=dict)
     checklists: dict[Literal["core", "critical"], VersionedReference] = Field(default_factory=dict)
     review_checklists: dict[Literal["core", "critical"], dict[Identifier, Criterion]] = Field(
         default_factory=default_checklists

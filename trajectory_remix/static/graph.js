@@ -3,7 +3,9 @@ import {renderValidationSettings} from './validation-settings.js';
 import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
+import {CommentsView} from './comments-view.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
+import {duplicateTrajectory} from './duplicate.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -103,6 +105,7 @@ export class StudioUI {
     if ($('search-stage').value !== '') q.stage = Number($('search-stage').value);
     if ($('search-split').value) q.split = $('search-split').value;
     if ($('search-tool').value) q.tool = $('search-tool').value;
+    if ($('search-comments').value) q.comments = $('search-comments').value;
     return q;
   }
   async loadSettings() {
@@ -117,8 +120,12 @@ export class StudioUI {
     const key = JSON.stringify([this.query(), this.offset]);
     this.listKey = key;
     const q = new URLSearchParams({...this.query(), limit: 50, offset: this.offset});
-    const data = await api('/trajectories?' + q);
+    const [data, counts] = await Promise.all([api('/trajectories?' + q), api('/comments/counts')]);
     if (key !== this.listKey) return;
+    data.items = data.items.map(item => {
+      const c = counts.counts[item.id] || {open: 0, addressed: 0};
+      return {...item, comments: c.open + c.addressed, review: c.addressed};
+    });
     this.lastItems = data.items; setText($('sample-count'), String(data.total));
     setText($('sample-page-label'), data.total ? `${Math.min(this.offset + 1, data.total)}–${this.offset + data.items.length} of ${data.total}` : '');
     $('sample-page-prev').disabled = !this.offset; $('sample-page-next').disabled = this.offset + 50 >= data.total;
@@ -134,14 +141,18 @@ export class StudioUI {
   sampleRow(item) {
     const row = button('', () => this.select(row.dataset.key), 'sample-row'); row.setAttribute('role', 'option');
     const id = node('span', shortId(item.id), 'mono sample-id'), stage = tag('', 'muted'), split = node('span', '', 'sample-split small'), lock = node('span', undefined, 'sample-lock');
-    lock.append(icon('lock')); row.append(id, stage, split, lock);
+    const notes = node('span', undefined, 'sample-comments'), noteCount = node('span', '', 'num');
+    lock.append(icon('lock')); notes.append(icon('comment'), noteCount); row.append(id, stage, split, notes, lock);
     row.update = value => {
       const [name, tone] = stageInfo(value.stage);
       setText(stage, name); setAttr(stage, 'class', `tag tone-${tone}`);
       setText(split, value.split ?? 'No split'); toggleClass(split, 'warn', !value.split);
+      setText(noteCount, String(value.comments || '')); setAttr(notes, 'hidden', !value.comments); toggleClass(notes, 'review', !!value.review);
+      const open = value.comments - value.review;
+      setAttr(notes, 'data-tip', value.comments ? [open && `${open} open`, value.review && `${value.review} awaiting your review`].filter(Boolean).join(' · ') : null);
       setAttr(lock, 'hidden', !value.owner); setAttr(lock, 'data-tip', value.owner ? 'Locked by a running job' : null);
       setAttr(row, 'data-tip', value.id); toggleClass(row, 'selected', value.id === this.id); setAttr(row, 'aria-selected', String(value.id === this.id));
-      setAttr(row, 'aria-label', `${value.id} · ${name} · ${value.split ?? 'Missing split'}${value.owner ? ' · Locked' : ''}`);
+      setAttr(row, 'aria-label', `${value.id} · ${name} · ${value.split ?? 'Missing split'}${value.comments ? ` · ${value.comments} unresolved comments` : ''}${value.owner ? ' · Locked' : ''}`);
     };
     return row;
   }
@@ -194,7 +205,7 @@ export class StudioUI {
     this.renderDraft(); this.renderEvent(); this.markSelectedRow();
     if (cached) { $('source-json').value = cached.sourceText; $('metadata-json').value = cached.metadataText;
       if (latest.revision !== cached.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.'); }
-    this.listing(); this.schedulePreview();
+    this.listing(); this.schedulePreview(); this.comments?.load(id).catch(message);
   }
   async refreshSelected() {
     if (!this.id) return;
@@ -226,7 +237,7 @@ export class StudioUI {
     const locked = !!this.record?.owner;
     for (const id of ['save-source', 'delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
     for (const root of ['graph-editor-fields', 'metadata-panel']) {
-      const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) input.disabled = locked;
+      const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) if (!input.closest('[data-lock-exempt]')) input.disabled = locked;
     }
     // Existing markup uses these stable controls even before the shell update.
     for (const id of ['event-content','event-kind','event-window','call-id','tool-id','chat-speaker','delivery','weight','chain','replace-body','close-window','masked','begin','end','echo-chat','window-id','window-purpose','window-writable','window-effort','window-left-open','metadata-json','source-json','stage','split']) $(id).disabled = locked;
@@ -406,6 +417,7 @@ export class StudioUI {
       $('window-grid').replaceChildren(node('div', 'Select a trajectory from the dataset, or create one with +.', 'empty'));
       return;
     }
+    this.comments?.setContext(this.draft, this.event);
     const order = graphOrder(this.draft), ticks = this.prefs.mode === 'ticks', zoom = this.prefs.zoom;
     const frames = this.frames || [];
     const max = Math.max(0, (ticks ? frames.length : order.length) - 1);
@@ -448,7 +460,9 @@ export class StudioUI {
       const e = this.draft.events[id], p = positions.get(id);
       const n = button('', click => click.shiftKey ? this.addDependency(id) : this.selectEvent(id), 'event-node' + (id === this.event ? ' selected' : '') + (visible.has(id) ? '' : ' future'));
       n.append(node('span', id, 'truncate'), node('span', ` → ${e.window}`, 'event-node-window'));
-      n.title = `Depends on: ${e.after.join(', ') || 'root'}`;
+      const notes = this.comments?.count('event', id) || 0;
+      if (notes) { const badge = node('span', undefined, 'event-node-comments'); badge.append(icon('comment'), node('span', String(notes))); n.append(badge); }
+      n.title = `Depends on: ${e.after.join(', ') || 'root'}${notes ? ` · ${notes} open comment${notes === 1 ? '' : 's'}` : ''}`;
       n.style.setProperty('--tone', `var(--pastel-${this.windowTone(e.window)})`);
       Object.assign(n.style, {left: p.x + 'px', top: p.y + 'px', width: p.width + 'px'}); chart.append(n);
     }
@@ -505,9 +519,24 @@ export class StudioUI {
       : button('', () => this.openPopout(id), 'ghost icon sm window-expand');
     size.append(icon(popout ? 'shrink' : 'expand')); size.setAttribute('aria-label', `${popout ? 'Shrink' : 'Expand'} window ${id}`);
     size.dataset.tip = popout ? 'Shrink back to the window grid (Esc)' : 'Expand this window into a large panel';
-    head.append(toggle, size);
+    const notes = this.comments?.count('window', id) || 0, comment = button('', () => this.commentOn('window', id), 'ghost sm window-comment' + (notes ? ' has-comments' : ''));
+    comment.append(icon('comment')); if (notes) comment.append(node('span', String(notes), 'num'));
+    comment.setAttribute('aria-label', `Comment on window ${id}${notes ? ` (${notes} open)` : ''}`);
+    comment.dataset.tip = notes ? `${notes} open comment${notes === 1 ? '' : 's'}. Click to add another.` : 'Comment on this window, for example a problem an agent should fix';
+    head.append(comment, toggle, size);
     card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.draft.events[event]?.extra_tools || [], hideExtras: !this.prefs.showRandomTools}));
     return card;
+  }
+  commentOn(kind, id) {
+    if (!this.draft) return;
+    $('tab-comments').click(); this.comments.compose(kind, id);
+  }
+  inspectTarget(kind, id) {
+    if (kind === 'event') { this.selectEvent(id); $('tab-content').click(); }
+    if (kind === 'window') {
+      $('window-id').value = id; this.renderWindow(); $('tab-windows').click();
+      [...$('window-grid').querySelectorAll('.window-comment')].find(b => b.getAttribute('aria-label').startsWith(`Comment on window ${id}`))?.closest('.window-card')?.scrollIntoView?.({block: 'nearest'});
+    }
   }
   openPopout(id) { this.popoutWindow = id; $('window-popout').hidden = false; this.renderPopout(); $('window-popout').querySelector('.window-shrink')?.focus(); }
   closePopout() {
@@ -559,6 +588,13 @@ export class StudioUI {
     this.history([{id: this.id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
     this.record = value; this.diagnostics = value.diagnostics; this.draft = copy(value.source); this.editors.clear(); this.renderDraft(); this.renderEvent(); this.schedulePreview(); await this.listing();
   }
+  async duplicate() {
+    if (!this.record) return message('Select a trajectory to duplicate.');
+    $('trajectory-menu')?.removeAttribute('open');
+    const unsaved = this.isDirty(), original = this.id, r = await duplicateTrajectory(api, this.record.source);
+    await this.select(r.source.id);
+    message(`Duplicated ${shortId(original)}${unsaved ? ' from its saved version; unsaved edits stay on the original' : ''}.`);
+  }
   exportSource() {
     if (!this.draft || !this.id) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(this.draft, null, 2) + '\n'], {type: 'application/json'})), a = node('a');
@@ -606,6 +642,15 @@ export class StudioUI {
     const r = await api('/reviews', 'POST', {mode: 'standard', repair, ...(bulk ? {query: this.query()} : {trajectory: this.id, expected_revision: this.record.revision})});
     this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
     message('Review running… Progress also appears in Jobs.');
+  }
+  async sendToAssistant() {
+    if (!this.id) return;
+    if (!this.settings.endpoint_roles?.assistant) throw new Error('Assign the Assistant endpoint role in Project Settings first.');
+    if (this.record?.owner) throw new Error('A job is working on this trajectory. Wait for it to settle or detach it.');
+    if (this.isDirty()) throw new Error('Save or reload your draft first, so the agent edits what you see.');
+    const r = await api(`/trajectories/${this.id}/assistant`, 'POST', {expected_revision: this.record.revision});
+    this.ownedBulk.add(r.job_id);
+    message(`Sent to ${this.settings.endpoint_roles.assistant}. Follow it in Jobs; answers appear here.`);
   }
   async openGenerationSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
@@ -773,6 +818,14 @@ export class StudioUI {
     // Started elsewhere (e.g. the Sampler): track it without leaving the current view.
     document.addEventListener('graph-job-started', e => this.jobsView.select(e.detail).then(() => message('Job started. Follow it in Jobs or from the status bar.')).catch(message));
     bindViewTabs();
+    this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
+      els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
+      onChange: () => {
+        if (this.draft) this.renderTimeline();
+        const items = this.comments.items, row = this.lastItems?.find(i => i.id === this.id);
+        const unresolved = items.filter(c => c.status !== 'resolved').length, review = items.filter(c => c.status === 'addressed').length;
+        if (row && (row.comments !== unresolved || row.review !== review)) this.listing().catch(message);
+      }});
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
@@ -780,8 +833,9 @@ export class StudioUI {
     });
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
+    on('duplicate-sample', 'click', () => this.duplicate());
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
-    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
+    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
     on('event-apply', 'click', () => this.applyEvent());
     on('new-event', 'click', () => {
@@ -802,7 +856,7 @@ export class StudioUI {
     on('metadata-apply', 'click', () => { const m = JSON.parse($('metadata-json').value); if (!m || Array.isArray(m) || typeof m !== 'object') throw new Error('Metadata must be an object'); this.draft.metadata = m; this.renderDraft(); this.changed(); });
     for (const id of ['stage', 'split']) on(id, 'change', () => { this.draft.metadata ||= {}; if (id === 'split' && !$(id).value) delete this.draft.metadata.split; else this.draft.metadata[id] = id === 'stage' ? Number($(id).value) : $(id).value; this.renderDraft(); this.changed(); });
     on('source-apply', 'click', async () => { const draft = JSON.parse($('source-json').value); if (draft.id !== this.id || !draft.events || !draft.windows) throw new Error('Keep source UUID and graph maps'); const validated = await api('/diagnostics', 'POST', draft); this.draft = validated.source; this.diagnostics = validated.diagnostics; this.editors.clear(); this.event = Object.keys(draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
-    for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
+    for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool', 'search-comments']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
     on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
@@ -835,6 +889,7 @@ export class StudioUI {
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review' || action === 'review_repair') return this.startReview({repair: action === 'review_repair', bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
     on('review-source', 'click', () => this.startReview({repair: false}));
+    on('comment-send', 'click', () => this.sendToAssistant());
     on('review-repair-source', 'click', () => this.startReview({repair: true}));
     on('export-source', 'click', () => this.exportSource());
     on('metrics-refresh', 'click', () => this.loadMetrics());
@@ -860,6 +915,7 @@ export class StudioUI {
       await this.listing();
     }
     await this.refreshSelected();
+    if (this.id) await this.comments.load(this.id);
     if (currentView() === 'jobs-view') await this.jobsView.renderList();
   }
   async loadMetrics() {
