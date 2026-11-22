@@ -53,10 +53,14 @@ def _merge_event(existing, changes):
     if kind not in EVENT_FIELDS:
         raise ValueError("Use a supported event kind")
     supported = COMMON_FIELDS | EVENT_FIELDS[kind]
+    # Models often send every optional field, unused ones as null. A null field that
+    # doesn't apply to the kind is already absent, so it changes nothing.
+    changes = {k: v for k, v in changes.items() if k in supported or v is not None}
     if changes.keys() - supported:
         raise ValueError(
-            "Fields do not apply to this event kind: "
+            f"Fields do not apply to {kind} events: "
             + ", ".join(sorted(changes.keys() - supported))
+            + ". Omit them or send null."
         )
     edited = {key: value for key, value in existing.items() if key in supported}
     for key, value in changes.items():
@@ -261,6 +265,8 @@ def apply(source, settings, name, arguments):
                 edited = _post_chat(data, settings, args)
             else:
                 properties = changes.pop("window_properties", None)
+                # A new event has nothing to clear: null means "use the default".
+                changes = {k: v for k, v in changes.items() if v is not None}
                 events[ident] = _merge_event({"kind": changes["kind"]}, changes)
                 _ensure_windows(data, events[ident], properties)
                 _sync_call(data, settings, ident)
