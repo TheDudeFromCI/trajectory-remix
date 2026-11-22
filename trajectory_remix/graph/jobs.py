@@ -810,7 +810,7 @@ class JobService:
                 result = self._decode_job(self._job(db, job))
             else:
                 row = db.execute(
-                    "SELECT id,kind,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?",
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?",
                     (job,),
                 ).fetchone()
                 if row is None:
