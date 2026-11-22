@@ -103,6 +103,7 @@ export class StudioUI {
     if ($('search-stage').value !== '') q.stage = Number($('search-stage').value);
     if ($('search-split').value) q.split = $('search-split').value;
     if ($('search-tool').value) q.tool = $('search-tool').value;
+    if ($('search-comments').checked) q.comments = 'open';
     return q;
   }
   async loadSettings() {
@@ -618,6 +619,15 @@ export class StudioUI {
     this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
     message('Review running… Progress also appears in Jobs.');
   }
+  async sendToAssistant() {
+    if (!this.id) return;
+    if (!this.settings.endpoint_roles?.assistant) throw new Error('Assign the Assistant endpoint role in Project Settings first.');
+    if (this.record?.owner) throw new Error('A job is working on this trajectory. Wait for it to settle or detach it.');
+    if (this.isDirty()) throw new Error('Save or reload your draft first, so the agent edits what you see.');
+    const r = await api(`/trajectories/${this.id}/assistant`, 'POST', {expected_revision: this.record.revision});
+    this.ownedBulk.add(r.job_id);
+    message(`Sent to ${this.settings.endpoint_roles.assistant}. Follow it in Jobs; answers appear here.`);
+  }
   async openGenerationSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
     const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
@@ -783,7 +793,7 @@ export class StudioUI {
     document.addEventListener('graph-job-started', e => this.jobsView.select(e.detail).then(() => message('Job started. Follow it in Jobs or from the status bar.')).catch(message));
     bindViewTabs();
     this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
-      els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count')},
+      els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
       onChange: () => {
         if (this.draft) this.renderTimeline();
         const open = this.comments.items.filter(c => c.status === 'open').length, row = this.lastItems?.find(i => i.id === this.id);
@@ -818,7 +828,7 @@ export class StudioUI {
     on('metadata-apply', 'click', () => { const m = JSON.parse($('metadata-json').value); if (!m || Array.isArray(m) || typeof m !== 'object') throw new Error('Metadata must be an object'); this.draft.metadata = m; this.renderDraft(); this.changed(); });
     for (const id of ['stage', 'split']) on(id, 'change', () => { this.draft.metadata ||= {}; if (id === 'split' && !$(id).value) delete this.draft.metadata.split; else this.draft.metadata[id] = id === 'stage' ? Number($(id).value) : $(id).value; this.renderDraft(); this.changed(); });
     on('source-apply', 'click', async () => { const draft = JSON.parse($('source-json').value); if (draft.id !== this.id || !draft.events || !draft.windows) throw new Error('Keep source UUID and graph maps'); const validated = await api('/diagnostics', 'POST', draft); this.draft = validated.source; this.diagnostics = validated.diagnostics; this.editors.clear(); this.event = Object.keys(draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
-    for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
+    for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool', 'search-comments']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
     on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
@@ -851,6 +861,7 @@ export class StudioUI {
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review' || action === 'review_repair') return this.startReview({repair: action === 'review_repair', bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
     on('review-source', 'click', () => this.startReview({repair: false}));
+    on('comment-send', 'click', () => this.sendToAssistant());
     on('review-repair-source', 'click', () => this.startReview({repair: true}));
     on('export-source', 'click', () => this.exportSource());
     on('metrics-refresh', 'click', () => this.loadMetrics());

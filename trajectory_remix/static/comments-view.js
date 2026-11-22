@@ -16,10 +16,10 @@ export function openCounts(items) {
 }
 
 export class CommentsView {
-  /** els: {target, body, add, list, count}; inspect(kind, id) jumps to a comment's target. */
+  /** els: {target, body, add, list, count, send?}; inspect(kind, id) jumps to a comment's target. */
   constructor({api, report, els, inspect = () => {}, onChange = () => {}}) {
     Object.assign(this, {api, report, els, inspect, onChange});
-    this.items = []; this.counts = new Map(); this.trajectory = null; this.loaded = '';
+    this.items = []; this.counts = new Map(); this.trajectory = null; this.loaded = ''; this.replies = new Map();
     els.add.addEventListener('click', () => this.add().catch(report));
     els.body.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.add().catch(report); } });
     els.target.addEventListener('change', () => { this.pinned = true; });
@@ -42,7 +42,7 @@ export class CommentsView {
   /** Point the composer at a target (from a window card) and focus it. */
   compose(kind, id) { this.els.target.value = targetKey(kind, id); this.pinned = true; this.els.body.focus(); }
   async load(trajectory) {
-    if (trajectory !== this.trajectory) { this.trajectory = trajectory; this.items = []; this.loaded = ''; this.render(); }
+    if (trajectory !== this.trajectory) { this.trajectory = trajectory; this.items = []; this.loaded = ''; this.replies.clear(); this.render(); }
     if (!trajectory) return;
     const data = await this.api(`/trajectories/${trajectory}/comments`);
     if (trajectory !== this.trajectory) return;
@@ -58,15 +58,23 @@ export class CommentsView {
     this.els.body.value = ''; this.pinned = false;
     await this.load(this.trajectory);
   }
-  async act(comment, method, body) {
-    await this.api(`/comments/${comment.id}`, method, body);
+  async act(comment, method, body, path = '') {
+    await this.api(`/comments/${comment.id}${path}`, method, body);
     await this.load(this.trajectory);
+  }
+  async sendReply(comment) {
+    const body = (this.replies.get(comment.id) || '').trim();
+    if (!body) throw new Error('Write the reply first.');
+    await this.act(comment, 'POST', {body}, '/replies');
+    this.replies.delete(comment.id); this.render();
   }
   render() {
     this.counts = openCounts(this.items);
     const open = this.items.filter(c => c.status === 'open'), resolved = this.items.filter(c => c.status !== 'open');
     setText(this.els.count, open.length ? String(open.length) : '');
+    if (this.els.send) this.els.send.disabled = !open.length;
     const list = this.els.list, wasOpen = list.querySelector('details')?.open ?? false;
+    const focused = document.activeElement?.closest?.('.comment-reply-form') && document.activeElement.dataset.comment;
     if (!this.trajectory) { list.replaceChildren(); return; }
     const parts = open.length ? open.map(c => this.card(c)) : [node('div', 'No open comments. Point out a problem above and an agent can pick it up.', 'empty')];
     if (resolved.length) {
@@ -75,6 +83,7 @@ export class CommentsView {
       parts.push(more);
     }
     list.replaceChildren(...parts);
+    if (focused) list.querySelector(`textarea[data-comment="${CSS.escape(focused)}"]`)?.focus();
   }
   card(c) {
     const card = node('article', undefined, `comment-card${c.status === 'open' ? '' : ' resolved'}`);
@@ -91,12 +100,46 @@ export class CommentsView {
     head.append(when);
     card.append(head, node('p', c.body, 'comment-body'));
     if (c.resolution) card.append(node('p', c.resolution, 'comment-resolution'));
+    if (c.replies?.length) card.append(this.thread(c));
+    const replying = this.replies.has(c.id);
+    if (replying) card.append(this.replyForm(c));
     const actions = node('div', undefined, 'comment-actions');
+    if (!replying) {
+      const reply = node('button', 'Reply', 'sm ghost');
+      reply.onclick = () => { this.replies.set(c.id, ''); this.render(); this.els.list.querySelector(`textarea[data-comment="${CSS.escape(c.id)}"]`)?.focus(); };
+      actions.append(reply);
+    }
     const toggle = node('button', c.status === 'open' ? 'Resolve' : 'Reopen', 'sm ghost');
     toggle.onclick = () => this.act(c, 'PATCH', {status: c.status === 'open' ? 'resolved' : 'open'}).catch(this.report);
     const remove = node('button', 'Delete', 'sm ghost danger');
     remove.onclick = () => { if (globalThis.confirm?.('Delete this comment?') === false) return; this.act(c, 'DELETE').catch(this.report); };
     actions.append(toggle, remove); card.append(actions);
     return card;
+  }
+  thread(c) {
+    const list = node('ol', undefined, 'comment-thread');
+    for (const r of c.replies) {
+      const item = node('li', undefined, 'comment-reply'), head = node('div', undefined, 'comment-head');
+      head.append(tag(r.author === 'agent' ? 'Agent' : 'You', r.author === 'agent' ? 'accent' : 'muted'), node('span', String(r.created).slice(0, 10), 'small muted grow'));
+      const remove = node('button', '×', 'ghost sm comment-reply-delete'); remove.setAttribute('aria-label', 'Delete reply');
+      remove.onclick = () => this.act(c, 'DELETE', undefined, `/replies/${r.id}`).catch(this.report);
+      head.append(remove); item.append(head, node('p', r.body, 'comment-body')); list.append(item);
+    }
+    return list;
+  }
+  replyForm(c) {
+    const form = node('div', undefined, 'comment-reply-form'), box = node('textarea');
+    box.rows = 2; box.dataset.comment = c.id; box.value = this.replies.get(c.id) || '';
+    box.setAttribute('aria-label', `Reply to comment on ${targetLabel(c.target_kind, c.target_id)}`); box.placeholder = 'Reply…';
+    box.oninput = () => this.replies.set(c.id, box.value);
+    box.onkeydown = e => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.sendReply(c).catch(this.report); }
+      if (e.key === 'Escape') { this.replies.delete(c.id); this.render(); }
+    };
+    const send = node('button', 'Send reply', 'sm'), cancel = node('button', 'Cancel', 'sm ghost');
+    send.onclick = () => this.sendReply(c).catch(this.report);
+    cancel.onclick = () => { this.replies.delete(c.id); this.render(); };
+    const row = node('div', undefined, 'comment-actions'); row.append(cancel, send);
+    form.append(box, row); return form;
   }
 }

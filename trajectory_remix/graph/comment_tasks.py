@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .comments import MAX_BODY, NewComment
+from .comments import MAX_BODY, NewComment, NewReply
 from .models import DTO
 
 
@@ -19,6 +19,10 @@ class CommentList(DTO):
 
 class CommentAdd(NewComment):
     trajectory: str
+
+
+class CommentReply(NewReply):
+    id: str
 
 
 class CommentResolve(DTO):
@@ -34,6 +38,10 @@ TASKS = {
     "add_graph_comment": (
         CommentAdd,
         "Leave a comment on a trajectory, event or window, for example a question for the user.",
+    ),
+    "reply_graph_comment": (
+        CommentReply,
+        "Reply in a comment's thread, for example to explain a fix or ask the user a question.",
     ),
     "resolve_graph_comment": (
         CommentResolve,
@@ -59,4 +67,6 @@ def call(comments, name, args):
         return comments.add(
             args.trajectory, NewComment(target=args.target, body=args.body), "agent"
         )
+    if name == "reply_graph_comment":
+        return comments.reply(args.id, NewReply(body=args.body), "agent")
     return comments.resolve(args.id, args.resolution)

@@ -117,3 +117,43 @@ def test_agent_reads_comments_answers_and_resolves(client):  # noqa: F811
         json={"name": "resolve_graph_comment", "arguments": {"id": cid, "resolution": ""}},
     )
     assert r.status_code == 422
+
+
+def test_reply_threads(client):  # noqa: F811
+    ident = create(client)["source"]["id"]
+    cid = comment(client, ident, "event", "b", "Why does b close the window?").json()["id"]
+    r = client.post(f"/api/v1/comments/{cid}/replies", json={"body": "Event c still needs it."})
+    assert r.status_code == 201, r.text
+    assert [x["body"] for x in r.json()["replies"]] == ["Event c still needs it."]
+    answer = mcp(client, "reply_graph_comment", id=cid, body="Should c own the close instead?")
+    assert [x["author"] for x in answer["replies"]] == ["user", "agent"]
+    assert answer["status"] == "open", "a reply never changes the comment's status"
+    (listed,) = client.get(f"/api/v1/trajectories/{ident}/comments").json()["items"]
+    assert len(listed["replies"]) == 2
+    assert len(mcp(client, "list_graph_comments")["items"][0]["replies"]) == 2
+    first = listed["replies"][0]["id"]
+    left = client.delete(f"/api/v1/comments/{cid}/replies/{first}").json()
+    assert [x["author"] for x in left["replies"]] == ["agent"]
+    assert client.delete(f"/api/v1/comments/{cid}/replies/{first}").status_code == 404
+    assert client.post(f"/api/v1/comments/{cid}/replies", json={"body": ""}).status_code == 422
+    assert client.post("/api/v1/comments/nope/replies", json={"body": "x"}).status_code == 404
+    client.delete(f"/api/v1/comments/{cid}")
+    with client.app.state.studio.store.connect() as db:
+        assert db.execute("SELECT count(*) FROM graph_comment_replies").fetchone()[0] == 0
+
+
+def test_open_comments_filter_in_shared_selector(client):  # noqa: F811
+    first, second = create(client), create(client)
+    flagged = comment(client, first["source"]["id"], "event", "a").json()
+    resolved = comment(client, second["source"]["id"], "event", "a").json()
+    client.patch(f"/api/v1/comments/{resolved['id']}", json={"status": "resolved"})
+    listing = client.get("/api/v1/trajectories?comments=open").json()
+    assert [i["id"] for i in listing["items"]] == [first["source"]["id"]]
+    assert client.get("/api/v1/trajectories").json()["total"] == 2
+    assert client.get("/api/v1/trajectories?comments=all").status_code == 422
+    found = mcp(client, "list_graphs", query={"comments": "open"})
+    assert [i["id"] for i in found["items"]] == [first["source"]["id"]]
+    lines = client.get("/api/v1/trajectories/export?comments=open").text.strip().splitlines()
+    assert len(lines) == 1
+    client.patch(f"/api/v1/comments/{flagged['id']}", json={"status": "resolved"})
+    assert client.get("/api/v1/trajectories?comments=open").json()["total"] == 0

@@ -20,7 +20,7 @@ Paths below are relative to `trajectory_remix/`.
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
 | Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
-| Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed |
+| Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; Send to agent freezes open comments, needs the Assistant role and never changes the stage |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants

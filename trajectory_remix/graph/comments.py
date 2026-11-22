@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS graph_comments (
     created TEXT NOT NULL,
     updated TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS graph_comments_trajectory ON graph_comments(trajectory_id, status);
+CREATE TABLE IF NOT EXISTS graph_comment_replies (
+    id TEXT PRIMARY KEY,
+    comment_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    author TEXT NOT NULL CHECK(author IN ('user','agent')),
+    created TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS graph_comment_replies_comment ON graph_comment_replies(comment_id);
 """
 COLUMNS = (
     "id,trajectory_id,target_kind,target_id,body,author,source_revision,status,resolution,"
@@ -46,6 +53,10 @@ class Target(DTO):
 
 class NewComment(DTO):
     target: Target
+    body: str = Field(min_length=1, max_length=MAX_BODY)
+
+
+class NewReply(DTO):
     body: str = Field(min_length=1, max_length=MAX_BODY)
 
 
@@ -82,7 +93,7 @@ class CommentService:
         row = db.execute(f"SELECT {COLUMNS} FROM graph_comments WHERE id=?", (ident,)).fetchone()
         if row is None:
             raise KeyError(ident)
-        return dict(row)
+        return _with_replies(db, [row])[0]
 
     def add(self, trajectory_id, comment: NewComment, author: Literal["user", "agent"]):
         record = self.store.read(trajectory_id)  # Missing trajectories raise KeyError.
@@ -127,8 +138,31 @@ class CommentService:
     def delete(self, ident):
         with self.store.connect() as db:
             self._row(db, ident)
+            db.execute("DELETE FROM graph_comment_replies WHERE comment_id=?", (ident,))
             db.execute("DELETE FROM graph_comments WHERE id=?", (ident,))
         return dict(id=ident, deleted=True)
+
+    def reply(self, ident, reply: NewReply, author: Literal["user", "agent"]):
+        """Add a reply to a comment's thread; the comment keeps its status."""
+        now = _now()
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._row(db, ident)
+            db.execute(
+                "INSERT INTO graph_comment_replies VALUES(?,?,?,?,?)",
+                (str(uuid4()), ident, reply.body, author, now),
+            )
+            db.execute("UPDATE graph_comments SET updated=? WHERE id=?", (now, ident))
+            return self._row(db, ident)
+
+    def delete_reply(self, ident, reply_id):
+        with self.store.connect() as db:
+            gone = db.execute(
+                "DELETE FROM graph_comment_replies WHERE id=? AND comment_id=?", (reply_id, ident)
+            ).rowcount
+            if not gone:
+                raise KeyError(reply_id)
+            return self._row(db, ident)
 
     def for_trajectory(self, trajectory_id, status: Status | None = None):
         """All comments on one trajectory, open first, each marked if its target is gone."""
@@ -142,7 +176,8 @@ class CommentService:
                 "ORDER BY status='resolved', rowid",
                 args,
             ).fetchall()
-        return [dict(r) | dict(target_exists=_exists(source, r)) for r in rows]
+            items = _with_replies(db, rows)
+        return [c | dict(target_exists=_exists(source, c)) for c in items]
 
     def listing(self, status: Status | None = "open", *, limit=20, offset=0):
         """Comments across the project, oldest first; deleted trajectories are left out."""
@@ -161,7 +196,7 @@ class CommentService:
                 "ORDER BY c.rowid LIMIT ? OFFSET ?",
                 [*args, limit, offset],
             ).fetchall()
-        items = [dict(r) for r in rows]
+            items = _with_replies(db, rows)
         more = offset + len(items) < total
         return dict(items=items, total=total, next_offset=offset + len(items) if more else None)
 
@@ -173,6 +208,21 @@ class CommentService:
                 "GROUP BY trajectory_id"
             ).fetchall()
         return {r[0]: r[1] for r in rows}
+
+
+def _with_replies(db, rows):
+    """Comment rows as dicts, each with its replies, oldest first."""
+    items = [dict(r) | dict(replies=[]) for r in rows]
+    by_id = {c["id"]: c for c in items}
+    if by_id:
+        marks = ",".join("?" * len(by_id))
+        for r in db.execute(
+            "SELECT id,comment_id,body,author,created FROM graph_comment_replies "
+            f"WHERE comment_id IN ({marks}) ORDER BY rowid",
+            list(by_id),
+        ):
+            by_id[r["comment_id"]]["replies"].append(dict(r))
+    return items
 
 
 def _exists(source, row):

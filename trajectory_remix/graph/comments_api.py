@@ -2,7 +2,7 @@
 
 from fastapi import Query
 
-from .comments import CommentEdit, CommentService, NewComment, Status
+from .comments import CommentEdit, CommentService, NewComment, NewReply, Status
 
 
 def add_comment_routes(router, comments: CommentService):
@@ -33,3 +33,11 @@ def add_comment_routes(router, comments: CommentService):
     @router.delete("/comments/{ident}")
     def delete_comment(ident: str):
         return comments.delete(ident)
+
+    @router.post("/comments/{ident}/replies", status_code=201)
+    def reply(ident: str, body: NewReply):
+        return comments.reply(ident, body, author="user")
+
+    @router.delete("/comments/{ident}/replies/{reply_id}")
+    def delete_reply(ident: str, reply_id: str):
+        return comments.delete_reply(ident, reply_id)

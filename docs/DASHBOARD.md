@@ -25,10 +25,10 @@ tooltips rather than in extra text on screen.
 
 | Panel | What it does |
 | --- | --- |
-| **Dataset** (left) | Search and filter trajectories by text, stage, split or tool. Each row shows a short ID, its stage and split, a speech bubble with the number of open comments, and a lock if a job owns it. Hover a row for the full ID. |
+| **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, or **Open comments**. Each row shows a short ID, its stage and split, a speech bubble with the number of open comments, and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Links** (dependencies), **Options** (closing, masks, delivery, framing), **Windows**, **Problems**, **Comments** (the speech bubble) and **JSON**. |
+| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **Problems**, **Comments** (the speech bubble) and **JSON**. |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -123,11 +123,11 @@ Events in the same window must be ordered, and events in different windows run i
 parallel unless you link them.
 
 1. Select the later event.
-2. Either **Shift-click** the earlier event in the timeline, or open the **Links** tab,
+2. Either **Shift-click** the earlier event in the timeline, or open the **Options** tab,
    pick an event ID and click **Add**.
-3. To remove a dependency, click its chip on the Links tab.
+3. To remove a dependency, click its chip under **Runs after** on the Options tab.
 
-![The Links tab with one dependency](images/dashboard/event-links.png)
+![Runs after on the Options tab, with one dependency](images/dashboard/event-links.png)
 
 ### Fix problems in a draft
 
@@ -149,8 +149,7 @@ agent connected over [MCP](MCP.md) can find it and fix it.
 
 1. Choose what the comment is about:
    - **A window:** click the speech bubble on its card.
-   - **An event:** select it on the timeline, then open the **Comments** tab (the speech
-     bubble next to Problems). The composer follows the selected event.
+   - **An event:** select it on the timeline, then open the **Comments** tab (the speech bubble next to Problems). The composer follows the selected event.
    - **Anything else:** pick it from **Comment on**: the whole trajectory, any event or any
      window.
 2. Write what's wrong, for example *"This tool call closes the window too early. Event 13
@@ -166,9 +165,31 @@ job holds the trajectory.
 | Timeline event, window card | A speech bubble with that target's open comments |
 | Comments tab | Open comments first, then **Resolved**, each with who wrote it (**You** or **Agent**) and the revision it was written against |
 
-Click a comment's target to jump to it. **Resolve** closes a comment and **Reopen** brings
-it back. When an agent resolves one, its note on what it changed appears under the comment.
-If the event or window has since been deleted, the comment is marked **Removed**.
+Click a comment's target to jump to it. **Reply** adds to its thread, for example to answer
+an agent's question; replies don't change whether it's open. **Resolve** closes a comment
+and **Reopen** brings it back. When an agent resolves one, its note on what it changed
+appears under the comment. If the event or window has since been deleted, the comment is
+marked **Removed**.
+
+To find work, tick **Open comments** in the dataset filters. It combines with the other
+filters, and **Bulk edit all matches** uses it too.
+
+#### Send comments to an agent
+
+Instead of connecting an agent yourself, you can have the project's **Assistant** endpoint
+work through a trajectory's open comments.
+
+1. In **Settings**, assign an endpoint to the **Assistant** role (see
+   [Project settings](PROJECT-SETTINGS.md)). It's separate from the generation and review
+   roles.
+2. Save the trajectory, then click **Send open comments to agent** on the Comments tab.
+
+The job takes the open comments as they are at that moment, with their replies. The model
+edits the trajectory with the same spot edits that repair uses, then answers every comment:
+it resolves the ones it fixed, with a note, and replies to the rest, with a reason or a
+question. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
+revert its edits, and read the answers in the Comments tab. If the session runs out of
+room, it stops with its edits so far kept and the comments still open.
 
 ### Preview the tokens
 

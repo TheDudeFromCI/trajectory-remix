@@ -30,6 +30,7 @@ models.
    | **Assembly** | The Assembly stage and its fix. Optional; falls back to Draft. Give it a stronger model for better structure. |
    | **Fast Review** | Fast Review and its repair. |
    | **Critical Review** | Critical Review and its repair. |
+   | **Assistant** | **Send open comments to agent** in the editor's Comments tab (see [Dashboard](DASHBOARD.md#leave-comments-for-an-agent-to-fix)). Generation never uses it. Optional. |
 5. **Save settings**, then open **Generate** to choose review and repair options.
 
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only

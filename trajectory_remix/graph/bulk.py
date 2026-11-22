@@ -28,7 +28,13 @@ class BulkService:
     def _where(query):
         # Small explicit graph query grammar, independent of legacy replay search.
         # The studio may extend this shared selector, never pass a page of IDs.
-        if not isinstance(query, dict) or set(query) - {"stage", "split", "text", "tool"}:
+        if not isinstance(query, dict) or set(query) - {
+            "stage",
+            "split",
+            "text",
+            "tool",
+            "comments",
+        }:
             raise ValueError("Unknown graph search fields")
         clauses, args = [], []
         for key in ("stage", "split"):
@@ -52,6 +58,14 @@ class BulkService:
                 "EXISTS(SELECT 1 FROM graph_tool_usage u WHERE u.trajectory_id=t.id AND u.tool_id=?)"
             )
             args.append(query["tool"])
+        if "comments" in query:
+            # Only "open" is meaningful: trajectories with at least one open comment.
+            if query["comments"] != "open":
+                raise ValueError('The comments filter only accepts "open"')
+            clauses.append(
+                "EXISTS(SELECT 1 FROM graph_comments c WHERE c.trajectory_id=t.id"
+                " AND c.status='open')"
+            )
         return " AND ".join(clauses) or "1", args
 
     def start(self, query, action, config=None):

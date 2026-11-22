@@ -240,6 +240,22 @@ The dashboard always uses Standard mode. Force modes are available through the R
 Ownership is always enforced, and a locked source is skipped. Closing the dialog doesn't stop the
 job; follow it in the **Jobs** view.
 
+### Assistant sessions
+
+**Send open comments to agent** (the editor's Comments tab, or `POST /api/v1/trajectories/{id}/assistant` with
+`expected_revision`) runs one trajectory through the **Assistant** endpoint role. It's a one-item job like a selected
+review, and it needs the saved revision you're looking at.
+
+| Step | What happens |
+| --- | --- |
+| Admission | The open comments and their replies are frozen into the job. Comments added later wait for the next send. |
+| Session | The model sees the source, its diagnostics, causal views and the comments, then uses the repair spot edits: `view`, `inspect`, `patch`, `patch_window`, `remove_event`. Each accepted edit is saved. |
+| Finish | `finish` must answer every frozen comment exactly once. `resolved: true` resolves it with the note; `false` adds the note as an agent reply. |
+| Limits | Invalid replies get the usual bounded corrections, then hold. Outgrowing the repair context budget ends the job with edits kept and comments open. |
+
+The stage and review history aren't touched; edits make an earlier review stale as usual. The job's Undo reverts its
+edits but not its comment answers.
+
 ### Stale reviews
 
 Changing a source or checklist makes older sign-offs **stale** without changing stages or rewriting

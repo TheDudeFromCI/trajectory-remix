@@ -135,8 +135,8 @@ body.resizing * { cursor: inherit !important; }
 #event-picker { flex: 1; min-width: 0; height: 28px; font-family: var(--font-mono); font-size: 13px; }
 .event-tabs { flex: 1; min-height: 0; }
 .event-tabs .tab-list { gap: 0; padding: 0 var(--space-1); }
-.event-tabs .tab-list [role=tab] { padding: var(--space-2) 5px; font-size: 13px; }
-.event-tabs .tab-list [role=tab]::after { left: 5px; right: 5px; }
+.event-tabs .tab-list [role=tab] { padding: var(--space-2) 6px; font-size: 13px; }
+.event-tabs .tab-list [role=tab]::after { left: 6px; right: 6px; }
 .event-tabs .tab-list [role=tab] .badge { margin-left: 2px; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); }
 .panel-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
@@ -352,6 +352,13 @@ td.faint { color: var(--ink-faint); }
 .comment-resolved { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
 .comment-resolved > summary { cursor: pointer; color: var(--ink-muted); font-size: 13px; }
 .comment-resolved[open] > summary { margin-bottom: var(--space-2); }
-#tab-comments { display: inline-flex; align-items: center; padding-inline: 4px; }
-.event-tabs .tab-list #tab-comments .badge { margin-left: 1px; min-width: 16px; padding: 0 4px; }
+.comment-thread { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0 0 0 var(--space-2); list-style: none; border-left: 2px solid var(--border); }
+.comment-reply { display: flex; flex-direction: column; gap: 2px; }
+.comment-reply .comment-reply-delete { height: 20px; min-width: 20px; padding: 0 4px; color: var(--ink-faint); }
+.comment-reply-form { display: flex; flex-direction: column; gap: var(--space-1); }
+.comment-reply-form textarea { min-height: 48px; resize: vertical; }
+.filter-check { display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; color: var(--ink-muted); }
+.comment-send { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.comment-send button { flex: none; }
+#tab-comments { display: inline-flex; align-items: center; }
 #tab-comments .ico { width: 15px; height: 15px; }

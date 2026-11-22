@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {Window} from 'happy-dom';
 const window = new Window();
-for (const key of ['document', 'Event', 'MutationObserver', 'KeyboardEvent']) globalThis[key] = window[key];
+for (const key of ['document', 'Event', 'MutationObserver', 'KeyboardEvent', 'CSS']) globalThis[key] = window[key];
 const {CommentsView, openCounts, targetKey} = await import('../trajectory_remix/static/comments-view.js');
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -11,7 +11,8 @@ document.body.append(...Object.values(els));
 let rows = [], posted = [], patched = [], inspected = [], changes = 0;
 const api = async (path, method = 'GET', body) => {
   if (method === 'GET') return {items: structuredClone(rows)};
-  if (method === 'POST') { posted.push(body); rows.push({id: 'c' + rows.length, target_kind: body.target.kind, target_id: body.target.id ?? null, body: body.body, author: 'user', status: 'open', resolution: null, source_revision: 1, created: '2026-11-22T00:00:00+00:00', target_exists: true}); return {}; }
+  if (method === 'POST' && !path.endsWith('/replies')) { posted.push(body); rows.push({id: 'c' + rows.length, target_kind: body.target.kind, target_id: body.target.id ?? null, body: body.body, author: 'user', replies: [], status: 'open', resolution: null, source_revision: 1, created: '2026-11-22T00:00:00+00:00', target_exists: true}); return {}; }
+  if (method === 'POST' && path.endsWith('/replies')) { const r = rows.find(x => path.includes(x.id)); r.replies.push({id: 'r' + r.replies.length, author: 'user', body: body.body, created: '2026-11-22'}); return r; }
   if (method === 'PATCH') { patched.push([path, body]); const r = rows.find(x => path.endsWith(x.id)); r.status = body.status; return r; }
   if (method === 'DELETE') { rows = rows.filter(x => !path.endsWith(x.id)); return {}; }
 };
@@ -50,6 +51,16 @@ assert.equal(els.count.textContent, ''); assert.match(els.list.querySelector('de
 [...els.list.querySelectorAll('button')].find(b => b.textContent === 'Reopen').click(); await settle(); await settle();
 assert.equal(els.count.textContent, '1');
 
+// Replies: a draft reply survives a re-render from polling, then posts and shows in the thread.
+const buttonNamed = name => [...els.list.querySelectorAll('button')].find(b => b.textContent === name);
+buttonNamed('Reply').click();
+const draftBox = () => els.list.querySelector('.comment-reply-form textarea');
+draftBox().value = 'Event c reads it later.'; draftBox().dispatchEvent(new window.Event('input'));
+rows[0].body = 'Not from any document (edited).'; await view.load('t1');
+assert.equal(draftBox().value, 'Event c reads it later.', 'polling keeps the reply being typed');
+buttonNamed('Send reply').click(); await settle(); await settle();
+assert.equal(draftBox(), null); assert.match(els.list.querySelector('.comment-thread').textContent, /Event c reads it later\./);
+
 // A comment whose event was deleted is flagged and cannot jump.
 rows.push({...rows[0], id: 'c9', target_kind: 'event', target_id: 'gone', target_exists: false});
 await view.load('t1');
@@ -58,5 +69,5 @@ assert.match(gone.textContent, /Removed/); assert.equal(gone.querySelector('.com
 
 assert.deepEqual([...openCounts(rows)], [[targetKey('window', 'doc'), 1], ['event:gone', 1]]);
 await view.load(null); assert.equal(els.list.children.length, 0); assert.equal(els.count.textContent, '');
-console.log('Comments view: targets, composing from a window, adding, quiet polling, resolve/reopen and removed targets passed.');
+console.log('Comments view: targets, composing from a window, adding, quiet polling, resolve/reopen, replies and removed targets passed.');
 window.happyDOM.abort();
