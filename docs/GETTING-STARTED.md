@@ -43,7 +43,7 @@ specific features, listed below.
 4. **Edit.** Change an event's text, window or dependencies. Add a dependency with the
    picker, or Shift-click a predecessor in the timeline. Save the trajectory.
 5. **Create your own.** Click **+** in the Dataset panel, add windows on the event
-   editor's **Windows** tab, then add events and link them on the **Links** tab. The
+   editor's **Windows** tab, then add events and link them under **Runs after** on the **Options** tab. The
    [Dashboard tutorials](DASHBOARD.md#tutorials) walk through this step by step.
 
 Structural errors, such as a missing reference or two unordered writers to one

@@ -111,10 +111,14 @@ def create_studio_app(
     )
     app.state.worker.handlers["run"] = generation.run
     app.state.worker.handlers["bulk:review_repair"] = generation.run
+    app.state.worker.handlers["bulk:assistant"] = generation.run
     app.state.worker.review_start = generation.start_review
     studio.generation = generation
     app.state.worker.bulk_handlers["metrics"] = metrics.calculate
     app.state.studio = studio
+    from .comments import CommentService
+
+    studio.comments = generation.comments = CommentService(studio.store)
     app.state.worker.handlers["import"] = studio.import_job
     token = app.state.csrf = secrets.token_urlsafe(32)
     static = Path(__file__).resolve().parents[1] / "static"
@@ -212,12 +216,14 @@ def create_studio_app(
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
+    from .comments_api import add_comment_routes
     from .prompt_migration import migrate
     from .prompts_api import add_prompt_routes
     from .tools_api import add_tool_routes
 
     migrate(studio.store)
     add_tool_routes(router, studio.store)
+    add_comment_routes(router, studio.comments)
     add_prompt_routes(router)
     from . import usage
 
@@ -236,6 +242,13 @@ def create_studio_app(
         if body.trajectory is not None and body.expected_revision is None:
             raise ValueError("Selected-source review requires expected_revision")
         job = generation.start_review(**body.model_dump())
+        studio.worker.kick(job)
+        return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
+
+    @router.post("/trajectories/{ident}/assistant", status_code=202)
+    async def send_to_assistant(ident: str, body: Delete):
+        """Send a saved trajectory's open comments to the Assistant endpoint."""
+        job = generation.start_assistant(ident, body.expected_revision, studio.comments)
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
@@ -298,12 +311,15 @@ def create_studio_app(
         stage: int | None = None,
         split: str | None = None,
         tool: str | None = None,
+        comments: Literal["open", "addressed", "unresolved"] | None = None,
         limit: int = Query(50, ge=1, le=1000),
         offset: int = Query(0, ge=0),
     ):
         query = {
             k: v
-            for k, v in dict(text=text, stage=stage, split=split, tool=tool).items()
+            for k, v in dict(
+                text=text, stage=stage, split=split, tool=tool, comments=comments
+            ).items()
             if v is not None
         }
         return studio.listing(query, limit=limit, offset=offset)
@@ -314,10 +330,13 @@ def create_studio_app(
         stage: int | None = None,
         split: str | None = None,
         tool: str | None = None,
+        comments: Literal["open", "addressed", "unresolved"] | None = None,
     ):
         query = {
             k: v
-            for k, v in dict(text=text, stage=stage, split=split, tool=tool).items()
+            for k, v in dict(
+                text=text, stage=stage, split=split, tool=tool, comments=comments
+            ).items()
             if v is not None
         }
         BulkService._where(query)  # Validate before the stream starts.

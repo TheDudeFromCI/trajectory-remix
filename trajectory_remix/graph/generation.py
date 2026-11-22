@@ -8,6 +8,7 @@ import jsonschema
 
 from . import (
     assembly_fix,
+    assistant,
     draft_assembly,
     phase_barrier,
     repair_policy,
@@ -34,6 +35,7 @@ class GenerationService:
         self.jobs, self.store, self.sampler, self.bulk = jobs, jobs.store, sampler, bulk
         self.transport = transport
         self.calls = set()
+        self.comments = None  # The studio's CommentService, for assistant sessions.
 
     def settings_for(self, job):
         config = self.jobs.inspect(job)["config"]
@@ -98,6 +100,51 @@ class GenerationService:
                 (job, trajectory, record.revision),
             )
             return job
+
+    def start_assistant(self, trajectory, expected_revision, comments):
+        """Queue an assistant session on one trajectory's open comments."""
+        settings = self.store.settings().settings
+        if assistant.ROLE not in settings.endpoint_roles:
+            raise ValueError("Assign the Assistant endpoint role in Project Settings first")
+        frozen = assistant.frozen(comments.for_trajectory(trajectory, "open"))
+        if not frozen:
+            raise ValueError("This trajectory has no open comments to send")
+        options = dict(settings=settings.model_dump(mode="json"), comments=frozen)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            record = self.store._read(db, trajectory)
+            self.store._check_revision(trajectory, expected_revision, record)
+            job = self.jobs._create(
+                db, "bulk", dict(query={}, action=assistant.ACTION, options=options), 1
+            )
+            db.execute(
+                "INSERT INTO graph_bulk_items VALUES(?,0,?,?,'pending',NULL,NULL)",
+                (job, trajectory, record.revision),
+            )
+            return job
+
+    def _operation(self, job, source):
+        """(endpoint role, phase) for a manual job's trajectory, or None to skip it."""
+        config = self.jobs.inspect(job)["config"]
+        if config.get("action") == assistant.ACTION:
+            return assistant.ROLE, assistant.PHASE
+        return reviews.manual_operation(
+            source.metadata.get("stage", -3),
+            config["options"]["mode"],
+            config["options"]["repair"],
+        )
+
+    def _session_base(self, job, source, cp):
+        """Seed a continuing repair or assistant session on the checkpoint."""
+        settings = self.settings_for(job)
+        if cp["phase"] == "repair":
+            base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
+        elif cp["phase"] == assistant.PHASE:
+            comments = self.jobs.inspect(job)["config"]["options"]["comments"]
+            base = assistant.payload(source, settings, comments)["messages"]
+        else:
+            return
+        cp.update(history=[], repair_base=base)
 
     def _owners(self, job):
         with self.store.connect() as db:
@@ -232,11 +279,7 @@ class GenerationService:
                             )
                             continue
                         record = self.store._read(db, ident)
-                        operation = reviews.manual_operation(
-                            record.source.metadata.get("stage", -3),
-                            j["config"]["options"]["mode"],
-                            j["config"]["options"]["repair"],
-                        )
+                        operation = self._operation(job, record.source)
                         if (
                             not operation
                             or operation[0] not in self.settings_for(job).endpoint_roles
@@ -264,13 +307,7 @@ class GenerationService:
                         _epoch=j["epoch"],
                         _revision=record.revision,
                     )
-                    if operation[1] == "repair":
-                        cp.update(
-                            history=[],
-                            repair_base=reviews.payload(
-                                record.source, self.settings_for(job), operation[0], "repair"
-                            )["messages"],
-                        )
+                    self._session_base(job, record.source, cp)
                     self._save(job, record.source, cp)
                 except (OwnershipConflict, RevisionConflict, KeyError):
                     with self.store.connect() as db:
@@ -305,11 +342,7 @@ class GenerationService:
                         "SELECT position FROM graph_bulk_items WHERE job_id=? AND trajectory_id=?",
                         (job, ident),
                     ).fetchone()
-                operation = reviews.manual_operation(
-                    source.metadata.get("stage", -3),
-                    j["config"]["options"]["mode"],
-                    j["config"]["options"]["repair"],
-                )
+                operation = self._operation(job, source)
                 cp = dict(
                     serial=0,
                     phase=operation[1],
@@ -318,13 +351,7 @@ class GenerationService:
                     manual=True,
                     bulk_position=item[0],
                 )
-                if cp["phase"] == "repair":
-                    cp.update(
-                        history=[],
-                        repair_base=reviews.payload(source, settings, cp["tier"], "repair")[
-                            "messages"
-                        ],
-                    )
+                self._session_base(job, source, cp)
             else:
                 cp = dict(serial=0, phase="event", index=0, errors=0, manual=False)
         if trajectory_hold.held(cp, epoch):
@@ -351,6 +378,17 @@ class GenerationService:
                 self._end_assembly_fix(job, source, cp, "context_limit")
                 return
             tier = cp["tier"]
+        elif cp["phase"] == assistant.PHASE:
+            tier = cp["tier"]
+            comments = self.jobs.inspect(job)["config"]["options"]["comments"]
+            payload = assistant.payload(source, settings, comments)
+            payload["messages"] = cp["repair_base"] + cp["history"]
+            if (
+                len(canonical(payload["messages"]).encode())
+                >= settings.generation.repair_context_bytes
+            ):
+                self._assist_end(job, source, cp, "context_limit")
+                return
         else:
             tier = cp["tier"]
             payload = reviews.payload(
@@ -612,7 +650,7 @@ class GenerationService:
                     ticket,
                 )
         else:
-            if cp["phase"] in ("repair", assembly_fix.PHASE):
+            if cp["phase"] in ("repair", assembly_fix.PHASE, assistant.PHASE):
                 cp["history"].append(
                     dict(
                         role="user",
@@ -634,6 +672,8 @@ class GenerationService:
                 self._end_assembly_fix(ticket.job_id, source, cp, "context_limit", ticket)
             elif cp["phase"] == "repair":
                 self._next_round(ticket.job_id, source, cp, ticket)
+            elif cp["phase"] == assistant.PHASE:
+                self._assist_end(ticket.job_id, source, cp, "context_limit", ticket)
             else:
                 self._hold(
                     ticket.job_id,
@@ -662,6 +702,11 @@ class GenerationService:
             problem = explain(ticket.payload["schema"], body)
             if problem:
                 raise ValueError(problem)
+            if cp["phase"] == assistant.PHASE and body["action"] == "finish":
+                comments = self.jobs.inspect(ticket.job_id)["config"]["options"]["comments"]
+                problem = assistant.finish_problem(body, comments)
+                if problem:
+                    raise ValueError(problem)
             if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
                 plan = self._plan(ticket.job_id, ticket.trajectory_id)
                 assembled, broken = draft_assembly.assemble(source, body, plan, settings)
@@ -701,6 +746,12 @@ class GenerationService:
         cp["errors"] = 0
         if cp["phase"] == assembly_fix.PHASE:
             self._assembly_fix_step(ticket, source, cp, body)
+            return
+        if cp["phase"] == assistant.PHASE:
+            if body["action"] == "finish":
+                self._assist_finish(ticket, source, cp, body)
+            else:
+                self._repair_action(ticket, source, cp, body)
             return
         if ticket.payload["operation"] == draft_assembly.DRAFT:
             cp["draft"] = body["draft"]
@@ -783,6 +834,29 @@ class GenerationService:
         else:
             cp["phase"] = "done"
             self._save(ticket.job_id, source, cp, ticket=ticket, outcome=result)
+
+    def _assist_finish(self, ticket, source, cp, body):
+        addressed = assistant.apply(self.comments, body)
+        cp["phase"] = "done"
+        self._save(ticket.job_id, source, cp, ticket=ticket, outcome="pass")
+        answered = len(body["comments"])
+        self.jobs.progress(
+            ticket.job_id,
+            f"Assistant finished: trajectory={label(source.id)} addressed={addressed}"
+            f" replied={answered - addressed}; addressed comments await your review",
+            "success",
+        )
+
+    def _assist_end(self, job, source, cp, reason, ticket=None):
+        """End an assistant session without answering; edits so far are kept."""
+        cp["phase"] = "done"
+        self._save(job, source, cp, ticket=ticket, outcome="fail")
+        self.jobs.progress(
+            job,
+            f"Assistant stopped ({label(reason)}): trajectory={label(source.id)};"
+            " edits so far are kept and the comments stay open.",
+            "warning",
+        )
 
     def _repair_action(self, ticket, source, cp, body):
         settings = self.settings_for(ticket.job_id)

@@ -34,6 +34,15 @@ Read one focused topic at a time: `dependencies`, `tools-chat`, `generation`,
    file names and authenticated REST paths, never binary data. Downloads expire
    after 24 hours. Source identities, review evidence and settings remain durable.
 
+Reviewer comments: `list_graph_comments` lists open comments on trajectories,
+events and windows; `read_graph` returns them as `open_comments`. Fix the
+problem, save, then `address_graph_comment` with a short note; the user reviews
+it and resolves it or sends it back open. Agents never resolve. Read each
+comment's `replies` (a reopened comment's latest reply says what is still
+wrong); ask with `reply_graph_comment` instead of addressing when unsure.
+`list_graphs` accepts `{"comments":"open"}` (also `"addressed"`, `"unresolved"`). Comments are outside the
+source and need no revision.
+
 Do not equate structural/schema correctness, model verdicts, training value and
 human acceptance. Report checks actually performed and unresolved findings.
 The prepared scale, local-LLM and training commands in `docs/ACCEPTANCE.md` are

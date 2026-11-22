@@ -21,6 +21,51 @@ NOTE = (
 )
 
 
+def edit_actions():
+    """Spot-edit actions shared by repair and assistant sessions: patch, inspect,
+    patch_window and remove_event, in that order."""
+    return [
+        dict(
+            type="object",
+            properties={
+                "action": {"const": "patch"},
+                "event_id": {"type": "string"},
+                "expected_source_hash": {"type": "string"},
+                "patch": {"type": "object"},
+            },
+            required=["action", "event_id", "expected_source_hash", "patch"],
+            additionalProperties=False,
+        ),
+        dict(
+            type="object",
+            properties={"action": {"const": "inspect"}, "event_id": {"type": "string"}},
+            required=["action", "event_id"],
+            additionalProperties=False,
+        ),
+        dict(
+            type="object",
+            properties={
+                "action": {"const": "patch_window"},
+                "window_id": {"type": "string"},
+                "expected_source_hash": {"type": "string"},
+                "patch": {"type": "object"},
+            },
+            required=["action", "window_id", "expected_source_hash", "patch"],
+            additionalProperties=False,
+        ),
+        dict(
+            type="object",
+            properties={
+                "action": {"const": "remove_event"},
+                "event_id": {"type": "string"},
+                "expected_source_hash": {"type": "string"},
+            },
+            required=["action", "event_id", "expected_source_hash"],
+            additionalProperties=False,
+        ),
+    ]
+
+
 def actions():
     """Extra repair actions, beside inspect, patch, patch_window, remove_event and verdict."""
     return [
