@@ -1,6 +1,7 @@
 """Model prompts exclude storage snapshots and repeated evidence bodies."""
 
 import json
+import re
 
 import httpx
 import pytest
@@ -24,10 +25,11 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
     source, plan = initial(gen)
     assert len(json.dumps(source.metadata)) > 60000
     payload = draft_assembly.payload(dict(errors=0), plan, gen.store.settings().settings)
-    body = json.loads(payload["messages"][1]["content"])
-    assert "source" not in body and "metadata" not in body
-    assert body["proposal"] == plan["proposal"]
-    assert "sampling_provenance" in body["proposal"]
+    task = payload["messages"][1]["content"]
+    block = re.search(r"Sampled proposal:\n```json\n(.*?)\n```", task, re.S).group(1)
+    assert json.loads(block) == plan["proposal"]
+    assert "sampling_provenance" in plan["proposal"]
+    assert source.id not in task and '"metadata"' not in task
     wire, messages = response_contract(payload)
     endpoint = gen.settings_for(gen.jobs.listing()[0]["id"]).endpoints["g"]
     # The prior strict defaults: a 65k window, 8k output and 1 byte per token.

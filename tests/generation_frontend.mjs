@@ -48,7 +48,7 @@ try {
   await page.waitForFunction(()=>[...graphStudio.jobs.values()].filter(j=>j.kind==='bulk'&&j.state==='completed').length>=2);
   const duplicateReview = (await get(`/trajectories/${duplicateId}`)).source.metadata;
   assert.equal(duplicateReview.stage,2);
-  assert.equal(duplicateReview.evaluations.at(-1).prompt_version,'native-review/1');
+  assert.equal(duplicateReview.evaluations.at(-1).prompt_version,'native-review/2');
   assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source,reviewed.source);
   // More → Export downloads the open trajectory's source as JSON.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);

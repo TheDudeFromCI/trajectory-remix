@@ -1,7 +1,7 @@
 """The packaged generation prompts (graph/draft_assembly.yaml), read once.
 
-Projects keep the actor, Draft and Assembly prompts in settings.prompts.
-Native review uses its packaged guide directly.
+Projects keep the agent (actor), authoring, Draft and Assembly prompts in
+settings.prompts. endpoint_prompts lays them out for each endpoint.
 """
 
 from functools import cache
@@ -21,16 +21,18 @@ def actor():
     return packaged()["actor_instruction"]
 
 
+def authoring():
+    return packaged()["authoring_instruction"]
+
+
 def draft():
-    prompts = packaged()
-    return prompts["trajectory_guide"] + "\n\n" + prompts["draft_instruction"]
+    return packaged()["draft_instruction"]
 
 
 def assembly():
-    prompts = packaged()
-    return prompts["trajectory_guide"] + "\n\n" + prompts["assemble_instruction"]
+    return packaged()["assemble_instruction"]
 
 
-def review():
-    prompts = packaged()
-    return prompts["trajectory_guide"] + "\n\n" + prompts["review_instruction"]
+def retired_actors():
+    """Earlier shipped agent prompts, newest first."""
+    return tuple(packaged()["retired"]["actor"])

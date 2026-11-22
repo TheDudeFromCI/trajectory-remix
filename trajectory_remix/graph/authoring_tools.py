@@ -153,18 +153,24 @@ TOOLS = {
 READ_ONLY = frozenset({"view_event", "view_window", "view_graph", "view_diagnostics"})
 
 
+def _provider_tool(name, parameters=None):
+    return dict(
+        type="function",
+        function=dict(
+            name=name,
+            description=TOOLS[name][1],
+            parameters=parameters or TOOLS[name][0].model_json_schema(),
+        ),
+    )
+
+
 def provider_tools(*, editable, signoff_parameters):
     names = TOOLS if editable else (*sorted(READ_ONLY), "signoff")
     return [
-        dict(
-            type="function",
-            function=dict(
-                name=name,
-                description=TOOLS[name][1],
-                parameters=signoff_parameters
-                if name == "signoff"
-                else TOOLS[name][0].model_json_schema(),
-            ),
-        )
-        for name in names
+        _provider_tool(name, signoff_parameters if name == "signoff" else None) for name in names
     ]
+
+
+def editing_tools():
+    """Every edit and read tool, without signoff, for sessions that end another way."""
+    return [_provider_tool(name) for name in TOOLS if name != "signoff"]

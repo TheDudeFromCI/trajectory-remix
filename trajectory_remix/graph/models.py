@@ -388,8 +388,18 @@ class GenerationPrompts(DTO):
     """The project's generation prompts; Load default restores the packaged ones."""
 
     actor: str = Field(default_factory=prompt_defaults.actor, min_length=1)
+    authoring: str = Field(default_factory=prompt_defaults.authoring, min_length=1)
     draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
     assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
+
+    @field_validator("actor")
+    @classmethod
+    def upgrade_packaged_actor(cls, value):
+        # A shipped agent prompt, possibly with a persona appended, gets the current one.
+        for retired in prompt_defaults.retired_actors():
+            if value.startswith(retired):
+                return prompt_defaults.actor() + value[len(retired) :]
+        return value
 
     @field_validator("draft", "assembly")
     @classmethod
@@ -399,6 +409,7 @@ class GenerationPrompts(DTO):
             "draft": {
                 "3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a",
                 "379f799bc52e67227994ec99bd671a194b2cabd11558d584e897551f2b0bd250",
+                "81fc1038e09cb959a01f19554ee649fe5cd4b37759fd03f10c953b2253a3a424",
             },
             "assembly": {
                 "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b",
@@ -406,6 +417,7 @@ class GenerationPrompts(DTO):
                 "9cdbe536af2c43734bb288e2d14ced358643bde21a3106b8a8ba9eae81ed6d87",
                 "5503627261f2d0c6e7541468d9150a6e3562e6cccd67fb3df9638001ab724058",
                 "f5bda2ec207ce5c99a8e25205f127ab9a31c25bf64234e343d776e939dfee6c3",
+                "063330936af9ac7e59136dc4c5cb9c26cfeda60c21d98c322c21bd04a5a8fa46",
             },
         }
         if digest(value) in previous[info.field_name]:

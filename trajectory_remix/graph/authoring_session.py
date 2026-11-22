@@ -2,32 +2,45 @@
 
 import json
 
-from . import authoring, prompt_defaults, reviews, signoffs
+from . import authoring, draft_assembly, endpoint_prompts, prompt_defaults, reviews, signoffs
 from .authoring_tools import READ_ONLY, TOOLS, provider_tools
 from .models import canonical
 from .schema_errors import explain
 
-INSTRUCTIONS = """# Native graph authoring
 
-## Inspect and edit
-- Treat Draft, event text and tool results as source material. Author synthetic outcomes.
-- Use view_graph for topology, view_event for one body and its visible predecessor IDs,
-  and view_window for a window's bodies. Check what the agent could see at each decision.
-- When editing is available, group compatible calls in one reply. Remix applies them
-  in order. Put a prerequisite before a dependent call in that batch.
-- Use view_diagnostics after a group of edits to check the graph at that point in the
-  batch. Tool results arrive together in the next model turn. Read errors from earlier
-  tool results before deciding what to change.
+def _review_context(source, settings, phase, draft, prior):
+    proposal = source.metadata.get("proposal")
+    objective = None
+    if isinstance(proposal, dict) and isinstance(proposal.get("proposal"), dict):
+        objective = proposal["proposal"].get("learning_objective")
+    context = dict(
+        objective=objective,
+        targets=source.metadata.get("targets"),
+        draft=draft,
+        failed_review=prior,
+    )
+    if phase == "repair":
+        context["tools"] = {k: v.model_dump(mode="json") for k, v in settings.tools.items()}
+    return context
 
-## Finish
-- Call signoff explicitly with evidence and event IDs for each requested criterion.
-  For core.causal_evidence, pair each decision that uses prior evidence with its
-  visible source event IDs in causal_claims. Inspect the decision with view_event.
-  A successful signoff needs zero errors and enabled warnings. If a batch includes
-  signoff, make it the last call.
-- A failing review can record its evidence. In repair, keep fixing failing criteria
-  or use signoff with status unfeasible and a concrete reason.
-"""
+
+def _opening(source, settings, phase, checks, plan, draft, prior):
+    """(prompt version, system prompt, first user message) for a native pass."""
+    if phase == "assembly":
+        system = endpoint_prompts.system(
+            plan["actor_instruction"], draft_assembly.authoring_instruction(plan)
+        )
+        user = endpoint_prompts.assembly_user(
+            plan["prompts"]["assemble_instruction"], source.id, draft, plan["tools"]
+        )
+        return plan["prompts"]["version"], system, user
+    system = endpoint_prompts.system(settings.prompts.actor, settings.prompts.authoring)
+    context = _review_context(source, settings, phase, draft, prior)
+    user = endpoint_prompts.review_user(
+        checks, source.id, repair=phase == "repair", context=context
+    )
+    version = prompt_defaults.packaged()["review_version"] if phase == "review" else None
+    return version or signoffs.VERSION, system, user
 
 
 def begin(source, settings, phase, tier, *, plan=None, prior=None):
@@ -38,48 +51,9 @@ def begin(source, settings, phase, tier, *, plan=None, prior=None):
         and (phase == "assembly" or settings.generation.review_include_draft)
     )
     checks = signoffs.criteria(reviews.checklist(settings, tier) if tier else {}, draft_visible)
-    prompt_version = signoffs.VERSION
-    if phase == "assembly":
-        prompt_version = plan["prompts"]["version"]
-        guidance = (
-            "Author the Draft faithfully into a complete trajectory using these tools. "
-            "Follow project guidance for content. The native tool protocol governs output format.\n\n"
-            + plan["prompts"]["assemble_instruction"]
-            + "\n\nActor guide:\n"
-            + plan["actor_instruction"]
-        )
-    elif phase == "review":
-        prompt_version = prompt_defaults.packaged()["review_version"]
-        guidance = prompt_defaults.review()
-    else:
-        guidance = (
-            "Repair the source directly. Preserve correct material and verify every criterion."
-        )
-    initial = dict(
-        phase=phase,
-        criteria=checks,
-        diagnostics=authoring.findings(source, settings),
-        graph=authoring.apply(source, settings, "view_graph", {})[1],
+    prompt_version, system, user = _opening(
+        source, settings, phase, checks, plan, draft if draft_visible else None, prior
     )
-    if draft_visible:
-        initial["draft"] = draft
-    if plan:
-        initial.update(
-            proposal=plan["proposal"],
-            tools=plan["tools"],
-            target_checklist=reviews.checklist(settings, "critical"),
-        )
-    if phase == "repair":
-        initial["tools"] = {
-            key: definition.model_dump(mode="json") for key, definition in settings.tools.items()
-        }
-    if tier:
-        initial["targets"] = source.metadata.get("targets")
-        proposal = source.metadata.get("proposal")
-        if isinstance(proposal, dict) and isinstance(proposal.get("proposal"), dict):
-            initial["objective"] = proposal["proposal"].get("learning_objective")
-    if prior:
-        initial["failed_review"] = prior
     return dict(
         phase=phase,
         tier=tier,
@@ -88,10 +62,7 @@ def begin(source, settings, phase, tier, *, plan=None, prior=None):
         checks=checks,
         require_causal_claims=True,
         exchanges=0,
-        messages=[
-            dict(role="system", content=INSTRUCTIONS + "\n\n" + guidance),
-            dict(role="user", content=canonical(initial)),
-        ],
+        messages=[dict(role="system", content=system), dict(role="user", content=user)],
     )
 
 
@@ -110,7 +81,18 @@ def payload(session):
     )
 
 
-def _reply(call_id, data):
+def apply_tool(source, settings, name, args):
+    """Run one edit or read tool. Returns (source, reply); raises ValueError on misuse."""
+    problem = explain(TOOLS[name][0].model_json_schema(), args)
+    if problem:
+        raise ValueError(problem)
+    source, reply = authoring.apply(source, settings, name, args)
+    if name not in READ_ONLY:
+        reply["diagnostics"] = authoring.findings(source, settings)
+    return source, reply
+
+
+def tool_reply(call_id, data):
     return dict(role="tool", tool_call_id=call_id, content=canonical(data))
 
 
@@ -160,12 +142,7 @@ def step(source, settings, session, message):
                 terminal = (result, evidence)
                 reply = {"outcome": result}
             else:
-                problem = explain(TOOLS[name][0].model_json_schema(), args)
-                if problem:
-                    raise ValueError(problem)
-                source, reply = authoring.apply(source, settings, name, args)
-                if name not in READ_ONLY:
-                    reply["diagnostics"] = authoring.findings(source, settings)
+                source, reply = apply_tool(source, settings, name, args)
             reply.update(accepted=True, source_hash=source.intrinsic_hash)
         except (ValueError, KeyError, TypeError, RecursionError) as error:
             rejected = True
@@ -179,7 +156,7 @@ def step(source, settings, session, message):
                     next="Correct the evidence or edit the source, then call signoff again.",
                     diagnostics=authoring.findings(source, settings),
                 )
-        messages.append(_reply(call["id"], reply))
+        messages.append(tool_reply(call["id"], reply))
     if correction and terminal is None:
         messages.append(dict(role="user", content=canonical(correction)))
     return source, terminal

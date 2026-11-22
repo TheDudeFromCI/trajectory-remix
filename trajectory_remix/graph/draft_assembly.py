@@ -8,7 +8,7 @@ The prompts come from the project settings (settings.prompts).
 
 from copy import deepcopy
 
-from . import compact_spec, prompt_defaults, reviews
+from . import compact_spec, endpoint_prompts, prompt_defaults, reviews
 from .models import GraphSource, canonical, digest
 from .validation import diagnose
 
@@ -32,6 +32,7 @@ def prompts(settings):
         draft_instruction=chosen["draft"],
         assemble_instruction=chosen["assembly"],
         actor_instruction=chosen["actor"],
+        authoring_instruction=chosen["authoring"],
     )
 
 
@@ -56,7 +57,23 @@ def plan(proposal, settings):
     )
 
 
-def _messages(plan, settings, instruction, extra):
+def authoring_instruction(plan):
+    """The run's frozen authoring prompt; runs frozen before it existed use the default."""
+    return plan["prompts"].get("authoring_instruction") or prompt_defaults.authoring()
+
+
+def _draft_messages(plan, correction):
+    user = endpoint_prompts.draft_user(
+        plan["prompts"]["draft_instruction"], plan["proposal"], plan["tools"], correction
+    )
+    return [
+        dict(role="system", content=endpoint_prompts.system(plan["actor_instruction"])),
+        dict(role="user", content=user),
+    ]
+
+
+def _legacy_messages(plan, settings, instruction, extra):
+    """The JSON-spec Assembly of runs frozen on the first Draft and Assembly driver."""
     system = f"{instruction}\n\nActor guide:\n{plan['actor_instruction']}"
     user = dict(
         proposal=plan["proposal"],
@@ -76,15 +93,13 @@ def payload(cp, plan, settings):
             operation=DRAFT,
             prompt_version=version,
             schema=DRAFT_SCHEMA,
-            messages=_messages(
-                plan, settings, plan["prompts"]["draft_instruction"], dict(correction=correction)
-            ),
+            messages=_draft_messages(plan, correction),
         )
     return dict(
         operation=ASSEMBLE,
         prompt_version=version,
         schema=compact_spec.schema(list(plan["tools"])),
-        messages=_messages(
+        messages=_legacy_messages(
             plan,
             settings,
             plan["prompts"]["assemble_instruction"],

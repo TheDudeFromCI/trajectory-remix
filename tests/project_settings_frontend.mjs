@@ -71,10 +71,10 @@ enter(byLabel(generation,'New criterion ID'),'quality');
 byLabel(generation,'Edit criterion quality').click();enter(byLabel(generation,'criterion quality'),'Avoid unsupported conclusions');
 const crit2=byLabel(generation,'criterion quality is core');crit2.checked=false;crit2.dispatchEvent(new window.Event('change'));
 assert.equal(generation.querySelector('[aria-label="Generation method"]'),null);
-enter(byLabel(generation,'Agent prompt'),'Be Kidra.');enter(byLabel(generation,'Assembly instructions'),'Build it.');
+enter(byLabel(generation,'Agent prompt'),'Be Kidra.');enter(byLabel(generation,'Authoring prompt'),'Use tools.');enter(byLabel(generation,'Assembly instructions'),'Build it.');
 enter(byLabel(generation,'Maximum exchanges per pass'),'4');
 const includeDraft=byLabel(generation,'Include Draft in review and repair');assert.equal(includeDraft.checked,false);includeDraft.click();
-assert.equal(draft.prompts.actor,'Be Kidra.');assert.equal(draft.prompts.assembly,'Build it.');assert.equal(draft.generation.phase_barrier,undefined);assert.equal(draft.generation.max_authoring_exchanges,4);assert.equal(draft.generation.review_include_draft,true);
+assert.equal(draft.prompts.actor,'Be Kidra.');assert.equal(draft.prompts.authoring,'Use tools.');assert.equal(draft.prompts.assembly,'Build it.');assert.equal(draft.generation.phase_barrier,undefined);assert.equal(draft.generation.max_authoring_exchanges,4);assert.equal(draft.generation.review_include_draft,true);
 assert.equal(draft.generation.repair,false);assert.equal(draft.review_checklists.critical.quality.text,'Avoid unsupported conclusions');
 assert.equal(draft.endpoints['local-model'].model,'tiny-local');
 btn(root,'Remove endpoint local-model').click();
@@ -124,8 +124,11 @@ window.happyDOM.abort();
 // Review pack export/import
 {
   const {buildPack, parsePack} = await import('../trajectory_remix/static/review-pack.js');
-  const src = {prompts:{actor:'A',draft:'D',assembly:'S'},review_checklists:{core:{evidence:{text:'E',allow_not_applicable:true}},critical:{deep:{text:'X'}}}};
+  const src = {prompts:{actor:'A',authoring:'T',draft:'D',assembly:'S'},review_checklists:{core:{evidence:{text:'E',allow_not_applicable:true}},critical:{deep:{text:'X'}}}};
   const pack = buildPack(src);
+  assert.equal(pack.prompts.authoring,'T');
+  const older = structuredClone(pack); delete older.prompts.authoring;  // Exported before the authoring prompt.
+  assert.deepEqual(parsePack(JSON.stringify(older)).prompts,{actor:'A',draft:'D',assembly:'S'});
   assert.deepEqual(pack.review_checklists.critical.deep,{text:'X',allow_not_applicable:false});
   assert.deepEqual(parsePack(JSON.stringify(pack)),{prompts:pack.prompts,review_checklists:pack.review_checklists});
   assert.throws(()=>parsePack('nope'),/not valid JSON/);

@@ -20,7 +20,7 @@ Paths below are relative to `trajectory_remix/`.
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
 | Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
-| Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; only a person resolves (agents mark comments addressed); Send to agent freezes open comments, needs the Assistant role and never changes the stage |
+| Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `graph/assistant_memory.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; only a person resolves (agents mark comments addressed); Send to agent freezes open comments, needs the Assistant role, answers through the native `reply` tool, continues the last finished conversation and never changes the stage |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -119,7 +119,8 @@ suite is evidence of covered behavior, not proof of exhaustive correctness.
 
 Coordinator defaults: `python -m pytest -q tests/test_coordinator_defaults.py` checks the
 default checklist keys, that saved checklists are not rewritten, that Draft and Assembly
-receive the agent prompt verbatim, and the derived
+receive the agent prompt verbatim (`tests/test_endpoint_prompts.py` covers every endpoint's
+message layout and the upgrade of earlier shipped prompts), and the derived
 `strategic_investment` label. Changing a default prompt or checklist changes the checklist
 hash and marks existing sign-offs stale, so keep existing keys and update
 [PROJECT-SETTINGS](PROJECT-SETTINGS.md) and [GRAPH-GENERATION](GRAPH-GENERATION.md) together.

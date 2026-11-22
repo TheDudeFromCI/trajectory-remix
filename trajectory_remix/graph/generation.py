@@ -9,6 +9,7 @@ import jsonschema
 from . import (
     assembly_fix,
     assistant,
+    assistant_memory,
     authoring_session,
     draft_assembly,
     phase_barrier,
@@ -122,7 +123,11 @@ class GenerationService:
         frozen = assistant.frozen(comments.for_trajectory(trajectory, "open"))
         if not frozen:
             raise ValueError("This trajectory has no open comments to send")
-        options = dict(settings=settings.model_dump(mode="json"), comments=frozen)
+        options = dict(
+            settings=settings.model_dump(mode="json"),
+            comments=frozen,
+            conversation=assistant_memory.load(self.store, trajectory),
+        )
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             record = self.store._read(db, trajectory)
@@ -149,17 +154,21 @@ class GenerationService:
         )
 
     def _session_base(self, job, source, settings, cp):
-        """Seed a continuing repair or assistant session on the checkpoint."""
+        """Seed a continuing legacy repair session on the checkpoint."""
         if cp["phase"] == "repair" and self._driver(job) != DRIVER:
             base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
-        elif cp["phase"] == assistant.PHASE:
-            comments = job["config"]["options"]["comments"]
-            payload = assistant.payload(source, settings, comments)
-            base = payload["messages"]
-            cp["prompt_version"] = payload["prompt_version"]
-        else:
-            return
-        cp.update(history=[], repair_base=base)
+            cp.update(history=[], repair_base=base)
+
+    @staticmethod
+    def _assist_session(job, source, settings):
+        """Continue the kept conversation when it fits the budget, else start afresh."""
+        options = job["config"]["options"]
+        prior = options.get("conversation")
+        session = assistant.begin(source, settings, options["comments"], prior)
+        budget = settings.generation.repair_context_bytes
+        if prior and len(canonical(session["messages"]).encode()) >= budget:
+            session = assistant.begin(source, settings, options["comments"])
+        return session
 
     def _owners(self, job):
         with self.store.connect() as db:
@@ -421,10 +430,11 @@ class GenerationService:
             tier = cp["tier"]
         elif cp["phase"] == assistant.PHASE:
             tier = cp["tier"]
-            comments = j["config"]["options"]["comments"]
-            payload = assistant.payload(source, settings, comments)
-            payload["messages"] = cp["repair_base"] + cp["history"]
-            payload["prompt_version"] = cp.get("prompt_version", assistant.LEGACY_VERSION)
+            if "authoring_session" not in cp:  # A JSON-action checkpoint restarts natively.
+                for key in ("repair_base", "history"):
+                    cp.pop(key, None)
+                cp["authoring_session"] = self._assist_session(j, source, settings)
+            payload = assistant.payload(cp["authoring_session"])
             if (
                 len(canonical(payload["messages"]).encode())
                 >= settings.generation.repair_context_bytes
@@ -692,7 +702,7 @@ class GenerationService:
                     ticket,
                 )
         else:
-            if cp["phase"] in ("repair", assembly_fix.PHASE, assistant.PHASE):
+            if cp["phase"] in ("repair", assembly_fix.PHASE):
                 cp["history"].append(
                     dict(
                         role="user",
@@ -709,6 +719,9 @@ class GenerationService:
         if record.revision != ticket.payload["source_revision"]:
             raise Fenced("Source changed while request was in progress")
         settings = self.settings_for(ticket.job_id)
+        if cp["phase"] == assistant.PHASE:
+            self._consume_assist(ticket, source, cp, complete)
+            return
         if "tools" in ticket.payload:
             self._consume_native(ticket, record, settings, source, cp, complete)
             return
@@ -717,8 +730,6 @@ class GenerationService:
                 self._end_assembly_fix(ticket.job_id, source, cp, "context_limit", ticket)
             elif cp["phase"] == "repair":
                 self._next_round(ticket.job_id, source, cp, ticket)
-            elif cp["phase"] == assistant.PHASE:
-                self._assist_end(ticket.job_id, source, cp, "context_limit", ticket)
             else:
                 self._hold(
                     ticket.job_id,
@@ -747,11 +758,6 @@ class GenerationService:
             problem = explain(ticket.payload["schema"], body)
             if problem:
                 raise ValueError(problem)
-            if cp["phase"] == assistant.PHASE and body["action"] == "finish":
-                comments = self.jobs.inspect(ticket.job_id)["config"]["options"]["comments"]
-                problem = assistant.finish_problem(body, comments)
-                if problem:
-                    raise ValueError(problem)
             if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
                 plan = self._plan(ticket.job_id, ticket.trajectory_id)
                 assembled, broken = draft_assembly.assemble(source, body, plan, settings)
@@ -791,12 +797,6 @@ class GenerationService:
         cp["errors"] = 0
         if cp["phase"] == assembly_fix.PHASE:
             self._assembly_fix_step(ticket, source, cp, body)
-            return
-        if cp["phase"] == assistant.PHASE:
-            if body["action"] == "finish":
-                self._assist_finish(ticket, source, cp, body)
-            else:
-                self._repair_action(ticket, source, cp, body)
             return
         if ticket.payload["operation"] == draft_assembly.DRAFT:
             cp["draft"] = body["draft"]
@@ -1016,11 +1016,51 @@ class GenerationService:
             cp["phase"] = "done"
             self._save(ticket.job_id, source, cp, ticket=ticket, outcome=result)
 
-    def _assist_finish(self, ticket, source, cp, body):
-        addressed = assistant.apply(self.comments, body)
+    def _consume_assist(self, ticket, source, cp, complete):
+        """One native Assistant exchange: edits, replies, and the end of the session."""
+        settings = self.settings_for(ticket.job_id)
+        session = cp.get("authoring_session")
+        if session is None or "tools" not in ticket.payload:  # A JSON-action reply.
+            for key in ("authoring_session", "repair_base", "history"):
+                cp.pop(key, None)
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+            return
+        if complete.get("context_limit"):
+            self._assist_end(ticket.job_id, source, cp, "context_limit", ticket)
+            return
+        try:
+            if complete.get("invalid_output"):
+                raise ValueError("The provider returned an incomplete native reply")
+            message = assistant_message(complete.get("message"))
+        except ValueError:
+            session["exchanges"] += 1
+            cp["errors"] += 1
+            if cp["errors"] > settings.generation.format_retries:
+                self._assist_end(ticket.job_id, source, cp, "invalid_output", ticket)
+                return
+            session["messages"].append(
+                dict(
+                    role="user", content="The prior reply was incomplete. Return native tool calls."
+                )
+            )
+            finished = False
+        else:
+            cp["errors"] = 0
+            source, finished = assistant.step(source, settings, session, message)
+        if finished:
+            self._assist_finish(ticket, source, cp)
+        elif session["exchanges"] >= settings.generation.max_authoring_exchanges:
+            self._assist_end(ticket.job_id, source, cp, "exchange_limit", ticket)
+        else:
+            self._save(ticket.job_id, source, cp, ticket=ticket)
+
+    def _assist_finish(self, ticket, source, cp):
+        session = cp.pop("authoring_session")
+        addressed = assistant.apply(self.comments, session["replies"])
+        assistant_memory.save(self.store, source.id, session["messages"])
         cp["phase"] = "done"
         self._save(ticket.job_id, source, cp, ticket=ticket, outcome="pass")
-        answered = len(body["comments"])
+        answered = len(session["replies"])
         self.jobs.progress(
             ticket.job_id,
             f"Assistant finished: trajectory={label(source.id)} addressed={addressed}"
@@ -1030,6 +1070,9 @@ class GenerationService:
 
     def _assist_end(self, job, source, cp, reason, ticket=None):
         """End an assistant session without answering; edits so far are kept."""
+        if reason == "context_limit":  # Too long to continue: the next send starts afresh.
+            assistant_memory.forget(self.store, source.id)
+        cp.pop("authoring_session", None)
         cp["phase"] = "done"
         self._save(job, source, cp, ticket=ticket, outcome="fail")
         self.jobs.progress(

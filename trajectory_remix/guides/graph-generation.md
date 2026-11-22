@@ -31,6 +31,6 @@ or benchmarks without task authorization.
 
 Generation is Draft → Assembly → Fast Review → Critical Review. Draft writes prose
 working notes. Assembly edits the graph with native tools and signs off after every
-error and enabled warning is resolved. The prompts (agent prompt, Draft and Assembly
-instructions) are project settings (`settings.prompts`) and freeze with the run;
+error and enabled warning is resolved. The prompts (agent prompt, authoring prompt, Draft and
+Assembly instructions) are project settings (`settings.prompts`) and freeze with the run;
 `instructions` takes no keys. See `docs/GRAPH-GENERATION.md`.

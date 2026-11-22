@@ -24,8 +24,9 @@ async def test_runs_use_and_freeze_the_project_prompts(tmp_path):
     job = gen.start([{"seed": 137}], {})
     edit_prompts(gen, actor="Edited after the run started.")
     await finish(gen, job)
-    system = fake.calls[0].payload["messages"][0]["content"]
-    assert system.startswith("Write the notes.") and "Be Kidra, the persona." in system
+    system, task = fake.calls[0].payload["messages"]
+    assert system["content"] == "Be Kidra, the persona."
+    assert task["content"].startswith("Write the notes.\n\nSampled proposal:\n```json\n")
     version = fake.calls[0].payload["prompt_version"]
     assert version.startswith(prompt_defaults.packaged()["version"] + "+")
 
@@ -37,36 +38,40 @@ def test_defaults_come_from_the_packaged_file():
 
 
 @pytest.mark.asyncio
-async def test_draft_and_assembly_receive_the_parallel_trajectory_guide(tmp_path):
-    gen, fake = service(tmp_path, fast=False)
-    await finish(gen, gen.start([{"seed": 137}], {}))
-    assert [ticket.payload["operation"] for ticket in fake.calls] == ["draft", "assembly"]
-    guide = prompt_defaults.packaged()["trajectory_guide"]
-    assert "A final comparison depends on" in guide
-    for ticket in fake.calls:
-        assert ticket.payload["messages"][0]["content"].count(guide) == 1
-
-
-@pytest.mark.asyncio
-async def test_both_review_tiers_receive_the_review_guide_and_initial_graph(tmp_path):
+async def test_every_system_prompt_opens_with_the_agent_prompt(tmp_path):
     gen, fake = service(tmp_path)
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
+    prompts = gen.store.settings().settings.prompts
+    assert "# Ticks" in prompts.actor and "Parallel subagents" in prompts.actor
+    by_operation = {ticket.payload["operation"]: ticket.payload for ticket in fake.calls}
+    assert by_operation["draft"]["messages"][0]["content"] == prompts.actor
+    for payload in (ticket.payload for ticket in fake.calls if "tools" in ticket.payload):
+        assert payload["messages"][0]["content"] == prompts.actor + "\n\n" + prompts.authoring
+
+
+@pytest.mark.asyncio
+async def test_review_tiers_get_the_checklist_and_trajectory_id(tmp_path):
+    gen, fake = service(tmp_path)
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+    ident = gen.jobs.attempts(job)[0]["trajectory_id"]
 
     payloads = [ticket.payload for ticket in fake.calls if ticket.payload["operation"] == "review"]
     assert [payload["tier"] for payload in payloads] == ["fast", "critical"]
     defaults = prompt_defaults.packaged()
     for payload in payloads:
-        system, initial = payload["messages"]
-        assert system["content"].count(defaults["trajectory_guide"]) == 1
-        assert defaults["review_instruction"] in system["content"]
-        start = json.loads(initial["content"])
-        assert start["graph"]["events"] and start["diagnostics"] == []
-        assert "core.causal_evidence" in start["criteria"] and "draft" not in start
+        _, task = payload["messages"]
+        assert task["content"].startswith("Please review the trajectory")
+        assert "Review Checklist:\n- `completeness`:" in task["content"]
+        assert "- `core.causal_evidence`:" in task["content"]
+        assert task["content"].endswith(f"Trajectory Id: `{ident}`")
+        assert "Draft:" not in task["content"]
         assert payload["prompt_version"] == defaults["review_version"]
+    assert "critical.training_value" in payloads[1]["messages"][1]["content"]
+    assert "critical.training_value" not in payloads[0]["messages"][1]["content"]
 
-    attempt = gen.jobs.attempts(job)[0]
-    evaluations = gen.store.read(attempt["trajectory_id"]).source.metadata["evaluations"]
+    evaluations = gen.store.read(ident).source.metadata["evaluations"]
     assert [item["prompt_version"] for item in evaluations] == [defaults["review_version"]] * 2
 
 

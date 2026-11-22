@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+import re
 from uuid import uuid4
 
 import pytest
@@ -182,7 +183,25 @@ def tool_message(*calls):
     )
 
 
-def native_report(payload, event_ids, status="pass"):
+def viewed_graph(payload):
+    """The latest view_graph result in a native conversation, or None before one."""
+    names, graph = {}, None
+    for message in payload["messages"]:
+        for call in message.get("tool_calls") or []:
+            names[call["id"]] = call["function"]["name"]
+        if message["role"] == "tool" and names.get(message["tool_call_id"]) == "view_graph":
+            graph = json.loads(message["content"])
+    return graph
+
+
+def offered_tools(payload):
+    """The project tool catalogue a Draft or Assembly user message lists."""
+    text = payload["messages"][1]["content"]
+    block = re.search(r"Project tools:\n```json\n(.*?)\n```", text, re.S)
+    return json.loads(block.group(1))
+
+
+def native_report(payload, event_ids, status="pass", graph=None):
     parameters = next(
         t["function"]["parameters"] for t in payload["tools"] if t["function"]["name"] == "signoff"
     )
@@ -192,7 +211,7 @@ def native_report(payload, event_ids, status="pass"):
         for key in criteria
     }
     if "causal_claims" in criteria.get("core.causal_evidence", {}).get("properties", {}):
-        graph = json.loads(payload["messages"][1]["content"])["graph"]["events"]
+        graph = (graph or viewed_graph(payload) or {}).get("events", {})
         items["core.causal_evidence"]["causal_claims"] = (
             [dict(consumer_event_id="note", evidence_event_ids=["got"])]
             if "note" in graph and "got" in graph
@@ -202,8 +221,7 @@ def native_report(payload, event_ids, status="pass"):
 
 
 def native_assembly(payload, ident, body=None, *, signoff=True):
-    data = json.loads(payload["messages"][1]["content"])
-    catalogue = data["tools"]
+    catalogue = offered_tools(payload)
     body = body or (spec() if "read" in catalogue else chat_spec())
     source = compact_spec.build(
         body, {"id": ident, "format": "kidra-trajectory-graph/1"}, catalogue, 0
@@ -248,6 +266,13 @@ class Fake:
         self.calls = []
         self.responses = []
 
+    def graph(self, ticket):
+        """The reviewed graph, read from the store when service() attached one."""
+        store = getattr(self, "store", None)
+        if store is None:
+            return None
+        return {"events": dict.fromkeys(store.read(ticket.trajectory_id).source.events)}
+
     async def __call__(self, ticket):
         self.calls.append(copy.deepcopy(ticket))
         p = ticket.payload
@@ -259,9 +284,10 @@ class Fake:
         if "tools" in p:
             if p["operation"] == "assembly":
                 message = native_assembly(p, ticket.trajectory_id)
+            elif (graph := viewed_graph(p) or self.graph(ticket)) is None:
+                message = tool_message(("view_graph", {}))
             else:
-                graph = json.loads(p["messages"][1]["content"])["graph"]
-                message = tool_message(native_report(p, list(graph["events"])[-1:]))
+                message = tool_message(native_report(p, list(graph["events"])[-1:], graph=graph))
             return {"message": message, "model": "actual-fixture"}
         if p["operation"] == "draft":
             body = {"draft": DRAFT}
@@ -282,6 +308,7 @@ def service(tmp_path, fake=None, **opts):
     jobs = JobService(store, active_limit=2)
     sampler, bulk = SamplerService(jobs), BulkService(jobs)
     fake = fake or Fake()
+    fake.store = store  # The default review reads its graph as view_graph would.
     return GenerationService(jobs, sampler, bulk, fake), fake
 
 

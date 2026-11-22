@@ -136,14 +136,19 @@ prompts**:
 
 | Prompt | Used by | What it's for |
 |---|---|---|
-| **Agent prompt** | Draft and Assembly | How the agent behaves. Add a persona pack here. |
-| **Draft instructions** | Draft | How to write the working notes. |
-| **Assembly instructions** | Assembly | How to turn the notes into a graph with the native tools. |
+| **Agent prompt** | Every endpoint: Draft, Assembly, Fast and Critical Review, Assistant | What a trajectory is (windows, events, chat, tools, parallel subagents, the window lifecycle and ticks) and how the agent behaves. Add a persona pack at the end. |
+| **Authoring prompt** | Assembly, Fast and Critical Review, Assistant | How to use the authoring tools, like a small skill file. |
+| **Draft instructions** | Draft | The Draft task: how to write the working notes. |
+| **Assembly instructions** | Assembly | The Assembly task: how to turn the notes into a graph. |
 
 **Load Default Prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
 you to confirm; nothing is saved until you choose **Save settings**. Runs freeze the prompts
 when they start, and each request records a prompt version: the packaged version, plus a short
 hash when you've edited them.
+
+A project still using an earlier shipped prompt gets the new one when it opens. An agent prompt
+that starts with the earlier default, for example with a persona appended, keeps the appended
+text after the new default. Prompts you wrote yourself are never replaced.
 
 Projects from before Draft and Assembly kept their prompts in the Flow. When such a project
 opens, a customised Flow agent prompt (for example one with a persona pack appended) moves into
@@ -151,15 +156,22 @@ opens, a customised Flow agent prompt (for example one with a persona pack appen
 
 ## What the model sees
 
-- **Draft and Assembly** see the sampled proposal, tool catalogue, checklists and project prompts.
-  Assembly gets the Draft and can inspect the graph it creates.
-- **Send to agent** uses the Agent prompt, Draft instructions and Assembly instructions as
-  references when editing a trajectory in response to comments. The job freezes these prompts
-  when you send the comments and uses its comment-editing workflow for replies.
-- **Review and repair** start with topology, diagnostics and the applicable criteria. Use
-  `view_event` for causal predecessors and `view_window` for the text in a window. In Review
-  Settings, turn on **Include Draft in review and repair** to require Draft-fidelity evidence
-  whenever the source has a Draft. It defaults to off.
+Every system prompt starts with the **Agent prompt**. The endpoints that use the authoring
+tools add the **Authoring prompt** after it. The task and its data go in the first user message:
+
+| Endpoint | System prompt | First user message |
+|---|---|---|
+| **Draft** | Agent prompt | Draft instructions, then the sampled proposal and the project tools as JSON. |
+| **Assembly** | Agent and authoring prompts | Assembly instructions, the trajectory ID, the project tools and the Draft. |
+| **Fast / Critical Review** | Agent and authoring prompts | A request to review the trajectory against the checklist and call `signoff`, the review checklist, the objective and sampled targets, and the trajectory ID. |
+| **Repair** (on the review endpoint) | Agent and authoring prompts | The same, asking to repair the issues, with the failed review and the project tools. |
+| **Assistant** | Agent and authoring prompts | The open comments as a table with their IDs and threads, the trajectory ID, and a request to answer each with the `reply` tool. |
+
+- Sessions with tools start from the trajectory ID and read the graph with `view_graph`,
+  `view_diagnostics`, `view_event` and `view_window`. The criteria are also in the `signoff`
+  tool's parameters.
+- In Review Settings, turn on **Include Draft in review and repair** to show the Draft to
+  reviewers and require Draft-fidelity evidence whenever the source has a Draft. It defaults to off.
 
 Synthetic tool outputs are authored event content. Remix performs no tool execution.
 
@@ -249,9 +261,11 @@ review, and it needs the saved revision you're looking at.
 | Step | What happens |
 | --- | --- |
 | Admission | The open comments and their replies are frozen into the job. Comments added later wait for the next send. |
-| Session | The model sees the source, its diagnostics, causal views and the comments, then uses the repair spot edits: `view`, `inspect`, `patch`, `patch_window`, `remove_event`. Each accepted edit is saved. |
-| Finish | `finish` must answer every frozen comment exactly once. `done: true` adds the note as an agent reply and marks the comment addressed, for the user to accept or send back; `false` adds the note as a reply and leaves it open. The model never resolves a comment. |
-| Limits | Invalid replies get the usual bounded corrections, then hold. Outgrowing the repair context budget ends the job with edits kept and comments open. |
+| Session | A native tool conversation. The model gets the comments table and the trajectory ID, reads and edits the graph with the authoring tools, and answers with `reply`. Each accepted edit is saved. |
+| Replies | `reply` answers one comment, once. `done: true` adds the note as an agent reply and marks the comment addressed, for the user to accept or send back; `false` adds the note as a reply and leaves it open. The model never resolves a comment. |
+| Finish | The session ends when every frozen comment has a reply; the replies are posted then. A reply without tool calls while comments remain gets a reminder listing them. |
+| Next send | The finished conversation is kept. The next send appends the new comments to it as a user message, unless it no longer fits the repair context budget; then it starts afresh. |
+| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or the repair context budget ends the job with edits kept and comments open; a context-budget end also drops the kept conversation. |
 
 The stage and review history aren't touched; edits make an earlier review stale as usual. The job's Undo reverts its
 edits but not its comment answers.
@@ -347,8 +361,8 @@ much of the previous request as possible. Caching saves prompt-processing time a
 does **not** enlarge the context window, because cached tokens still count toward
 `context_window_tokens`.
 
-- **Draft and Assembly:** the system prompt is the stage's instructions plus the agent prompt,
-  the same for every trajectory in a run. The user message holds the data.
+- **All endpoints:** the system prompt is the agent prompt, plus the authoring prompt for tool
+  sessions. It's the same for every trajectory in a run. The task and data go in the user message.
 - **Native turns:** each request extends the accepted conversation with the assistant's
   tool calls, paired tool results and any user-role correction.
 

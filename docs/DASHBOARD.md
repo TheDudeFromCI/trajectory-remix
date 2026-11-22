@@ -197,9 +197,11 @@ work through a trajectory's open comments.
 2. Save the trajectory, then click **Send open comments to agent** on the Comments tab.
 
 The job takes the open comments as they are at that moment, with their replies. The model
-edits the trajectory with the same spot edits that repair uses, then answers every comment:
-it marks the ones it fixed **Awaiting review**, with a note on what changed, and replies to
-the rest with a reason or a question, leaving them open. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
+edits the trajectory with the same authoring tools Assembly uses, then answers every comment
+with its `reply` tool: it marks the ones it fixed **Awaiting review**, with a note on what
+changed, and replies to the rest with a reason or a question, leaving them open. The next time
+you send comments on the same trajectory, the agent continues the same conversation, so it
+remembers what it already did. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
 revert its edits, and read the answers in the Comments tab. If the session runs out of
 room, it stops with its edits so far kept and the comments still open.
 
@@ -256,8 +258,12 @@ Review** (see [Event generation](GRAPH-GENERATION.md#draft-and-assembly)). What 
 the prompts and the models:
 
 1. Open **Review Settings** and find **Generation prompts**.
-2. Edit the **Agent prompt** (how the agent behaves, and where a persona pack goes), the
-   **Draft instructions** or the **Assembly instructions**.
+2. Edit the prompts:
+   - **Agent prompt:** what a trajectory is and how the agent behaves. Every endpoint sees it,
+     and a persona pack goes at its end.
+   - **Authoring prompt:** how to use the authoring tools. Assembly, review and the Assistant
+     see it.
+   - **Draft instructions** and **Assembly instructions:** the task for each stage.
 3. **Load Default Prompts** restores the packaged prompts, after you confirm.
 4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 

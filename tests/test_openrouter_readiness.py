@@ -230,9 +230,10 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
         system, user = body["messages"]  # Roles alternate: one system, one user message.
         assert system["role"] == "system" and user["role"] == "user"
         text = user["content"]
-        if text.startswith("Return one JSON object"):
-            text = text.split("\n\n", 1)[1]
-        json.loads(text)
+        if "tools" in body:
+            assert "Trajectory Id: `" in text and "Draft:\n```" in text
+        else:
+            assert "# Draft a synthetic episode" in text and "Sampled proposal:" in text
         if "tools" in body:
             message = native_assembly(body, body["session_id"])
             finish_reason = "tool_calls"

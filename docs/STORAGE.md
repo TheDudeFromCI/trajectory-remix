@@ -9,7 +9,9 @@ A project is one SQLite database in WAL mode (format `kidra-graph-project/1`). I
 
 - the current head of every trajectory, plus **immutable revisions** of each source and of the project settings,
 - an index of which trajectories use which tool,
-- job state: ownership, FIFO request queues, frozen run inputs and committed checkpoints.
+- job state: ownership, FIFO request queues, frozen run inputs and committed checkpoints,
+- reviewer comments and their replies, and the last finished Assistant conversation for each trajectory. Neither is part
+  of a source, so they never change its revision or export.
 
 Edits use compare-and-swap on a per-trajectory revision, so an edit to one trajectory never invalidates a save to another.
 A pipeline that owns a trajectory (generation, or a manual review) holds it exclusively, and other edits wait for it.

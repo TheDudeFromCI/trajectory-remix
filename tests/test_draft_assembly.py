@@ -1,7 +1,14 @@
 """Two-pass generation: a prose draft, one assembled graph, then review and repair."""
 
 import pytest
-from test_graph_generation import DRAFT, finish, frozen_legacy_run, service, spec, tangled_spec  # noqa: F401
+from test_graph_generation import (  # noqa: F401
+    DRAFT,
+    finish,
+    frozen_legacy_run,
+    service,
+    spec,
+    tangled_spec,
+)
 
 from trajectory_remix.graph import compact_spec, draft_assembly, prompt_defaults
 
@@ -71,10 +78,11 @@ def test_builder_fills_in_listing_echo_and_call_ids(tmp_path):
     assert data["events"]["ack:echo"]["window"] == "room"
 
 
-def test_packaged_assembly_prompt_describes_the_native_workflow():
-    guidance = prompt_defaults.assembly()
-    for tool in ("post_tool_schema", "post_chat_message", "signoff"):
+def test_packaged_authoring_prompt_describes_the_native_workflow():
+    guidance = prompt_defaults.authoring()
+    for tool in ("post_tool_schema", "post_chat_message", "view_event", "signoff", "reply"):
         assert tool in guidance
+    assert "signoff" in prompt_defaults.assembly()
 
 
 @pytest.mark.parametrize(
