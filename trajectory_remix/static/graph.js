@@ -669,8 +669,9 @@ export class StudioUI {
     }, (chip, job) => {
       setAttr(chip.parts.dot, 'class', `dot tone-${KIND_TONES[job.kind] || 'accent'}`);
       const progress = jobProgress(job), {value, total, unit} = progress;
-      setText(chip.parts.name, kindName(job.kind)); chip.parts.bar.update(progress);
-      setAttr(chip, 'aria-label', `${kindName(job.kind)} job ${job.state} ${value} of ${total}${unit ? ' ' + unit : ''}. Open in Jobs`);
+      const name = kindName(job.kind, job.action);
+      setText(chip.parts.name, name); chip.parts.bar.update(progress);
+      setAttr(chip, 'aria-label', `${name} job ${job.state} ${value} of ${total}${unit ? ' ' + unit : ''}. Open in Jobs`);
       toggleClass(chip, 'paused', job.state === 'paused');
     });
     const badge = $('jobs-running-badge');
@@ -780,7 +781,7 @@ export class StudioUI {
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
-    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.renderDirty(); this.renderTimeline(); await this.listing(); });
+    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
     on('event-apply', 'click', () => this.applyEvent());
     on('new-event', 'click', () => {
@@ -810,7 +811,15 @@ export class StudioUI {
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
     on('scrubber', 'input', e => scrub(e.target.value)); on('tick-number', 'change', e => scrub(e.target.value));
     on('first-tick', 'click', () => scrub(0)); on('prev-tick', 'click', () => scrub(this.position - 1)); on('next-tick', 'click', () => scrub(this.position + 1)); on('last-tick', 'click', () => scrub($('scrubber').max));
-    on('play', 'click', () => { if (this.playing) { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; } else { $('play').textContent = 'Pause'; this.playing = setInterval(() => scrub(this.position >= Number($('scrubber').max) ? 0 : this.position + 1), 500); } });
+    const lastTick = () => Number($('scrubber').max);
+    const pausePlayback = () => { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; };
+    on('play', 'click', () => {
+      if (this.playing) return pausePlayback();
+      if (this.position >= lastTick()) scrub(0); // Pressing Play at the end restarts from the beginning.
+      $('play').textContent = 'Pause';
+      // Playback does not loop: it pauses on reaching the last tick.
+      this.playing = setInterval(() => { scrub(Math.min(this.position + 1, lastTick())); if (this.position >= lastTick()) pausePlayback(); }, 500);
+    });
     on('settings-button', 'click', () => this.openSettings());
     if ($('generation-settings-button')) on('generation-settings-button', 'click', () => this.openGenerationSettings());
     if ($('generation-sampler-button')) on('generation-sampler-button', 'click', () => { $('generation-settings-dialog').close(); $('sampler-tab').click(); });

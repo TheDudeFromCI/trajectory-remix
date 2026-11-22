@@ -53,7 +53,9 @@ try {
   const [bulk]=await Promise.all([page.waitForEvent('download'),page.locator('#bulk-start').click()]);
   assert.equal(bulk.suggestedFilename(),'trajectories.jsonl');
   // Two distinct review jobs, independent logs and settled history records.
-  assert.equal((await get('/job-summaries')).filter(j=>j.kind==='bulk').length,2);
+  const summaries = await get('/job-summaries');
+  assert.deepEqual(summaries.filter(j=>j.kind==='bulk').map(j=>j.action), ['review_repair','review_repair']);
+  assert.deepEqual(summaries.find(j=>j.id===job).stage_progress, {completed:2,total:2});
   await page.locator('#trajectory-tab').click();
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
   // The acknowledgment is usable at desktop and compact sizes, persists, and

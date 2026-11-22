@@ -838,7 +838,7 @@ class JobService:
             rows = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT id,kind,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
                     (limit, offset),
                 )
             ]
@@ -852,7 +852,7 @@ class JobService:
             else:
                 db.execute("BEGIN")
                 row = db.execute(
-                    "SELECT id,kind,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?",
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?",
                     (job,),
                 ).fetchone()
                 if row is None:

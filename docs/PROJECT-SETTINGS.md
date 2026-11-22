@@ -162,7 +162,7 @@ for the multi-agent coordinator the data is written for.
 
 ### Reset to the defaults
 
-Press **Reset review checklists to defaults** in the Review Settings tab to replace both
+Press **Load Default Checklist** in the Review Settings tab to replace both
 lists with the packaged criteria. A confirmation asks first, because your added,
 edited and removed criteria in the draft are lost. Declining changes nothing. The
 reset stays in the draft until you press **Save review settings**, and saving marks affected
@@ -172,8 +172,8 @@ sign-offs stale like any other checklist change.
 
 Only new projects get new defaults. A project that already saved its checklists keeps
 them exactly as they are, so existing sign-offs do not become stale on upgrade. To adopt
-the coordinator criteria in an existing project, either press **Reset review checklists
-to defaults** (this replaces your custom criteria too), or add the criteria you want by
+the coordinator criteria in an existing project, either press **Load Default Checklist**
+(this replaces your custom criteria too), or add the criteria you want by
 hand with **Add core criterion** and **Add critical criterion**, using the IDs and
 wording in the table above. There is no merge action that adds only the missing
 recommended criteria.

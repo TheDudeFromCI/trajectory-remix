@@ -229,8 +229,10 @@ export function renderGenerationSettings(container, initial, options = {}) {
   retriesField.dataset.tip = 'How many times to ask the model again when its response is cut off (it hit the output token limit) or malformed. Bad tool arguments are sent back to the model instead and do not use a retry.';
   limits.append(retriesField, field('Maximum exchanges per pass', exchanges), node('p', 'Assembly, review, and repair each use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
-  renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
-  renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading});
+  const defaultsBox = node('div', undefined, 'settings-limits');
+  renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts, actions: defaultsBox});
+  renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading, actions: defaultsBox});
+  if (defaultsBox.children.length) settingsColumn.append(defaultsBox);
   tipHeading(settingsColumn, 'Prompt and checklist pack', 'Export the prompts and checklist as a JSON file, or import one shared from another project.');
   renderReviewPack(settingsColumn, {current, write, error, render});
   settingsColumn.append(status);

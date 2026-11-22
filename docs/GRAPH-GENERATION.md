@@ -140,7 +140,7 @@ prompts**:
 | **Draft instructions** | Draft | How to write the working notes. |
 | **Assembly instructions** | Assembly | How to turn the notes into a graph with the native tools. |
 
-**Load default prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
+**Load Default Prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
 you to confirm; nothing is saved until you choose **Save settings**. Runs freeze the prompts
 when they start, and each request records a prompt version: the packaged version, plus a short
 hash when you've edited them.
