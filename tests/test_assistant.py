@@ -7,10 +7,12 @@ import pytest
 from test_graph_generation import Fake, finish, plan, settings
 from test_graph_studio import client, create  # noqa: F401  (pytest fixture)
 
+from trajectory_remix.graph import assistant
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.comments import CommentService, NewComment, NewReply
 from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import JobService
+from trajectory_remix.graph.provider import request_body
 from trajectory_remix.graph.sampling import SamplerService
 from trajectory_remix.graph.storage import GraphStore
 
@@ -124,6 +126,33 @@ async def test_comments_are_frozen_at_send(tmp_path):
     assert "Later." not in fake.calls[0].payload["messages"][1]["content"]
     later = [c for c in gen.comments.for_trajectory(record.source.id) if c["body"] == "Later."]
     assert later[0]["status"] == "open"
+
+
+@pytest.mark.asyncio
+async def test_project_prompts_are_frozen_for_each_assistant_request(tmp_path):
+    gen, fake = service(tmp_path)
+    current = gen.store.settings()
+    data = current.settings.model_dump(mode="json")
+    prompts = dict(actor="Use the project persona.", draft="Draft guide.", assembly="Graph guide.")
+    gen.store.update_settings(data | {"prompts": prompts}, current.revision)
+    record, (comment,) = flagged(gen, "Fix x.")
+    job = gen.start_assistant(record.source.id, record.revision, gen.comments)
+    current = gen.store.settings()
+    gen.store.update_settings(
+        data | {"prompts": prompts | {"actor": "A later persona."}}, current.revision
+    )
+    fake.responses = [patch, lambda t: finish_with((comment, True, "Fixed."))]
+    await finish(gen, job)
+
+    first, second = (ticket.payload for ticket in fake.calls)
+    system = first["messages"][0]["content"]
+    assert system.startswith(assistant.SYSTEM)
+    assert all(text in system for text in prompts.values())
+    assert "A later persona." not in system
+    assert first["messages"] == second["messages"][: len(first["messages"])]
+    assert first["prompt_version"] == second["prompt_version"] == assistant.VERSION
+    body, _ = request_body(first, record.source.id)
+    assert body["messages"][0]["content"].startswith(system)
 
 
 def test_send_requires_the_role_open_comments_and_current_revision(tmp_path):

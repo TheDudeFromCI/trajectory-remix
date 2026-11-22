@@ -154,7 +154,9 @@ class GenerationService:
             base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
         elif cp["phase"] == assistant.PHASE:
             comments = job["config"]["options"]["comments"]
-            base = assistant.payload(source, settings, comments)["messages"]
+            payload = assistant.payload(source, settings, comments)
+            base = payload["messages"]
+            cp["prompt_version"] = payload["prompt_version"]
         else:
             return
         cp.update(history=[], repair_base=base)
@@ -419,9 +421,10 @@ class GenerationService:
             tier = cp["tier"]
         elif cp["phase"] == assistant.PHASE:
             tier = cp["tier"]
-            comments = self.jobs.inspect(job)["config"]["options"]["comments"]
+            comments = j["config"]["options"]["comments"]
             payload = assistant.payload(source, settings, comments)
             payload["messages"] = cp["repair_base"] + cp["history"]
+            payload["prompt_version"] = cp.get("prompt_version", assistant.LEGACY_VERSION)
             if (
                 len(canonical(payload["messages"]).encode())
                 >= settings.generation.repair_context_bytes

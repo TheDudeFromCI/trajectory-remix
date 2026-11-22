@@ -153,6 +153,9 @@ opens, a customised Flow agent prompt (for example one with a persona pack appen
 
 - **Draft and Assembly** see the sampled proposal, tool catalogue, checklists and project prompts.
   Assembly gets the Draft and can inspect the graph it creates.
+- **Send to agent** uses the Agent prompt, Draft instructions and Assembly instructions as
+  references when editing a trajectory in response to comments. The job freezes these prompts
+  when you send the comments and uses its comment-editing workflow for replies.
 - **Review and repair** start with topology, diagnostics and the applicable criteria. Use
   `view_event` for causal predecessors and `view_window` for the text in a window. In Review
   Settings, turn on **Include Draft in review and repair** to require Draft-fidelity evidence

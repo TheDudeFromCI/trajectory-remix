@@ -18,7 +18,8 @@ from .validation import diagnose
 PHASE = "assist"
 ROLE = "assistant"
 ACTION = "assistant"
-VERSION = "graph-assistant/1"
+LEGACY_VERSION = "graph-assistant/1"
+VERSION = "graph-assistant/2"
 
 SYSTEM = (
     "You fix a trajectory graph by answering a person's review comments. Each comment"
@@ -79,6 +80,16 @@ def schema(comment_ids):
 
 def payload(source, settings, comments):
     """The first request of a session; later requests append the action history."""
+    prompts = settings.prompts
+    system = (
+        SYSTEM
+        + "\n\nUse the project prompts below as references for the authored episode. They describe "
+        "the episode's actor and how to draft and assemble the graph. Follow the comment-editing "
+        "workflow above and the supplied action schema for your own replies."
+        + f"\n\n## Agent prompt\n{prompts.actor}"
+        + f"\n\n## Draft instructions\n{prompts.draft}"
+        + f"\n\n## Assembly instructions\n{prompts.assembly}"
+    )
     brief = dict(
         source=source.model_dump(mode="json", exclude={"metadata"}),
         source_hash=source.intrinsic_hash,
@@ -91,7 +102,7 @@ def payload(source, settings, comments):
         tier=ROLE,
         prompt_version=VERSION,
         schema=schema([c["id"] for c in comments]),
-        messages=[dict(role="system", content=SYSTEM), dict(role="user", content=canonical(brief))],
+        messages=[dict(role="system", content=system), dict(role="user", content=canonical(brief))],
     )
 
 
