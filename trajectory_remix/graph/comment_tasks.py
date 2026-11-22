@@ -12,7 +12,7 @@ from .models import DTO
 
 class CommentList(DTO):
     trajectory: str | None = None
-    status: Literal["open", "resolved", "all"] = "open"
+    status: Literal["open", "addressed", "resolved", "unresolved", "all"] = "open"
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
@@ -21,13 +21,14 @@ class CommentAdd(NewComment):
     trajectory: str
 
 
-class CommentReply(NewReply):
+class CommentReply(DTO):
     id: str
+    body: str = Field(min_length=1, max_length=MAX_BODY)
 
 
-class CommentResolve(DTO):
+class CommentAddress(DTO):
     id: str
-    resolution: str = Field(min_length=1, max_length=MAX_BODY)
+    note: str = Field(min_length=1, max_length=MAX_BODY)
 
 
 TASKS = {
@@ -43,9 +44,10 @@ TASKS = {
         CommentReply,
         "Reply in a comment's thread, for example to explain a fix or ask the user a question.",
     ),
-    "resolve_graph_comment": (
-        CommentResolve,
-        "Mark a comment resolved after saving the fix; say what changed in resolution.",
+    "address_graph_comment": (
+        CommentAddress,
+        "After saving a fix, mark a comment addressed with a note of what changed. The user"
+        " reviews it and resolves it or requests changes; agents never resolve comments.",
     ),
 }
 
@@ -69,4 +71,4 @@ def call(comments, name, args):
         )
     if name == "reply_graph_comment":
         return comments.reply(args.id, NewReply(body=args.body), "agent")
-    return comments.resolve(args.id, args.resolution)
+    return comments.address(args.id, args.note)

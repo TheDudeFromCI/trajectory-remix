@@ -2,9 +2,10 @@
 
 "Send to agent" freezes the open comments into a one-trajectory job on the Assistant
 endpoint role. The session uses the same spot-edit actions as repair (view, inspect,
-patch, patch_window, remove_event) and ends with finish, which answers every comment:
-resolved ones get the model's note as their resolution, the rest get it as a reply.
-No stage, review or checklist changes; edits simply make an earlier review stale.
+patch, patch_window, remove_event) and ends with finish, which answers every comment.
+Ones it fixed become addressed, with its note in the thread, for a person to accept or
+send back; the rest get the note as a reply and stay open. The model never resolves a
+comment. No stage, review or checklist changes; edits simply make an earlier review stale.
 """
 
 from __future__ import annotations
@@ -27,8 +28,10 @@ SYSTEM = (
     " then spot-edit with patch (merge a patch into an event; a new event ID adds one),"
     " patch_window or remove_event, passing the latest source_hash. What an event can see"
     " comes from its after list. Never regenerate the whole source. When done, call finish"
-    " once and answer EVERY comment: resolved true with a short note of what you changed,"
-    " or resolved false with a note explaining why not or asking the person a question."
+    " once and answer EVERY comment: done true with a short note of what you changed (the"
+    " person then reviews your fix), or done false with a note explaining why not or asking"
+    " the person a question. Earlier replies may be the person rejecting a previous fix:"
+    " address what they said."
 )
 
 
@@ -51,10 +54,10 @@ def finish_action(comment_ids):
         type="object",
         properties={
             "id": {"enum": list(comment_ids)},
-            "resolved": {"type": "boolean"},
+            "done": {"type": "boolean"},
             "note": {"type": "string", "minLength": 1, "maxLength": 10_000},
         },
-        required=["id", "resolved", "note"],
+        required=["id", "done", "note"],
         additionalProperties=False,
     )
     return dict(
@@ -108,17 +111,18 @@ def finish_problem(body, comments):
 
 
 def apply(comments, body):
-    """Resolve or reply to each comment; ones deleted meanwhile are skipped."""
+    """Mark fixed comments addressed and reply to the rest; ones deleted meanwhile are
+    skipped. Returns how many were addressed."""
     from .comments import NewReply
 
-    resolved = 0
+    addressed = 0
     for answer in body["comments"]:
         try:
-            if answer["resolved"]:
-                comments.resolve(answer["id"], answer["note"])
-                resolved += 1
+            if answer["done"]:
+                comments.address(answer["id"], answer["note"])
+                addressed += 1
             else:
                 comments.reply(answer["id"], NewReply(body=answer["note"]), "agent")
         except KeyError:
             continue
-    return resolved
+    return addressed

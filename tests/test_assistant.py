@@ -59,7 +59,7 @@ def patch(t):
 def finish_with(*answers):
     return {
         "action": "finish",
-        "comments": [dict(id=i, resolved=r, note=n) for i, r, n in answers],
+        "comments": [dict(id=i, done=r, note=n) for i, r, n in answers],
         "summary": "done",
     }
 
@@ -71,7 +71,7 @@ async def run(gen, record):
 
 
 @pytest.mark.asyncio
-async def test_assistant_patches_then_resolves_and_replies(tmp_path):
+async def test_assistant_patches_then_addresses_and_replies(tmp_path):
     gen, fake = service(tmp_path)
     record, (fixed, unclear) = flagged(gen, "Content is wrong.", "Is this the right window?")
     gen.comments.reply(unclear, NewReply(body="I think reason is wrong."), "user")
@@ -89,7 +89,8 @@ async def test_assistant_patches_then_resolves_and_replies(tmp_path):
     assert "Content is wrong." in brief and "I think reason is wrong." in brief
     assert "metadata" not in json.loads(brief)["source"]
     states = {c["id"]: c for c in gen.comments.for_trajectory(record.source.id)}
-    assert states[fixed]["status"] == "resolved" and states[fixed]["resolution"] == "Rewrote x."
+    assert states[fixed]["status"] == "addressed", "only the user resolves"
+    assert states[fixed]["replies"][-1]["body"] == "Rewrote x."
     assert states[unclear]["status"] == "open"
     assert states[unclear]["replies"][-1] == {**states[unclear]["replies"][-1], "author": "agent"}
     assert states[unclear]["replies"][-1]["body"] == "Which window?"
@@ -107,7 +108,7 @@ async def test_finish_must_answer_every_comment(tmp_path):
     await run(gen, record)
     correction = fake.calls[1].payload["messages"][-1]["content"]
     assert "output contract" in correction
-    assert all(c["status"] == "resolved" for c in gen.comments.for_trajectory(record.source.id))
+    assert all(c["status"] == "addressed" for c in gen.comments.for_trajectory(record.source.id))
 
 
 @pytest.mark.asyncio

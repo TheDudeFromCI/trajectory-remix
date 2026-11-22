@@ -1,6 +1,8 @@
 /* Reviewer comments on the selected trajectory, its events and its windows.
    Comments save straight away and sit outside the source: they never make the draft
-   dirty, and they stay writable while a job holds the trajectory. */
+   dirty, and they stay writable while a job holds the trajectory.
+   Lifecycle: open → addressed (an agent says it's fixed) → resolved. Only the person
+   resolves: Accept closes an addressed comment, Request changes reopens it with a reply. */
 import {node, setText, tag} from './ui-kit.js';
 
 export const targetKey = (kind, id) => kind === 'trajectory' ? 'trajectory' : `${kind}:${id}`;
@@ -8,10 +10,12 @@ const parseKey = key => { const at = key.indexOf(':'); return at < 0 ? {kind: 't
 const KIND_NAMES = {trajectory: 'Trajectory', event: 'Event', window: 'Window'};
 export const targetLabel = (kind, id) => kind === 'trajectory' ? 'Whole trajectory' : `${KIND_NAMES[kind]} ${id}`;
 
-/** Open comments per target key, for badges on window cards and timeline events. */
-export function openCounts(items) {
+const UNRESOLVED = new Set(['open', 'addressed']);
+
+/** Unresolved (open or addressed) comments per target key, for badges on cards and events. */
+export function unresolvedCounts(items) {
   const counts = new Map();
-  for (const c of items) if (c.status === 'open') { const key = targetKey(c.target_kind, c.target_id); counts.set(key, (counts.get(key) || 0) + 1); }
+  for (const c of items) if (UNRESOLVED.has(c.status)) { const key = targetKey(c.target_kind, c.target_id); counts.set(key, (counts.get(key) || 0) + 1); }
   return counts;
 }
 
@@ -62,21 +66,31 @@ export class CommentsView {
     await this.api(`/comments/${comment.id}${path}`, method, body);
     await this.load(this.trajectory);
   }
+  /** Open a reply box; reopen makes it "Request changes". */
+  startReply(comment, reopen = false) {
+    this.replies.set(comment.id, {text: this.replies.get(comment.id)?.text || '', reopen});
+    this.render(); this.els.list.querySelector(`textarea[data-comment="${CSS.escape(comment.id)}"]`)?.focus();
+  }
   async sendReply(comment) {
-    const body = (this.replies.get(comment.id) || '').trim();
-    if (!body) throw new Error('Write the reply first.');
-    await this.act(comment, 'POST', {body}, '/replies');
+    const draft = this.replies.get(comment.id) || {text: ''}, body = draft.text.trim();
+    if (!body) throw new Error(draft.reopen ? 'Say what still needs to change.' : 'Write the reply first.');
+    await this.act(comment, 'POST', {body, reopen: !!draft.reopen}, '/replies');
     this.replies.delete(comment.id); this.render();
   }
   render() {
-    this.counts = openCounts(this.items);
-    const open = this.items.filter(c => c.status === 'open'), resolved = this.items.filter(c => c.status !== 'open');
-    setText(this.els.count, open.length ? String(open.length) : '');
+    this.counts = unresolvedCounts(this.items);
+    const by = status => this.items.filter(c => c.status === status);
+    const open = by('open'), addressed = by('addressed'), resolved = by('resolved');
+    const unresolved = open.length + addressed.length;
+    setText(this.els.count, unresolved ? String(unresolved) : '');
     if (this.els.send) this.els.send.disabled = !open.length;
     const list = this.els.list, wasOpen = list.querySelector('details')?.open ?? false;
     const focused = document.activeElement?.closest?.('.comment-reply-form') && document.activeElement.dataset.comment;
     if (!this.trajectory) { list.replaceChildren(); return; }
-    const parts = open.length ? open.map(c => this.card(c)) : [node('div', 'No open comments. Point out a problem above and an agent can pick it up.', 'empty')];
+    const parts = [];
+    if (addressed.length) parts.push(node('h3', `Awaiting your review (${addressed.length})`, 'comment-section'), ...addressed.map(c => this.card(c)));
+    if (open.length) parts.push(...(addressed.length ? [node('h3', `Open (${open.length})`, 'comment-section')] : []), ...open.map(c => this.card(c)));
+    if (!unresolved) parts.push(node('div', 'No open comments. Point out a problem above and an agent can pick it up.', 'empty'));
     if (resolved.length) {
       const more = node('details', undefined, 'comment-resolved'); more.open = wasOpen;
       more.append(node('summary', `Resolved (${resolved.length})`), ...resolved.map(c => this.card(c)));
@@ -86,7 +100,7 @@ export class CommentsView {
     if (focused) list.querySelector(`textarea[data-comment="${CSS.escape(focused)}"]`)?.focus();
   }
   card(c) {
-    const card = node('article', undefined, `comment-card${c.status === 'open' ? '' : ' resolved'}`);
+    const card = node('article', undefined, `comment-card ${c.status}`);
     const head = node('header', undefined, 'comment-head');
     const jump = node('button', targetLabel(c.target_kind, c.target_id), 'comment-target ghost sm');
     jump.type = 'button'; jump.disabled = !c.target_exists;
@@ -95,26 +109,28 @@ export class CommentsView {
     head.append(jump);
     if (!c.target_exists) head.append(tag('Removed', 'warning'));
     head.append(tag(c.author === 'agent' ? 'Agent' : 'You', c.author === 'agent' ? 'accent' : 'muted'));
+    if (c.status === 'addressed') { const t = tag('Awaiting review', 'warning'); t.dataset.tip = 'An agent says this is fixed. Accept it, or request changes.'; head.append(t); }
     const when = node('span', `rev ${c.source_revision ?? '?'} · ${String(c.created).slice(0, 10)}`, 'small muted grow');
     when.dataset.tip = `Written against source revision ${c.source_revision ?? 'unknown'} at ${c.created}`;
     head.append(when);
     card.append(head, node('p', c.body, 'comment-body'));
-    if (c.resolution) card.append(node('p', c.resolution, 'comment-resolution'));
     if (c.replies?.length) card.append(this.thread(c));
     const replying = this.replies.has(c.id);
     if (replying) card.append(this.replyForm(c));
-    const actions = node('div', undefined, 'comment-actions');
-    if (!replying) {
-      const reply = node('button', 'Reply', 'sm ghost');
-      reply.onclick = () => { this.replies.set(c.id, ''); this.render(); this.els.list.querySelector(`textarea[data-comment="${CSS.escape(c.id)}"]`)?.focus(); };
-      actions.append(reply);
-    }
-    const toggle = node('button', c.status === 'open' ? 'Resolve' : 'Reopen', 'sm ghost');
-    toggle.onclick = () => this.act(c, 'PATCH', {status: c.status === 'open' ? 'resolved' : 'open'}).catch(this.report);
-    const remove = node('button', 'Delete', 'sm ghost danger');
-    remove.onclick = () => { if (globalThis.confirm?.('Delete this comment?') === false) return; this.act(c, 'DELETE').catch(this.report); };
-    actions.append(toggle, remove); card.append(actions);
+    card.append(this.actions(c, replying));
     return card;
+  }
+  actions(c, replying) {
+    const row = node('div', undefined, 'comment-actions');
+    const act = (text, cls, run) => { const b = node('button', text, `sm ${cls}`); b.onclick = () => Promise.resolve(run()).catch(this.report); row.append(b); return b; };
+    if (!replying) act('Reply', 'ghost', () => this.startReply(c));
+    if (c.status === 'addressed') {
+      if (!replying) act('Request changes', 'ghost', () => this.startReply(c, true)).dataset.tip = 'Reopen it with a reply saying what is still wrong';
+      act('Accept', 'primary', () => this.act(c, 'PATCH', {status: 'resolved'})).dataset.tip = 'The fix is right: resolve the comment';
+    } else if (c.status === 'open') act('Resolve', 'ghost', () => this.act(c, 'PATCH', {status: 'resolved'}));
+    else act('Reopen', 'ghost', () => this.act(c, 'PATCH', {status: 'open'}));
+    act('Delete', 'ghost danger', () => { if (globalThis.confirm?.('Delete this comment?') === false) return; return this.act(c, 'DELETE'); });
+    return row;
   }
   thread(c) {
     const list = node('ol', undefined, 'comment-thread');
@@ -128,15 +144,17 @@ export class CommentsView {
     return list;
   }
   replyForm(c) {
-    const form = node('div', undefined, 'comment-reply-form'), box = node('textarea');
-    box.rows = 2; box.dataset.comment = c.id; box.value = this.replies.get(c.id) || '';
-    box.setAttribute('aria-label', `Reply to comment on ${targetLabel(c.target_kind, c.target_id)}`); box.placeholder = 'Reply…';
-    box.oninput = () => this.replies.set(c.id, box.value);
+    const draft = this.replies.get(c.id), form = node('div', undefined, 'comment-reply-form'), box = node('textarea');
+    box.rows = 2; box.dataset.comment = c.id; box.value = draft.text;
+    const what = draft.reopen ? 'Request changes on' : 'Reply to';
+    box.setAttribute('aria-label', `${what} comment on ${targetLabel(c.target_kind, c.target_id)}`);
+    box.placeholder = draft.reopen ? 'What is still wrong? The comment reopens for the agent.' : 'Reply…';
+    box.oninput = () => { draft.text = box.value; };
     box.onkeydown = e => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.sendReply(c).catch(this.report); }
       if (e.key === 'Escape') { this.replies.delete(c.id); this.render(); }
     };
-    const send = node('button', 'Send reply', 'sm'), cancel = node('button', 'Cancel', 'sm ghost');
+    const send = node('button', draft.reopen ? 'Send and reopen' : 'Send reply', 'sm'), cancel = node('button', 'Cancel', 'sm ghost');
     send.onclick = () => this.sendReply(c).catch(this.report);
     cancel.onclick = () => { this.replies.delete(c.id); this.render(); };
     const row = node('div', undefined, 'comment-actions'); row.append(cancel, send);

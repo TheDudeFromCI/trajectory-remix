@@ -59,13 +59,17 @@ class BulkService:
             )
             args.append(query["tool"])
         if "comments" in query:
-            # Only "open" is meaningful: trajectories with at least one open comment.
-            if query["comments"] != "open":
-                raise ValueError('The comments filter only accepts "open"')
+            # Trajectories with at least one comment in that state: open (agent work),
+            # addressed (awaiting a person's review) or unresolved (either).
+            from .comments import status_clause
+
+            if query["comments"] not in ("open", "addressed", "unresolved"):
+                raise ValueError('The comments filter is "open", "addressed" or "unresolved"')
+            clause, extra = status_clause(query["comments"], "c.status")
             clauses.append(
-                "EXISTS(SELECT 1 FROM graph_comments c WHERE c.trajectory_id=t.id"
-                " AND c.status='open')"
+                f"EXISTS(SELECT 1 FROM graph_comments c WHERE c.trajectory_id=t.id AND {clause})"
             )
+            args.extend(extra)
         return " AND ".join(clauses) or "1", args
 
     def start(self, query, action, config=None):

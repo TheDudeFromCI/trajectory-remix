@@ -36,9 +36,11 @@ Read one focused topic at a time: `dependencies`, `tools-chat`, `generation`,
 
 Reviewer comments: `list_graph_comments` lists open comments on trajectories,
 events and windows; `read_graph` returns them as `open_comments`. Fix the
-problem, save, then `resolve_graph_comment` with a short resolution. Read each
-comment's `replies`; ask with `reply_graph_comment` instead of resolving when
-unsure. `list_graphs` accepts `{"comments":"open"}`. Comments are outside the
+problem, save, then `address_graph_comment` with a short note; the user reviews
+it and resolves it or sends it back open. Agents never resolve. Read each
+comment's `replies` (a reopened comment's latest reply says what is still
+wrong); ask with `reply_graph_comment` instead of addressing when unsure.
+`list_graphs` accepts `{"comments":"open"}` (also `"addressed"`, `"unresolved"`). Comments are outside the
 source and need no revision.
 
 Do not equate structural/schema correctness, model verdicts, training value and

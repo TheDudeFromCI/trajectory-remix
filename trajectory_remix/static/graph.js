@@ -103,7 +103,7 @@ export class StudioUI {
     if ($('search-stage').value !== '') q.stage = Number($('search-stage').value);
     if ($('search-split').value) q.split = $('search-split').value;
     if ($('search-tool').value) q.tool = $('search-tool').value;
-    if ($('search-comments').checked) q.comments = 'open';
+    if ($('search-comments').value) q.comments = $('search-comments').value;
     return q;
   }
   async loadSettings() {
@@ -118,9 +118,12 @@ export class StudioUI {
     const key = JSON.stringify([this.query(), this.offset]);
     this.listKey = key;
     const q = new URLSearchParams({...this.query(), limit: 50, offset: this.offset});
-    const [data, counts] = await Promise.all([api('/trajectories?' + q), api('/comments/open-counts')]);
+    const [data, counts] = await Promise.all([api('/trajectories?' + q), api('/comments/counts')]);
     if (key !== this.listKey) return;
-    data.items = data.items.map(item => ({...item, comments: counts.counts[item.id] || 0}));
+    data.items = data.items.map(item => {
+      const c = counts.counts[item.id] || {open: 0, addressed: 0};
+      return {...item, comments: c.open + c.addressed, review: c.addressed};
+    });
     this.lastItems = data.items; setText($('sample-count'), String(data.total));
     setText($('sample-page-label'), data.total ? `${Math.min(this.offset + 1, data.total)}–${this.offset + data.items.length} of ${data.total}` : '');
     $('sample-page-prev').disabled = !this.offset; $('sample-page-next').disabled = this.offset + 50 >= data.total;
@@ -142,11 +145,12 @@ export class StudioUI {
       const [name, tone] = stageInfo(value.stage);
       setText(stage, name); setAttr(stage, 'class', `tag tone-${tone}`);
       setText(split, value.split ?? 'No split'); toggleClass(split, 'warn', !value.split);
-      setText(noteCount, String(value.comments || '')); setAttr(notes, 'hidden', !value.comments);
-      setAttr(notes, 'data-tip', value.comments ? `${value.comments} open comment${value.comments === 1 ? '' : 's'}` : null);
+      setText(noteCount, String(value.comments || '')); setAttr(notes, 'hidden', !value.comments); toggleClass(notes, 'review', !!value.review);
+      const open = value.comments - value.review;
+      setAttr(notes, 'data-tip', value.comments ? [open && `${open} open`, value.review && `${value.review} awaiting your review`].filter(Boolean).join(' · ') : null);
       setAttr(lock, 'hidden', !value.owner); setAttr(lock, 'data-tip', value.owner ? 'Locked by a running job' : null);
       setAttr(row, 'data-tip', value.id); toggleClass(row, 'selected', value.id === this.id); setAttr(row, 'aria-selected', String(value.id === this.id));
-      setAttr(row, 'aria-label', `${value.id} · ${name} · ${value.split ?? 'Missing split'}${value.comments ? ` · ${value.comments} open comments` : ''}${value.owner ? ' · Locked' : ''}`);
+      setAttr(row, 'aria-label', `${value.id} · ${name} · ${value.split ?? 'Missing split'}${value.comments ? ` · ${value.comments} unresolved comments` : ''}${value.owner ? ' · Locked' : ''}`);
     };
     return row;
   }
@@ -796,8 +800,9 @@ export class StudioUI {
       els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
       onChange: () => {
         if (this.draft) this.renderTimeline();
-        const open = this.comments.items.filter(c => c.status === 'open').length, row = this.lastItems?.find(i => i.id === this.id);
-        if (row && row.comments !== open) this.listing().catch(message);
+        const items = this.comments.items, row = this.lastItems?.find(i => i.id === this.id);
+        const unresolved = items.filter(c => c.status !== 'resolved').length, review = items.filter(c => c.status === 'addressed').length;
+        if (row && (row.comments !== unresolved || row.review !== review)) this.listing().catch(message);
       }});
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);

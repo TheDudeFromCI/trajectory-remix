@@ -50,12 +50,12 @@ def test_comments_leave_the_source_and_its_revision_alone(client):  # noqa: F811
 def test_resolve_reopen_edit_and_delete(client):  # noqa: F811
     ident = create(client)["source"]["id"]
     cid = comment(client, ident, "window", "doc").json()["id"]
-    done = client.patch(
-        f"/api/v1/comments/{cid}", json={"status": "resolved", "resolution": "Fixed it."}
-    ).json()
-    assert done["status"] == "resolved" and done["resolution"] == "Fixed it."
+    done = client.patch(f"/api/v1/comments/{cid}", json={"status": "resolved"}).json()
+    assert done["status"] == "resolved"
     reopened = client.patch(f"/api/v1/comments/{cid}", json={"status": "open"}).json()
-    assert reopened["status"] == "open" and reopened["resolution"] is None
+    assert reopened["status"] == "open"
+    patch = client.patch(f"/api/v1/comments/{cid}", json={"status": "addressed"})
+    assert patch.status_code == 422, "only agents mark a comment addressed"
     edited = client.patch(f"/api/v1/comments/{cid}", json={"body": "Clearer."}).json()
     assert edited["body"] == "Clearer."
     assert client.patch(f"/api/v1/comments/{cid}", json={}).status_code == 422
@@ -81,8 +81,11 @@ def test_project_listing_and_counts_skip_deleted_trajectories(client):  # noqa: 
     comment(client, first["source"]["id"], "trajectory", None)
     comment(client, second["source"]["id"], "event", "a")
     comment(client, second["source"]["id"], "event", "b")
-    counts = client.get("/api/v1/comments/open-counts").json()["counts"]
-    assert counts == {first["source"]["id"]: 1, second["source"]["id"]: 2}
+    counts = client.get("/api/v1/comments/counts").json()["counts"]
+    assert counts == {
+        first["source"]["id"]: {"open": 1, "addressed": 0},
+        second["source"]["id"]: {"open": 2, "addressed": 0},
+    }
     page = client.get("/api/v1/comments?limit=2").json()
     assert page["total"] == 3 and len(page["items"]) == 2 and page["next_offset"] == 2
     client.request(
@@ -91,9 +94,10 @@ def test_project_listing_and_counts_skip_deleted_trajectories(client):  # noqa: 
     assert client.get("/api/v1/comments").json()["total"] == 1
 
 
-def test_agent_reads_comments_answers_and_resolves(client):  # noqa: F811
+def test_agent_addresses_and_only_the_user_resolves(client):  # noqa: F811
     tools = {t["name"] for t in client.get("/api/mcp/tools").json()["tools"]}
-    assert {"list_graph_comments", "add_graph_comment", "resolve_graph_comment"} <= tools
+    assert {"list_graph_comments", "add_graph_comment", "address_graph_comment"} <= tools
+    assert "resolve_graph_comment" not in tools
     ident = create(client)["source"]["id"]
     cid = comment(client, ident, "event", "b", "Event b closes the window too early.").json()["id"]
     queue = mcp(client, "list_graph_comments")
@@ -107,16 +111,36 @@ def test_agent_reads_comments_answers_and_resolves(client):  # noqa: F811
         body="Should this window stay open?",
     )
     assert asked["author"] == "agent"
-    resolved = mcp(client, "resolve_graph_comment", id=cid, resolution="Moved the close to c.")
-    assert resolved["status"] == "resolved" and resolved["resolution"] == "Moved the close to c."
+    done = mcp(client, "address_graph_comment", id=cid, note="Moved the close to c.")
+    assert done["status"] == "addressed"
+    assert done["replies"][-1]["author"] == "agent"
+    assert done["replies"][-1]["body"] == "Moved the close to c."
+    assert [i["id"] for i in mcp(client, "list_graph_comments")["items"]] == [asked["id"]]
+    waiting = mcp(client, "list_graph_comments", status="addressed")["items"]
+    assert [i["id"] for i in waiting] == [cid]
     mine = mcp(client, "list_graph_comments", trajectory=ident, status="all", limit=1)
     assert mine["total"] == 2 and mine["next_offset"] == 1
     assert mcp(client, "read_graph", id=ident)["open_comments"][0]["id"] == asked["id"]
     r = client.post(
         "/api/mcp/call",
-        json={"name": "resolve_graph_comment", "arguments": {"id": cid, "resolution": ""}},
+        json={"name": "address_graph_comment", "arguments": {"id": cid, "note": ""}},
     )
     assert r.status_code == 422
+    r = client.post(
+        "/api/mcp/call",
+        json={"name": "reply_graph_comment", "arguments": {"id": cid, "body": "x", "reopen": True}},
+    )
+    assert r.status_code == 422, "agents cannot reopen through a reply"
+    # The user sends it back: one reply that reopens it, then the agent sees it again.
+    back = client.post(
+        f"/api/v1/comments/{cid}/replies", json={"body": "c still reads it.", "reopen": True}
+    ).json()
+    assert back["status"] == "open" and back["replies"][-1]["author"] == "user"
+    assert cid in [i["id"] for i in mcp(client, "list_graph_comments")["items"]]
+    # Accepting a fix is the user's resolve.
+    mcp(client, "address_graph_comment", id=cid, note="Now c closes it.")
+    accepted = client.patch(f"/api/v1/comments/{cid}", json={"status": "resolved"}).json()
+    assert accepted["status"] == "resolved"
 
 
 def test_reply_threads(client):  # noqa: F811
@@ -155,5 +179,42 @@ def test_open_comments_filter_in_shared_selector(client):  # noqa: F811
     assert [i["id"] for i in found["items"]] == [first["source"]["id"]]
     lines = client.get("/api/v1/trajectories/export?comments=open").text.strip().splitlines()
     assert len(lines) == 1
-    client.patch(f"/api/v1/comments/{flagged['id']}", json={"status": "resolved"})
+    client.app.state.studio.comments.address(flagged["id"], "Fixed.")
     assert client.get("/api/v1/trajectories?comments=open").json()["total"] == 0
+    for status in ("addressed", "unresolved"):
+        found = client.get(f"/api/v1/trajectories?comments={status}").json()["items"]
+        assert [i["id"] for i in found] == [first["source"]["id"]]
+    client.patch(f"/api/v1/comments/{flagged['id']}", json={"status": "resolved"})
+    assert client.get("/api/v1/trajectories?comments=unresolved").json()["total"] == 0
+
+
+def test_tables_from_before_the_addressed_state_are_upgraded(tmp_path):
+    import uuid
+
+    from test_graph_studio import source
+
+    from trajectory_remix.graph.comments import CommentService
+    from trajectory_remix.graph.storage import GraphStore
+
+    store = GraphStore.initialize(tmp_path / "old.sqlite")
+    data = source()
+    store.create(data)
+    with store.connect() as db:
+        db.executescript(
+            """CREATE TABLE graph_comments (id TEXT PRIMARY KEY, trajectory_id TEXT NOT NULL,
+            target_kind TEXT NOT NULL, target_id TEXT, body TEXT NOT NULL, author TEXT NOT NULL,
+            source_revision INTEGER,
+            status TEXT NOT NULL CHECK(status IN ('open','resolved')), resolution TEXT,
+            created TEXT NOT NULL, updated TEXT NOT NULL);"""
+        )
+        db.execute(
+            "INSERT INTO graph_comments VALUES(?,?,'trajectory',NULL,'Old.','user',1,"
+            "'resolved','Agent fixed it.','2026-01-01','2026-01-02')",
+            (str(uuid.uuid4()), data["id"]),
+        )
+    service = CommentService(store)
+    (old,) = service.for_trajectory(data["id"])
+    assert old["status"] == "resolved" and "resolution" not in old
+    assert [(r["author"], r["body"]) for r in old["replies"]] == [("agent", "Agent fixed it.")]
+    service.address(old["id"], "Addressed works on the upgraded table.")
+    CommentService(store)  # Upgrading twice is a no-op.

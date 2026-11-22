@@ -836,14 +836,14 @@ class GenerationService:
             self._save(ticket.job_id, source, cp, ticket=ticket, outcome=result)
 
     def _assist_finish(self, ticket, source, cp, body):
-        resolved = assistant.apply(self.comments, body)
+        addressed = assistant.apply(self.comments, body)
         cp["phase"] = "done"
         self._save(ticket.job_id, source, cp, ticket=ticket, outcome="pass")
         answered = len(body["comments"])
         self.jobs.progress(
             ticket.job_id,
-            f"Assistant finished: trajectory={label(source.id)} resolved={resolved}"
-            f" replied={answered - resolved}",
+            f"Assistant finished: trajectory={label(source.id)} addressed={addressed}"
+            f" replied={answered - addressed}; addressed comments await your review",
             "success",
         )
 

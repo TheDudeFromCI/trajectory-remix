@@ -311,7 +311,7 @@ def create_studio_app(
         stage: int | None = None,
         split: str | None = None,
         tool: str | None = None,
-        comments: Literal["open"] | None = None,
+        comments: Literal["open", "addressed", "unresolved"] | None = None,
         limit: int = Query(50, ge=1, le=1000),
         offset: int = Query(0, ge=0),
     ):
@@ -330,7 +330,7 @@ def create_studio_app(
         stage: int | None = None,
         split: str | None = None,
         tool: str | None = None,
-        comments: Literal["open"] | None = None,
+        comments: Literal["open", "addressed", "unresolved"] | None = None,
     ):
         query = {
             k: v
