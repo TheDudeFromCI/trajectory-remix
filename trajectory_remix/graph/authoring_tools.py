@@ -91,10 +91,16 @@ class ViewDiagnostics(DTO):
     pass
 
 
+class CausalClaim(DTO):
+    consumer_event_id: Identifier
+    evidence_event_ids: list[Identifier] = Field(min_length=1)
+
+
 class Evidence(DTO):
     status: Literal["pass", "fail", "not_applicable"]
     evidence: str = Field(min_length=1)
     event_ids: list[Identifier]
+    causal_claims: list[CausalClaim] | None = None
 
 
 class Signoff(DTO):

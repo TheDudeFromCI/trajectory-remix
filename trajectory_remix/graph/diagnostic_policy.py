@@ -42,6 +42,10 @@ WARNINGS = {
         "Reasoning in a tool window",
         "Agent reasoning shares a window with a tool call or result. Use a dedicated reasoning window.",
     ),
+    "tool_result_unavailable": (
+        "Tool result unavailable",
+        "A direct tool response dependency has been closed or replaced before agent output.",
+    ),
     "tools_window_has_dependencies": (
         "Tools window opens late",
         "The event that opens a tools window depends on other events.",

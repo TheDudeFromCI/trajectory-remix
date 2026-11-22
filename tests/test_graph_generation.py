@@ -186,19 +186,19 @@ def native_report(payload, event_ids, status="pass"):
     parameters = next(
         t["function"]["parameters"] for t in payload["tools"] if t["function"]["name"] == "signoff"
     )
-    return (
-        "signoff",
-        dict(
-            status="complete",
-            summary="offline fixture",
-            items={
-                key: dict(
-                    status=status, evidence="Observed causal evidence.", event_ids=list(event_ids)
-                )
-                for key in parameters["properties"]["items"]["properties"]
-            },
-        ),
-    )
+    criteria = parameters["properties"]["items"]["properties"]
+    items = {
+        key: dict(status=status, evidence="Observed causal evidence.", event_ids=list(event_ids))
+        for key in criteria
+    }
+    if "causal_claims" in criteria.get("core.causal_evidence", {}).get("properties", {}):
+        graph = json.loads(payload["messages"][1]["content"])["graph"]["events"]
+        items["core.causal_evidence"]["causal_claims"] = (
+            [dict(consumer_event_id="note", evidence_event_ids=["got"])]
+            if "note" in graph and "got" in graph
+            else []
+        )
+    return "signoff", dict(status="complete", summary="offline fixture", items=items)
 
 
 def native_assembly(payload, ident, body=None, *, signoff=True):

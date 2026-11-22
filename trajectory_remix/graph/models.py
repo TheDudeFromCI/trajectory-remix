@@ -405,6 +405,7 @@ class GenerationPrompts(DTO):
                 "325bbdc768a88d57609bd1cc38f2dec2b61632f395de754a096d3d35518dee51",
                 "9cdbe536af2c43734bb288e2d14ced358643bde21a3106b8a8ba9eae81ed6d87",
                 "5503627261f2d0c6e7541468d9150a6e3562e6cccd67fb3df9638001ab724058",
+                "f5bda2ec207ce5c99a8e25205f127ab9a31c25bf64234e343d776e939dfee6c3",
             },
         }
         if digest(value) in previous[info.field_name]:

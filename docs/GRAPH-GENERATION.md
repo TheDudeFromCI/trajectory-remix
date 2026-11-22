@@ -187,6 +187,12 @@ warning opt-outs under **Project Settings → Validation**. A completed failing 
 record evidence for repair. Signoffs preserve the source and settings identity, checklist,
 tier, model, endpoint and transition.
 
+A pass on the Core causal-evidence criterion includes `causal_claims` with a consumer
+event and the source event IDs it uses. Signoff checks each claim against the consumer's
+visible windows and requires closure or replacement to follow the consumer. Tool responses,
+documents, or prior reasoning can supply evidence. The dry run also warns about a direct
+tool result dependency that was closed or replaced before agent output.
+
 ### Stage transitions
 
 | Event | Result |

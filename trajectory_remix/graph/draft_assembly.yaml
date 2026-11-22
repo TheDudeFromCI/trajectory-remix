@@ -1,4 +1,4 @@
-version: draft-assembly/5
+version: draft-assembly/6
 # The agent's behaviour guide. Both Draft and Assembly see it; a persona pack goes here.
 actor_instruction: >-
   The agent acts only on visible evidence and the tool contract.
@@ -93,12 +93,20 @@ assemble_instruction: |-
     response window when the tool specifies one.
 
   ## Check visibility and close working windows
-  - after names real event IDs. Add dependencies on the observations a decision uses.
-    Order all writers to the same window. Give independent actions separate windows
-    where appropriate. Keep evidence available through its last consumer.
-  - Keep external observations masked and supervise agent outputs unless the sample
-    calls for a different mask. Close temporary windows when their work is done.
-    Use update_event to fix a specific edit. After deleting an event, repair any
+  - after names real event IDs and sets order. A dependency can still point to an
+    event whose body is gone. Use view_event on the consuming decision and check
+    that the specific evidence IDs appear in its visible windows.
+  - Keep tool results, documents, and prior reasoning open until their last
+    consumer. For a result used later, leave close_window false on the response.
+    After the decision that uses it, add an empty agent_text event in the tool
+    window with close_window true and after containing the last consumer. For a
+    read-only window, use an empty external_text closure. Order any replacement
+    after the last consumer too. If evidence was copied into a retained window,
+    depend on the event that actually holds the copy.
+  - Order all writers to the same window. Give independent actions separate
+    windows where appropriate. Keep external observations masked and supervise
+    agent outputs unless the sample calls for a different mask.
+  - Use update_event to fix a specific edit. After deleting an event, repair any
     dependencies that pointed to it.
 
   ## Example opening batch

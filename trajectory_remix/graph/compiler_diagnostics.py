@@ -23,6 +23,7 @@ from .models import (
     WindowReference,
 )
 from .tool_visibility import presentations, visible_at
+from .window_evidence import evidence_blocker, invalidators
 
 
 def reject_constant(value):
@@ -172,6 +173,29 @@ def diagnose_schedule(
             emit("dependency_cycle", "Event belongs to a dependency cycle", ident, "after")
         # Lifecycle evaluation requires a DAG; broken cyclic drafts remain readable.
         return sorted(diagnostics, key=lambda d: (str(d.path), d.code))
+
+    cleared = invalidators(source, ordered)
+    for ident in ordered:
+        event = events[ident]
+        if not is_model_event(event) or (
+            event.kind == "agent_text" and not has_content(event.content)
+        ):
+            continue
+        for index, dependency in enumerate(event.after):
+            result = events.get(dependency)
+            if not isinstance(result, ToolResponse) or not has_content(result.content):
+                continue
+            blocker = evidence_blocker(source, ancestors, cleared, dependency, ident)
+            if blocker:
+                hidden_by, reason = blocker
+                emit(
+                    "tool_result_unavailable",
+                    f"Tool response {dependency} is no longer visible here. Event {hidden_by} {reason}. "
+                    "If this event uses the result, keep it visible or depend on a visible copy.",
+                    ident,
+                    path=["events", ident, "after", index],
+                    related=list(dict.fromkeys([dependency, hidden_by])),
+                )
 
     by_window, calls, responses = defaultdict(list), defaultdict(list), defaultdict(list)
 

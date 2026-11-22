@@ -21,6 +21,8 @@ INSTRUCTIONS = """# Native graph authoring
 
 ## Finish
 - Call signoff explicitly with evidence and event IDs for each requested criterion.
+  For core.causal_evidence, pair each decision that uses prior evidence with its
+  visible source event IDs in causal_claims. Inspect the decision with view_event.
   A successful signoff needs zero errors and enabled warnings. If a batch includes
   signoff, make it the last call.
 - A failing review can record its evidence. In repair, keep fixing failing criteria
@@ -80,6 +82,7 @@ def begin(source, settings, phase, tier, *, plan=None, prior=None):
         tier=tier,
         draft_visible=draft_visible,
         checks=checks,
+        require_causal_claims=True,
         exchanges=0,
         messages=[
             dict(role="system", content=INSTRUCTIONS + "\n\n" + guidance),
@@ -96,7 +99,9 @@ def payload(session):
         messages=session["messages"],
         tools=provider_tools(
             editable=session["phase"] != "review",
-            signoff_parameters=signoffs.parameters(session["checks"]),
+            signoff_parameters=signoffs.parameters(
+                session["checks"], require_causal_claims=session.get("require_causal_claims", False)
+            ),
         ),
     )
 
@@ -139,7 +144,13 @@ def step(source, settings, session, message):
                     rejected and isinstance(args, dict) and args.get("status") != "unfeasible"
                 ):
                     raise ValueError("Sign off after the other tools have succeeded")
-                result, evidence = signoffs.validate(source, settings, session["checks"], args)
+                result, evidence = signoffs.validate(
+                    source,
+                    settings,
+                    session["checks"],
+                    args,
+                    require_causal_claims=session.get("require_causal_claims", False),
+                )
                 if result == "fail" and editable:
                     raise ValueError("Continue fixing failing criteria or sign off as unfeasible")
                 terminal = (result, evidence)
