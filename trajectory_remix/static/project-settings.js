@@ -220,8 +220,10 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const rounds = input('Repair rounds', current().generation?.repair_rounds ?? 3, value => write(d => { d.generation ||= {}; d.generation.repair_rounds = value; }), 'number'); rounds.min = 1; rounds.max = 10; rounds.step = 1;
   limits.append(field('Format correction retries', retries), field('Repair transcript byte limit', bytes), field('Repair rounds', rounds), node('p', 'A repair fails only when the repairer gives up. A session that reaches the transcript limit starts a fresh round on the current graph; the round count caps spending.', 'settings-help')); settingsColumn.append(limits);
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
-  renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts});
-  renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading});
+  const defaultsBox = node('div', undefined, 'settings-limits');
+  renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts, actions: defaultsBox});
+  renderChecklistSettings(checklistColumn, {current, write, input, error, render, loadDefault: options.loadDefaultChecklists, tipHeading, actions: defaultsBox});
+  if (defaultsBox.children.length) settingsColumn.append(defaultsBox);
   tipHeading(settingsColumn, 'Prompt and checklist pack', 'Export the prompts and checklist as a JSON file, or import one shared from another project.');
   renderReviewPack(settingsColumn, {current, write, error, render});
   settingsColumn.append(status);

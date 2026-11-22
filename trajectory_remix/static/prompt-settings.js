@@ -7,7 +7,7 @@ const PROMPTS = [
   ['assembly', 'Assembly instructions', 'Assembly turns the notes into the compact JSON spec.'],
 ];
 
-export function renderPromptSettings(target, {current, write, error, render, loadDefault}) {
+export function renderPromptSettings(target, {current, write, error, render, loadDefault, actions = null}) {
   const box = node('div', undefined, 'settings-limits');
   for (const [key, title, help] of PROMPTS) {
     const label = node('label', title), text = node('textarea');
@@ -23,7 +23,7 @@ export function renderPromptSettings(target, {current, write, error, render, loa
       if (!confirm('Replace the agent prompt and the Draft and Assembly instructions with the packaged defaults? Your edits in this draft, including any persona text, will be lost. Nothing is saved until you choose Save settings.')) return;
       write(d => { d.prompts = {...defaults}; }); render('Prompts reset to the defaults. Choose Save settings to keep them.');
     };
-    box.append(reset);
+    (actions || box).append(reset);
   }
   target.append(box);
 }
