@@ -93,7 +93,7 @@
     </div>
     <details class="bulk-edit"><summary>Bulk edit all matches <span class="info" tabindex="0" data-tip="Applies to every trajectory matching the current search and filters, across all pages. Runs as an undoable job; locked trajectories are skipped."></span></summary>
       <div class="inline-form">
-        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="review_repair">Review &amp; Repair</option><option value="export">Export</option><option value="delete">Delete</option></select></label>
+        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="export">Export</option><option value="delete">Delete</option></select></label>
         <label id="bulk-value-label">Value<input id="bulk-value" value="3" aria-label="Bulk value"></label>
         <button id="bulk-start" class="sm">Apply</button>
       </div>
@@ -156,8 +156,7 @@
         <span class="grow"></span>
         <button class="primary sm" id="save-source">Save</button>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
-          <button id="review-source">Review</button>
-          <button id="review-repair-source">Review &amp; Repair</button>
+          <button id="review-source" data-tip="Review against the checklist, repair what fails, then sign off">Review</button>
           <button id="export-source">Export</button>
           <button id="duplicate-sample">Duplicate trajectory</button>
           <hr>

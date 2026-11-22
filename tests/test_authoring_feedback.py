@@ -13,7 +13,7 @@ from trajectory_remix.graph.models import ProjectSettings
 def test_diagnostics_tool_observes_its_position_in_the_batch():
     settings = ProjectSettings()
     graph = source({})
-    session = authoring_session.begin(graph, settings, "repair", "fast")
+    session = authoring_session.begin(graph, settings, "review", "fast")
     message = tool_message(
         (
             "create_event",
@@ -36,7 +36,7 @@ def test_diagnostics_tool_observes_its_position_in_the_batch():
 
     review = authoring_session.begin(updated, settings, "review", "fast")
     names = {tool["function"]["name"] for tool in authoring_session.payload(review)["tools"]}
-    assert "view_diagnostics" in names and "update_event" not in names
+    assert {"view_diagnostics", "update_event", "signoff"} <= names  # Reviews can edit.
 
 
 def advice(gen, job):

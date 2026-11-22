@@ -56,7 +56,7 @@ for you to copy, not calls this document makes.
 | Change dependencies | `update_event` | `{"id":"UUID","event_id":"think","expected_revision":2,"after":["input"]}` |
 | Mark an intentional Auto split | `patch_graph` | `{"id":"UUID","expected_revision":3,"patch":{"metadata":{"split":"Auto"}}}` |
 | Generate (only when authorized) | `generate_graphs` | `{"requests":[{"seed":137,"overrides":{"domain":"software_engineering"}}],"instructions":{}}` |
-| Review a saved detached source | `review_graphs` | `{"trajectory":"UUID","expected_revision":4,"mode":"standard","repair":true}` |
+| Review a saved detached source | `review_graphs` | `{"trajectory":"UUID","expected_revision":4,"mode":"standard"}` |
 | Job status | `inspect_graph_job` | `{"id":"JOB_UUID"}` |
 | Outcomes, paged | `graph_job_items` | `{"id":"JOB_UUID","limit":10,"offset":0}` |
 | Logs, by cursor | `graph_job_logs` | `{"id":"JOB_UUID","after":0,"limit":10}` |

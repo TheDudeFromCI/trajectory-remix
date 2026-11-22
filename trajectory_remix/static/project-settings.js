@@ -148,7 +148,7 @@ export function renderProjectSettings(container, initial, options = {}) {
     if (!validId(id) || Object.hasOwn(current().endpoints || {}, id)) return error('Use a unique endpoint ID starting with a lowercase letter, followed by letters, numbers, hyphens or underscores.');
     write(d => { d.endpoints ||= {}; d.endpoints[id] = {url:'http://127.0.0.1:8000/v1', model:'', concurrency:1, retries:2, context_window_tokens:-1, max_output_tokens:-1}; }); render();
   })); container.append(addition);
-  heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Assembly falls back to Draft. Fast Review and Critical Review also perform their corresponding repairs. Assistant answers reviewer comments when you click Send to agent; generation never uses it. Roles may share an endpoint.');
+  heading(container, 'Endpoint roles', 'Draft writes the working notes and Assembly builds the trajectory from them; Assembly falls back to Draft. Fast Review and Critical Review each review, repair what fails and sign off. Assistant answers reviewer comments when you click Send to agent; generation never uses it. Roles may share an endpoint.');
   const roles = node('div', undefined, 'settings-grid');
   for (const [role, name] of [['draft', 'Draft'], ['assembly', 'Assembly'], ['fast', 'Fast Review'], ['critical', 'Critical Review'], ['assistant', 'Assistant']]) {
     const choices = [['', 'Not configured'], ...Object.keys(current().endpoints || {}).map(id => [id, id])];
@@ -215,19 +215,19 @@ export function renderGenerationSettings(container, initial, options = {}) {
   const column = name => node('div', undefined, `review-column review-column-${name}`);
   const settingsColumn = column('settings'), promptsColumn = column('prompts'), checklistColumn = column('checklist');
   container.classList.add('review-columns'); container.append(settingsColumn, promptsColumn, checklistColumn);
-  tipHeading(settingsColumn, 'Automatic review and repair', 'These options apply to future generation runs. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
+  tipHeading(settingsColumn, 'Automatic review', 'These options apply to future generation runs. Each review checks the trajectory, repairs what fails and signs off. A review runs only when its endpoint role is configured. Manual review remains available for detached trajectories.');
   const toggle = (key, title, fallback = true) => {
     const n = node('input'); n.type = 'checkbox'; n.checked = current().generation?.[key] ?? fallback; n.setAttribute('aria-label', title);
     n.onchange = () => write(d => { d.generation ||= {}; d.generation[key] = n.checked; }); return field(title, n);
   };
-  settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review'), toggle('repair','Attempt repair after review failure'));
-  settingsColumn.append(toggle('review_include_draft','Include Draft in review and repair', false));
+  settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review'));
+  settingsColumn.append(toggle('review_include_draft','Include Draft in review', false));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Authoring limits'));
   const retries = input('Incomplete response retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
   const exchanges = input('Maximum exchanges per pass', current().generation?.max_authoring_exchanges ?? 10, value => write(d => { d.generation ||= {}; d.generation.max_authoring_exchanges = value; }), 'number'); exchanges.min = 1; exchanges.step = 1;
   const retriesField = field('Incomplete response retries', retries);
   retriesField.dataset.tip = 'How many times to ask the model again when its response is cut off (it hit the output token limit) or malformed. Bad tool arguments are sent back to the model instead and do not use a retry.';
-  limits.append(retriesField, field('Maximum exchanges per pass', exchanges), node('p', 'Assembly, review, and repair each use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
+  limits.append(retriesField, field('Maximum exchanges per pass', exchanges), node('p', 'Assembly and each review use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
   const defaultsBox = node('div', undefined, 'settings-limits');
   renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts, actions: defaultsBox});

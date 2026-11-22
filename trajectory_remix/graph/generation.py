@@ -1,25 +1,19 @@
-"""Durable shared event/review/repair driver over the existing FIFO services."""
+"""Durable Draft, Assembly, review and Assistant driver over the existing FIFO services."""
 
 import asyncio
 import json
 from copy import deepcopy
 
-import jsonschema
-
 from . import (
-    assembly_fix,
     assistant,
     assistant_memory,
     authoring_session,
     draft_assembly,
     phase_barrier,
-    repair_policy,
     reviews,
     signoffs,
-    spec_normalize,
     trajectory_hold,
 )
-from .commands import merge_patch
 from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
@@ -28,10 +22,22 @@ from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
 from .schema_errors import explain
 from .storage import RevisionConflict
-from .validation import diagnose
 
-DRIVER = "draft-assembly/2"
-LEGACY_DRIVER = "draft-assembly/1"
+DRIVER = draft_assembly.DRIVER
+
+
+def context_reason(ticket, complete):
+    """Why a Draft request was held for its context allowance."""
+    budget = complete.get("local_budget")
+    if not budget:
+        return "Provider context limit; no quality verdict."
+    return (
+        f"Local context guard ({ticket.payload['operation']}): "
+        f"about {budget['input_tokens_estimate']} input tokens "
+        f"({budget['input_bytes']} bytes at {budget['bytes_per_token']} bytes/token) exceed the "
+        f"{budget['input_ceiling']}-token allowance. No provider call made. Reduce prompt scope "
+        "or change the endpoint budget; active runs keep frozen settings."
+    )
 
 
 class GenerationService:
@@ -60,7 +66,7 @@ class GenerationService:
         if "draft" not in settings.endpoint_roles:
             raise ValueError("Configure the Draft endpoint in Project Settings")
         for tier in reviews.automatic_tiers(settings.generation, settings.endpoint_roles):
-            reviews.review_schema(settings, tier)
+            reviews.require_checklist(settings, tier)
         instructions = deepcopy(instructions)
         retired = {"plan", "flow_yaml"} & instructions.keys()
         if retired:
@@ -83,19 +89,16 @@ class GenerationService:
             settings_record=settings_record,
         )
 
-    def start_review(
-        self, query, *, mode="standard", repair=True, trajectory=None, expected_revision=None
-    ):
-        if mode not in {"standard", "force_fast", "force_critical"} or type(repair) is not bool:
+    def start_review(self, query, *, mode="standard", trajectory=None, expected_revision=None):
+        if mode not in {"standard", "force_fast", "force_critical"}:
             raise ValueError("Invalid review mode")
         snapshot = self.store.settings()
         settings = snapshot.settings
         for tier in ("fast", "critical"):
             if tier in settings.endpoint_roles:
-                reviews.review_schema(settings, tier)
+                reviews.require_checklist(settings, tier)
         options = dict(
             mode=mode,
-            repair=repair,
             settings=settings.model_dump(mode="json"),
             settings_revision=snapshot.revision,
             driver=DRIVER,
@@ -147,17 +150,8 @@ class GenerationService:
         if config.get("action") == assistant.ACTION:
             return assistant.ROLE, assistant.PHASE
         return reviews.manual_operation(
-            source.metadata.get("stage", -3),
-            config["options"]["mode"],
-            config["options"]["repair"],
-            settings,
+            source.metadata.get("stage", -3), config["options"]["mode"], settings
         )
-
-    def _session_base(self, job, source, settings, cp):
-        """Seed a continuing legacy repair session on the checkpoint."""
-        if cp["phase"] == "repair" and self._driver(job) != DRIVER:
-            base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
-            cp.update(history=[], repair_base=base)
 
     @staticmethod
     def _assist_session(job, source, settings):
@@ -165,7 +159,7 @@ class GenerationService:
         options = job["config"]["options"]
         prior = options.get("conversation")
         session = assistant.begin(source, settings, options["comments"], prior)
-        budget = settings.generation.repair_context_bytes
+        budget = settings.generation.assistant_context_bytes
         if prior and len(canonical(session["messages"]).encode()) >= budget:
             session = assistant.begin(source, settings, options["comments"])
         return session
@@ -226,11 +220,6 @@ class GenerationService:
 
     def _phase(self, job, source, cp, phase, tier=None, *, outcome=None):
         cp.update(phase=phase, tier=tier, errors=0)
-        if phase == "repair":
-            cp["history"] = []
-            cp["repair_base"] = reviews.payload(source, self.settings_for(job), tier, "repair")[
-                "messages"
-            ]
         self._save(job, source, cp, outcome=outcome)
         self.jobs.progress(
             job,
@@ -249,19 +238,23 @@ class GenerationService:
         else:
             self._phase(job, source, cp, "done", outcome="pass")
 
+    def _retired(self, job, j, message):
+        """Pause a job made for an earlier pipeline, whose phases no longer exist."""
+        if self._driver(j) == DRIVER:
+            return False
+        self.jobs.control(job, "pause")
+        self.jobs.append_log(job, message, level="error")
+        return True
+
     def _admit(self, job, epoch=None):
         j = self.jobs.inspect(job)
         if epoch is not None and j["epoch"] != epoch:
             raise Fenced("Worker epoch changed")
         # Only this handoff's explicitly prepared runs have model access. Generic
         # /runs and historical sampler snapshots cannot silently become live jobs.
-        if self._driver(j) not in {DRIVER, LEGACY_DRIVER}:
-            self.jobs.control(job, "pause")
-            self.jobs.append_log(
-                job,
-                "This run was made by a retired generation method; start a new generation run.",
-                level="error",
-            )
+        if self._retired(
+            job, j, "This run was made by a retired generation method; start a new generation run."
+        ):
             return
         self.settings_for(job)
         for offset in range(0, j["total"], 100):
@@ -292,6 +285,10 @@ class GenerationService:
         j = self.jobs.inspect(job)
         if epoch is not None and j["epoch"] != epoch:
             raise Fenced("Worker epoch changed")
+        if j["config"].get("action") == "review_repair" and self._retired(
+            job, j, "This review was queued for a retired review pipeline; start a new review."
+        ):
+            return
         for offset in range(0, j["total"], 100):
             for item in self.bulk.results(job, offset=offset):
                 if item["state"] != "pending":
@@ -339,7 +336,6 @@ class GenerationService:
                         _epoch=j["epoch"],
                         _revision=record.revision,
                     )
-                    self._session_base(j, record.source, settings, cp)
                     self._save(job, record.source, cp)
                 except (OwnershipConflict, RevisionConflict, KeyError):
                     with self.store.connect() as db:
@@ -383,7 +379,6 @@ class GenerationService:
                     manual=True,
                     bulk_position=item[0],
                 )
-                self._session_base(j, source, settings, cp)
             else:
                 cp = dict(serial=0, phase="event", index=0, errors=0, manual=False)
         if trajectory_hold.held(cp, epoch):
@@ -399,63 +394,32 @@ class GenerationService:
         if phase == "event" and cp.get("assembled"):
             self._after_generation(job, source, cp)
             return
-        if self._driver(j) == DRIVER and (
-            phase in ("review", "repair") or (phase == "event" and "draft" in cp)
-        ):
+        if phase == "review" or (phase == "event" and "draft" in cp):
             session = cp.get("authoring_session")
             if session is None:
                 plan = self._plan(job, ident) if phase == "event" else None
                 session = authoring_session.begin(
-                    source,
-                    settings,
-                    "assembly" if plan else phase,
-                    cp.get("tier"),
-                    plan=plan,
-                    prior=cp.get("failed_review") if phase == "repair" else None,
+                    source, settings, "assembly" if plan else phase, cp.get("tier"), plan=plan
                 )
                 cp["authoring_session"] = session
             tier = draft_assembly.role(settings, "assembly") if phase == "event" else cp["tier"]
             payload = authoring_session.payload(session)
         elif phase == "event":
-            payload = draft_assembly.payload(cp, self._plan(job, ident), settings)
-            tier = draft_assembly.role(settings, payload["operation"])
-        elif cp["phase"] == assembly_fix.PHASE:
-            payload = assembly_fix.payload(cp)
-            if (
-                len(canonical(payload["messages"]).encode())
-                >= settings.generation.repair_context_bytes
-            ):
-                self._end_assembly_fix(job, source, cp, "context_limit")
-                return
+            payload = draft_assembly.payload(cp, self._plan(job, ident))
+            tier = draft_assembly.role(settings, draft_assembly.DRAFT)
+        elif phase == assistant.PHASE:
             tier = cp["tier"]
-        elif cp["phase"] == assistant.PHASE:
-            tier = cp["tier"]
-            if "authoring_session" not in cp:  # A JSON-action checkpoint restarts natively.
-                for key in ("repair_base", "history"):
-                    cp.pop(key, None)
+            if "authoring_session" not in cp:
                 cp["authoring_session"] = self._assist_session(j, source, settings)
             payload = assistant.payload(cp["authoring_session"])
             if (
                 len(canonical(payload["messages"]).encode())
-                >= settings.generation.repair_context_bytes
+                >= settings.generation.assistant_context_bytes
             ):
                 self._assist_end(job, source, cp, "context_limit")
                 return
         else:
-            tier = cp["tier"]
-            payload = reviews.payload(
-                source, settings, tier, cp["phase"], correction=cp["errors"] > 0
-            )
-            if cp["phase"] == "repair":
-                # Original complete snapshot + continuing tool history. Never
-                # silently rebuild/compact a repair session after each patch.
-                payload["messages"] = cp["repair_base"] + cp["history"]
-                if (
-                    len(canonical(payload["messages"]).encode())
-                    >= settings.generation.repair_context_bytes
-                ):
-                    self._next_round(job, source, cp)
-                    return
+            return
         endpoint = settings.endpoint_roles[tier]
         payload.update(
             endpoint_config=settings.endpoints[endpoint].model_dump(mode="json"),
@@ -482,18 +446,6 @@ class GenerationService:
             "warning" if paused else "info",
         )
 
-    def _next_round(self, job, source, cp, ticket=None):
-        """A repair that outgrew its context continues as a fresh round, up to the cap."""
-        settings = self.settings_for(job)
-        base = reviews.payload(source, settings, cp["tier"], "repair")["messages"]
-        if not repair_policy.new_round(cp, settings, base):
-            self._repair_failure(job, source, cp, "round_limit", ticket)
-            return
-        self._save(job, source, cp, ticket=ticket)
-        self.jobs.progress(
-            job, f"Repair round {cp['round']} started: trajectory={label(source.id)}"
-        )
-
     def _plan(self, job, ident):
         with self.store.connect() as db:
             proposal = json.loads(
@@ -502,77 +454,6 @@ class GenerationService:
                 ).fetchone()[0]
             )
         return self.jobs.inspect(job)["config"]["config"]["plans"][proposal["id"]]
-
-    @staticmethod
-    def _can_repair(settings):
-        return settings.generation.repair and "fast" in settings.endpoint_roles
-
-    def _assembled(self, ticket, source, broken, cp):
-        """Commit an assembled graph. Structural errors go straight to Fast repair."""
-        self.jobs.progress(
-            ticket.job_id,
-            f"Graph assembled: trajectory={label(source.id)} events={len(source.events)}"
-            + (f" structural_errors={len(broken)}" if broken else ""),
-        )
-        settings = self.settings_for(ticket.job_id)
-        if assembly_fix.needed(source, settings):
-            draft = source.metadata.get("draft", "")
-            cp.update(
-                phase=assembly_fix.PHASE,
-                tier=draft_assembly.role(settings, "assembly"),
-                errors=0,
-                history=[],
-            )
-            cp["self_base"] = assembly_fix.base(source, settings, draft)
-            self._save(ticket.job_id, source, cp, ticket=ticket)
-            return
-        self._to_review(ticket.job_id, source, broken, cp, ticket)
-
-    def _end_assembly_fix(self, job, source, cp, reason, ticket=None):
-        """Hand the graph on to review (or Fast repair if errors remain)."""
-        settings = self.settings_for(job)
-        data = source.to_dict()
-        data["metadata"]["assembly_fix"] = assembly_fix.outcome(source, settings, cp, reason)
-        source = GraphSource.model_validate(data)
-        for key in ("self_base", "history"):
-            cp.pop(key, None)
-        cp.update(phase="event", errors=0)
-        self.jobs.progress(
-            job, f"Self-repair ended ({label(reason)}): trajectory={label(source.id)}"
-        )
-        self._to_review(job, source, assembly_fix.errors(source, settings), cp, ticket)
-
-    def _assembly_fix_step(self, ticket, source, cp, body):
-        settings = self.settings_for(ticket.job_id)
-        if body["action"] == "give_up":
-            self._end_assembly_fix(ticket.job_id, source, cp, "gave_up", ticket)
-        elif body["action"] != "done":
-            self._repair_action(ticket, source, cp, body)
-        elif assembly_fix.errors(source, settings):
-            cp["history"].extend(
-                [
-                    dict(role="assistant", content=canonical(body)),
-                    assembly_fix.not_done(source, settings),
-                ]
-            )
-            self._save(ticket.job_id, source, cp, ticket=ticket)
-        else:
-            self._end_assembly_fix(ticket.job_id, source, cp, "done", ticket)
-
-    def _to_review(self, job, source, broken, cp, ticket=None):
-        if not broken:
-            cp["assembled"] = True
-            self._save(job, source, cp, ticket=ticket)
-            return
-        settings = self.settings_for(job)
-        data = source.to_dict()
-        data["metadata"].update(
-            stage=-1, generation_failure=dict(kind="assembled_with_structural_errors")
-        )
-        source = GraphSource.model_validate(data)
-        cp.update(phase="repair", tier="fast", errors=0, history=[], round=1)
-        cp["repair_base"] = reviews.payload(source, settings, "fast", "repair")["messages"]
-        self._save(job, source, cp, ticket=ticket)
 
     def _hold(self, job, source, cp, reason, ticket=None):
         """Hold one trajectory for attention; the rest of the job keeps running."""
@@ -646,17 +527,8 @@ class GenerationService:
                 level="warning",
             )
 
-    def _repair_failure(self, job, source, cp, reason, ticket=None, detail=None):
-        data = source.to_dict()
-        data.setdefault("metadata", {})["stage"] = -3
-        outcome = dict(tier=cp["tier"], outcome=reason, source_hash=source.intrinsic_hash)
-        if detail:
-            outcome["reason"] = detail
-        data["metadata"].setdefault("repair_outcomes", []).append(outcome)
-        cp["phase"] = "done"
-        self._save(job, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail")
-
     def _invalid(self, ticket, source, cp):
+        """An unusable Draft reply: correct it, up to format_retries, then fail the attempt."""
         settings = self.settings_for(ticket.job_id)
         cp["errors"] += 1
         self.jobs.progress(
@@ -664,52 +536,19 @@ class GenerationService:
             f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
             "warning",
         )
-        if cp["errors"] > settings.generation.format_retries:
-            if cp["phase"] == assembly_fix.PHASE:
-                self._end_assembly_fix(ticket.job_id, source, cp, "invalid_output", ticket)
-            elif cp["phase"] == "event":
-                data = source.to_dict()
-                data["metadata"]["stage"] = -1
-                data["metadata"]["generation_failure"] = {
-                    "kind": "invalid_provider_output",
-                    "event_index": cp["index"],
-                }
-                # An empty graph has nothing to repair and would pass structurally.
-                if self._can_repair(settings) and source.events:
-                    cp.update(phase="repair", tier="fast", errors=0, history=[])
-                    cp["repair_base"] = reviews.payload(
-                        GraphSource.model_validate(data), settings, "fast", "repair"
-                    )["messages"]
-                    self._save(ticket.job_id, GraphSource.model_validate(data), cp, ticket=ticket)
-                else:
-                    cp["phase"] = "done"
-                    self._save(
-                        ticket.job_id,
-                        GraphSource.model_validate(data),
-                        cp,
-                        ticket=ticket,
-                        outcome="fail",
-                    )
-            else:
-                # No quality verdict exists. Keep the stage and hold this trajectory;
-                # Resume gives it a fresh bounded correction.
-                self._hold(
-                    ticket.job_id,
-                    source,
-                    cp,
-                    "Review/repair output stayed invalid after its corrections; no verdict"
-                    " recorded.",
-                    ticket,
-                )
-        else:
-            if cp["phase"] in ("repair", assembly_fix.PHASE):
-                cp["history"].append(
-                    dict(
-                        role="user",
-                        content="Previous reply violated the output contract. Return a complete valid inspection, patch or verdict.",
-                    )
-                )
+        if cp["errors"] <= settings.generation.format_retries:
             self._save(ticket.job_id, source, cp, ticket=ticket)
+            return
+        data = source.to_dict()
+        data["metadata"]["stage"] = -1
+        data["metadata"]["generation_failure"] = {
+            "kind": "invalid_provider_output",
+            "event_index": cp["index"],
+        }
+        cp["phase"] = "done"
+        self._save(
+            ticket.job_id, GraphSource.model_validate(data), cp, ticket=ticket, outcome="fail"
+        )
 
     def consume(self, ticket):
         complete = self.jobs.result(ticket)
@@ -721,108 +560,31 @@ class GenerationService:
         settings = self.settings_for(ticket.job_id)
         if cp["phase"] == assistant.PHASE:
             self._consume_assist(ticket, source, cp, complete)
-            return
-        if "tools" in ticket.payload:
+        elif "tools" in ticket.payload:
             self._consume_native(ticket, record, settings, source, cp, complete)
-            return
-        if complete.get("context_limit"):
-            if cp["phase"] == assembly_fix.PHASE:
-                self._end_assembly_fix(ticket.job_id, source, cp, "context_limit", ticket)
-            elif cp["phase"] == "repair":
-                self._next_round(ticket.job_id, source, cp, ticket)
-            else:
-                self._hold(
-                    ticket.job_id,
-                    source,
-                    cp,
-                    (
-                        f"Local context guard ({ticket.payload['operation']}): "
-                        f"about {complete['local_budget']['input_tokens_estimate']} input tokens "
-                        f"({complete['local_budget']['input_bytes']} bytes at "
-                        f"{complete['local_budget']['bytes_per_token']} bytes/token) exceed the "
-                        f"{complete['local_budget']['input_ceiling']}-token allowance. "
-                        "No provider call made. Reduce prompt scope or change the endpoint budget; "
-                        "active runs keep frozen settings."
-                        if complete.get("local_budget")
-                        else "Provider context limit; no quality verdict."
-                    ),
-                    ticket,
-                )
-            return
+        elif complete.get("context_limit"):
+            self._hold(ticket.job_id, source, cp, context_reason(ticket, complete), ticket)
+        else:
+            self._consume_draft(ticket, source, cp, complete)
+
+    def _consume_draft(self, ticket, source, cp, complete):
         body = complete.get("output")
         try:
             if complete.get("invalid_output"):
                 raise ValueError(invalid_reason(complete))
-            if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
-                body = spec_normalize.normalize(body)
             problem = explain(ticket.payload["schema"], body)
             if problem:
                 raise ValueError(problem)
-            if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
-                plan = self._plan(ticket.job_id, ticket.trajectory_id)
-                assembled, broken = draft_assembly.assemble(source, body, plan, settings)
-                if broken and not self._can_repair(settings):
-                    raise ValueError(
-                        "Structural errors; fix them: "
-                        + "; ".join(f"{d.code}: {d.message}" for d in broken[:8])
-                    )
-            if cp["phase"] == "review":
-                quality = reviews.verdict(body, source)
-                if quality == "pass" and any(
-                    d.severity == "error" for d in diagnose(source, settings)
-                ):
-                    raise ValueError("A structural error cannot receive a passing signoff")
-            elif cp["phase"] == "repair" and body["action"] == "verdict":
-                quality = reviews.verdict(body["review"], source)
-                if quality == "fail":
-                    # Not a failure: the repairer keeps working, or gives up explicitly.
-                    cp["errors"] = 0
-                    cp["failed_review"] = body["review"]
-                    cp["history"].extend(
-                        [
-                            dict(role="assistant", content=canonical(body)),
-                            repair_policy.still_failing(body["review"]),
-                        ]
-                    )
-                    self._save(ticket.job_id, source, cp, ticket=ticket)
-                    return
-                if quality == "pass" and any(
-                    d.severity == "error" for d in diagnose(source, settings)
-                ):
-                    raise ValueError("Repair must resolve structural errors before passing")
-        except (jsonschema.ValidationError, ValueError, TypeError, KeyError) as error:
+        except (ValueError, TypeError, KeyError) as error:
             cp["flow_error"] = str(error)[:2000]
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
-        if cp["phase"] == assembly_fix.PHASE:
-            self._assembly_fix_step(ticket, source, cp, body)
-            return
-        if ticket.payload["operation"] == draft_assembly.DRAFT:
-            cp["draft"] = body["draft"]
-            self._save(
-                ticket.job_id, draft_assembly.with_draft(source, body["draft"]), cp, ticket=ticket
-            )
-            self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
-            return
-        if ticket.payload["operation"] == draft_assembly.ASSEMBLE:
-            self._assembled(ticket, assembled, broken, cp)
-            return
-        if cp["phase"] == "repair" and body["action"] == "give_up":
-            self.jobs.progress(
-                ticket.job_id,
-                f"Repair given up as not feasible: trajectory={label(source.id)}",
-                "warning",
-            )
-            self._repair_failure(
-                ticket.job_id, source, cp, "unfeasible", ticket, detail=body["reason"]
-            )
-            return
-        if cp["phase"] == "repair" and body["action"] != "verdict":
-            self._repair_action(ticket, source, cp, body)
-            return
-        review = body["review"] if cp["phase"] == "repair" else body
-        self._finish_review(ticket, record, settings, source, cp, complete, review)
+        cp["draft"] = body["draft"]
+        self._save(
+            ticket.job_id, draft_assembly.with_draft(source, body["draft"]), cp, ticket=ticket
+        )
+        self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
 
     def _consume_native(self, ticket, record, settings, source, cp, complete):
         session = cp["authoring_session"]
@@ -875,7 +637,7 @@ class GenerationService:
                 self._save(ticket.job_id, source, cp, ticket=ticket)
             return
         result, evidence = terminal
-        if result == "unfeasible":
+        if result == "unfeasible" and session["phase"] == "assembly":
             self._authoring_failure(ticket, source, cp, result, detail=evidence["summary"])
             return
         cp.pop("authoring_session")
@@ -906,8 +668,11 @@ class GenerationService:
             cp["assembled"] = True
             self._save(ticket.job_id, source, cp, ticket=ticket)
         else:
+            # A review that cannot make the trajectory pass signs off as unfeasible: a failure.
+            failed = result == "unfeasible"
+            evidence = evidence | dict(unfeasible=True) if failed else evidence
             self._finish_review(
-                ticket, record, settings, source, cp, complete, evidence, native=session
+                ticket, record, settings, source, cp, complete, evidence, session, failed
             )
 
     def _authoring_failure(self, ticket, source, cp, reason, detail=None):
@@ -941,38 +706,33 @@ class GenerationService:
         )
 
     def _finish_review(
-        self, ticket, record, settings, source, cp, complete, review, *, native=None
+        self, ticket, record, settings, source, cp, complete, evidence, session, failed
     ):
-        provenance = None
-        if native is not None:
-            config = self.jobs.inspect(ticket.job_id)["config"]
-            provenance = signoffs.stamp(
-                source,
-                settings,
-                draft_visible=native["draft_visible"],
-                binds_review_option=True,
-            ) | dict(
-                settings_revision=config.get(
-                    "settings_revision", config.get("options", {}).get("settings_revision")
-                ),
-                exchanges=native["exchanges"],
-            )
+        config = self.jobs.inspect(ticket.job_id)["config"]
+        provenance = signoffs.stamp(
+            source, settings, draft_visible=session["draft_visible"], binds_review_option=True
+        ) | dict(
+            settings_revision=config.get(
+                "settings_revision", config.get("options", {}).get("settings_revision")
+            ),
+            exchanges=session["exchanges"],
+        )
         source, result = reviews.signoff(
             source,
             record,
             settings,
             cp["tier"],
-            cp["phase"],
-            review,
-            ticket.endpoint,
-            complete.get("model"),
-            settings.endpoints[ticket.endpoint].model,
-            native=provenance,
-            prompt_version=native.get("prompt_version") if native is not None else None,
+            evidence,
+            result="fail" if failed else "pass",
+            endpoint=ticket.endpoint,
+            model=complete.get("model"),
+            requested_model=settings.endpoints[ticket.endpoint].model,
+            provenance=provenance,
+            prompt_version=session["prompt_version"],
         )
         self.jobs.progress(
             ticket.job_id,
-            f"{label(cp['tier'])} {label(cp['phase'])} verdict: {label(result)} trajectory={label(source.id)}",
+            f"{label(cp['tier'])} review verdict: {label(result)} trajectory={label(source.id)}",
             "success" if result == "pass" else "warning",
         )
         next_critical = (
@@ -981,35 +741,7 @@ class GenerationService:
             and cp["tier"] == "fast"
             and "critical" in reviews.automatic_tiers(settings.generation, settings.endpoint_roles)
         )
-        if cp["phase"] == "repair":
-            if result == "fail":
-                self._repair_failure(ticket.job_id, source, cp, "negative_verdict", ticket)
-            else:
-                if next_critical:
-                    cp.update(phase="review", tier="critical", errors=0)
-                    self._save(ticket.job_id, source, cp, ticket=ticket)
-                else:
-                    cp["phase"] = "done"
-                    self._save(ticket.job_id, source, cp, ticket=ticket, outcome="pass")
-            return
-        manual = cp["manual"]
-        repair_enabled = (
-            self.jobs.inspect(ticket.job_id)["config"]["options"]["repair"]
-            if manual
-            else settings.generation.repair
-        )
-        if result == "fail" and repair_enabled:
-            cp.update(phase="repair", errors=0, failed_review=review)
-            if native is None:
-                cp.update(history=[], round=1)
-                cp["repair_base"] = reviews.payload(source, settings, cp["tier"], "repair")[
-                    "messages"
-                ]
-                cp["repair_base"].append(
-                    dict(role="user", content=canonical({"failed_review": review}))
-                )
-            self._save(ticket.job_id, source, cp, ticket=ticket)
-        elif next_critical:
+        if next_critical:
             cp.update(tier="critical", errors=0)
             self._save(ticket.job_id, source, cp, ticket=ticket)
         else:
@@ -1019,12 +751,7 @@ class GenerationService:
     def _consume_assist(self, ticket, source, cp, complete):
         """One native Assistant exchange: edits, replies, and the end of the session."""
         settings = self.settings_for(ticket.job_id)
-        session = cp.get("authoring_session")
-        if session is None or "tools" not in ticket.payload:  # A JSON-action reply.
-            for key in ("authoring_session", "repair_base", "history"):
-                cp.pop(key, None)
-            self._save(ticket.job_id, source, cp, ticket=ticket)
-            return
+        session = cp["authoring_session"]
         if complete.get("context_limit"):
             self._assist_end(ticket.job_id, source, cp, "context_limit", ticket)
             return
@@ -1081,46 +808,6 @@ class GenerationService:
             " edits so far are kept and the comments stay open.",
             "warning",
         )
-
-    def _repair_action(self, ticket, source, cp, body):
-        settings = self.settings_for(ticket.job_id)
-        reply = {}
-        ident = body.get("event_id", body.get("window_id"))
-        try:
-            if body["action"] == "inspect":
-                reply = repair_policy.inspect(source, ident)
-            elif body["action"] == "view":
-                reply = repair_policy.view(source, settings)
-            else:
-                if body["expected_source_hash"] != source.intrinsic_hash:
-                    raise ValueError("Patch source hash is stale")
-                data = source.to_dict()
-                if body["action"] == "remove_event":
-                    del data["events"][ident]  # Keep broken references explicit.
-                else:
-                    collection = "windows" if body["action"] == "patch_window" else "events"
-                    data[collection][ident] = merge_patch(
-                        data[collection].get(ident, {}), body["patch"]
-                    )
-                prepared = GraphSource.model_validate(data)
-                source = prepared
-                reply = dict(
-                    accepted=True,
-                    source_hash=source.intrinsic_hash,
-                    diagnostics=[d.model_dump(mode="json") for d in diagnose(source, settings)],
-                )
-        except (ValueError, KeyError):
-            reply = {
-                "accepted": False,
-                "error": "Invalid event, source hash or graph patch; inspect and correct within this session.",
-            }
-        cp["history"].extend(
-            [
-                dict(role="assistant", content=canonical(body)),
-                dict(role="user", content=canonical(reply)),
-            ]
-        )
-        self._save(ticket.job_id, source, cp, ticket=ticket)
 
     async def _call(self, endpoint):
         try:

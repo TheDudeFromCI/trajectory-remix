@@ -6,11 +6,11 @@ for (const key of ['document', 'MutationObserver']) globalThis[key] = window[key
 const {renderUsage, formatValue, duration} = await import('../trajectory_remix/static/usage-view.js');
 const row = (n, cost) => ({requests: n, prompt_tokens: 1000 * n, cached_tokens: 700 * n, completion_tokens: 50 * n, reasoning_tokens: 0, cost, seconds: n});
 const report = {job_id: 'j', trajectories: 2, wall_seconds: 125, models: ['vendor/model'], total: row(10, 0.0123), per_trajectory: row(5, 0.00615),
-  operations: {flow_select: row(6, 0.009), event: row(4, null)}};
+  operations: {draft: row(6, 0.009), review: row(4, null)}};
 const box = document.createElement('div'); document.body.append(box);
 const signature = renderUsage(box, report);
 const text = box.textContent;
-assert.match(text, /Per trajectory \(2\)/); assert.match(text, /Selections/); assert.match(text, /Event writing/);
+assert.match(text, /Per trajectory \(2\)/); assert.match(text, /Drafts/); assert.match(text, /Reviews/);
 assert.match(text, /\$0\.0123/); assert.match(text, /7,000 \(70%\)/); assert.match(text, /vendor\/model/);
 const missing = [...box.querySelectorAll('td')].find(td => td.textContent === '—');
 assert.ok(missing?.dataset.tip, 'missing values explain themselves');

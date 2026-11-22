@@ -636,10 +636,10 @@ export class StudioUI {
     if (dirty) return;
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
   }
-  async startReview({repair, bulk = false}) {
+  async startReview({bulk = false} = {}) {
     if (!bulk && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
     $('trajectory-menu')?.removeAttribute('open');
-    const r = await api('/reviews', 'POST', {mode: 'standard', repair, ...(bulk ? {query: this.query()} : {trajectory: this.id, expected_revision: this.record.revision})});
+    const r = await api('/reviews', 'POST', {mode: 'standard', ...(bulk ? {query: this.query()} : {trajectory: this.id, expected_revision: this.record.revision})});
     this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
     message('Review running… Progress also appears in Jobs.');
   }
@@ -886,11 +886,10 @@ export class StudioUI {
     on('export-button', 'click', () => $('export-dialog').showModal());
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-action', 'change', () => { $('bulk-value-label').hidden = !['stage', 'split'].includes($('bulk-action').value); });
-    on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review' || action === 'review_repair') return this.startReview({repair: action === 'review_repair', bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
+    on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review') return this.startReview({bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
-    on('review-source', 'click', () => this.startReview({repair: false}));
+    on('review-source', 'click', () => this.startReview());
     on('comment-send', 'click', () => this.sendToAssistant());
-    on('review-repair-source', 'click', () => this.startReview({repair: true}));
     on('export-source', 'click', () => this.exportSource());
     on('metrics-refresh', 'click', () => this.loadMetrics());
     on('metrics-calculate', 'click', async () => {

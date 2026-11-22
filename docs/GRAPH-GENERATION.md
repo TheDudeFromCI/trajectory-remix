@@ -65,8 +65,8 @@ over one continuing tool conversation, then hands the signed-off graph to review
 |---|---|---|
 | Draft | **Draft** | Plain-prose working notes for the whole episode: messages, reasoning, tool calls and their results, parallel work, and what the agent can confirm at the end. |
 | Assembly | **Assembly** (falls back to Draft) | Uses native tools to create and inspect the graph, resolve diagnostics and sign off on completeness and Draft fidelity. |
-| Fast Review | **Fast Review** | Checklist review, with repair if it fails. |
-| Critical Review | **Critical Review** | Stricter checklist review, with repair if it fails. |
+| Fast Review | **Fast Review** | Checklist review that repairs what fails, then signs off. |
+| Critical Review | **Critical Review** | Stricter checklist review that repairs what fails, then signs off. |
 
 Draft and Assembly can share one endpoint, or you can give Assembly a stronger model for better
 structure. The Draft and Assembly calls see the proposal, the tool catalogue, the review checklist
@@ -86,7 +86,8 @@ model turn.
 Assembly is complete when `signoff` accepts evidence for completeness and fidelity to the
 Draft. Resolve all errors and enabled warnings first. A regular text reply leaves the same
 conversation open. The Draft and signoff stay with the trajectory in `metadata.draft` and
-`metadata.authoring_signoffs`. Existing jobs keep their frozen generation driver.
+`metadata.authoring_signoffs`. Jobs started before review and repair became one step pause with a
+message; start a new run or review instead.
 
 ### Generate and review in separate sessions
 
@@ -97,8 +98,8 @@ models that don't fit in VRAM together), use the **Phase barriers** checkboxes i
 | Checkbox | The job waits until every trajectory has... | Resume starts |
 |---|---|---|
 | Pause before Assembly | finished Draft | Assembly |
-| Pause before Fast review | been assembled | Fast review, with its repairs |
-| Pause before Critical review | reached Critical review | Critical review, with its repairs |
+| Pause before Fast review | been assembled | Fast review |
+| Pause before Critical review | reached Critical review | Critical review |
 
 With a barrier on, a trajectory that reaches it **parks** instead of going on. When every
 trajectory is parked, held or finished, the job **pauses** and the log says so. With several
@@ -131,7 +132,7 @@ answers with whatever model is loaded, review requests can silently go to the ge
 
 ### Edit the prompts
 
-The prompts are project settings, under **Settings → Automatic review and repair → Generation
+The prompts are project settings, under **Review Settings → Generation
 prompts**:
 
 | Prompt | Used by | What it's for |
@@ -163,14 +164,13 @@ tools add the **Authoring prompt** after it. The task and its data go in the fir
 |---|---|---|
 | **Draft** | Agent prompt | Draft instructions, then the sampled proposal and the project tools as JSON. |
 | **Assembly** | Agent and authoring prompts | Assembly instructions, the trajectory ID, the project tools and the Draft. |
-| **Fast / Critical Review** | Agent and authoring prompts | A request to review the trajectory against the checklist and call `signoff`, the review checklist, the objective and sampled targets, and the trajectory ID. |
-| **Repair** (on the review endpoint) | Agent and authoring prompts | The same, asking to repair the issues, with the failed review and the project tools. |
+| **Fast / Critical Review** | Agent and authoring prompts | A request to review the trajectory against the checklist, repair any issues and call `signoff`; the review checklist, the objective and sampled targets, the project tools, and the trajectory ID. |
 | **Assistant** | Agent and authoring prompts | The open comments as a table with their IDs and threads, the trajectory ID, and a request to answer each with the `reply` tool. |
 
 - Sessions with tools start from the trajectory ID and read the graph with `view_graph`,
   `view_diagnostics`, `view_event` and `view_window`. The criteria are also in the `signoff`
   tool's parameters.
-- In Review Settings, turn on **Include Draft in review and repair** to show the Draft to
+- In Review Settings, turn on **Include Draft in review** to show the Draft to
   reviewers and require Draft-fidelity evidence whenever the source has a Draft. It defaults to off.
 
 Synthetic tool outputs are authored event content. Remix performs no tool execution.
@@ -196,11 +196,14 @@ Two optional reviewers check a finished trajectory against editable checklists:
 - **Fast** covers the **Core** checklist.
 - **Critical** covers **Core + Critical**.
 
-Use `signoff` to record a verdict, evidence and valid event IDs for every requested
-criterion. A successful signoff requires zero errors and zero enabled warnings. Configure
-warning opt-outs under **Project Settings → Validation**. A completed failing review can
-record evidence for repair. Signoffs preserve the source and settings identity, checklist,
-tier, model, endpoint and transition.
+Each review is one step: a native tool conversation on that tier's endpoint, with the same
+authoring tools Assembly uses. The reviewer reads the trajectory, repairs anything that fails
+a criterion, and signs off. Each accepted exchange saves its edits and conversation.
+
+Use `signoff` to record evidence and valid event IDs for every requested criterion. A passing
+signoff requires zero errors and zero enabled warnings. Configure warning opt-outs under
+**Project Settings → Validation**. Signoffs preserve the source and settings identity,
+checklist, tier, model, endpoint and transition.
 
 A pass on the Core causal-evidence criterion includes `causal_claims` with a consumer
 event and the source event IDs it uses. Signoff checks each claim against the consumer's
@@ -221,32 +224,27 @@ Automatic review skips unassigned or disabled roles. If only Critical is enabled
 it starts directly after Assembly and covers Core + Critical. When both steps run, Critical waits
 for a Fast pass. With both roles skipped, successful Assembly leaves the trajectory Pending.
 
-### Repair
+### How a review ends
 
-A failed review can enter repair on the same tier's model. Repair starts with the failed review
-and continues in one native tool conversation. Each accepted exchange saves its edits and
-history. Failing criteria keep the repair open so it can continue.
-
-- Use `signoff` with `status: "complete"` after the graph passes every required criterion
-  and has no effective diagnostics.
-- Use `status: "unfeasible"` with a reason when repair cannot succeed. The trajectory settles
-  as Unfinished with its edits and the failure in `metadata.repair_outcomes`.
-- The endpoint context limit and **Maximum exchanges per pass** also end the pass with its
-  saved edits. The default is ten exchanges. A reply containing several tool calls counts once.
-  If the same endpoint hits the exchange limit twice in a job, Jobs logs a warning with the
-  setting to adjust for new runs.
-- A successful automatic Fast repair can proceed to Critical review.
+| Ending | Result |
+| --- | --- |
+| `signoff` passes every criterion | The review passes and the stage moves up. An automatic Fast pass goes on to Critical review. |
+| `signoff` with a failing criterion | Refused. The reviewer keeps fixing in the same conversation. |
+| `signoff` with `status: "unfeasible"` and a reason | The review fails: the stage becomes Unsuccessful or Rejected, and the evaluation records `verdict: "fail"`, `unfeasible: true` and the reason. Edits are kept. |
+| **Maximum exchanges per pass** or the endpoint context limit | No verdict. The stage stays, edits are kept, and the outcome is in `metadata.review_outcomes`. The default is ten exchanges; a reply with several tool calls counts once. If the same endpoint hits the exchange limit twice in a job, Jobs logs a warning with the setting to adjust. |
+| Replies that stay malformed | The trajectory is held for attention, with no verdict. |
 
 ### Manual review
 
-**Review** and **Review & Repair** run from the trajectory header's **More** menu on the selected saved
-revision, or from the dataset's bulk actions on every match of a search across all pages.
+**Review** runs from the trajectory header's **More** menu on the selected saved revision, or from
+the dataset's bulk actions on every match of a search across all pages. It reviews, repairs what
+fails and signs off.
 
 The dashboard always uses Standard mode. Force modes are available through the REST API and MCP.
 
 | Mode | Behavior |
 | --- | --- |
-| **Standard** | Pending uses the first assigned review role. Candidate gets Critical. Failed stages repair at their own tier if repair is on. Everything else is skipped. |
+| **Standard** | Pending uses the first assigned review role. Candidate gets Critical. Unsuccessful gets Fast and Rejected gets Critical again. Everything else is skipped. |
 | **Force Fast / Critical** | Ignores stage limits. A pass keeps a higher existing stage, and failures follow normal transitions. |
 
 Ownership is always enforced, and a locked source is skipped. Closing the dialog doesn't stop the
@@ -264,8 +262,8 @@ review, and it needs the saved revision you're looking at.
 | Session | A native tool conversation. The model gets the comments table and the trajectory ID, reads and edits the graph with the authoring tools, and answers with `reply`. Each accepted edit is saved. |
 | Replies | `reply` answers one comment, once. `done: true` adds the note as an agent reply and marks the comment addressed, for the user to accept or send back; `false` adds the note as a reply and leaves it open. The model never resolves a comment. |
 | Finish | The session ends when every frozen comment has a reply; the replies are posted then. A reply without tool calls while comments remain gets a reminder listing them. |
-| Next send | The finished conversation is kept. The next send appends the new comments to it as a user message, unless it no longer fits the repair context budget; then it starts afresh. |
-| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or the repair context budget ends the job with edits kept and comments open; a context-budget end also drops the kept conversation. |
+| Next send | The finished conversation is kept. The next send appends the new comments to it as a user message, unless it no longer fits the Assistant context budget (`assistant_context_bytes`); then it starts afresh. |
+| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or the Assistant context budget ends the job with edits kept and comments open; a context-budget end also drops the kept conversation. |
 
 The stage and review history aren't touched; edits make an earlier review stale as usual. The job's Undo reverts its
 edits but not its comment answers.
@@ -284,26 +282,29 @@ without calling a model.
   attached work are kept. Fix the server and use **Resume endpoint**.
 - **Format failures** are retried up to `format_retries` times. Persistent malformed review
   replies can hold the trajectory for attention with no quality verdict.
-- **Context and exchange limits** settle native authoring passes as failed, preserving their
-  edits. A Draft over its endpoint context allowance is held for attention.
+- **Context and exchange limits** end a pass and keep its edits. Assembly settles as
+  Unfinished; a review records no verdict and keeps the stage. A Draft over its endpoint
+  context allowance is held for attention.
 - **Held trajectories** never stall the rest of the job: the others keep running. A held
   trajectory shows the reason in `metadata.needs_attention` and the job log. When only held
   trajectories remain, the job pauses. **Resume** retries every held trajectory (with a fresh
   bounded correction); **detach** settles one as Unfinished, keeping its edits.
 - **Server restart:** jobs pause, callbacks are fenced, unaccepted text is dropped, and you
-  resume manually. Completed events and repair patches survive.
+  resume manually. Completed events and review edits survive.
 - **Cancel and detach** use the same fences as everywhere else ([Jobs](GRAPH-JOBS.md)).
 
 ## Reference
 
-**Settings.** Under `generation`, `max_authoring_exchanges` defaults to 10 and
-`review_include_draft` defaults to false. The `fast`, `critical` and `repair` options
-default to true. Set `disabled_warnings` to warning codes to omit. Prompts are in
+**Settings.** Under `generation`, `max_authoring_exchanges` defaults to 10,
+`review_include_draft` defaults to false and `assistant_context_bytes` defaults to 65536.
+The `fast` and `critical` options default to true. Settings saved with the retired `repair`
+and `repair_rounds` options still load, and `repair_context_bytes` becomes
+`assistant_context_bytes`. Set `disabled_warnings` to warning codes to omit. Prompts are in
 `settings.prompts`.
 
 **Endpoints.** Remix sends non-streamed OpenAI-compatible `/chat/completions` requests.
-Draft uses the endpoint's configured JSON output mode. Assembly, review and repair require
-native function tools. Credentials come from `REMIX_API_KEY_<ENDPOINT>` in the environment.
+Draft uses the endpoint's configured JSON output mode. Assembly, review and the Assistant
+require native function tools. Credentials come from `REMIX_API_KEY_<ENDPOINT>` in the environment.
 
 **REST routes:**
 
@@ -312,7 +313,7 @@ native function tools. Credentials come from `REMIX_API_KEY_<ENDPOINT>` in the e
 | `POST /api/v1/generation/runs` | `{requests:[{seed, overrides, …}], instructions:{}}`. Needs a Draft role. Returns a job. |
 | `POST /api/v1/sampler/runs` | The same driver when a Draft role exists, otherwise a paused snapshot-only run. |
 | `GET /api/v1/generation/prompts/default` | The packaged prompts, for Load default. Saves nothing. |
-| `POST /api/v1/reviews` | `{query, mode, repair}` or `{trajectory, expected_revision, mode, repair}`. |
+| `POST /api/v1/reviews` | `{query, mode}` or `{trajectory, expected_revision, mode}`. |
 | `GET /api/v1/trajectories/{id}` | Source, ownership, diagnostics and review staleness. |
 | `/jobs`, `/attempts`, `/results`, `/history` and controls | Progress, skipped targets, saved deltas, Pause, Resume, Cancel and detach. |
 
@@ -434,5 +435,5 @@ Timeout is a client setting, never part of the JSON sent to the model. It bounds
 each complete request attempt and individual network operations. Timeouts follow
 the existing endpoint retry/exhaustion behavior; each retry gets a fresh deadline.
 It does not limit the whole generation job. All four fields freeze into new run
-settings and apply to Draft, Assembly, review and repair requests using that
+settings and apply to Draft, Assembly, review and Assistant requests using that
 endpoint. Edits do not alter an active run. No frontend files or routes changed.

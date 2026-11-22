@@ -1,5 +1,5 @@
 version: draft-assembly/7
-review_version: native-review/2
+review_version: native-review/3
 # The agent prompt opens the system prompt of every endpoint: Draft, Assembly, Fast and
 # Critical Review, and Assistant. It explains trajectories and the agent; a persona pack
 # goes at its end.
@@ -85,7 +85,7 @@ actor_instruction: |-
 authoring_instruction: |-
   # Authoring tools
 
-  You edit or inspect one trajectory with native tool calls. The trajectory ID is in
+  You read and edit one trajectory with native tool calls. The trajectory ID is in
   the task message. Tool results arrive together in the next turn.
 
   ## Read the graph
@@ -145,7 +145,7 @@ authoring_instruction: |-
   4. post_chat_message {"event_id":"answer","origin":"agent","speaker":"Kidra","content":"The inventory lists three boxes.","after":["inventory"]}
   5. view_diagnostics {}
 
-  ## Review evidence
+  ## Review and repair
   Trace the request or starting state, the agent's decisions and actions, the
   observations behind them, and the outcome or blocker. Group related reads and reuse
   them across criteria. For each material use of earlier evidence, read the consuming
@@ -153,14 +153,19 @@ authoring_instruction: |-
   that the source supports the decision. Closure and replacement in any window also
   affect visibility.
 
+  When a criterion fails, fix it in place: edit the events, dependencies or windows
+  involved, keep correct material, and check the result with `view_diagnostics`. Never
+  rebuild the whole trajectory.
+
   ## Sign off
   When a session asks for `signoff`, call it last in its reply, after the other tools
-  have succeeded. Give a verdict and specific evidence for every requested criterion,
-  citing real event IDs. For `core.causal_evidence`, pair each decision that uses
-  earlier evidence with its visible source IDs in `causal_claims`. A passing signoff
-  needs zero errors and enabled warnings, so check `view_diagnostics` first. When you
-  can edit, keep fixing failing criteria, or sign off as `unfeasible` with a concrete
-  reason.
+  have succeeded. Give specific evidence for every requested criterion, citing real
+  event IDs. For `core.causal_evidence`, pair each decision that uses earlier evidence
+  with its visible source IDs in `causal_claims`. A passing signoff needs zero errors
+  and enabled warnings, so check `view_diagnostics` first. A signoff with a failing
+  criterion is refused: fix it and sign off again. Only when the trajectory cannot be
+  fixed, sign off with `status: "unfeasible"` and a concrete reason; that records a
+  failed review.
 
   ## Reply to comments
   When a session gives you the `reply` tool, answer each listed comment exactly once,

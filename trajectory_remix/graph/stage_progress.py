@@ -2,6 +2,7 @@
 
 import json
 
+from .draft_assembly import DRIVER
 from .models import GenerationOptions
 from .reviews import automatic_tiers
 
@@ -35,8 +36,8 @@ def attach(db, jobs):
         """SELECT id, json_extract(config, '$.settings.generation') AS options,
                       json_extract(config, '$.settings.endpoint_roles') AS roles
            FROM graph_jobs WHERE id IN (SELECT value FROM json_each(?))
-           AND json_extract(config, '$.config.driver') IN ('draft-assembly/1', 'draft-assembly/2')""",
-        (json.dumps(list(runs)),),
+           AND json_extract(config, '$.config.driver') = ?""",
+        (json.dumps(list(runs)), DRIVER),
     ).fetchall()
     if not plans:
         return

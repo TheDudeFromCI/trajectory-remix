@@ -31,7 +31,7 @@ def test_comment_table_escapes_cells_and_lists_threads():
     assert rows[3] == "| `c2` | trajectory | x | - |"
 
 
-def test_review_and_repair_tasks_name_the_checklist_then_the_trajectory():
+def test_review_task_names_the_checklist_then_the_trajectory():
     criteria = {
         "completeness": dict(text="Whole episode.", allow_not_applicable=False),
         "critical.x": dict(text="Maybe.", allow_not_applicable=True),
@@ -43,25 +43,24 @@ def test_review_and_repair_tasks_name_the_checklist_then_the_trajectory():
         "Review Checklist:",
         "- `completeness`: Whole episode.",
     ]
+    assert "Repair any issues" in endpoint_prompts.REVIEW
     assert "- `critical.x`: Maybe. (may be not applicable)" in review
     assert review.endswith("Trajectory Id: `t-1`")
-    repair = endpoint_prompts.review_user(
-        criteria, "t-1", repair=True, context=dict(failed_review={"summary": "Gap."})
-    )
-    assert repair.startswith(endpoint_prompts.REPAIR) and '"summary": "Gap."' in repair
 
 
-def test_repair_opens_with_failed_review_and_project_tools(tmp_path):
+def test_a_review_can_edit_and_gets_the_project_tools(tmp_path):
     gen, _ = service(tmp_path)
     settings = gen.store.settings().settings
     source = GraphSource.model_validate(
         dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
     )
-    session = authoring_session.begin(source, settings, "repair", "fast", prior={"summary": "Gap"})
+    session = authoring_session.begin(source, settings, "review", "fast")
     system, task = session["messages"]
     assert system["content"] == settings.prompts.actor + "\n\n" + settings.prompts.authoring
-    assert task["content"].startswith(endpoint_prompts.REPAIR)
-    assert "Failed review:" in task["content"] and "Project tools:" in task["content"]
+    assert task["content"].startswith(endpoint_prompts.REVIEW)
+    assert "Project tools:" in task["content"]
+    names = {tool["function"]["name"] for tool in authoring_session.payload(session)["tools"]}
+    assert {"create_event", "update_event", "delete_event", "signoff"} <= names
 
 
 @pytest.mark.asyncio

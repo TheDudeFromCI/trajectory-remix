@@ -12,7 +12,7 @@ certify tool coherence, objective coverage or truthful reasoning, so record what
 1. Install the project and start your own OpenAI-compatible server with structured JSON-schema output.
 2. Copy [`examples/graph_local_llm.json`](../examples/graph_local_llm.json) to a local config and set each base URL
    and model. The three roles (draft, fast, critical) may share one server, and the example uses concurrency 1.
-   Project toggles let you opt out of review and repair. No cloud account is needed.
+   Project toggles let you opt out of either review. No cloud account is needed.
 3. If your server needs a key, set `REMIX_API_KEY_LOCAL_DRAFT`, `REMIX_API_KEY_LOCAL_FAST` and
    `REMIX_API_KEY_LOCAL_CRITICAL` in the environment.
 
@@ -55,17 +55,15 @@ of reports. The request table keeps source and prompt identities for debugging.
 
 Work on a **copy** of a smoke project:
 
-- **Stage rules.** Pending + Standard + repair off runs Fast only. Candidate + Standard runs Critical. Validated or
-  Ready + Standard skips. A forced Fast pass keeps a higher stage, and a forced failure follows its tier's failure
+- **Stage rules.** Pending + Standard runs Fast. Candidate + Standard runs Critical. Unsuccessful and Rejected +
+  Standard rerun their own tier. Validated or Ready + Standard skips. A forced Fast pass keeps a higher stage, and a forced failure follows its tier's failure
   transition. Locked sources are skipped.
-- **A planted flaw.** Introduce a small, concrete inconsistency in a detached sample, set it to Unsuccessful or
-  Rejected by hand, and run Standard with repair on. Watch the continuing event patches and the single combined
-  verdict. There should be no extra same-model validation after a successful repair. Whether the flaw is noticed
-  depends on the model, so record misses.
-- **Repair limits.** Use an impossible criterion to elicit a negative verdict: the session should keep
-  going until the model gives up. Set a small `repair_context_bytes` and `repair_rounds: 1` to see the round
-  cap end the repair detached as Unfinished, keeping completed edits. Test a provider-reported context limit
-  separately if your server supports it.
+- **A planted flaw.** Introduce a small, concrete inconsistency in a detached sample and run a Standard review.
+  Watch the reviewer find it, edit the events in the same conversation and sign off once. Whether the flaw is
+  noticed depends on the model, so record misses.
+- **Review limits.** Use an impossible criterion: failing signoffs are refused, so the session should keep going
+  until the model signs off as unfeasible (a failed review) or reaches **Maximum exchanges per pass** (no verdict,
+  stage kept, edits kept). Test a provider-reported context limit separately if your server supports it.
 - **Stale indicators.** Change a checklist and edit a reviewed source. Stale markers appear, stages don't move and
   nothing re-reviews until you ask.
 - **Failures.** Stop the endpoint mid-call. After its retries run out, the queue pauses with no quality verdict and

@@ -1,4 +1,4 @@
-"""Native repair keeps a single durable conversation through settlement."""
+"""A review is one editable native session: it repairs what fails, then signs off."""
 
 import json
 from uuid import uuid4
@@ -37,6 +37,7 @@ async def run(gen, record):
 
 @pytest.mark.asyncio
 async def test_failing_evidence_keeps_the_session_open(tmp_path):
+    """A detached Unsuccessful trajectory is reviewed again at Fast and fixed there."""
     gen, fake = service(tmp_path, critical=False)
     record = detached(gen)
     fake.responses = [verdict("fail"), patch(), verdict("pass")]
@@ -58,9 +59,9 @@ async def test_unfeasible_signoff_is_failed_and_keeps_its_reason(tmp_path):
         tool_message(("signoff", {"status": "unfeasible", "summary": reason})),
     ]
     source, _ = await run(gen, record)
-    outcome = source.metadata["repair_outcomes"][-1]
-    assert source.metadata["stage"] == -3
-    assert outcome["outcome"] == "unfeasible" and outcome["reason"] == reason
+    (evaluation,) = source.metadata["evaluations"]
+    assert source.metadata["stage"] == -1, "an unfeasible review fails its tier"
+    assert evaluation["verdict"] == "fail" and evaluation["summary"] == reason
 
 
 @pytest.mark.asyncio
@@ -76,7 +77,7 @@ async def test_views_show_saved_tool_edits(tmp_path):
 
 @pytest.mark.parametrize("reason", ["context_limit", "exchange_limit"])
 @pytest.mark.asyncio
-async def test_limits_preserve_partial_graph_and_history_without_starting_over(tmp_path, reason):
+async def test_limits_keep_edits_and_the_stage_without_a_verdict(tmp_path, reason):
     ceiling = 1 if reason == "exchange_limit" else 10
     gen, fake = service(tmp_path, critical=False, max_authoring_exchanges=ceiling)
     record = detached(gen)
@@ -91,28 +92,44 @@ async def test_limits_preserve_partial_graph_and_history_without_starting_over(t
 
         gen.transport = capped
     source, checkpoint = await run(gen, record)
-    assert source.metadata["stage"] == -3
+    assert source.metadata["stage"] == -1 and "evaluations" not in source.metadata
     assert source.events["x"].content == "repaired"
-    assert source.metadata["repair_outcomes"][-1]["outcome"] == reason
+    assert source.metadata["review_outcomes"][-1]["outcome"] == reason
     assert checkpoint["authoring_session"]["exchanges"] == 1
     assert len(fake.calls) == (2 if reason == "context_limit" else 1)
 
 
-def test_review_prompt_survives_an_event_in_an_unknown_window():
-    from trajectory_remix.graph import repair_policy, reviews
-    from trajectory_remix.graph.models import GraphSource
+def test_settings_with_the_retired_repair_options_still_load():
+    from trajectory_remix.graph.models import GenerationOptions
 
-    source = GraphSource.model_validate(
-        dict(
-            format="kidra-trajectory-graph/1",
-            id=str(uuid4()),
-            windows=plan()["windows"],
-            events={
-                "x": dict(kind="agent_text", window="reason", content="before"),
-                "y": dict(kind="agent_text", window="nowhere", after=["x"], content="new"),
-                "z": dict(kind="agent_text", window="reason", after=["y"], content="later"),
-            },
-        )
+    options = GenerationOptions.model_validate(
+        {"repair": False, "repair_rounds": 3, "repair_context_bytes": 4096}
     )
-    assert "unavailable" in reviews.causal_evidence(source)["z"]
-    assert isinstance(repair_policy.inspect(source, "z")["visible"], str)
+    assert options.assistant_context_bytes == 4096
+    assert {"repair", "repair_rounds", "repair_context_bytes"}.isdisjoint(options.model_dump())
+
+
+@pytest.mark.asyncio
+async def test_a_review_queued_for_the_retired_pipeline_pauses(tmp_path):
+    gen, fake = service(tmp_path, critical=False)
+    record = detached(gen)
+    snapshot = gen.store.settings()
+    options = dict(
+        mode="standard",
+        repair=True,
+        settings=snapshot.settings.model_dump(mode="json"),
+        settings_revision=snapshot.revision,
+        driver="draft-assembly/2",
+    )
+    with gen.store.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        config = dict(query={}, action="review_repair", options=options)
+        job = gen.jobs._create(db, "bulk", config, 1)
+        db.execute(
+            "INSERT INTO graph_bulk_items VALUES(?,0,?,?,'pending',NULL,NULL)",
+            (job, record.source.id, record.revision),
+        )
+    await finish(gen, job)
+    assert gen.jobs.inspect(job)["state"] == "paused" and not fake.calls
+    logs = [line["text"] for line in gen.jobs.logs(job)["items"]]
+    assert any("retired review pipeline" in line for line in logs)

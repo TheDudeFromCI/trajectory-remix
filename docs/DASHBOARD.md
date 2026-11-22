@@ -81,7 +81,7 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
    agent can reply in the chatroom. Removing it is your choice.
 3. **Set up review (optional).** Open the **Review Settings** tab to choose automatic
-   review and repair options, edit the Core and Critical checklists, and edit the
+   review options, edit the Core and Critical checklists, and edit the
    generation prompts. Click **Save review settings** if you change them.
 4. **Open Generate.** It shows which endpoint fills each role and any pins from the
    Sampler.
@@ -285,23 +285,24 @@ endpoint in **Settings → Models & defaults**.
 
 1. Save the trajectory you want reviewed, or set up a search that matches the ones you
    want.
-2. For one trajectory, open **More** in the trajectory header and choose **Review** or
-   **Review & Repair**. For every search match, open **Bulk edit all matches**, pick
-   **Review** or **Review & Repair** as the action, and click **Apply**.
+2. For one trajectory, open **More** in the trajectory header and choose **Review**. For
+   every search match, open **Bulk edit all matches**, pick **Review** as the action, and
+   click **Apply**.
 3. Follow the job in Jobs. A message appears when it finishes.
 
-**Review** only records a verdict. **Review & Repair** also attempts a repair after a
-failure. Both use standard mode: Pending trajectories get the Fast review and Candidate
-trajectories get the Critical review.
+A review checks the trajectory against the checklist, fixes anything that fails, and signs
+off. If the reviewer decides a trajectory can't be fixed, it signs off as unfeasible with a
+reason, and the review fails. Manual reviews use standard mode: Pending trajectories get the
+Fast review, Candidate trajectories get the Critical review, and Unsuccessful or Rejected
+trajectories are reviewed again at their own tier.
 
-The **Review Settings** tab holds the automatic review and repair settings and the review
-checklists.
+The **Review Settings** tab holds the automatic review settings and the review checklists.
 
 ### Change many trajectories at once
 
 1. Filter the dataset to the trajectories you want.
 2. Open **Bulk edit all matches** at the bottom of the Dataset panel.
-3. Choose **Set stage**, **Set split**, **Review**, **Review & Repair** or **Delete**, enter the value (a stage number such
+3. Choose **Set stage**, **Set split**, **Review** or **Delete**, enter the value (a stage number such
    as `3` for Ready, or a split name; review and delete need none), and click **Apply**.
 
 Bulk edits skip locked trajectories and can be undone with **Undo** once they finish.

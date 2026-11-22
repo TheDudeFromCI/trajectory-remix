@@ -2,8 +2,8 @@
 
 **Settings** (in the header) holds the things shared by everyone using a project: model
 endpoints and roles, tokenizer profiles, tools and defaults, on the **Models & defaults**,
-**Tools**, **Storage** and **Advanced JSON** tabs. The **Review Settings** tab holds review and
-repair options and the review checklists.
+**Tools**, **Storage** and **Advanced JSON** tabs. The **Review Settings** tab holds the review
+options, the generation prompts and the review checklists.
 
 ![Project settings](images/dashboard/settings.png)
 
@@ -28,10 +28,10 @@ models.
    |---|---|
    | **Draft** | The Draft stage of [Draft and Assembly](GRAPH-GENERATION.md#draft-and-assembly). Required to generate. Older projects with a Generator role are converted to Draft. |
    | **Assembly** | The Assembly stage and its fix. Optional; falls back to Draft. Give it a stronger model for better structure. |
-   | **Fast Review** | Fast Review and its repair. |
-   | **Critical Review** | Critical Review and its repair. |
+   | **Fast Review** | Fast Review, which repairs what fails and signs off. |
+   | **Critical Review** | Critical Review, which repairs what fails and signs off. |
    | **Assistant** | **Send open comments to agent** in the editor's Comments tab (see [Dashboard](DASHBOARD.md#leave-comments-for-an-agent-to-fix)). Generation never uses it. Optional. |
-5. **Save settings**, then open **Generate** to choose review and repair options.
+5. **Save settings**, then open **Review Settings** to choose which reviews run automatically.
 
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
 future work.

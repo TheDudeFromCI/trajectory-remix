@@ -86,7 +86,7 @@ TASKS = {
     ),
     "review_graphs": (
         ReviewInput,
-        "Queue a selected revision or frozen search-wide Review & Repair job. Uses configured review models.",
+        "Queue a review of a selected revision or of every frozen search match. Each review repairs what fails, then signs off. Uses configured review models.",
     ),
     "inspect_graph_job": (
         Read,

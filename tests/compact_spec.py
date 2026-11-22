@@ -1,13 +1,27 @@
-"""The compact episode spec the assemble pass writes, and its conversion to a graph source.
+"""Test fixture: a compact episode spec and its conversion to a graph source.
+
+The fake provider uses it to script native Assembly tool calls. It was the spec the
+retired JSON Assembly wrote.
 
 A spec lists windows and events in causal order with short field names. The builder adds
 what follows from them: the tool_schema event listing the tools, tool-call IDs on results, chat deliveries
 (:echo events) and canonical JSON tool arguments. It never invents content.
 """
 
-from . import spec_normalize, tool_listing
-from .flow import chat_echo
-from .models import GraphSource, canonical
+from trajectory_remix.graph import tool_listing
+from trajectory_remix.graph.flow import chat_echo
+from trajectory_remix.graph.models import GraphSource, canonical
+
+ECHO = ":echo"
+
+
+def _resolve(after, events):
+    """Map "<id>:echo" to "<id>" when <id> exists but has no delivery."""
+    return [
+        a[: -len(ECHO)] if a not in events and a.endswith(ECHO) and a[: -len(ECHO)] in events else a
+        for a in after
+    ]
+
 
 KINDS = dict(
     user="chat_message",
@@ -143,7 +157,7 @@ def _add(data, event, shown, listed_ids=()):
     ident = event["id"]
     if ident in data["events"]:
         raise ValueError(f"Event ID {ident} is used twice; give each event its own ID")
-    event = dict(event, after=spec_normalize.resolve(event["after"], data["events"]))
+    event = dict(event, after=_resolve(event["after"], data["events"]))
     missing = [a for a in event["after"] if a not in data["events"]]
     later = [a for a in missing if a in listed_ids]
     if later:

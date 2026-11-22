@@ -15,7 +15,7 @@ Paths below are relative to `trajectory_remix/`.
 | --- | --- | --- |
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
 | Compiler/export | `graph/compiler.py`, `graph/export.py`, `graph/ktremix.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
-| Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/compact_spec.py`, `graph/assembly_fix.py`, `graph/reviews.py`, `graph/repair_policy.py`, `graph/provider.py` | Frozen inputs and prompts, Draft/Assembly/fix stages, checklist evidence, stage transitions and repair rounds |
+| Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/authoring_session.py`, `graph/endpoint_prompts.py`, `graph/reviews.py`, `graph/signoffs.py`, `graph/provider.py` | Frozen inputs and prompts, Draft and native Assembly/review sessions, checklist evidence and stage transitions; every review can edit and repairs what fails before signing off |
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js`, `static/checklist-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
@@ -41,13 +41,14 @@ Paths below are relative to `trajectory_remix/`.
   jobs, discard a draft or mutate a frozen run.
 - Use source revision/commit CAS, transactional ownership and worker fences.
   Reject late results after pause, cancel or detach. Pauses preserve resumable
-  ownership; detachment is permanent. Manual review/repair requires a detached
+  ownership; detachment is permanent. Manual review requires a detached
   source and one shared operation slot.
 - Keep each API request in its endpoint FIFO slot through retries. Exhaustion
   pauses that endpoint for explicit recovery; never silently change models.
 - A model/API failure is not a quality verdict. Record per-item review evidence
-  and source/checklist identities. Repairs preserve completed spot edits, use
-  the matching tier, and end on verdict or context exhaustion. Ready is manual.
+  and source/checklist identities. A review repairs in place at its own tier,
+  keeps completed edits, and ends on a signoff (pass or unfeasible) or a limit
+  (no verdict). Ready is manual.
 - Retain original sampler targets and frozen configuration. Pins remain separate
   from saved weights. Unknown measured metrics stay unavailable, never zero.
 - Keep credentials out of project/source/export/log payloads and reports. Validate
@@ -58,7 +59,7 @@ Paths below are relative to `trajectory_remix/`.
 
 Walk through fresh setup → endpoints/roles → generation → job inspection and
 pause/resume/cancel. Also exercise import, authoring, both timeline modes,
-review/repair, export and Undo/Redo. Verify empty and locked states.
+review, export and Undo/Redo. Verify empty and locked states.
 
 Delay responses while typing/saving or switching selections. Refresh clean
 selected sources as server commits arrive, including unlocking after settlement;
@@ -149,14 +150,12 @@ with the retired `method` field still load, that retired `plan` and `flow_yaml` 
 are refused before reserving attempts, the default-prompts route, and the one-time move of a
 customised Flow agent prompt (an appended persona keeps today's default; Load default sticks).
 
-Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test_spec_normalize.py tests/test_repair_policy.py`
-checks the draft and assemble order, the draft kept in metadata, the builder's tool listing,
-chat deliveries and call IDs, corrections for specs that can't be built, the handoff of
-errors left after the assembly fix to Fast repair, and that Draft, Assembly and the fix use their
-own endpoint roles (with Draft as the fallback). `tests/test_spec_normalize.py` checks
-the settled `:echo` slips, tools objects and wrappers, and the builder's fix-it messages. It also validates the worked example in the assemble prompt
-against the schema and graph validator. Keep the prompts in `graph/draft_assembly.yaml` and the field
-descriptions in `compact_spec.schema` in sync.
+Draft and Assembly: `python -m pytest -q tests/test_draft_assembly.py tests/test_endpoint_prompts.py`
+checks the Draft, Assembly and review order, the draft kept in metadata, that a failed Draft is
+not reviewed, that Draft and Assembly use their own endpoint roles (with Draft as the fallback),
+every endpoint's message layout and the upgrade of earlier shipped prompts. The fake provider
+scripts native Assembly calls with the compact spec builder in `tests/compact_spec.py`, a test
+fixture only.
 Run the full Python suite with `python -m pytest -q tests` before opening a prompt PR.
 
 Phase barriers: `python -m pytest -q tests/test_phase_barrier.py` checks the per-job barriers
@@ -171,14 +170,11 @@ output or a local error holds only that trajectory while the rest finish, that t
 only when held trajectories alone remain, that Resume retries and clears `needs_attention`, and
 that detaching a held trajectory completes the job. Never pause a whole job for one trajectory.
 
-Assembly fix: `python -m pytest -q tests/test_assembly_fix.py` checks that errors and
-warnings (not a clean graph) start the fix, that `done` is refused while errors remain, and that
-giving up or invalid output hands the graph on to review without pausing.
-
-Repair policy: `python -m pytest -q tests/test_repair_policy.py` checks that a failing repair
-verdict keeps the session open, that `give_up` is the failure (with its reason), that `view`
-shows the patched source, that context exhaustion starts a fresh round on the current graph,
-and that `repair_rounds` caps the rounds.
+Review sessions: `python -m pytest -q tests/test_review_session.py` checks that a failing
+signoff keeps the review open to fix, that an unfeasible signoff records a failed review with
+its reason, that views show saved edits, that the exchange and context limits keep edits and the
+stage without a verdict, that settings with the retired `repair` options still load, and that a
+review queued for the retired pipeline pauses.
 
 Hosted providers and usage: `python -m pytest -q tests/test_openrouter_readiness.py
 tests/test_openrouter_models.py` checks the bytes-per-token context estimate, extra

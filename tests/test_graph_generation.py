@@ -6,13 +6,14 @@ import json
 import re
 from uuid import uuid4
 
+import compact_spec
 import pytest
 from fastapi.testclient import TestClient
 
-from trajectory_remix.graph import compact_spec, draft_assembly, phase_barrier, reviews
+from trajectory_remix.graph import reviews
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.flow import causal_view
-from trajectory_remix.graph.generation import LEGACY_DRIVER, GenerationService
+from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import Fenced, JobService, OwnershipConflict
 from trajectory_remix.graph.models import GraphSource
 from trajectory_remix.graph.sampling import SamplerService
@@ -79,21 +80,6 @@ def plan():
             ),
         ],
     }
-
-
-def report(payload, status="pass", source_ids=()):
-    schema = payload["schema"]
-    if payload["operation"] == "repair":
-        schema = schema["oneOf"][2]["properties"]["review"]
-    return dict(
-        items={
-            key: dict(
-                status=status, evidence="Observed causal evidence.", event_ids=list(source_ids)
-            )
-            for key in schema["properties"]["items"]["properties"]
-        },
-        summary="offline fixture",
-    )
 
 
 DRAFT = "Working notes. " * 20
@@ -242,25 +228,6 @@ def native_assembly(payload, ident, body=None, *, signoff=True):
     return tool_message(*calls)
 
 
-def frozen_legacy_run(gen, requests, instructions):
-    frozen = gen.sampler.editor()
-    snapshot = gen.store.settings(frozen["settings_revision"])
-    proposals = [gen.sampler.propose(**request, frozen=frozen) for request in requests]
-    return gen.jobs.create_run(
-        dict(
-            driver=LEGACY_DRIVER,
-            instructions=instructions,
-            sampler=frozen,
-            barriers=phase_barrier.validate(None),
-            plans={
-                p["id"]: draft_assembly.plan(p["proposal"], snapshot.settings) for p in proposals
-            },
-        ),
-        proposals,
-        settings_record=snapshot,
-    )
-
-
 class Fake:
     def __init__(self):
         self.calls = []
@@ -289,18 +256,8 @@ class Fake:
             else:
                 message = tool_message(native_report(p, list(graph["events"])[-1:], graph=graph))
             return {"message": message, "model": "actual-fixture"}
-        if p["operation"] == "draft":
-            body = {"draft": DRAFT}
-        elif p["operation"] == "assembly":
-            offered = p["schema"]["properties"]["tools"]["items"]["enum"]
-            body = spec() if "read" in offered else chat_spec()
-        elif p["operation"] == "assembly_fix":
-            body = {"action": "done"}
-        elif p["operation"] == "repair":
-            body = {"action": "verdict", "review": report(p)}
-        else:
-            body = report(p)
-        return {"output": body, "model": "actual-fixture"}
+        assert p["operation"] == "draft", "only Draft uses a JSON reply"
+        return {"output": {"draft": DRAFT}, "model": "actual-fixture"}
 
 
 def service(tmp_path, fake=None, **opts):
@@ -394,7 +351,7 @@ def test_causal_frontiers_replacement_close_parallel(tmp_path):
 
 @pytest.mark.asyncio
 async def test_generation_format_failure_no_replacement(tmp_path):
-    gen, fake = service(tmp_path, fast=False, repair=False, format_retries=1)
+    gen, fake = service(tmp_path, fast=False, format_retries=1)
     fake.responses = [{"wrong": "x"}, {"wrong": "x"}]
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
@@ -424,7 +381,7 @@ async def test_malformed_review_pauses_without_verdict(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path):
+async def test_a_review_edits_in_one_session_and_records_one_verdict(tmp_path):
     gen, fake = service(tmp_path, critical=False)
     # Start from a detached failed source for a compact manual session.
     source = dict(
@@ -524,7 +481,7 @@ def test_manual_detach_keeps_other_items_running_and_cannot_be_resettled(tmp_pat
                 metadata={"stage": 0},
             )
         )
-    job = gen.start_review({}, repair=False)
+    job = gen.start_review({})
     gen._manual_admit(job)
     first, second = gen._owners(job)
     gen._prepare(job, first)
@@ -566,7 +523,7 @@ async def test_manual_force_staleness_skips_locks(tmp_path):
     job = gen.start_review({})
     await finish(gen, job)
     assert gen.bulk.results(job)[0]["state"] == "skipped" and not fake.calls
-    job = gen.start_review({}, mode="force_fast", repair=False)
+    job = gen.start_review({}, mode="force_fast")
     await finish(gen, job)
     source = gen.store.read(record.source.id).source
     assert source.metadata["stage"] == 3 and source.metadata["evaluations"][-1]["tier"] == "fast"
@@ -646,7 +603,6 @@ def test_rest_generation_and_manual_popup_contract(tmp_path):
                 "arguments": {
                     "trajectory": a["trajectory_id"],
                     "expected_revision": record["revision"],
-                    "repair": False,
                 },
             },
         )
@@ -664,7 +620,7 @@ def test_rest_generation_and_manual_popup_contract(tmp_path):
         )
         bulk = client.post(
             "/api/v1/bulk",
-            json={"query": {"stage": 1}, "action": "review_repair", "config": {"repair": False}},
+            json={"query": {"stage": 1}, "action": "review_repair", "config": {}},
         )
         assert bulk.status_code == 202, bulk.text
         bulk_job = bulk.json()["job_id"]
@@ -737,7 +693,7 @@ async def test_transport_exhaustion_pause_and_cancel_no_quality_failure(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_automatic_fast_failure_repair_then_critical(tmp_path):
+async def test_a_failing_signoff_keeps_the_review_fixing_then_critical(tmp_path):
     gen, fake = service(tmp_path)
     fake.responses = [
         {"draft": DRAFT},
@@ -750,10 +706,39 @@ async def test_automatic_fast_failure_repair_then_critical(tmp_path):
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     assert source.metadata["stage"] == 2
     assert [(r["tier"], r["operation"], r["verdict"]) for r in source.metadata["evaluations"]] == [
-        ("fast", "review", "fail"),
-        ("fast", "repair", "pass"),
+        ("fast", "review", "pass"),
         ("critical", "review", "pass"),
     ]
+    refused = json.loads(fake.calls[3].payload["messages"][-2]["content"])
+    assert refused["accepted"] is False and "Continue fixing" in refused["error"]
+    assert all(
+        "signoff" in [t["function"]["name"] for t in c.payload["tools"]] for c in fake.calls[1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unfeasible_review_records_a_failed_verdict(tmp_path):
+    gen, fake = service(tmp_path, critical=False)
+    record = gen.store.create(
+        dict(
+            format="kidra-trajectory-graph/1",
+            id=str(uuid4()),
+            windows=plan()["windows"],
+            events={"x": dict(kind="agent_text", window="reason", content="before")},
+            metadata={"stage": 0},
+        )
+    )
+    unfeasible = ("signoff", dict(status="unfeasible", summary="The episode has no request."))
+    fake.responses = [
+        tool_message(("update_event", {"event_id": "x", "content": "after"}), unfeasible)
+    ]
+    job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
+    await finish(gen, job)
+    source = gen.store.read(record.source.id).source
+    assert source.metadata["stage"] == -1 and source.events["x"].content == "after"
+    (evaluation,) = source.metadata["evaluations"]
+    assert evaluation["verdict"] == "fail" and evaluation["unfeasible"] is True
+    assert evaluation["summary"] == "The episode has no request."
 
 
 @pytest.mark.asyncio
@@ -769,7 +754,7 @@ async def test_invalid_review_evidence_never_publishes_pass(tmp_path):
         )
     )
     fake.responses = [lambda t: tool_message(native_report(t.payload, ["missing-event"]))]
-    job = gen.start_review({}, repair=False)
+    job = gen.start_review({})
     await finish(gen, job)
     source = gen.store.read(record.source.id).source
     assert source.metadata["stage"] == 0 and "evaluations" not in source.metadata

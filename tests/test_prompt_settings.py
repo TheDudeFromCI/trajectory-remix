@@ -160,7 +160,7 @@ def test_new_matrix_dimensions_reach_draft_and_assembly(tmp_path):
     proposal["future_dimension"] = {"quantum_potatoes": {"required": True}}
     plan = draft_assembly.plan(proposal, settings)
     assert plan["proposal"] == proposal
-    payload = draft_assembly.payload(dict(errors=0), plan, settings)
+    payload = draft_assembly.payload(dict(errors=0), plan)
     assert "quantum_potatoes" in json.dumps(payload["messages"])
 
 

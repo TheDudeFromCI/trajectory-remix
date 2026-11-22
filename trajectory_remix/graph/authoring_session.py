@@ -1,4 +1,8 @@
-"""One native tool conversation per Assembly, review or repair pass."""
+"""One native tool conversation per Assembly or review pass.
+
+Every pass can edit the trajectory. It ends with signoff: a passing verdict, or unfeasible
+with a reason. A signoff with failing criteria is refused, so the model keeps fixing.
+"""
 
 import json
 
@@ -8,23 +12,20 @@ from .models import canonical
 from .schema_errors import explain
 
 
-def _review_context(source, settings, phase, draft, prior):
+def _review_context(source, settings, draft):
     proposal = source.metadata.get("proposal")
     objective = None
     if isinstance(proposal, dict) and isinstance(proposal.get("proposal"), dict):
         objective = proposal["proposal"].get("learning_objective")
-    context = dict(
+    return dict(
         objective=objective,
         targets=source.metadata.get("targets"),
         draft=draft,
-        failed_review=prior,
+        tools={k: v.model_dump(mode="json") for k, v in settings.tools.items()},
     )
-    if phase == "repair":
-        context["tools"] = {k: v.model_dump(mode="json") for k, v in settings.tools.items()}
-    return context
 
 
-def _opening(source, settings, phase, checks, plan, draft, prior):
+def _opening(source, settings, phase, checks, plan, draft):
     """(prompt version, system prompt, first user message) for a native pass."""
     if phase == "assembly":
         system = endpoint_prompts.system(
@@ -35,15 +36,11 @@ def _opening(source, settings, phase, checks, plan, draft, prior):
         )
         return plan["prompts"]["version"], system, user
     system = endpoint_prompts.system(settings.prompts.actor, settings.prompts.authoring)
-    context = _review_context(source, settings, phase, draft, prior)
-    user = endpoint_prompts.review_user(
-        checks, source.id, repair=phase == "repair", context=context
-    )
-    version = prompt_defaults.packaged()["review_version"] if phase == "review" else None
-    return version or signoffs.VERSION, system, user
+    user = endpoint_prompts.review_user(checks, source.id, _review_context(source, settings, draft))
+    return prompt_defaults.packaged()["review_version"], system, user
 
 
-def begin(source, settings, phase, tier, *, plan=None, prior=None):
+def begin(source, settings, phase, tier, *, plan=None):
     draft = source.metadata.get("draft")
     draft_visible = (
         isinstance(draft, str)
@@ -52,7 +49,7 @@ def begin(source, settings, phase, tier, *, plan=None, prior=None):
     )
     checks = signoffs.criteria(reviews.checklist(settings, tier) if tier else {}, draft_visible)
     prompt_version, system, user = _opening(
-        source, settings, phase, checks, plan, draft if draft_visible else None, prior
+        source, settings, phase, checks, plan, draft if draft_visible else None
     )
     return dict(
         phase=phase,
@@ -73,7 +70,6 @@ def payload(session):
         prompt_version=session.get("prompt_version", signoffs.VERSION),
         messages=session["messages"],
         tools=provider_tools(
-            editable=session["phase"] != "review",
             signoff_parameters=signoffs.parameters(
                 session["checks"], require_causal_claims=session.get("require_causal_claims", False)
             ),
@@ -115,7 +111,6 @@ def step(source, settings, session, message):
             )
         )
         return source, None
-    editable = session["phase"] != "review"
     terminal = None
     correction = None
     rejected = False
@@ -123,7 +118,7 @@ def step(source, settings, session, message):
         name = call["function"]["name"]
         try:
             args = json.loads(call["function"]["arguments"])
-            if name not in TOOLS or (not editable and name not in READ_ONLY and name != "signoff"):
+            if name not in TOOLS:
                 raise ValueError("This tool is unavailable in the current pass")
             if name == "signoff":
                 if call is not calls[-1] or (
@@ -137,7 +132,7 @@ def step(source, settings, session, message):
                     args,
                     require_causal_claims=session.get("require_causal_claims", False),
                 )
-                if result == "fail" and editable:
+                if result == "fail":
                     raise ValueError("Continue fixing failing criteria or sign off as unfeasible")
                 terminal = (result, evidence)
                 reply = {"outcome": result}

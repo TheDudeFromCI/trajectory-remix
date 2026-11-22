@@ -240,7 +240,7 @@ async def test_context_limit_ends_the_session_and_keeps_comments_open(tmp_path):
     fake.responses = [turn(("view_graph", {}))] * 400
     current = gen.store.settings()
     tight = current.settings.model_dump(mode="json")
-    tight["generation"]["repair_context_bytes"] = 256
+    tight["generation"]["assistant_context_bytes"] = 256
     gen.store.update_settings(tight, current.revision)
     job = await run(gen, record)
     assert gen.jobs.inspect(job)["state"] == "completed"

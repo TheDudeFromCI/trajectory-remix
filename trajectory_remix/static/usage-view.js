@@ -14,7 +14,7 @@ export function duration(seconds) {
   if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
   return `${Math.floor(s / 3600)}h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}m`;
 }
-const OPERATIONS = {flow_select: 'Selections', event: 'Event writing', review: 'Reviews', repair: 'Repairs'};
+const OPERATIONS = {draft: 'Drafts', assembly: 'Assemblies', review: 'Reviews', assist: 'Assistant'};
 
 export function formatValue(key, value, row) {
   if (value === null || value === undefined) return '—';

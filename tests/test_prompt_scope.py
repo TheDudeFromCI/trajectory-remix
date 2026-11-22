@@ -7,7 +7,7 @@ import httpx
 import pytest
 from test_graph_generation import service
 
-from trajectory_remix.graph import draft_assembly, reviews
+from trajectory_remix.graph import draft_assembly
 from trajectory_remix.graph.jobs import Ticket
 from trajectory_remix.graph.provider import OpenAITransport, context_budget, response_contract
 
@@ -24,7 +24,7 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
     gen, _ = service(tmp_path)
     source, plan = initial(gen)
     assert len(json.dumps(source.metadata)) > 60000
-    payload = draft_assembly.payload(dict(errors=0), plan, gen.store.settings().settings)
+    payload = draft_assembly.payload(dict(errors=0), plan)
     task = payload["messages"][1]["content"]
     block = re.search(r"Sampled proposal:\n```json\n(.*?)\n```", task, re.S).group(1)
     assert json.loads(block) == plan["proposal"]
@@ -38,21 +38,6 @@ def test_real_initial_snapshot_excluded_and_proposal_preserved(tmp_path):
     budget = context_budget(payload, wire, messages)
     assert budget["input_bytes"] < budget["input_ceiling"]
     assert len(json.dumps(source.metadata)) > 60000  # Storage unchanged.
-
-
-@pytest.mark.asyncio
-async def test_review_frontiers_reference_bodies_once(tmp_path):
-    from test_graph_generation import finish
-
-    gen, _ = service(tmp_path, fast=False)
-    job = gen.start([{"seed": 137}], {})
-    await finish(gen, job)
-    source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
-    payload = reviews.payload(source, gen.settings_for(job), "fast", "review")
-    body = json.loads(payload["messages"][1]["content"])
-    assert "got" in body["causal_views"]["note"]["w2"]
-    assert "metadata" not in body["source"]
-    assert source.events["got"].content not in json.dumps(body["causal_views"])
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 """Message layouts for the five endpoints: Draft, Assembly, Fast/Critical Review, Assistant.
 
 Every system prompt starts with the project's agent prompt. Sessions that use the
-authoring tools (Assembly, review, repair, Assistant) add the authoring prompt after it,
+authoring tools (Assembly, review, Assistant) add the authoring prompt after it,
 so the system prompt is the same for every request of a run and caches well. The task
 and its data go in the first user message.
 """
@@ -12,12 +12,8 @@ import re
 from .models import canonical
 
 REVIEW = (
-    "Please review the trajectory to ensure it meets the qualifications in this checklist,"
-    " and call `signoff` when you're done."
-)
-REPAIR = (
-    "An earlier review found problems with this trajectory. Please repair any issues so it"
-    " meets the qualifications in this checklist, and call `signoff` when you're done."
+    "Please review the trajectory to ensure it meets the qualifications in this checklist."
+    " Repair any issues, and call `signoff` when you're done."
 )
 ASSIST = "Please address the following issues:"
 ASSIST_AFTER = (
@@ -81,19 +77,16 @@ def checklist(criteria):
     )
 
 
-def review_user(criteria, trajectory_id, *, repair=False, context=None):
-    """Review or repair. context holds optional objective, targets, Draft, failed review
-    and, for repair, the project tools."""
+def review_user(criteria, trajectory_id, context=None):
+    """The review task. context holds the objective, targets, an optional Draft and tools."""
     context = context or {}
-    parts = [REPAIR if repair else REVIEW, "Review Checklist:\n" + checklist(criteria)]
+    parts = [REVIEW, "Review Checklist:\n" + checklist(criteria)]
     if context.get("objective"):
         parts.append(f"Objective: {context['objective']}")
     if context.get("targets"):
         parts.append("Sampled targets (advisory):\n" + _json(context["targets"]))
     if context.get("draft"):
         parts.append("Draft:\n" + fence(context["draft"]))
-    if context.get("failed_review"):
-        parts.append("Failed review:\n" + _json(context["failed_review"]))
     if context.get("tools"):
         parts.append("Project tools:\n" + fence(canonical(context["tools"]), "json"))
     parts.append(_identity(trajectory_id))

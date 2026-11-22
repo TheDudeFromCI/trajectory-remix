@@ -401,11 +401,14 @@ class GenerationPrompts(DTO):
                 return prompt_defaults.actor() + value[len(retired) :]
         return value
 
-    @field_validator("draft", "assembly")
+    @field_validator("authoring", "draft", "assembly")
     @classmethod
     def upgrade_packaged_prompt(cls, value, info):
         # Only replace exact shipped defaults. Custom guidance stays with the project.
         previous = {
+            "authoring": {
+                "2f5c97260d020513efe645f4f77ea59b04e8cb26cdf70f4fada584bc59a789a9",
+            },
             "draft": {
                 "3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a",
                 "379f799bc52e67227994ec99bd671a194b2cabd11558d584e897551f2b0bd250",
@@ -432,22 +435,23 @@ class GenerationOptions(DTO):
         # Projects saved while the step-by-step Flow existed carry a method field;
         # Draft and Assembly is now the only way to generate.
         # phase_barrier moved to the Generate trajectories panel (chosen per job).
+        # Review now always repairs, so repair and repair_rounds are gone; the context
+        # budget they shared belongs to the Assistant alone.
         if isinstance(data, dict):
-            data = {k: v for k, v in data.items() if k not in {"method", "phase_barrier"}}
+            retired = {"method", "phase_barrier", "repair", "repair_rounds"}
+            data = {k: v for k, v in data.items() if k not in retired}
+            if "repair_context_bytes" in data:
+                data.setdefault("assistant_context_bytes", data.pop("repair_context_bytes"))
         return data
 
     fast: bool = True
     critical: bool = True
-    repair: bool = True
     review_include_draft: bool = False
     max_authoring_exchanges: Annotated[int, Field(ge=1)] = 10
     format_retries: Annotated[int, Field(ge=0, le=5)] = 2
-    # An explicit byte budget for the continuing repair transcript, not a token
-    # estimate or a spending limit. Provider context exhaustion also terminates it.
-    repair_context_bytes: Annotated[int, Field(ge=256)] = 65536
-    # A spending guard: a repair session that outgrows repair_context_bytes starts a
-    # fresh round on the current graph, up to this many rounds in all.
-    repair_rounds: Annotated[int, Field(ge=1, le=10)] = 3
+    # An explicit byte budget for an Assistant conversation, kept between sends; not a
+    # token estimate. The endpoint's context limit also ends a session.
+    assistant_context_bytes: Annotated[int, Field(ge=256)] = 65536
 
 
 class ProjectSettings(DTO):

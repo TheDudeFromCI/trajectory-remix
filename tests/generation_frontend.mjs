@@ -44,11 +44,11 @@ try {
   await page.waitForFunction(id=>graphStudio.record && graphStudio.record.source.id !== id,record.source.id);
   const duplicateId = await page.evaluate(()=>graphStudio.record.source.id);
   assert.deepEqual((await get(`/trajectories/${duplicateId}`)).source, {...reviewed.source,id:duplicateId});
-  await page.locator('#trajectory-menu summary').click(); await page.locator('#review-repair-source').click();
+  await page.locator('#trajectory-menu summary').click(); assert.equal(await page.locator('#review-repair-source').count(),0); await page.locator('#review-source').click();
   await page.waitForFunction(()=>[...graphStudio.jobs.values()].filter(j=>j.kind==='bulk'&&j.state==='completed').length>=2);
   const duplicateReview = (await get(`/trajectories/${duplicateId}`)).source.metadata;
   assert.equal(duplicateReview.stage,2);
-  assert.equal(duplicateReview.evaluations.at(-1).prompt_version,'native-review/2');
+  assert.equal(duplicateReview.evaluations.at(-1).prompt_version,'native-review/3');
   assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source,reviewed.source);
   // More → Export downloads the open trajectory's source as JSON.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
@@ -85,5 +85,5 @@ try {
     assert.equal(await page.evaluate(id=>graphStudio.diagnostics.some(d=>d.code==='open_window'&&graphStudio.draft.events[d.event_id].window===id),openWindow),false);
   }
   assert.deepEqual(errors,[]);
-  console.log('Generation pins, saved weights, frozen run and Review & Repair browser checks passed');
+  console.log('Generation pins, saved weights, frozen run and Review browser checks passed');
 } finally { await browser.close(); }

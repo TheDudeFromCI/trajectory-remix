@@ -164,10 +164,10 @@ def _provider_tool(name, parameters=None):
     )
 
 
-def provider_tools(*, editable, signoff_parameters):
-    names = TOOLS if editable else (*sorted(READ_ONLY), "signoff")
+def provider_tools(*, signoff_parameters):
+    """Every authoring tool, with signoff limited to the pass's criteria."""
     return [
-        _provider_tool(name, signoff_parameters if name == "signoff" else None) for name in names
+        _provider_tool(name, signoff_parameters if name == "signoff" else None) for name in TOOLS
     ]
 
 
