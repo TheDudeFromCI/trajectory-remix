@@ -3,6 +3,7 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
+import {duplicateTrajectory} from './duplicate.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -548,6 +549,13 @@ export class StudioUI {
     this.history([{id: this.id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
     this.record = value; this.diagnostics = value.diagnostics; this.draft = copy(value.source); this.editors.clear(); this.renderDraft(); this.renderEvent(); this.schedulePreview(); await this.listing();
   }
+  async duplicate() {
+    if (!this.record) return message('Select a trajectory to duplicate.');
+    $('trajectory-menu')?.removeAttribute('open');
+    const unsaved = this.isDirty(), original = this.id, r = await duplicateTrajectory(api, this.record.source);
+    await this.select(r.source.id);
+    message(`Duplicated ${shortId(original)}${unsaved ? ' from its saved version; unsaved edits stay on the original' : ''}.`);
+  }
   exportSource() {
     if (!this.draft || !this.id) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(this.draft, null, 2) + '\n'], {type: 'application/json'})), a = node('a');
@@ -766,6 +774,7 @@ export class StudioUI {
     });
     await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
+    on('duplicate-sample', 'click', () => this.duplicate());
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
     on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
