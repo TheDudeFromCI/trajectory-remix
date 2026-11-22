@@ -1,7 +1,7 @@
 """The packaged generation prompts (graph/draft_assembly.yaml), read once.
 
-Projects keep their own copy in settings.prompts; these are the defaults and what
-Load default restores.
+Projects keep the actor, Draft and Assembly prompts in settings.prompts.
+Native review uses its packaged guide directly.
 """
 
 from functools import cache
@@ -29,3 +29,8 @@ def draft():
 def assembly():
     prompts = packaged()
     return prompts["trajectory_guide"] + "\n\n" + prompts["assemble_instruction"]
+
+
+def review():
+    prompts = packaged()
+    return prompts["trajectory_guide"] + "\n\n" + prompts["review_instruction"]

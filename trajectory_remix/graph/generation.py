@@ -377,8 +377,6 @@ class GenerationService:
                     plan=plan,
                     prior=cp.get("failed_review") if phase == "repair" else None,
                 )
-                if plan:
-                    session["prompt_version"] = plan["prompts"]["version"]
                 cp["authoring_session"] = session
             tier = draft_assembly.role(settings, "assembly") if phase == "event" else cp["tier"]
             payload = authoring_session.payload(session)
@@ -918,6 +916,7 @@ class GenerationService:
             complete.get("model"),
             settings.endpoints[ticket.endpoint].model,
             native=provenance,
+            prompt_version=native.get("prompt_version") if native is not None else None,
         )
         self.jobs.progress(
             ticket.job_id,

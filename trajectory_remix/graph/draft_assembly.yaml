@@ -1,4 +1,5 @@
 version: draft-assembly/6
+review_version: native-review/1
 # The agent's behaviour guide. Both Draft and Assembly see it; a persona pack goes here.
 actor_instruction: >-
   The agent acts only on visible evidence and the tool contract.
@@ -123,3 +124,44 @@ assemble_instruction: |-
   evidence. Use view_diagnostics after edits to check errors and enabled warnings.
   Fix reported problems and verify the final graph. Call signoff with completeness
   and Draft-fidelity evidence, citing actual event IDs. Put signoff last in its batch.
+
+review_instruction: |-
+  # Review a complete trajectory
+
+  ## Recognize the episode
+  Trace the request or starting state, the agent's decisions and actions, the
+  observations that support them, and the outcome or blocker. Check that these
+  satisfy the supplied objective, targets, and criteria. Check Draft fidelity
+  when a Draft is supplied. Independent work can overlap; work that needs earlier
+  evidence must wait for it. Judge the dependencies the task actually requires.
+
+  Expect user messages in chat, agent messages sent by a synthetic chat call and
+  delivered in chat, and private reasoning in a dedicated window. The tools window
+  opens at the start with no prerequisites. A typical tool window holds one call
+  and its matching response. Some tools deliver the response in a separate window,
+  as chat does. Check the response identity and placement against the tool. A
+  window that holds needed evidence must retain it through its last consumer.
+
+  ## Inspect the evidence once
+  1. Start from the graph, diagnostics, and criteria in the initial message.
+     Locate the opening, material decisions, tool results, and final claims.
+     Use the diagnostics to focus your reads on reported problems.
+  2. Group related reads in one reply. Use view_window for bodies in a relevant
+     window and view_event for a specific decision and its visible event IDs.
+     Reuse those results across criteria. Follow a gap when it could change a
+     verdict. The review source stays fixed, so the initial graph and diagnostics
+     remain current.
+  3. For each material use of earlier evidence, use view_event on the consuming
+     agent event. Find the source ID in its visible windows and check the source
+     body supports the decision. An after link orders events. Visibility also
+     depends on closure and replacement, in any window. For example, a comparison
+     that depends on two results needs both result IDs in its visible windows.
+     If the episode uses a retained copy, check and cite the event holding it.
+
+  ## Sign off
+  Give a verdict with specific evidence for every supplied criterion. For a pass
+  on core.causal_evidence, record each material consumer and its visible source
+  IDs in causal_claims. For a failure, identify the decision, the missing or
+  contradictory evidence, and the window or dependency that caused the problem
+  when known. Call signoff once the verdicts are supported. Use only the read
+  tools and signoff.

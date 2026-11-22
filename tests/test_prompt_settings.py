@@ -1,5 +1,7 @@
 """Generation prompts live in project settings; the retired Flow leaves nothing behind."""
 
+import json
+
 import pytest
 import yaml
 from test_graph_generation import finish, service
@@ -43,6 +45,29 @@ async def test_draft_and_assembly_receive_the_parallel_trajectory_guide(tmp_path
     assert "A final comparison depends on" in guide
     for ticket in fake.calls:
         assert ticket.payload["messages"][0]["content"].count(guide) == 1
+
+
+@pytest.mark.asyncio
+async def test_both_review_tiers_receive_the_review_guide_and_initial_graph(tmp_path):
+    gen, fake = service(tmp_path)
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+
+    payloads = [ticket.payload for ticket in fake.calls if ticket.payload["operation"] == "review"]
+    assert [payload["tier"] for payload in payloads] == ["fast", "critical"]
+    defaults = prompt_defaults.packaged()
+    for payload in payloads:
+        system, initial = payload["messages"]
+        assert system["content"].count(defaults["trajectory_guide"]) == 1
+        assert defaults["review_instruction"] in system["content"]
+        start = json.loads(initial["content"])
+        assert start["graph"]["events"] and start["diagnostics"] == []
+        assert "core.causal_evidence" in start["criteria"] and "draft" not in start
+        assert payload["prompt_version"] == defaults["review_version"]
+
+    attempt = gen.jobs.attempts(job)[0]
+    evaluations = gen.store.read(attempt["trajectory_id"]).source.metadata["evaluations"]
+    assert [item["prompt_version"] for item in evaluations] == [defaults["review_version"]] * 2
 
 
 def test_settings_saved_with_the_retired_method_still_load():
@@ -122,8 +147,6 @@ def test_retired_instructions_reserve_no_attempts(tmp_path):
 
 
 def test_new_matrix_dimensions_reach_draft_and_assembly(tmp_path):
-    import json
-
     from trajectory_remix.graph import draft_assembly
 
     gen, _ = service(tmp_path)

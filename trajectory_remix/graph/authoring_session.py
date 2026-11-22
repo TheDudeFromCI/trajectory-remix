@@ -2,7 +2,7 @@
 
 import json
 
-from . import authoring, reviews, signoffs
+from . import authoring, prompt_defaults, reviews, signoffs
 from .authoring_tools import READ_ONLY, TOOLS, provider_tools
 from .models import canonical
 from .schema_errors import explain
@@ -31,7 +31,6 @@ INSTRUCTIONS = """# Native graph authoring
 
 
 def begin(source, settings, phase, tier, *, plan=None, prior=None):
-    editing = phase != "review"
     draft = source.metadata.get("draft")
     draft_visible = (
         isinstance(draft, str)
@@ -39,19 +38,23 @@ def begin(source, settings, phase, tier, *, plan=None, prior=None):
         and (phase == "assembly" or settings.generation.review_include_draft)
     )
     checks = signoffs.criteria(reviews.checklist(settings, tier) if tier else {}, draft_visible)
-    guidance = (
-        "Author the Draft faithfully into a complete trajectory using these tools. "
-        "Follow project guidance for content. The native tool protocol governs output format.\n\n"
-        + plan["prompts"]["assemble_instruction"]
-        + "\n\nActor guide:\n"
-        + plan["actor_instruction"]
-        if phase == "assembly"
-        else (
-            "Assess the trajectory against every criterion. Use only read tools and signoff."
-            if not editing
-            else "Repair the source directly. Preserve correct material and verify every criterion."
+    prompt_version = signoffs.VERSION
+    if phase == "assembly":
+        prompt_version = plan["prompts"]["version"]
+        guidance = (
+            "Author the Draft faithfully into a complete trajectory using these tools. "
+            "Follow project guidance for content. The native tool protocol governs output format.\n\n"
+            + plan["prompts"]["assemble_instruction"]
+            + "\n\nActor guide:\n"
+            + plan["actor_instruction"]
         )
-    )
+    elif phase == "review":
+        prompt_version = prompt_defaults.packaged()["review_version"]
+        guidance = prompt_defaults.review()
+    else:
+        guidance = (
+            "Repair the source directly. Preserve correct material and verify every criterion."
+        )
     initial = dict(
         phase=phase,
         criteria=checks,
@@ -80,6 +83,7 @@ def begin(source, settings, phase, tier, *, plan=None, prior=None):
     return dict(
         phase=phase,
         tier=tier,
+        prompt_version=prompt_version,
         draft_visible=draft_visible,
         checks=checks,
         require_causal_claims=True,

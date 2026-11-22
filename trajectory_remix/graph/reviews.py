@@ -201,6 +201,7 @@ def signoff(
     requested_model,
     *,
     native=None,
+    prompt_version=None,
 ):
     result = verdict(body, source)
     old = source.metadata.get("stage", -3)
@@ -218,7 +219,7 @@ def signoff(
             endpoint=endpoint,
             model=model,
             requested_model=requested_model,
-            prompt_version=signoffs.VERSION if native is not None else VERSION,
+            prompt_version=prompt_version or (signoffs.VERSION if native is not None else VERSION),
             source_hash=source.intrinsic_hash,
             source_revision=record.revision + (source.intrinsic_hash != record.intrinsic_hash),
             intrinsic_revision=record.intrinsic_revision
