@@ -115,6 +115,9 @@ def create_studio_app(
     studio.generation = generation
     app.state.worker.bulk_handlers["metrics"] = metrics.calculate
     app.state.studio = studio
+    from .comments import CommentService
+
+    studio.comments = CommentService(studio.store)
     app.state.worker.handlers["import"] = studio.import_job
     token = app.state.csrf = secrets.token_urlsafe(32)
     static = Path(__file__).resolve().parents[1] / "static"
@@ -212,12 +215,14 @@ def create_studio_app(
         studio.worker.kick(job)
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
+    from .comments_api import add_comment_routes
     from .prompt_migration import migrate
     from .prompts_api import add_prompt_routes
     from .tools_api import add_tool_routes
 
     migrate(studio.store)
     add_tool_routes(router, studio.store)
+    add_comment_routes(router, studio.comments)
     add_prompt_routes(router)
     from . import usage
 

@@ -94,6 +94,7 @@ jobs:
       - run: node tests/usage_view_frontend.mjs
       - run: node tests/tool_import_frontend.mjs
       - run: node tests/tool_picker_frontend.mjs
+      - run: node tests/comments_view_frontend.mjs
       - run: node tests/job_log_levels_frontend.mjs
       - run: node tests/job_names_tabs_frontend.mjs
 

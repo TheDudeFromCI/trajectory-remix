@@ -60,6 +60,10 @@ for you to copy, not calls this document makes.
 | Export Ready sources | `export_graphs` | `{"options":{"compiled":false,"minimum_stage":3}}` |
 | Export Ready, compiled | `export_graphs` | `{"profile":"training","options":{"compiled":true}}` |
 | List finished download paths | `graph_job_artifacts` | `{"id":"JOB_UUID"}` |
+| Find open comments | `list_graph_comments` | `{"status":"open","limit":20}` |
+| Comments on one trajectory | `list_graph_comments` | `{"trajectory":"UUID","status":"all"}` |
+| Ask the user something | `add_graph_comment` | `{"trajectory":"UUID","target":{"kind":"window","id":"doc"},"body":"Should this stay open?"}` |
+| Resolve a comment after the fix | `resolve_graph_comment` | `{"id":"COMMENT_UUID","resolution":"Moved close_window to event 13."}` |
 
 There are also `create_graph` and the other lifecycle tasks. `get_authoring_guide` topics are `start`, `dependencies`,
 `tools-chat`, `generation` and `export`.
@@ -74,6 +78,8 @@ There are also `create_graph` and the other lifecycle tasks. `get_authoring_guid
   Preferences and Undo history.
 - **Downloads.** MCP returns file paths, never session tokens or archives. Fetching them needs the `X-Remix-Token` from the
   loopback dashboard, and artifacts expire after 24 hours.
+- **Comments** are notes a person (or agent) leaves on a trajectory, event or window. `read_graph` includes the open
+  ones as `open_comments`. They live outside the source, so they never change a revision and need no `expected_revision`.
 - **A model pass is evidence, not approval.** Nothing an agent does makes a trajectory Ready.
 
 See the [bundled Skill](../trajectory_remix/Skill.md) for the full authoring rules.

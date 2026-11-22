@@ -28,6 +28,7 @@
 <symbol id="i-shrink" viewBox="0 0 16 16"><path d="M13.5 6.5h-4v-4M9.5 6.5l4-4M2.5 9.5h4v4M6.5 9.5l-4 4"/></symbol>
 <symbol id="i-timeline" viewBox="0 0 16 16"><path d="M2.5 4.5h7M2.5 8h11M2.5 11.5h5"/></symbol>
 <symbol id="i-chevron" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></symbol>
+<symbol id="i-comment" viewBox="0 0 16 16"><path d="M3 3.5h10a.5.5 0 0 1 .5.5v6.5a.5.5 0 0 1-.5.5H7l-3 2.5V11H3a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5Z"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 3v3.5H9.5"/><path d="M12.6 6.5A5 5 0 1 0 13 9"/></symbol>
 </svg>
 
@@ -182,6 +183,7 @@
         <button role="tab" id="tab-options" aria-controls="panel-options" aria-selected="false">Options</button>
         <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false">Windows</button>
         <button role="tab" id="tab-problems" aria-controls="panel-problems" aria-selected="false">Problems <span id="problems-count" class="badge"></span></button>
+        <button role="tab" id="tab-comments" aria-controls="panel-comments" aria-selected="false" aria-label="Comments" data-tip="Comments on this trajectory, its events and windows, for whoever fixes it next"><svg class="ico" aria-hidden="true"><use href="#i-comment"/></svg><span id="comments-count" class="badge accent"></span></button>
         <button role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON</button>
       </div>
 
@@ -247,6 +249,15 @@
 
       <div role="tabpanel" id="panel-problems" aria-labelledby="tab-problems" class="panel-body" hidden>
         <div id="diagnostics" class="diagnostic-list"></div>
+      </div>
+
+      <div role="tabpanel" id="panel-comments" aria-labelledby="tab-comments" class="panel-body" data-lock-exempt hidden>
+        <div class="comment-composer">
+          <label>Comment on <select id="comment-target"></select></label>
+          <textarea id="comment-body" rows="3" placeholder="What is wrong here? For example: this tool call closes the window too early." aria-label="Comment"></textarea>
+          <div class="panel-actions"><span class="small muted grow">Saved at once. Agents read open comments over MCP and fix them.</span><button id="comment-add" class="sm primary">Add comment</button></div>
+        </div>
+        <div id="comment-list" class="comment-list"></div>
       </div>
 
       <div role="tabpanel" id="panel-json" aria-labelledby="tab-json" class="panel-body" hidden>

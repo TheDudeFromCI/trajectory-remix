@@ -25,10 +25,10 @@ tooltips rather than in extra text on screen.
 
 | Panel | What it does |
 | --- | --- |
-| **Dataset** (left) | Search and filter trajectories by text, stage, split or tool. Each row shows a short ID, its stage and split, and a lock if a job owns it. Hover a row for the full ID. |
-| **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. |
+| **Dataset** (left) | Search and filter trajectories by text, stage, split or tool. Each row shows a short ID, its stage and split, a speech bubble with the number of open comments, and a lock if a job owns it. Hover a row for the full ID. |
+| **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Links** (dependencies), **Options** (closing, masks, delivery, framing), **Windows**, **Problems** and **JSON**. |
+| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Links** (dependencies), **Options** (closing, masks, delivery, framing), **Windows**, **Problems**, **Comments** (the speech bubble) and **JSON**. |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -140,6 +140,35 @@ Broken drafts always save. Problems show up as you edit:
 - Errors block compiled export; warnings don't.
 
 ![A missing dependency on the Problems tab](images/dashboard/problems.png)
+
+### Leave comments for an agent to fix
+
+Some problems no checklist catches: a tool argument the model couldn't have known, or a
+window closed while a later event still needs it. Point them out with a comment, and an
+agent connected over [MCP](MCP.md) can find it and fix it.
+
+1. Choose what the comment is about:
+   - **A window:** click the speech bubble on its card.
+   - **An event:** select it on the timeline, then open the **Comments** tab (the speech
+     bubble next to Problems). The composer follows the selected event.
+   - **Anything else:** pick it from **Comment on**: the whole trajectory, any event or any
+     window.
+2. Write what's wrong, for example *"This tool call closes the window too early. Event 13
+   is still using it."*, and click **Add comment** (or press Ctrl+Enter).
+
+Comments save straight away. They aren't part of the trajectory, so they don't make the
+draft unsaved, don't change its revision or review, aren't exported, and still work while a
+job holds the trajectory.
+
+| Where | What you see |
+| --- | --- |
+| Dataset row | A speech bubble with the number of open comments |
+| Timeline event, window card | A speech bubble with that target's open comments |
+| Comments tab | Open comments first, then **Resolved**, each with who wrote it (**You** or **Agent**) and the revision it was written against |
+
+Click a comment's target to jump to it. **Resolve** closes a comment and **Reopen** brings
+it back. When an agent resolves one, its note on what it changed appears under the comment.
+If the event or window has since been deleted, the comment is marked **Removed**.
 
 ### Preview the tokens
 
