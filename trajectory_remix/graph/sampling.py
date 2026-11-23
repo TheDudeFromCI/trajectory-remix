@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .models import canonical, digest
 from .sampler_originals import kidra_sampler as original
+from .size_labels import agent_characters, total_characters
 
 ROOT = Path(original.__file__).parent
 OVERRIDES = (
@@ -29,6 +30,8 @@ CALCULATORS = {
         {e.call_id for e in s.events.values() if e.kind == "tool_call"}
     ),
     "authored_windows": lambda s: len(s.windows),
+    "total_characters": total_characters,
+    "agent_characters": agent_characters,
 }
 
 

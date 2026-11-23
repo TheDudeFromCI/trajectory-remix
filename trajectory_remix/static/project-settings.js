@@ -194,6 +194,14 @@ export function renderProjectSettings(container, initial, options = {}) {
   grid.append(field('Random extra tools in tool schema events (% chance each; 0 = none)', chance));
   const levels = input('Reasoning effort levels', (current().reasoning_levels || []).join(', '), value => write(d => { d.reasoning_levels = value.split(',').map(v => v.trim()).filter(Boolean); }));
   grid.append(field('Reasoning effort levels, comma separated', levels));
+  const sizes = node('div', undefined, 'settings-grid');
+  (current().size_labels || []).forEach((label, i) => {
+    sizes.append(field(`Size ${i + 1} name`, input(`Size ${i + 1} name`, label.name, value => write(d => { d.size_labels[i].name = value; }))));
+    for (const [key, text] of [['agent_tokens', 'agent tokens'], ['total_tokens', 'total tokens']]) {
+      const n = input(`${label.name} ${text}`, label[key], value => write(d => { d.size_labels[i][key] = value; }), 'number'); n.min = key === 'agent_tokens' ? 0 : 1; n.step = 1; sizes.append(field(`${label.name} ${text}`, n));
+    }
+  });
+  other.append(node('h4', 'Trajectory size labels'), sizes, node('p', 'A trajectory gets the label whose total tokens are nearest (log2) to its estimated total tokens.', 'settings-help'));
   other.append(grid, node('p', 'Split fractions must total 1. Changing settings never rewrites existing trajectories.', 'settings-help')); container.append(other, status);
   report(options.notice || 'Changes remain in this settings draft until Save settings.');
 }

@@ -71,6 +71,19 @@ function availabilityWidget(population) {
   return widget('Metric availability', wrap);
 }
 
+function sizeWidget(population) {
+  const labels = population.size_labels || [], counts = population.size_distribution || {};
+  if (!labels.length) return widget('Trajectory sizes', node('div', 'No size labels are configured. Add them in Project settings.', 'empty'));
+  const table = node('table', undefined, 'data'), head = node('tr'), body = node('tbody');
+  for (const [text, cls] of [['Size'], ['Agent tokens', 'num'], ['Total tokens', 'num'], ['Trajectories', 'num']]) head.append(node('th', text, cls));
+  const thead = node('thead'); thead.append(head); table.append(thead, body);
+  for (const l of labels) {
+    const tr = node('tr'); tr.append(node('td', l.name), node('td', l.agent_tokens.toLocaleString(), 'num'), node('td', l.total_tokens.toLocaleString(), 'num'), node('td', String(counts[l.name] ?? 0), 'num')); body.append(tr);
+  }
+  const wrap = node('div', undefined, 'table-wrap'); wrap.append(table);
+  return widget('Trajectory sizes', [node('p', 'Nearest size by estimated total tokens (about 3.5 characters per token, log2 distance).', 'note'), wrap]);
+}
+
 function selectedWidget(selected) {
   if (!selected) return widget('Selected trajectory', node('div', 'Select a trajectory in the Editor to see its metric status.', 'empty'));
   const table = node('table', undefined, 'data'), head = node('tr'), body = node('tbody');
@@ -98,9 +111,11 @@ export function renderMetrics(population, selected, scopeText) {
     tile(population.total ?? 0, 'Saved records in search'),
     tile(coverage.included_records ?? 0, 'Accepted for coverage', population.acceptance ? 'Coverage counts records with ' + population.acceptance + '.' : undefined),
     tile(unavailableTotal, 'Unavailable values', 'Metric values not yet measured or annotated. Use “Calculate missing metrics” to fill measurable ones.'),
-    tile(staleTotal, 'Stale values', 'Values recorded against an older source or metric definition.'));
+    tile(staleTotal, 'Stale values', 'Values recorded against an older source or metric definition.'),
+    tile((population.total_characters ?? 0).toLocaleString(), 'Total characters', 'Characters of text in every event of the saved records in this search.'),
+    tile((population.agent_characters ?? 0).toLocaleString(), 'Agent-generated characters', 'Characters in agent text and tool call events.'));
   const grid = node('div', undefined, 'metrics-grid');
-  grid.append(targetsWidget(coverage), availabilityWidget(population), selectedWidget(selected));
+  grid.append(targetsWidget(coverage), availabilityWidget(population), sizeWidget(population), selectedWidget(selected));
   $('metrics-content').replaceChildren(tiles, grid);
   $('metrics-scope').textContent = scopeText;
   $('metrics-values').textContent = JSON.stringify({population, selected, note: 'Saved records only; unsaved drafts excluded.'}, null, 2);

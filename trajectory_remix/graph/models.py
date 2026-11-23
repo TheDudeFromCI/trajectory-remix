@@ -345,6 +345,20 @@ class SplitRatios(DTO):
         return self
 
 
+class SizeLabel(DTO):
+    """A trajectory size class; the nearest total_tokens (log2) names a trajectory's size."""
+
+    name: Identifier
+    agent_tokens: Annotated[int, Field(ge=0)]
+    total_tokens: Annotated[int, Field(ge=1)]
+
+
+def default_size_labels():
+    from .size_labels import default_size_labels as defaults
+
+    return [SizeLabel(**x) for x in defaults()]
+
+
 class Criterion(DTO):
     text: Identifier
     allow_not_applicable: bool = False
@@ -459,6 +473,15 @@ class ProjectSettings(DTO):
     log_cache_mib: Annotated[int, Field(ge=0)] | None = 1024
     # Chance that each tool outside a tool_schema event's chosen tools is listed anyway (0 = never).
     tool_schema_extra_chance: Annotated[float, Field(ge=0, le=1)] = 0.5
+    size_labels: list[SizeLabel] = Field(default_factory=default_size_labels)
+
+    @field_validator("size_labels")
+    @classmethod
+    def unique_size_labels(cls, labels):
+        names = [x.name for x in labels]
+        if len(names) != len(set(names)):
+            raise ValueError("Size label names must be unique")
+        return sorted(labels, key=lambda x: x.total_tokens)
 
     @model_validator(mode="after")
     def references(self):

@@ -75,7 +75,7 @@
       <div class="widget-actions"><button id="new-sample" class="ghost icon sm" aria-label="Create trajectory" data-tip="Create an empty trajectory"><svg class="ico"><use href="#i-plus"/></svg></button></div>
     </div>
     <div class="dataset-filters">
-      <input id="sample-search" type="search" placeholder="Search source text" aria-label="Search source text">
+      <input id="sample-search" type="search" placeholder="Search source text · @size:m or @size:<=xs" aria-label="Search source text; @size:m or @size:<=xs filters by size">
       <div class="filter-row">
         <select id="search-stage" aria-label="Filter by stage"><option value="">All stages</option><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select>
         <select id="search-split" aria-label="Filter by split"><option value="">All splits</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select>
@@ -169,6 +169,7 @@
       <div class="bar-row meta-row" id="trajectory-meta">
         <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
         <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
+        <small id="size-tag" class="tag tone-muted"></small>
         <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
         <span id="lock-slot" class="row"></span>
       </div>
