@@ -4,6 +4,7 @@ Source-only and tokenizer-free. Token counts are estimated from characters, so a
 coarse size class, never a measured export size.
 """
 
+import json
 import math
 
 CHARS_PER_TOKEN = 3.5
@@ -59,6 +60,24 @@ def nearest_size(total_tokens, labels):
         return min(labels, key=lambda x: x["total_tokens"])["name"]
     here = math.log2(total_tokens)
     return min(labels, key=lambda x: abs(math.log2(x["total_tokens"]) - here))["name"]
+
+
+def nearest_index(total_tokens, totals):
+    """Index of the nearest size in `totals` (sorted ascending) by log2 distance."""
+    if total_tokens < 1:
+        return 0
+    here = math.log2(total_tokens)
+    return min(range(len(totals)), key=lambda i: abs(math.log2(totals[i]) - here))
+
+
+def event_characters_json(source_json):
+    """Total characters of a serialized source, without building models."""
+    count = 0
+    for event in json.loads(source_json).get("events", {}).values():
+        content = event.get("content", "")
+        for piece in content if isinstance(content, list) else [content]:
+            count += len(piece if isinstance(piece, str) else piece.get("text", ""))
+    return count
 
 
 def size_of(source, labels):

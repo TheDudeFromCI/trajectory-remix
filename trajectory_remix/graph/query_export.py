@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from . import size_query
 from .bulk import BulkService
 
 BATCH = 200
@@ -14,7 +15,7 @@ def iter_jsonl(store, query):
 
     Pages by id (not offset) so edits made while streaming cannot skip or repeat rows.
     """
-    where, args = BulkService._where(query or {})
+    where, args = BulkService._where(query or {}, size_query.labels_for(store, query))
     after = ""
     while True:
         with store.connect() as db:

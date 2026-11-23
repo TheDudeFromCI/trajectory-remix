@@ -58,3 +58,18 @@ You can edit the labels under **Project settings → Project defaults → Trajec
 | XXXL | 64k | 1024k |
 
 Here `k` is 1024 tokens. Label names must be unique.
+
+### Searching and showing size
+
+Type `@size:` plus a label in the Editor search box to filter by size, alone or beside other text:
+
+| Search | Matches |
+| --- | --- |
+| `@size:m` | Exactly M |
+| `@size:<=xs` | XS or smaller |
+| `@size:>l` | Larger than L |
+| `retry @size:>=xl` | Text "retry" among XL or larger trajectories |
+
+Use `<`, `<=`, `>`, `>=` or `=` (the default). Names ignore case and follow your configured labels, ordered by
+their total tokens. The same filter applies to Metrics, bulk edits and exports. Each trajectory's size also
+appears as a **Size** tag in the collapsible trajectory header (from its last saved source).

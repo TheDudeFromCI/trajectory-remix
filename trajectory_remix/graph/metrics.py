@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+from . import size_query
 from .bulk import BulkService
 from .derived_labels import DerivedLabelCounts
 from .sampling import CALCULATORS, original
@@ -124,7 +125,7 @@ class MetricService:
         if population not in ("all", "accepted"):
             raise ValueError("population must be all or accepted")
         c = self.sampler.editor()["configuration"]
-        where, args = BulkService._where(query or {})
+        where, args = BulkService._where(query or {}, size_query.labels_for(self.store, query))
         unavailable = dict.fromkeys(c["definitions"], 0)
         stale = dict.fromkeys(c["definitions"], 0)
         total, derived = 0, DerivedLabelCounts()
