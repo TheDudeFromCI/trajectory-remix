@@ -20,9 +20,11 @@ export function unresolvedCounts(items) {
 }
 
 export class CommentsView {
-  /** els: {target, body, add, list, count, send?}; inspect(kind, id) jumps to a comment's target. */
-  constructor({api, report, els, inspect = () => {}, onChange = () => {}}) {
-    Object.assign(this, {api, report, els, inspect, onChange});
+  /** els: {target, body, add, list, count, send?}; inspect(kind, id) jumps to a comment's target.
+     autoSend() says whether new or reopened comments go to the assistant at once; onOpened() does the sending. */
+  constructor({api, report, els, inspect = () => {}, onChange = () => {}, autoSend = () => false, onOpened = async () => {}}) {
+    Object.assign(this, {api, report, els, inspect, onChange, autoSend, onOpened});
+    this.sendTip = els.send?.dataset.tip || '';
     this.items = []; this.counts = new Map(); this.trajectory = null; this.loaded = ''; this.replies = new Map();
     els.add.addEventListener('click', () => this.add().catch(report));
     els.body.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.add().catch(report); } });
@@ -61,6 +63,19 @@ export class CommentsView {
     await this.api(`/trajectories/${this.trajectory}/comments`, 'POST', {target: parseKey(this.els.target.value), body});
     this.els.body.value = ''; this.pinned = false;
     await this.load(this.trajectory);
+    await this.autoSendOpened();
+  }
+  /** In auto mode, hand freshly opened comments to the assistant; the comment itself is already saved. */
+  async autoSendOpened() {
+    if (this.autoSend()) await this.onOpened();
+  }
+  /** Refresh the send button: greyed out in auto mode, otherwise enabled while comments are open. */
+  updateSendButton(hasOpen) {
+    const send = this.els.send;
+    if (!send) return;
+    const auto = this.autoSend();
+    send.disabled = auto || !hasOpen;
+    send.dataset.tip = auto ? 'Auto-send is enabled in Preferences: new comments go to the assistant automatically' : this.sendTip;
   }
   async act(comment, method, body, path = '') {
     await this.api(`/comments/${comment.id}${path}`, method, body);
@@ -76,6 +91,7 @@ export class CommentsView {
     if (!body) throw new Error(draft.reopen ? 'Say what still needs to change.' : 'Write the reply first.');
     await this.act(comment, 'POST', {body, reopen: !!draft.reopen}, '/replies');
     this.replies.delete(comment.id); this.render();
+    if (draft.reopen) await this.autoSendOpened();
   }
   render() {
     this.counts = unresolvedCounts(this.items);
@@ -83,7 +99,7 @@ export class CommentsView {
     const open = by('open'), addressed = by('addressed'), resolved = by('resolved');
     const unresolved = open.length + addressed.length;
     setText(this.els.count, unresolved ? String(unresolved) : '');
-    if (this.els.send) this.els.send.disabled = !open.length;
+    this.updateSendButton(open.length > 0);
     const list = this.els.list, wasOpen = list.querySelector('details')?.open ?? false;
     const focused = document.activeElement?.closest?.('.comment-reply-form') && document.activeElement.dataset.comment;
     if (!this.trajectory) { list.replaceChildren(); return; }
