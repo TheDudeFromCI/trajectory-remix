@@ -203,6 +203,12 @@ the rest with a reason or a question, leaving them open. Review its fixes as abo
 revert its edits, and read the answers in the Comments tab. If the session runs out of
 room, it stops with its edits so far kept and the comments still open.
 
+To skip the button, turn on **Automatically send new comments to the assistant** in
+**Preferences** (off by default, stored in this browser). Adding a comment, or requesting
+changes on an agent's fix, then sends the trajectory's open comments at once. The same
+checks apply, so save your draft first. While it's on, **Send open comments to agent** is
+greyed out and its tooltip says auto-send is enabled.
+
 ### Preview the tokens
 
 1. Add a tokenizer profile in **Settings** (see
