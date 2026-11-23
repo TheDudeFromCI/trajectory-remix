@@ -11,6 +11,7 @@ from pydantic import Field
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
+from .agent_share import low_agent_share_message
 from .models import (
     DTO,
     ChatMessage,
@@ -238,6 +239,10 @@ def diagnose(source: GraphSource, settings: ProjectSettings | None = None) -> li
                 "close_window",
                 warning=True,
             )
+
+    share_message = low_agent_share_message(source)
+    if share_message:
+        emit("low_agent_share", share_message, warning=True, path=["events"])
 
     submitted = {}
     for call_id, ids in sorted(calls.items()):
