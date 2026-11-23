@@ -171,7 +171,10 @@ class MetricService:
                     proposal["metrics"]["actual"] = actual
                     yield proposal
 
-            report = original.metrics_report(records(), c["matrix"], population=population)
+            # Coverage is documented as accepted-only (stage >= Candidate). Unaccepted records
+            # reach the report as status "proposed" and are filtered out there, even when the
+            # surrounding totals (population="all") include them.
+            report = original.metrics_report(records(), c["matrix"], population="accepted")
         return dict(
             total=total,
             proposal_coverage=report,
