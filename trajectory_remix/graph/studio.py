@@ -12,6 +12,7 @@ from threading import Lock
 
 from fastapi.encoders import jsonable_encoder
 
+from . import size_query
 from .bulk import BulkService
 from .commands import GraphCommands
 from .jobs import page
@@ -43,7 +44,7 @@ class Studio:
 
     def listing(self, query=None, *, limit=50, offset=0):
         page(limit, offset)
-        where, args = BulkService._where(query or {})
+        where, args = BulkService._where(query or {}, size_query.labels_for(self.store, query))
         with self.store.connect() as db:
             db.execute("BEGIN")
             join = """FROM graph_trajectories t JOIN graph_trajectory_revisions r
@@ -96,7 +97,14 @@ class Studio:
             value["diagnostics"] = jsonable_encoder(diagnostics)
             value["has_errors"] = any(d.severity == "error" for d in diagnostics)
         review = stale(source, settings)
-        return value | dict(owner=owner[0] if owner else None, review_status=review)
+        from .size_labels import size_of
+
+        labels = [x.model_dump() for x in settings.size_labels]
+        return value | dict(
+            owner=owner[0] if owner else None,
+            review_status=review,
+            size=size_of(source, labels),
+        )
 
     def graph(self, ident):
         value = self.read(ident)

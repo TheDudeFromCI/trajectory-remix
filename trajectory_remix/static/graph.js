@@ -100,7 +100,10 @@ export class StudioUI {
     }), value => { this.frames = value.frames; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
   }
   query() {
-    const q = {}; if ($('sample-search').value) q.text = $('sample-search').value;
+    const q = {}, size = $('sample-search').value.match(/(?:^|\s)@size:(\S+)/i); // `@size:m` or `@size:<=xs`
+    const text = $('sample-search').value.replace(/(?:^|\s)@size:\S+/gi, ' ').trim();
+    if (text) q.text = text;
+    if (size) q.size = size[1];
     if ($('search-stage').value !== '') q.stage = Number($('search-stage').value);
     if ($('search-split').value) q.split = $('search-split').value;
     if ($('search-tool').value) q.tool = $('search-tool').value;
@@ -262,6 +265,8 @@ export class StudioUI {
     const stale = this.record.review_status?.stale;
     $('review-stale').textContent = stale ? 'Review stale' : '';
     setAttr($('review-stale'), 'data-tip', stale ? 'Review is stale: ' + this.record.review_status.reasons.join(', ') + '. Re-review manually.' : null);
+    const size = this.record.size; $('size-tag').textContent = size?.label ? 'Size ' + size.label : '';
+    setAttr($('size-tag'), 'data-tip', size ? `Saved source: ${size.total_characters.toLocaleString()} characters (about ${size.total_tokens_estimate.toLocaleString()} tokens), ${size.agent_characters.toLocaleString()} agent-generated.` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);

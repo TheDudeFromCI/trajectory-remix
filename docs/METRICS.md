@@ -31,3 +31,45 @@ published back to the source automatically.
 - [Sampler and metrics](GRAPH-SAMPLER-METRICS.md): provenance, tolerances and drift, coverage, REST routes and
   which fields are unavailable.
 - [Sampler Matrix workbench](SAMPLER-WORKBENCH.md): editing the linked target and metric definitions.
+
+## Character counts and trajectory sizes
+
+The Metrics tab also shows **Total characters** and **Agent-generated characters** for the saved
+records in your search. Agent-generated text means agent text and tool call events. Both are source-only
+calculators, so **Calculate Missing Metrics** can save them per trajectory.
+
+Each trajectory also gets a **size label**. Tokens are estimated at about 3.5 characters per token (nothing is
+tokenized), and the label whose *total tokens* is nearest in log2 distance wins. Empty trajectories get the
+smallest label. The Metrics tab lists how many trajectories fall in each size.
+
+You can edit the labels under **Project settings → Project defaults → Trajectory size labels** (also the
+`size_labels` setting). The defaults:
+
+| Name | Agent tokens | Total tokens |
+| --- | --- | --- |
+| XXXS | 0.25k | 4k |
+| XXS | 0.5k | 8k |
+| XS | 1k | 16k |
+| S | 2k | 32k |
+| M | 4k | 64k |
+| L | 8k | 128k |
+| XL | 16k | 256k |
+| XXL | 32k | 512k |
+| XXXL | 64k | 1024k |
+
+Here `k` is 1024 tokens. Label names must be unique.
+
+### Searching and showing size
+
+Type `@size:` plus a label in the Editor search box to filter by size, alone or beside other text:
+
+| Search | Matches |
+| --- | --- |
+| `@size:m` | Exactly M |
+| `@size:<=xs` | XS or smaller |
+| `@size:>l` | Larger than L |
+| `retry @size:>=xl` | Text "retry" among XL or larger trajectories |
+
+Use `<`, `<=`, `>`, `>=` or `=` (the default). Names ignore case and follow your configured labels, ordered by
+their total tokens. The same filter applies to Metrics, bulk edits and exports. Each trajectory's size also
+appears as a **Size** tag in the collapsible trajectory header (from its last saved source).
