@@ -5,6 +5,7 @@ from copy import deepcopy
 from .bulk import BulkService
 from .derived_labels import DerivedLabelCounts
 from .sampling import CALCULATORS, original
+from .size_labels import size_of
 
 
 class MetricService:
@@ -25,7 +26,12 @@ class MetricService:
             if key in defs
         }
 
-    def view(self, record, defs):
+    def _size_labels(self):
+        return [x.model_dump() for x in self.store.settings().settings.size_labels]
+
+    def view(self, record, defs, size_labels=None):
+        if size_labels is None:
+            size_labels = self._size_labels()
         metrics = record.source.metadata.get("metrics", {})
         values = {}
         for key, spec in defs.items():
@@ -64,6 +70,7 @@ class MetricService:
             id=record.source.id,
             revision=record.revision,
             values=values,
+            size=size_of(record.source, size_labels),
             targets=record.source.metadata.get("targets", {}),
         )
 
@@ -121,6 +128,9 @@ class MetricService:
         unavailable = dict.fromkeys(c["definitions"], 0)
         stale = dict.fromkeys(c["definitions"], 0)
         total, derived = 0, DerivedLabelCounts()
+        labels = self._size_labels()
+        sizes = {x["name"]: 0 for x in labels}
+        characters = dict(total=0, agent=0)
         with self.store.connect() as db:
             db.execute("BEGIN")
 
@@ -138,7 +148,11 @@ class MetricService:
                     if population == "accepted" and not accepted:
                         continue
                     total += 1
-                    view = self.view(r, c["definitions"])
+                    view = self.view(r, c["definitions"], labels)
+                    if view["size"]["label"] is not None:
+                        sizes[view["size"]["label"]] += 1
+                    characters["total"] += view["size"]["total_characters"]
+                    characters["agent"] += view["size"]["agent_characters"]
                     actual = {}
                     for key, value in view["values"].items():
                         if value["status"] == "unavailable":
@@ -161,6 +175,10 @@ class MetricService:
             total=total,
             proposal_coverage=report,
             derived_labels=derived.report(),
+            total_characters=characters["total"],
+            agent_characters=characters["agent"],
+            size_distribution=sizes,
+            size_labels=labels,
             unavailable=unavailable,
             stale=stale,
             definitions=c["definitions"],
