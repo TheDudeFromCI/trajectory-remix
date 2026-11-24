@@ -6,7 +6,7 @@ revision checks and locks. For how an agent should work, see [Authoring with an 
 
 ## Connect
 
-Install the MCP extra (`pip install -e '.[mcp]'`) and start the studio on a project:
+Install the MCP extra (`pip install ./native/ktremix-python -e '.[mcp]'`) and start the studio on a project:
 
 ```bash
 python -m trajectory_remix graph-studio --dataset project.sqlite \

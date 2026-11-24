@@ -1,13 +1,13 @@
 # Compiler and preview
 
 The compiler turns a dependency graph into the row-by-row training form: which tokens appear
-when, what each token may see, and what it is trained to predict. You only need this page to
-understand **Tick history** previews, export behavior and compile errors. Authoring never calls
-it.
+when, what each token may see, and what it is trained to predict. The native Rust compiler
+reads the [source format](GRAPH-SOURCE.md) and feeds **Tick history** previews,
+[Export](EXPORT.md) and the [KTREMIX](KTREMIX.md) format.
 
-The compiler reads the [source format](GRAPH-SOURCE.md). It doesn't execute tools, call models,
-change sources or settings, or calculate stored metrics. Its output feeds [Export](EXPORT.md) and
-the [KTREMIX](KTREMIX.md) format. Install its dependencies with `pip install -e '.[export]'`.
+Authoring calls the compiler's tokenizer-free dry run for structural diagnostics.
+Full tokenization and scheduling run on explicit preview or export. Other projects can
+use the [standalone Rust crate or Python bindings](../native/ktremix-python/README.md).
 
 ## Using it
 

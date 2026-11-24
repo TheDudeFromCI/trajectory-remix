@@ -4,7 +4,7 @@ These tests use small deterministic graph/codec fixtures, fake providers and
 clocks. No scale workloads, throughput measurements or live models run here.
 
 ```bash
-python -m pip install -e '.[test,mcp,export]'
+python -m pip install ./native/ktremix-python -e '.[test,mcp,export]'
 python -m pytest -q tests/test_graph*.py tests/test_ktremix_format.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py

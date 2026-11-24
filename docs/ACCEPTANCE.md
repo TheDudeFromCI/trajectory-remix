@@ -125,7 +125,7 @@ session with a one-update limit.
 Install the project, then explicitly run in a **fresh directory**:
 
 ```bash
-python -m pip install -e '.[mcp,export]'
+python -m pip install ./native/ktremix-python -e '.[mcp,export]'
 python scripts/graph_workload.py --user-machine --provider fake \
   --stored 25000 --active 20 --attempts 40 --seed 137 \
   --output /tmp/remix-workload-fake-01 --serve

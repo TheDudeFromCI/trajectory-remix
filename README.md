@@ -21,11 +21,13 @@ content**. Remix never executes them.
 
 ## Quick start
 
+Install a stable Rust toolchain to build the native compiler bindings from this checkout.
+
 ```bash
 # Install the project
 git clone https://github.com/TheDudeFromCI/trajectory-remix.git
 cd trajectory-remix
-python -m pip install -e '.[mcp,export]'
+python -m pip install ./native/ktremix-python -e '.[mcp,export]'
 
 # Create the project file
 python -m trajectory_remix graph-init --dataset project.sqlite
@@ -75,6 +77,7 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 | Let an AI agent drive Remix | [MCP setup](docs/MCP.md), [Authoring with an agent](docs/MCP-AUTHORING.md) |
 | Check a local model | [Local-model validation](docs/GRAPH-LOCAL-LLM.md) |
 | Know where data lives | [Storage](docs/STORAGE.md) |
+| Compile trajectories or load training shards from another project | [KTREMIX native library](native/ktremix-python/README.md) |
 | Run or review the checks | [Testing](docs/TESTING.md), [Acceptance](docs/ACCEPTANCE.md), [Maintenance](docs/MAINTENANCE.md) |
 
 ## Good to know
