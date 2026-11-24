@@ -119,8 +119,10 @@ async def test_the_session_continues_until_every_comment_has_one_reply(tmp_path)
     first, duplicate = results(fake.calls[1].payload)
     assert first == {**first, "accepted": True, "remaining": [two]}
     assert duplicate["accepted"] is False and "already replied" in duplicate["error"]
-    nudge = json.loads(fake.calls[2].payload["messages"][-1]["content"])
-    assert nudge["remaining"] == [two]
+    nudge = fake.calls[2].payload["messages"][-1]
+    assert nudge["role"] == "user"
+    assert f"You have not replied to comment `{two}`" in nudge["content"]
+    assert one not in nudge["content"]
     kept = assistant_memory.load(gen.store, record.source.id)
     signoff, answered = (json.loads(m["content"]) for m in kept[-2:])
     assert signoff["accepted"] is False and "unavailable" in signoff["error"]
@@ -213,8 +215,29 @@ async def test_exchange_limit_ends_the_session_and_keeps_comments_open(tmp_path)
     job = await run(gen, record)
     assert len(fake.calls) == 2 and gen.jobs.inspect(job)["state"] == "completed"
     assert gen.store.read(record.source.id).source.events["x"].content == "after"
-    assert gen.comments.for_trajectory(record.source.id)[0]["status"] == "open"
+    comment = gen.comments.for_trajectory(record.source.id)[0]
+    assert comment["status"] == "open"
+    assert comment["replies"][-1]["author"] == "agent"
+    assert comment["replies"][-1]["body"] == "Failed to execute task. Exchange limit reached."
     assert assistant_memory.load(gen.store, record.source.id) is None
+
+
+@pytest.mark.asyncio
+async def test_exchange_limit_keeps_given_replies_and_adds_the_failure_note(tmp_path):
+    gen, fake = service(tmp_path)
+    record, (one, two) = flagged(gen, "First.", "Second.")
+    current = gen.store.settings()
+    data = current.settings.model_dump(mode="json")
+    data["generation"]["max_authoring_exchanges"] = 2
+    gen.store.update_settings(data, current.revision)
+    fake.responses = [turn(edit(), reply(one, True, "Rewrote x.")), turn(("view_graph", {}))]
+    await run(gen, record)
+    states = {c["id"]: c for c in gen.comments.for_trajectory(record.source.id)}
+    bodies = {ident: [r["body"] for r in c["replies"]] for ident, c in states.items()}
+    failure = "Failed to execute task. Exchange limit reached."
+    assert bodies[one][-2:] == ["Rewrote x.", failure]
+    assert bodies[two] == [failure]
+    assert states[one]["status"] == "addressed" and states[two]["status"] == "open"
 
 
 def test_send_requires_the_role_open_comments_and_current_revision(tmp_path):
