@@ -368,12 +368,18 @@ td.faint { color: var(--ink-faint); }
 .event-tabs .tab-list .issue-tab .ico { width: 15px; height: 15px; }
 .comment-head .small.muted { white-space: nowrap; }
 
-.assistant-working { display: flex; align-items: center; gap: var(--space-1); position: sticky; bottom: calc(-1 * var(--space-3)); margin-top: auto; padding: var(--space-2) 0; background: var(--surface-100, inherit); color: var(--accent); font-size: 12px; font-weight: 500; }
+.assistant-working { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); position: sticky; bottom: calc(-1 * var(--space-3)); margin-top: auto; padding: var(--space-2) 0; background: var(--surface-100, inherit); color: var(--accent); font-size: 12px; font-weight: 500; }
 .assistant-working[hidden] { display: none; }
 .working-time { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .assistant-working code { font-family: var(--font-mono); }
 .assistant-working[hidden] { display: none; }
 .working-label { white-space: nowrap; }
+.working-toggle { display: flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.working-toggle::after { content: "\25B8"; margin-left: auto; color: var(--ink-muted); }
+.working-toggle[aria-expanded="true"]::after { content: "\25BE"; }
+.working-tools { margin: var(--space-1) 0 0; padding-left: var(--space-4, 20px); max-height: 160px; overflow-y: auto; color: var(--ink-muted); font-family: var(--font-mono); font-size: 11px; font-weight: 400; }
+.working-tools[hidden] { display: none; }
+.working-tools-empty { list-style: none; margin-left: calc(-1 * var(--space-4, 20px)); font-family: inherit; }
 .working-dots span { animation: working-dot 1.4s infinite both; }
 .working-dots span:nth-child(2) { animation-delay: 0.2s; }
 .working-dots span:nth-child(3) { animation-delay: 0.4s; }
