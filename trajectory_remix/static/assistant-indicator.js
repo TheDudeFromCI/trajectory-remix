@@ -9,7 +9,9 @@ function build() {
   const dots = node('span', undefined, 'working-dots');
   dots.setAttribute('aria-hidden', 'true');
   dots.append(...[1, 2, 3].map(() => node('span', '.')));
-  el.append(node('span', undefined, 'spinner'), node('span', 'Working'), dots);
+  const label = node('span', 'Working', 'working-label');
+  label.append(dots);
+  el.append(node('span', undefined, 'spinner'), label);
   return el;
 }
 

@@ -369,6 +369,7 @@ td.faint { color: var(--ink-faint); }
 
 .assistant-working { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--accent); font-size: 12px; font-weight: 500; }
 .assistant-working[hidden] { display: none; }
+.working-label { white-space: nowrap; }
 .working-dots span { animation: working-dot 1.4s infinite both; }
 .working-dots span:nth-child(2) { animation-delay: 0.2s; }
 .working-dots span:nth-child(3) { animation-delay: 0.4s; }
