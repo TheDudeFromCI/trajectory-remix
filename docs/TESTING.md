@@ -11,6 +11,7 @@ python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
+node tests/window_markdown_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs
 node tests/comments_auto_send_frontend.mjs
@@ -42,7 +43,7 @@ structure, not prompt quality.
 Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations
 when nothing changed, which is what keeps the dashboard from flickering. `window_render_frontend.mjs`
-covers the readable window view (NOOP folding, chat bubbles, JSON formatting).
+covers the readable window view (NOOP folding, chat bubbles, JSON formatting). `window_markdown_frontend.mjs` covers its Markdown rendering: inline and block syntax, escaped HTML and unsafe links, plain text passing through unchanged, unterminated (streaming) syntax and Raw mode.
 `project_settings_frontend.mjs` also covers the **Generation prompts** section. `tool_picker_frontend.mjs` covers the tool checkboxes that replace the text box for `tool_schema` events: chosen versus random tools, relisting, hidden extras, tools missing from the project, failed requests and the locked state. `comments_view_frontend.mjs` covers the reviewer comments panel: choosing a target, composing from a window card, adding, resolve/reopen, accept/request changes on an agent's fix, replies, removed targets and polling without DOM changes; `python -m pytest -q tests/test_comments.py` covers the REST routes, replies, the comment filters, the open → addressed → resolved lifecycle (agents can't resolve), upgrading older comment tables and MCP tasks, and that comments never touch the source revision. `python -m pytest -q tests/test_assistant.py` drives Send to agent with a scripted fake model: spot edits, addressing and replying, frozen comments, incomplete finishes, the context budget and the missing-role error. `job_log_levels_frontend.mjs` covers
 the coloured job log lines. `run_layout_frontend.py` drives a real browser through the splitters, the collapsible trajectory bar
 and the timeline controls that move to the status bar, and checks real layout rather than DOM state. Layout, sampler, dashboard and
