@@ -14,13 +14,13 @@ from . import (
     signoffs,
     trajectory_hold,
 )
+from .draft_reply import draft_text
 from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
 from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
-from .schema_errors import explain
 from .storage import RevisionConflict
 
 DRIVER = draft_assembly.DRIVER
@@ -533,7 +533,7 @@ class GenerationService:
         cp["errors"] += 1
         self.jobs.progress(
             ticket.job_id,
-            f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
+            f"Unusable Draft reply; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
             "warning",
         )
         if cp["errors"] <= settings.generation.format_retries:
@@ -568,22 +568,17 @@ class GenerationService:
             self._consume_draft(ticket, source, cp, complete)
 
     def _consume_draft(self, ticket, source, cp, complete):
-        body = complete.get("output")
         try:
             if complete.get("invalid_output"):
                 raise ValueError(invalid_reason(complete))
-            problem = explain(ticket.payload["schema"], body)
-            if problem:
-                raise ValueError(problem)
-        except (ValueError, TypeError, KeyError) as error:
+            draft = draft_text(complete)
+        except ValueError as error:
             cp["flow_error"] = str(error)[:2000]
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
-        cp["draft"] = body["draft"]
-        self._save(
-            ticket.job_id, draft_assembly.with_draft(source, body["draft"]), cp, ticket=ticket
-        )
+        cp["draft"] = draft
+        self._save(ticket.job_id, draft_assembly.with_draft(source, draft), cp, ticket=ticket)
         self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
 
     def _consume_native(self, ticket, record, settings, source, cp, complete):

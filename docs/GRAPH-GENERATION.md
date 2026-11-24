@@ -304,7 +304,8 @@ and `repair_rounds` options still load, and `repair_context_bytes` becomes
 `settings.prompts`.
 
 **Endpoints.** Remix sends non-streamed OpenAI-compatible `/chat/completions` requests.
-Draft uses the endpoint's configured JSON output mode. Assembly, review and the Assistant
+Draft replies in plain text (no `response_format`, JSON mode or grammar), and Remix stores the
+reply as the Draft; it must be at least 200 characters. Assembly, review and the Assistant
 require native function tools. Credentials come from `REMIX_API_KEY_<ENDPOINT>` in the environment.
 
 **REST routes:**

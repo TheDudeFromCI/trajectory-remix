@@ -46,7 +46,6 @@ The OpenAI origin returned no response or usage. No repeated API attempts were
 made, and the temporary credential was deleted rather than stored in the project,
 repository or report. Real provider/content quality therefore remains unvalidated.
 
-Provider HTTP regressions cover strict schema requests and JSON-object mode for
-contracts outside the common strict subset; the complete local schema remains
-authoritative. JSON mode changes only serialization, never endpoint/model routing.
+Provider HTTP regressions cover plain-text Draft requests (no `response_format`) and
+native tool calls for every other stage.
 No fake-provider verdict is presented as live-model evidence.

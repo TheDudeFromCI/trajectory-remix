@@ -1,4 +1,4 @@
-version: draft-assembly/7
+version: draft-assembly/8
 review_version: native-review/3
 # The agent prompt opens the system prompt of every endpoint: Draft, Assembly, Fast and
 # Critical Review, and Assistant. It explains trajectories and the agent; a persona pack
@@ -181,7 +181,8 @@ draft_instruction: |-
   working notes. Assembly will build the graph from your notes and assign event and
   window IDs.
 
-  **Deliverable:** one JSON object with a "draft" string of at least 200 characters.
+  **Deliverable:** reply with the working notes only, as plain text of at least 200
+  characters. No JSON wrapper and no preamble.
 
   ## Plan from the proposal
   - Identify the user's request, the starting evidence, the required decisions, and
