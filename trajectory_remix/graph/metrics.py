@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 
-from . import size_query
+from . import size_query, task_axes
 from .bulk import BulkService
 from .derived_labels import DerivedLabelCounts
 from .sampling import CALCULATORS, original
@@ -108,7 +108,8 @@ class MetricService:
             type(value) not in (int, float) or not -float("inf") < value < float("inf")
         ):
             raise ValueError("Expected finite numeric value")
-        source = record.source.to_dict()
+        before = record.source.to_dict()
+        source = deepcopy(before)
         source.setdefault("metadata", {}).setdefault("metrics", {})[key] = dict(
             value=value,
             origin=origin,
@@ -118,8 +119,20 @@ class MetricService:
             profile_fingerprint=profile_fingerprint,
             compiler_version=compiler_version,
         )
-        self.store.replace(ident, source, expected_revision)
-        return self.view(self.store.read(ident), defs)
+        return self._commit(ident, before, source, expected_revision, defs)
+
+    def _commit(self, ident, before, source, expected_revision, defs):
+        """Store an edited source; the view carries an Undo delta like a trajectory save."""
+        record = self.store.replace(ident, source, expected_revision)
+        view = self.view(record, defs)
+        view["delta"] = dict(
+            id=ident,
+            before=before,
+            after=record.source.to_dict(),
+            expected_revision=record.revision,
+            expected_commit=record.commit_id,
+        )
+        return view
 
     def clear(self, ident, expected_revision, key):
         """Forget a recorded observation so the metric reads as unavailable again."""
@@ -127,12 +140,13 @@ class MetricService:
         defs = self.sampler.editor()["configuration"]["definitions"]
         if key not in defs:
             raise ValueError("Unknown metric definition")
-        source = record.source.to_dict()
+        before = record.source.to_dict()
+        source = deepcopy(before)
         saved = source.get("metadata", {}).get("metrics", {})
-        if key in saved:
-            del saved[key]
-            self.store.replace(ident, source, expected_revision)
-        return self.view(self.store.read(ident), defs)
+        if key not in saved:
+            return self.view(record, defs)
+        del saved[key]
+        return self._commit(ident, before, source, expected_revision, defs)
 
     def population(self, query=None, population="all"):
         if population not in ("all", "accepted"):
@@ -188,6 +202,7 @@ class MetricService:
             # reach the report as status "proposed" and are filtered out there, even when the
             # surrounding totals (population="all") include them.
             report = original.metrics_report(records(), c["matrix"], population="accepted")
+            task_axes.add_length_comparison(report, c["matrix"])
         return dict(
             total=total,
             proposal_coverage=report,

@@ -27,9 +27,10 @@ const api = async (path, method = 'GET', body) => {
 const els = {list: document.createElement('div'), note: document.createElement('span'), unset: document.createElement('input')};
 els.unset.type = 'checkbox'; document.body.append(...Object.values(els));
 let saved = 0;
-const editor = new MetricsEditor({api, report: e => { throw e; }, els, onSaved: () => { saved += 1; }});
+let flushed = 0;
+const editor = new MetricsEditor({api, report: e => { throw e; }, els, beforeSave: async () => { flushed += 1; }, onSaved: view => { saved += 1; assert.ok(view); }});
 
-editor.sync({id: 't1', revision: 1, locked: false, dirty: false}); await settle();
+editor.sync({id: 't1', revision: 1, locked: false}); await settle();
 const text = els.list.textContent;
 for (const heading of ['Categories', 'Labels', 'Outcomes and notes', 'Measured']) assert.match(text, new RegExp(heading));
 assert.equal(els.list.querySelectorAll('select').length, 1);
@@ -42,23 +43,22 @@ assert.match(text, /Confirm/, 'stale values can be confirmed');
 const select = els.list.querySelector('select'); select.value = 'closed'; select.dispatchEvent(new Event('change'));
 await editor.busy;
 assert.deepEqual(calls.at(-1), ['PUT', '/metrics/trajectories/t1/lifecycle', {expected_revision: 1, value: 'closed', origin: 'manual_annotation'}]);
-assert.equal(saved, 1);
+assert.equal(saved, 1); assert.equal(flushed, 1, 'pending trajectory edits save first');
 
 // Clearing uses DELETE on the latest revision.
+editor.sync({id: 't1', revision: 2, locked: false});
 const clear = [...els.list.querySelectorAll('button')].find(b => b.textContent === 'Clear');
 clear.click(); await editor.busy;
 assert.equal(calls.at(-1)[0], 'DELETE'); assert.deepEqual(calls.at(-1)[2], {expected_revision: 2});
 
-// A dirty draft or a lock disables every control and explains why.
-editor.sync({id: 't1', revision: 3, locked: false, dirty: true});
+// A lock disables every control and explains why.
+editor.sync({id: 't1', revision: 3, locked: true});
 assert.ok([...els.list.querySelectorAll('[data-metric-input]')].every(i => i.disabled));
-assert.match(els.note.textContent, /Save or discard the draft/);
-editor.sync({id: 't1', revision: 3, locked: true, dirty: false});
 assert.match(els.note.textContent, /job holds/);
 
 // "Only show unset" hides set values.
-editor.sync({id: 't1', revision: 3, locked: false, dirty: false}); await settle();
+editor.sync({id: 't1', revision: 3, locked: false}); await settle();
 els.unset.checked = true; els.unset.dispatchEvent(new Event('change'));
 assert.doesNotMatch(els.list.textContent, /authored windows/); assert.match(els.list.textContent, /lifecycle/);
-console.log('Metrics editor: grouping, parsing, read-only measured values, saves, clears and locking passed.');
+console.log('Metrics editor: grouping, parsing, read-only measured values, saves, clears and locking, flush-first and Undo deltas passed.');
 window.happyDOM.abort();

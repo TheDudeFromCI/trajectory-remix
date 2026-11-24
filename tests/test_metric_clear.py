@@ -41,15 +41,27 @@ def test_set_then_clear_manual_metric(client):
     assert put.status_code == 200, put.text
     assert put.json()["values"]["lifecycle"]["status"] == "available"
     assert put.json()["revision"] == 2
+    delta = put.json()["delta"]
+    assert delta["before"]["metadata"].get("metrics", {}) == {}
+    assert delta["after"]["metadata"]["metrics"]["lifecycle"]["value"] == value
+    assert delta["expected_revision"] == 2
+
+    undo = c.post("/api/v1/bulk/history", json={"deltas": [delta], "undo": True})
+    assert undo.status_code == 200, undo.text
+    view = c.get(f"/api/v1/metrics/trajectories/{ident}").json()
+    assert view["values"]["lifecycle"]["status"] == "unavailable" and view["revision"] == 3
+    redo = c.post("/api/v1/bulk/history", json={"deltas": undo.json()["deltas"], "undo": False})
+    assert redo.status_code == 200, redo.text
+    assert c.get(f"/api/v1/metrics/trajectories/{ident}").json()["revision"] == 4
 
     stale = c.request("DELETE", path, json={"expected_revision": 1})
     assert stale.status_code == 409
 
-    cleared = c.request("DELETE", path, json={"expected_revision": 2})
+    cleared = c.request("DELETE", path, json={"expected_revision": 4})
     assert cleared.status_code == 200, cleared.text
     body = cleared.json()
     assert body["values"]["lifecycle"]["status"] == "unavailable"
-    assert body["revision"] == 3
+    assert body["revision"] == 5 and body["delta"]["after"]["metadata"]["metrics"] == {}
     saved = app.state.metrics.store.read(ident).source.metadata
     assert "lifecycle" not in saved.get("metrics", {})
 

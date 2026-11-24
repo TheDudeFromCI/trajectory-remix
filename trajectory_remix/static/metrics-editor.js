@@ -1,7 +1,7 @@
 /* Metrics tab in the Editor: view and set the selected trajectory's metric values.
-   Values save straight to the stored trajectory (with source and definition
-   provenance), so the panel needs a clean, unlocked trajectory. Measured metrics
-   (calculated from the source or from an export) are shown read-only. */
+   Values save straight to the stored trajectory (with source and definition provenance),
+   after any pending trajectory edits have saved, and each change is one Undo step.
+   Measured metrics (calculated from the source or from an export) are shown read-only. */
 import {node, setAttr, setText, tag} from './ui-kit.js';
 
 const GROUPS = [
@@ -26,15 +26,17 @@ export function parseNote(text) {
 export const showNote = value => value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
 
 export class MetricsEditor {
-  /** els: {list, note, unset}; onSaved() runs after each stored change so the editor can refresh. */
-  constructor({api, report, els, onSaved = async () => {}}) {
-    Object.assign(this, {api, report, els, onSaved});
+  /** els: {list, note, unset}; beforeSave() saves pending trajectory edits first;
+     onSaved(view) runs after each stored change with its Undo delta in view.delta;
+     onView(view, state) runs whenever the shown values change. */
+  constructor({api, report, els, beforeSave = async () => {}, onSaved = async () => {}, onView = () => {}}) {
+    Object.assign(this, {api, report, els, beforeSave, onSaved, onView});
     this.view = null; this.key = ''; this.busy = Promise.resolve(); this.state = {id: null};
     els.unset.addEventListener('change', () => this.render());
   }
   /** Follow the selected trajectory; reloads only when its id or revision changed. */
-  sync({id, revision, locked, dirty}) {
-    this.state = {id, revision, locked, dirty};
+  sync({id, revision, locked}) {
+    this.state = {id, revision, locked};
     const key = id ? `${id}@${revision}` : '';
     if (key !== this.key) { this.key = key; this.load().catch(this.report); }
     this.renderState();
@@ -46,16 +48,17 @@ export class MetricsEditor {
     if (id !== this.state.id) return;
     this.view = view; this.render();
   }
-  get editable() { return !!this.view && !this.state.locked && !this.state.dirty; }
+  get editable() { return !!this.view && !this.state.locked; }
   renderState() {
-    const {locked, dirty} = this.state, note = this.els.note;
+    this.onView(this.view, this.state);
+    const {locked} = this.state, note = this.els.note;
     const text = !this.state.id ? '' : locked ? 'A job holds this trajectory. Metrics unlock when it settles.'
-      : dirty ? 'Save or discard the draft first: metric values are saved to the stored trajectory.'
-        : 'Changes save at once and are recorded against the current saved source.';
-    setText(note, text); note.className = 'small ' + (locked || dirty ? 'tone-warning metrics-note' : 'muted metrics-note');
+      : 'Changes save at once. Undo reverts them like any other edit.';
+    setText(note, text); note.className = 'small ' + (locked ? 'tone-warning metrics-note' : 'muted metrics-note');
     for (const input of this.els.list.querySelectorAll('[data-metric-input]')) input.disabled = !this.editable;
   }
   render() {
+    this.onView(this.view, this.state);
     const list = this.els.list;
     if (!this.view) { list.replaceChildren(node('div', this.state.id ? 'Loading metrics…' : 'Select a trajectory to edit its metrics.', 'empty')); return; }
     const onlyUnset = this.els.unset.checked, sections = [];
@@ -134,7 +137,9 @@ export class MetricsEditor {
   async store(key, value) {
     const id = this.state.id;
     if (!this.editable || !id) return;
-    const path = `/metrics/trajectories/${id}/${encodeURIComponent(key)}`, expected_revision = this.view.revision;
+    await this.beforeSave();
+    if (id !== this.state.id) return;
+    const path = `/metrics/trajectories/${id}/${encodeURIComponent(key)}`, expected_revision = this.state.revision;
     const view = value === undefined ? await this.api(path, 'DELETE', {expected_revision})
       : await this.api(path, 'PUT', {expected_revision, value, origin: 'manual_annotation'});
     if (id !== this.state.id) return;
