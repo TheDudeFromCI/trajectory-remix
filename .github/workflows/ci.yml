@@ -97,6 +97,7 @@ jobs:
       - run: node tests/tool_picker_frontend.mjs
       - run: node tests/comments_view_frontend.mjs
       - run: node tests/comments_auto_send_frontend.mjs
+      - run: node tests/auto_save_frontend.mjs
       - run: node tests/assistant_indicator_frontend.mjs
       - run: node tests/assistant_queue_frontend.mjs
       - run: node tests/job_log_levels_frontend.mjs
