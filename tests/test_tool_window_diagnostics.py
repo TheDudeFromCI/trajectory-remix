@@ -17,12 +17,18 @@ def test_fragmented_call_response_and_empty_eos_share_one_tool_window():
         {
             "tools": event("tool_schema", "tools", LISTING),
             "start": event(
-                "tool_call", "work", "{", ["tools"], tool="read", call_id="r", insert_tool_end=False
+                "tool_call",
+                "work",
+                '{"path":',
+                ["tools"],
+                tool="read",
+                call_id="r",
+                insert_tool_end=False,
             ),
             "submit": event(
                 "tool_call",
                 "work",
-                "}",
+                '"notes.txt"}',
                 ["start"],
                 tool="read",
                 call_id="r",
@@ -95,7 +101,7 @@ def test_reasoning_in_a_response_only_window_is_flagged():
 
 def test_tools_window_opener_must_have_no_dependencies():
     events = {
-        "prepare": event("agent_text", "work", close_window=True),
+        "prepare": event("agent_text", "work", "Check the available tools.", close_window=True),
         "listing": event("tool_schema", "tools", LISTING, ["prepare"]),
         "refresh": event("tool_schema", "tools", LISTING, ["listing"]),
     }
