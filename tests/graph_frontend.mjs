@@ -65,8 +65,11 @@ $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('chang
 $('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":');
 // Return to the saved graph and distinguish missing split from intentional Auto.
 await ui.select(ui.id,true); $('split').value='Auto'; $('split').dispatchEvent(new Event('change'));
-assert.equal(ui.draft.metadata.split,'Auto'); assert.equal($('split-warning').textContent,'');
-$('split').value=''; $('split').dispatchEvent(new Event('change')); assert.ok($('split-warning').textContent.includes('Missing'));
+// Missing split is a studio warning in the Problems tab, gone as soon as a split (even Auto) is chosen.
+const studioCodes=()=>[...$('diagnostics').querySelectorAll('.diagnostic')].filter(n=>n.textContent.includes('Studio')).map(n=>n.querySelector('code').textContent);
+assert.equal(ui.draft.metadata.split,'Auto'); assert.deepEqual(studioCodes(),[]);
+$('split').value=''; $('split').dispatchEvent(new Event('change')); assert.deepEqual(studioCodes(),['missing_split']);
+assert.ok([...$('diagnostics').querySelectorAll('button')].some(b=>b.textContent==='Set split'));
 const intrinsic = ui.record.intrinsic_hash;
 $('split').value='Auto'; $('split').dispatchEvent(new Event('change')); await ui.autoSave.flush(); assert.equal(ui.record.intrinsic_hash,intrinsic);
 // Consecutive local history actions track revisions created by our own restores.

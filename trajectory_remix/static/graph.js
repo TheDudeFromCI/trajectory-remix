@@ -6,6 +6,7 @@ import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
 import {MetricsEditor} from './metrics-editor.js';
 import {renderComplexity} from './complexity-select.js';
+import {studioWarnings} from './studio-warnings.js';
 import {AssistantStatus, isAssistantOwner} from './assistant-indicator.js';
 import {AssistantQueue} from './assistant-queue.js';
 import {AutoSave} from './auto-save.js';
@@ -294,24 +295,24 @@ export class StudioUI {
     this.renderWindow();
     keepTyping('metadata-json', json(this.draft.metadata || {}));
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
-    const stale = this.record.review_status?.stale;
-    $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
-    setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
     const size = this.record.size; $('size-tag').textContent = size?.label || '';
     setAttr($('size-tag'), 'data-tip', size ? `Saved source: about ${size.total_tokens_estimate.toLocaleString()} tokens total, about ${size.agent_tokens_estimate.toLocaleString()} agent-generated.` : null);
-    $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
-    setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     keepTyping('source-json', json(this.draft));
     this.renderDiagnostics();
     this.applyLock();
     this.renderTimeline();
   }
   renderDiagnostics() {
-    const list = this.diagnostics || [], errors = list.filter(d => d.severity === 'error').length, warnings = list.length - errors;
+    const studio = studioWarnings({draft: this.draft, record: this.record, metrics: this.metricsView});
+    const list = [...(this.diagnostics || []), ...studio], errors = list.filter(d => d.severity === 'error').length, warnings = list.length - errors;
     $('diagnostics').replaceChildren(...list.map(d => {
       const n = node('div', undefined, 'diagnostic ' + d.severity), head = node('div', undefined, 'row');
-      head.append(tag(d.severity === 'error' ? 'Error' : 'Warning', d.severity === 'error' ? 'danger' : 'warning'), node('code', d.code, 'small grow truncate'));
+      const origin = tag(d.source === 'studio' ? 'Studio' : 'Compiler', 'muted', 'diagnostic-source');
+      setAttr(origin, 'data-tip', d.source === 'studio' ? 'Editor check: never blocks export and is not shown to agents' : 'Structural check from the compiler');
+      head.append(tag(d.severity === 'error' ? 'Error' : 'Warning', d.severity === 'error' ? 'danger' : 'warning'), origin, node('code', d.code, 'small grow truncate'));
       if (d.event_id) head.append(button('Inspect event', () => { this.selectEvent(d.event_id); $('tab-content')?.click(); }, 'sm ghost'));
+      if (d.action === 'split') head.append(button('Set split', () => { $('tab-metrics').click(); $('split').focus(); }, 'sm ghost'));
+      if (d.action === 'metrics') head.append(button('Show metrics', () => $('tab-metrics').click(), 'sm ghost'));
       n.append(head, node('p', d.message)); return n;
     }));
     if (!list.length) $('diagnostics').append(node('div', 'No problems. Errors block compiled export; warnings do not.', 'empty'));
@@ -903,7 +904,10 @@ export class StudioUI {
       }});
     this.metricsEditor = new MetricsEditor({api, report: message, beforeSave: () => this.autoSave.flush(),
       onSaved: view => { if (view.delta) this.history([view.delta]); return this.refreshSelected(); },
-      onView: (view, state) => renderComplexity($('complexity'), view, state.locked),
+      onView: (view, state) => {
+        renderComplexity($('complexity'), view, state.locked);
+        if (view !== this.metricsView) { this.metricsView = view; this.renderDiagnostics(); }
+      },
       shownElsewhere: ['complexity'],
       els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset')}});
     on('complexity', 'change', () => this.metricsEditor.save('complexity', $('complexity').value || undefined));

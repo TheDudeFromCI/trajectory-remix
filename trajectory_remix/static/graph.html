@@ -152,7 +152,6 @@
       <div class="bar-row">
         <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
         <span id="dirty-indicator" class="tag"></span>
-        <small id="review-stale" class="tag tone-warning"></small>
         <button id="diagnostics-summary" class="sm ghost" hidden></button>
         <span class="grow"></span>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
@@ -182,7 +181,7 @@
         <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false">Windows</button>
         <button role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON</button>
         <button role="tab" id="tab-metrics" aria-controls="panel-metrics" aria-selected="false" data-tip="Set this trajectory's metric categories, labels and outcomes">Metrics</button>
-        <button role="tab" id="tab-problems" class="issue-tab" aria-controls="panel-problems" aria-selected="false" aria-label="Problems" data-tip="Problems: structural errors and warnings"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span id="problems-count" class="badge"></span></button>
+        <button role="tab" id="tab-problems" class="issue-tab" aria-controls="panel-problems" aria-selected="false" aria-label="Problems" data-tip="Problems: compiler errors and warnings, plus studio warnings such as a missing split"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span id="problems-count" class="badge"></span></button>
         <button role="tab" id="tab-comments" class="issue-tab" aria-controls="panel-comments" aria-selected="false" aria-label="Comments" data-tip="Comments on this trajectory, its events and windows, for whoever fixes it next"><svg class="ico" aria-hidden="true"><use href="#i-comment"/></svg><span id="comments-count" class="badge accent"></span></button>
       </div>
 
@@ -256,7 +255,7 @@
             <label>Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
             <label>Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
             <label>Complexity <select id="complexity"><option value="">Not set</option></select></label>
-            <div class="field-tags"><span class="small muted">Size</span> <small id="size-tag" class="tag tone-muted"></small> <small id="split-warning" class="tag tone-warning"></small></div>
+            <div class="field-tags"><span class="small muted">Size</span> <small id="size-tag" class="tag tone-muted"></small></div>
           </div>
         </section>
         <div class="metrics-editor-head">

@@ -155,6 +155,7 @@ body.resizing * { cursor: inherit !important; }
 .diagnostic { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: var(--radius-sm); background: var(--surface-200); }
 .diagnostic.error { border-left-color: var(--danger); }
 .diagnostic p { color: var(--ink-muted); font-size: 13px; }
+.diagnostic .diagnostic-source { font-size: 11px; }
 
 /* ---------- Jobs ---------- */
 .jobs-view { --jobs-w: 320px; display: grid; grid-template-columns: minmax(200px, var(--jobs-w)) var(--split) minmax(0, 1fr); }

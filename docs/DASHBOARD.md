@@ -28,7 +28,7 @@ tooltips rather than in extra text on screen.
 | **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, comment state or size (type `@size:m` or `@size:<=xs` in the search box; see [Metrics](METRICS.md#character-counts-and-trajectory-sizes)). Each row shows a short ID, its stage and split, a speech bubble with the number of unresolved comments (amber when some await your review), and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state, problem count and any *Review stale* tag. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
+| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state and problem count. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -144,6 +144,17 @@ Broken drafts always save. Problems show up as you edit:
 - Each problem has a code, a message and, where it applies, **Inspect event** to jump to
   the event.
 - Errors block compiled export; warnings don't.
+
+Problems come from two places, labelled on each row:
+
+| Label | What it checks | Examples |
+| --- | --- | --- |
+| **Compiler** | The trajectory's structure, on the server | Missing dependencies, windows left open |
+| **Studio** | Editor housekeeping, worked out in your browser | `missing_split` (**Set split**), `review_stale` or `signoff_stale`, `stale_metrics` (**Show metrics**) |
+
+Studio warnings update as you edit, never block export, and aren't shown to the review or
+assembly agents. Choosing **Auto** as the split clears `missing_split` without a warning
+at export.
 
 ![A missing dependency on the Problems tab](images/dashboard/problems.png)
 
@@ -387,7 +398,7 @@ events arrive, and unlocks when the work ends.
 | **Ready (3)** | Approved by you. This is what export includes by default. |
 
 Changing a source or checklist can make an old review **stale**. Stale reviews keep
-their stage and show a *Review stale* tag in the trajectory bar. Nothing is re-reviewed
+their stage and show a `review_stale` warning on the Problems tab. Nothing is re-reviewed
 unless you ask. See [Event generation](GRAPH-GENERATION.md#reviews-and-repair).
 
 ## Good to know

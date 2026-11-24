@@ -24,7 +24,7 @@ Categories, labels and outcomes can't be calculated, so you set them by hand in 
 1. Select a trajectory.
 2. Open the **Metrics** tab in the event panel (after **JSON**).
 3. At the top, under **Trajectory**, set **Stage**, **Split** and **Complexity**, and read the trajectory's
-   **Size** (with a *Missing split* warning when no split is chosen).
+   **Size**. A missing split or stale values show up as warnings on the **Problems** tab.
 4. Below that, pick a value, tick labels or type an outcome. Each change saves at once.
 
 | Group | What it holds | How you set it |
@@ -43,7 +43,8 @@ holds the trajectory.
 list. When it's unset, the picker shows the sampler's target as a hint.
 
 A value you set is recorded against the trajectory's current content. If the content changes afterwards,
-the value is marked **Stale** until you **Confirm** it again.
+the value is marked **Stale** until you **Confirm** it again, and the **Problems** tab lists it under
+`stale_metrics`.
 
 ## Calculate what's missing
 
