@@ -2,6 +2,8 @@
 // seeds MT19937 with the UTF-8 seed followed by its SHA-512 digest.
 use sha2::{Digest, Sha512};
 
+/// Mersenne Twister seeded the way Python's `random.Random(str)` is, so physical
+/// slot choices match the original Python compiler exactly.
 pub(crate) struct Slots {
     state: [u32; 624],
     index: usize,
@@ -70,6 +72,8 @@ impl Slots {
         word ^ (word >> 18)
     }
 
+    /// Returns a uniform index below `len` using rejection sampling (like
+    /// `Random._randbelow`).
     pub fn choose(&mut self, len: u32) -> usize {
         let shift = len.leading_zeros();
         loop {

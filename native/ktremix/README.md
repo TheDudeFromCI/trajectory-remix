@@ -1,8 +1,31 @@
 # KTREMIX Rust crate
 
 `ktremix` compiles Trajectory Remix graph JSON and raw corpus text into KTREMIX
-1.0 training shards. Rust consumers can depend on this crate by path or Git
-revision.
+1.0 training shards, and reads them back for training. For how this crate fits with
+the Python package and the studio, see [Native compiler](../../docs/NATIVE-COMPILER.md).
+
+## Use it
+
+Depend on the crate by path or Git revision:
+
+```toml
+[dependencies]
+ktremix = { git = "https://github.com/TheDudeFromCI/trajectory-remix", package = "ktremix" }
+```
+
+```rust
+use ktremix::{Compiler, Options, TokenizerProfile};
+
+let profile: TokenizerProfile = serde_json::from_str(&std::fs::read_to_string("profile.json")?)?;
+let compiler = Compiler::new(profile, None, Options::default())?;
+let source = std::fs::read_to_string("trajectory.json")?;
+let compilation = compiler.compile(&source)?;
+println!("{} rows", compilation.columns.token_ids.len());
+```
+
+Browse the full API with `cargo doc --no-deps --open -p ktremix`.
+
+## What is in the crate
 
 - `Compiler` compiles graph sources and runs diagnostics with or without a
   tokenizer profile. Use `shard::CompileWriter` to write batches to disk.

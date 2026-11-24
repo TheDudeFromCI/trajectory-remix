@@ -296,6 +296,8 @@ class ArtifactService:
                             },
                         )
 
+                        # Compile on native threads, capped so large machines do not
+                        # oversubscribe while the studio keeps serving requests.
                         workers = min(len(chunk), os.cpu_count() or 1, 8)
                         compiler.write_shard(
                             path,

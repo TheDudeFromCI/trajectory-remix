@@ -1,4 +1,11 @@
-"""Compatibility adapter from studio DTOs to the standalone KTREMIX compiler."""
+"""Compatibility adapter from studio DTOs to the standalone KTREMIX compiler.
+
+The compiler itself lives in the native ``ktremix`` Rust crate (see
+``native/ktremix``). This module keeps the studio's historical ``GraphCompiler``
+API: it accepts :class:`GraphSource` and :class:`TokenizerProfile` models,
+forwards the work to ``ktremix_native``, and turns native ``ValueError`` failures
+into :class:`CompileError`.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +21,17 @@ __all__ = ["CONTRACT", "VERSION", "Cancelled", "CompileError", "GraphCompiler"]
 
 
 class CompileError(ValueError):
-    pass
+    """The graph, profile or options could not be compiled."""
 
 
 @dataclass(frozen=True)
 class Token:
+    """One token of a preview frame: a literal ID, a control, or a window reference.
+
+    ``header`` marks tokens of the window header. ``reference`` is the referenced
+    window name and slot digit; its ``id`` is ``None`` until slots are assigned.
+    """
+
     id: int | None
     control: str | None = None
     header: bool = False
@@ -27,6 +40,12 @@ class Token:
 
 @dataclass(frozen=True)
 class Emission:
+    """Tokens one event writes into one window during a frame.
+
+    ``model`` is true for tokens the model must predict and false for inputs.
+    ``replace`` rewrites the window body; ``opening`` marks the window's first write.
+    """
+
     event: str | None
     window: str
     tokens: tuple[Token, ...]
@@ -38,12 +57,16 @@ class Emission:
 
 @dataclass(frozen=True)
 class Frame:
+    """One scheduler step: external ``inputs`` arrive, then the model emits ``outputs``."""
+
     tick: int
     inputs: tuple[Emission, ...]
     outputs: tuple[Emission, ...]
 
 
 def _frames(values):
+    """Rebuild typed frames from the plain dictionaries the native preview returns."""
+
     def emission(value):
         tokens = tuple(
             Token(
@@ -60,12 +83,22 @@ def _frames(values):
 
 
 def _source(source):
+    """Normalize a :class:`GraphSource` or raw mapping into a validated ``GraphSource``."""
     return GraphSource.model_validate(
         source.to_dict() if isinstance(source, GraphSource) else source
     )
 
 
 class GraphCompiler:
+    """Compiles studio graphs for one tokenizer profile.
+
+    ``active_limit`` caps simultaneously active windows, ``seed`` fixes physical
+    slot assignment (same source and seed give identical arrays), ``max_rows``
+    bounds a single trajectory, and ``settings`` supplies project tool and
+    reasoning-level contracts for validation. Raises :class:`CompileError` if the
+    native compiler rejects the profile or options.
+    """
+
     def __init__(
         self,
         profile: TokenizerProfile,
@@ -97,21 +130,31 @@ class GraphCompiler:
 
     @cached_property
     def tokenizer(self):
+        """The profile's tokenizer as a ``tokenizers.Tokenizer``, built on first use."""
         return Tokenizer.from_str(self._tokenizer_json)
 
     def tokenizer_json(self):
+        """The tokenizer as Hugging Face JSON text."""
         return self._tokenizer_json
 
     def text(self, value):
+        """Tokenize ``value`` as literal text (no control tokens)."""
         try:
             return [Token(ident) for ident in self._native.literal_ids(value)]
         except ValueError as error:
             raise CompileError(str(error)) from error
 
     def frames(self, source, *, cancelled=None):
+        """Yield every scheduled frame of ``source`` (up to ``max_rows``)."""
         yield from self.preview(source, max_frames=self.max_rows, cancelled=cancelled)["frames"]
 
     def compile(self, source, *, cancelled=None):
+        """Compile one graph.
+
+        Returns ``(columns, provenance)``: the row, frame and window arrays plus a
+        dictionary describing how they were made (compiler version, source and
+        profile hashes, seed, peak active windows, logical window names).
+        """
         source = _source(source)
         try:
             result = self._native.compile(source.to_dict(), cancelled=cancelled)
@@ -130,6 +173,12 @@ class GraphCompiler:
         }
 
     def preview(self, source, *, max_frames=1000, cancelled=None):
+        """Schedule ``source`` and return up to ``max_frames`` frames for display.
+
+        The result includes a ``cache_key`` that changes whenever the compiler
+        version, source, profile, seed or window limit changes, and ``truncated``
+        when more frames existed.
+        """
         if type(max_frames) is not int or max_frames < 1:
             raise ValueError("max_frames must be positive")
         source = _source(source)
@@ -155,6 +204,11 @@ class GraphCompiler:
         }
 
     def write_shard(self, path, sources, *, sample_count, manifest, cancelled=None, workers=1):
+        """Compile ``sources`` into one shard at ``path`` and return the path.
+
+        ``sample_count`` must match the number of sources; ``manifest`` is merged
+        into the shard manifest. Nothing is published if any source fails.
+        """
         try:
             return self._native.write_trajectories(
                 path,

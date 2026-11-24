@@ -12,7 +12,9 @@ use std::sync::OnceLock;
 use tokenizers::Tokenizer;
 use uuid::Uuid;
 
+/// Identifier of this compiler's lowering rules, recorded in every shard manifest.
 pub const VERSION: &str = "kidra.graph-compiler/1";
+/// Execution contract that readers of the compiled arrays are expected to follow.
 pub const CONTRACT: &str = "kidra.progressive-sleep/1";
 const CONTROL_NAMES: [&str; 12] = [
     "bos",
@@ -29,19 +31,32 @@ const CONTROL_NAMES: [&str; 12] = [
     "window_ref",
 ];
 
+/// A tokenizer plus the IDs of the control tokens the compiler inserts.
+///
+/// Profiles are exported by Trajectory Remix. `special_tokens` must name every
+/// control the compiler uses: `bos`, `eos`, `noop`, `ctx_begin`, `ctx_end`,
+/// `tool_begin`, `tool_end`, `response_begin`, `response_end`, `msg_begin`,
+/// `msg_end` and `window_ref`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TokenizerProfile {
+    /// Human-readable profile name. Must not be empty.
     pub name: String,
+    /// Hugging Face `tokenizer.json` content.
     pub definition: Value,
+    /// Control name to token ID.
     pub special_tokens: BTreeMap<String, u32>,
 }
 
+/// Compilation settings. [`Options::default`] is suitable for most graphs.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Options {
+    /// Most windows that may be active at once, not counting the spare "available" window.
     pub active_limit: u32,
+    /// Integer seed for physical window slot assignment. The same source and seed always compile to the same arrays.
     pub seed: serde_json::Number,
+    /// Upper bound on rows per compilation. Larger graphs fail instead of exhausting memory.
     pub max_rows: usize,
 }
 
@@ -55,21 +70,30 @@ impl Default for Options {
     }
 }
 
+/// Size figures for a successfully scheduled graph.
 #[derive(Debug, Serialize)]
 pub struct Metrics {
+    /// Total rows, including control tokens.
     pub total_tokens: usize,
+    /// Rows with positive loss weight.
     pub target_tokens: usize,
+    /// Peak number of simultaneously active windows, excluding the available window.
     pub peak_active_windows: usize,
+    /// Peak number of rows visible at any single prediction frontier.
     pub peak_visible_tokens: usize,
 }
 
+/// Outcome of a dry run: diagnostics plus, when scheduling succeeded, [`Metrics`].
 #[derive(Debug, Default, Serialize)]
 pub struct Report {
+    /// Errors and warnings. Any error prevents compilation.
     pub diagnostics: Vec<Diagnostic>,
+    /// Present only when the graph scheduled without errors and a tokenizer was used.
     pub metrics: Option<Metrics>,
 }
 
 impl Report {
+    /// Returns `true` if any diagnostic is an error (warnings do not count).
     pub fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()
@@ -77,17 +101,28 @@ impl Report {
     }
 }
 
+/// The result of compiling one graph.
 #[derive(Debug, Serialize)]
 pub struct Compilation {
+    /// The source graph's UUID. It becomes the sample ID in a shard.
     pub id: Uuid,
+    /// SHA-256 of the graph's canonical, compile-relevant content.
     pub source_hash: String,
+    /// Source window name for each physical window instance, in the same order as the `window_*` columns. `None` for unnamed instances such as the spare available window.
     pub logical_windows: Vec<Option<String>>,
+    /// The compiled row, frame and window arrays.
     pub columns: Columns,
+    /// Diagnostics and metrics produced while compiling.
     pub report: Report,
+    /// The graph's free-form `metadata` object, carried into shard sample metadata.
     #[serde(skip)]
     pub source_metadata: Option<Value>,
 }
 
+/// Compiles graphs for one tokenizer profile and set of [`Options`].
+///
+/// A `Compiler` is immutable after construction and can be shared between
+/// threads. Build it once and reuse it for many graphs.
 pub struct Compiler {
     encoder: Tokenizer,
     pub(crate) literal: Tokenizer,
@@ -96,11 +131,19 @@ pub struct Compiler {
     alphabet: OnceLock<[u32; 16]>,
     settings: Option<Settings>,
     pub(crate) options: Options,
+    /// SHA-256 of the tokenizer profile, recorded in manifests.
     pub profile_sha256: String,
+    /// SHA-256 of the tokenizer definition, recorded in manifests.
     pub tokenizer_sha256: String,
 }
 
 impl Compiler {
+    /// Builds a compiler from a tokenizer profile.
+    ///
+    /// `settings` is an optional JSON snapshot of project settings, used to check
+    /// tool contracts and reasoning levels. Fails if the options are out of range
+    /// (`active_limit`, `max_rows`, `seed`), the profile name is empty, or any control
+    /// token is missing from `special_tokens`.
     pub fn new(
         profile: TokenizerProfile,
         settings: Option<&str>,
@@ -179,6 +222,9 @@ impl Compiler {
         })
     }
 
+    /// Returns the shard manifest fields that describe this compiler: format
+    /// version, contract, seed, window limit and tokenizer hashes. Pass it to
+    /// [`shard::ShardWriter::new`](crate::shard::ShardWriter::new).
     pub fn manifest(&self) -> Value {
         json!({
             "format": "ktremix",
@@ -196,6 +242,7 @@ impl Compiler {
         })
     }
 
+    /// Tokenizes `text` as plain literal text, without adding any control tokens.
     pub fn literal_ids(&self, text: &str) -> Result<Vec<u32>> {
         Ok(self
             .text(text)?
@@ -204,6 +251,7 @@ impl Compiler {
             .collect())
     }
 
+    /// Serializes the tokenizer definition back to Hugging Face JSON.
     pub fn tokenizer_json(&self) -> Result<String> {
         self.encoder
             .to_string(false)
@@ -245,10 +293,16 @@ impl Compiler {
         }
     }
 
+    /// Compiles one graph JSON document.
+    ///
+    /// Fails with [`Error::Invalid`] if the report contains errors, with the first
+    /// error messages as the reason.
     pub fn compile(&self, source: &str) -> Result<Compilation> {
         self.compile_cancellable(source, || false)
     }
 
+    /// Like [`Compiler::compile`], but polls `cancelled` while scheduling and returns
+    /// [`Error::Cancelled`] once it returns `true`.
     pub fn compile_cancellable(
         &self,
         input: &str,
@@ -362,6 +416,9 @@ impl Compiler {
         }
     }
 
+    /// Schedules a graph and returns up to `max_frames` frames of tokens for display,
+    /// plus whether the preview was truncated. Used by the studio to show what the
+    /// model will see; it does not build arrays.
     pub fn preview(
         &self,
         input: &str,

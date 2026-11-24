@@ -77,6 +77,7 @@ regression, then run relevant shared suites. A typical bounded check is:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p ktremix
 python -m pytest -q tests/test_graph*.py tests/test_ktremix*.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py

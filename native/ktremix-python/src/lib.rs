@@ -1,3 +1,9 @@
+//! PyO3 bindings that expose the `ktremix` crate to Python as `ktremix_native._native`.
+//!
+//! The classes here are thin wrappers. Structured values cross the boundary as
+//! JSON strings, which the pure-Python layer in `python/ktremix_native` decodes,
+//! and long-running native work releases the GIL.
+
 use ktremix::corpus::{CorpusOptions, Document, Documents, Input};
 use ktremix::dataset::{Dataset, SamplingOptions};
 use ktremix::shard::{CompileWriter, Sample};
@@ -12,8 +18,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+// Raised when a caller-supplied cancellation callback stops native work.
 pyo3::create_exception!(_native, Cancelled, PyRuntimeError);
 
+/// Maps a crate error onto the closest Python exception: cancellation,
+/// `FileExistsError`, `OSError`, or `ValueError` for invalid input.
 fn error(exc: Error) -> PyErr {
     match exc {
         Error::Cancelled => Cancelled::new_err(exc.to_string()),
@@ -28,14 +37,21 @@ fn error(exc: Error) -> PyErr {
     }
 }
 
+/// Deserializes a JSON string argument, reporting failures as `ValueError`.
 fn parse<T: serde::de::DeserializeOwned>(input: &str) -> PyResult<T> {
     serde_json::from_str(input).map_err(|exc| PyValueError::new_err(exc.to_string()))
 }
 
+/// Serializes a result to a JSON string for the Python layer to decode.
 fn output<T: serde::Serialize>(value: T) -> PyResult<String> {
     serde_json::to_string(&value).map_err(|exc| PyValueError::new_err(exc.to_string()))
 }
 
+/// Bridges a Python cancellation callback into the native scheduler.
+///
+/// The callback is only consulted every 64th check so native code rarely needs
+/// the GIL. An exception raised by the callback cancels the work and is
+/// re-raised to the caller by [`Poll::finish`].
 struct Poll {
     function: Option<Py<PyAny>>,
     exception: Mutex<Option<PyErr>>,
@@ -53,6 +69,7 @@ impl Poll {
         }
     }
 
+    /// Returns `true` once the work should stop.
     fn check(&self) -> bool {
         let Some(function) = &self.function else {
             return false;
@@ -89,6 +106,7 @@ impl Poll {
         })
     }
 
+    /// Returns the callback's exception if it raised one, otherwise the mapped result.
     fn finish<T>(self, result: ktremix::Result<T>) -> PyResult<T> {
         match self.exception.into_inner().unwrap() {
             Some(exc) => Err(exc),
@@ -98,6 +116,7 @@ impl Poll {
 }
 
 #[pyclass(name = "Compiler", module = "ktremix_native._native")]
+/// Python `Compiler`: compile, dry-run and convert corpora for one tokenizer profile.
 struct CompilerBinding(Compiler);
 
 #[pymethods]
@@ -136,10 +155,12 @@ impl CompilerBinding {
         poll.finish(result)
     }
 
+    /// Tokenizer-free dry run of one graph, returned as a JSON report.
     fn report_json(&self, py: Python<'_>, source: &str) -> PyResult<String> {
         output(py.detach(|| self.0.report(source)))
     }
 
+    /// Tokenizer-free dry run of a bounded batch of graphs, returned as JSON.
     fn reports_json(
         &self,
         py: Python<'_>,
@@ -260,6 +281,7 @@ impl CompilerBinding {
 
 #[pyfunction]
 #[pyo3(signature = (source, settings=None))]
+/// Tokenizer-free dry run of one graph, returned as a JSON report.
 fn report_json(py: Python<'_>, source: &str, settings: Option<&str>) -> PyResult<String> {
     py.detach(|| {
         Compiler::structural_report(source, settings)
@@ -270,6 +292,7 @@ fn report_json(py: Python<'_>, source: &str, settings: Option<&str>) -> PyResult
 
 #[pyfunction]
 #[pyo3(signature = (sources, workers, settings=None))]
+/// Tokenizer-free dry run of a bounded batch of graphs, returned as JSON.
 fn reports_json(
     py: Python<'_>,
     sources: Vec<String>,
@@ -283,6 +306,8 @@ fn reports_json(
 }
 
 #[pyclass(name = "ShardWriter", module = "ktremix_native._native")]
+/// Python `ShardWriter`: appends compilations to one shard. The inner writer is
+/// `None` after `finish`, which makes later calls raise `RuntimeError`.
 struct WriterBinding(Option<CompileWriter>);
 
 #[pymethods]
@@ -350,6 +375,7 @@ impl WriterBinding {
 }
 
 #[pyclass(name = "Dataset", module = "ktremix_native._native")]
+/// Python `Dataset`: batched, optionally non-repeating sampling over shards.
 struct DatasetBinding(Dataset);
 
 #[pymethods]
@@ -381,6 +407,8 @@ impl DatasetBinding {
 }
 
 #[pyclass(name = "Sample", module = "ktremix_native._native", frozen)]
+/// Python `Sample`: one decoded record whose columns are exposed as read-only
+/// views of the native buffer.
 struct SampleBinding(Sample);
 
 #[pymethods]
