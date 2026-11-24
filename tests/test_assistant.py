@@ -119,8 +119,10 @@ async def test_the_session_continues_until_every_comment_has_one_reply(tmp_path)
     first, duplicate = results(fake.calls[1].payload)
     assert first == {**first, "accepted": True, "remaining": [two]}
     assert duplicate["accepted"] is False and "already replied" in duplicate["error"]
-    nudge = json.loads(fake.calls[2].payload["messages"][-1]["content"])
-    assert nudge["remaining"] == [two]
+    nudge = fake.calls[2].payload["messages"][-1]
+    assert nudge["role"] == "user"
+    assert f"You have not replied to comment `{two}`" in nudge["content"]
+    assert one not in nudge["content"]
     kept = assistant_memory.load(gen.store, record.source.id)
     signoff, answered = (json.loads(m["content"]) for m in kept[-2:])
     assert signoff["accepted"] is False and "unavailable" in signoff["error"]

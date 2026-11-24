@@ -19,7 +19,6 @@ import json
 from . import endpoint_prompts
 from .authoring_session import apply_tool, tool_reply
 from .authoring_tools import TOOLS, editing_tools
-from .models import canonical
 from .schema_errors import explain
 
 PHASE = "assist"
@@ -144,10 +143,20 @@ def step(source, settings, session, message):
     for call in calls:
         source = _call(source, settings, session, call)
     if remaining(session) and not calls:
-        nudge = dict(next="Reply to every listed comment with the reply tool.")
-        nudge["remaining"] = remaining(session)
-        session["messages"].append(dict(role="user", content=canonical(nudge)))
+        session["messages"].append(dict(role="user", content=missing_replies(session)))
     return source, not remaining(session)
+
+
+def missing_replies(session):
+    """The message sent when the model stops before answering every comment."""
+    ids = remaining(session)
+    listed = ", ".join(f"`{ident}`" for ident in ids)
+    noun = "comment" if len(ids) == 1 else "comments"
+    return (
+        f"You have not replied to {noun} {listed} with the `reply` tool. Every listed comment"
+        " needs exactly one reply, even if you only explain or ask a question. Reply to"
+        f" {'it' if len(ids) == 1 else 'each of them'} now."
+    )
 
 
 def apply(comments, replies):
