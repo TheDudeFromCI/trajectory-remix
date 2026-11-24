@@ -94,6 +94,7 @@ jobs:
       - run: node tests/endpoint_collapse_frontend.mjs
       - run: node tests/usage_view_frontend.mjs
       - run: node tests/metrics_editor_frontend.mjs
+      - run: node tests/complexity_select_frontend.mjs
       - run: node tests/tool_import_frontend.mjs
       - run: node tests/tool_picker_frontend.mjs
       - run: node tests/comments_view_frontend.mjs

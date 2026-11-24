@@ -79,7 +79,6 @@ try {
     assert.equal(await acknowledgment.isVisible(),true);
     assert.equal(await acknowledgment.evaluate(n=>getComputedStyle(n).visibility),'visible');
     await acknowledgment.check(); await page.locator('#window-save').click();
-    await page.locator('#save-source').click();
     await page.waitForFunction(id=>graphStudio.record.source.windows[id]?.intentionally_left_open===true && !graphStudio.isDirty(),openWindow);
     assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source.events,reviewed.source.events);
     assert.equal(await page.evaluate(id=>graphStudio.diagnostics.some(d=>d.code==='open_window'&&graphStudio.draft.events[d.event_id].window===id),openWindow),false);

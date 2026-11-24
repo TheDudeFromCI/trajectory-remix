@@ -155,7 +155,6 @@
         <span id="dirty-indicator" class="tag"></span>
         <button id="diagnostics-summary" class="sm ghost" hidden></button>
         <span class="grow"></span>
-        <button class="primary sm" id="save-source">Save</button>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
           <button id="review-source" data-tip="Review against the checklist, repair what fails, then sign off">Review</button>
           <button id="export-source">Export</button>
@@ -169,6 +168,7 @@
       <div class="bar-row meta-row" id="trajectory-meta">
         <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
         <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
+        <label class="inline-label">Complexity <select id="complexity" data-lock-exempt aria-label="Complexity"><option value="">Not set</option></select></label>
         <small id="size-tag" class="tag tone-muted"></small>
         <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
         <span id="lock-slot" class="row"></span>
@@ -351,7 +351,6 @@
       <label>Preview delay (ms) <input id="preview-debounce" type="number" min="0" max="10000" value="500"></label>
     </div>
     <label class="checkbox"><input id="show-random-tools" type="checkbox" checked> Show randomly added tools (grayed out) in tool schema events</label>
-    <label class="checkbox"><input id="auto-save" type="checkbox" checked> Automatically save the trajectory a moment after each edit</label>
     <label class="checkbox"><input id="auto-send-comments" type="checkbox"> Automatically send new comments to the assistant (no need to click Send)</label>
     <p class="note">Stored in this browser only. Tick history uses the preview tokenizer; graph authoring never needs one.</p>
   </div>

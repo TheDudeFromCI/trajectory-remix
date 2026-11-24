@@ -41,7 +41,7 @@ specific features, listed below.
 3. **Scrub the timeline.** In the default *Dependency graph* mode, scrubbing steps through the
    dependency order. It is not authored time.
 4. **Edit.** Change an event's text, window or dependencies. Add a dependency with the
-   picker, or Shift-click a predecessor in the timeline. Save the trajectory.
+   picker, or Shift-click a predecessor in the timeline. Changes save as you make them.
 5. **Create your own.** Click **+** in the Dataset panel, add windows on the event
    editor's **Windows** tab, then add events and link them under **Runs after** on the **Options** tab. The
    [Dashboard tutorials](DASHBOARD.md#tutorials) walk through this step by step.

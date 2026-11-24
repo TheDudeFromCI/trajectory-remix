@@ -52,7 +52,6 @@ try {
   assert.equal(await page.locator('#trajectory-meta').isVisible(), true);
   await page.locator('#header-toggle').click();
   assert.equal(await page.locator('#trajectory-meta').isVisible(), false);
-  assert.equal(await page.locator('#save-source').isVisible(), true);
   assert.equal(await page.locator('#header-toggle').getAttribute('aria-expanded'), 'false');
   await open();
   assert.equal(await page.locator('#trajectory-meta').isVisible(), false);

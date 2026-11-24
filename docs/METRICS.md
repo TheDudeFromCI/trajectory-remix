@@ -21,21 +21,27 @@ Filter the population with the same search you use in the sidebar. Unsaved draft
 
 Categories, labels and outcomes can't be calculated, so you set them by hand in the Editor:
 
-1. Select a trajectory and save any unsaved edits.
+1. Select a trajectory.
 2. Open the **Metrics** tab in the event panel (after **JSON**).
 3. Pick a value, tick labels or type an outcome. Each change saves at once.
 
 | Group | What it holds | How you set it |
 | --- | --- | --- |
-| **Categories** | One choice per sampler dimension, such as `lifecycle` or `domain` | A dropdown |
+| **Categories** | One choice per sampler dimension, such as `complexity`, `task_length` or `domain` | A dropdown |
 | **Labels** | Event tags and secondary competencies or behaviors | Checkboxes (click the summary to open them) |
 | **Outcomes and notes** | Free values such as `actual_outcome` or `accepted` | Text, a number, `true`/`false` or JSON |
 | **Measured** | Values calculated from the source or an export | Read-only; use **Calculate missing metrics** |
 
 **Clear** removes a value so it reads as unavailable again. A **Stale** value was recorded against an older
 source or definition; **Confirm** records it again for the current source. Tick **Only show unset** to
-list just the values still missing. The tab is read-only while the trajectory has unsaved edits or a job
-holds it, and metric changes are not part of Undo.
+list just the values still missing. Each change is one **Undo** step. The tab is read-only while a job
+holds the trajectory.
+
+**Complexity** also has a picker in the trajectory bar, next to Stage and Split. When it's unset, the picker
+shows the sampler's target as a hint.
+
+A value you set is recorded against the trajectory's current content. If the content changes afterwards,
+the value is marked **Stale** until you **Confirm** it again.
 
 ## Calculate what's missing
 

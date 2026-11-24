@@ -37,7 +37,8 @@ assert.equal(ui.prefs.mode,'graph'); assert.equal(ui.frames,null);
 $('new-event-id').value='first'; $('new-event').click(); await until(()=>ui.event==='first');
 $('event-content').value='hello'; $('event-content').dispatchEvent(new Event('input'));
 $('close-window').checked=true; $('close-window').dispatchEvent(new Event('change'));
-$('save-source').click(); await until(()=>ui.record.revision===2);
+// Every change saves itself; no Save button.
+assert.equal($('save-source'),null); await until(()=>ui.record.revision>=2 && !ui.hasUnsavedChanges());
 assert.equal(ui.record.source.events.first.content,'hello');
 assert.ok($('window-grid').textContent.includes('EOS'));
 $('new-event-id').value='second'; $('new-event').click(); await until(()=>ui.event==='second');
@@ -67,10 +68,12 @@ await ui.select(ui.id,true); $('split').value='Auto'; $('split').dispatchEvent(n
 assert.equal(ui.draft.metadata.split,'Auto'); assert.equal($('split-warning').textContent,'');
 $('split').value=''; $('split').dispatchEvent(new Event('change')); assert.ok($('split-warning').textContent.includes('Missing'));
 const intrinsic = ui.record.intrinsic_hash;
-$('split').value='Auto'; $('split').dispatchEvent(new Event('change')); await ui.save(); assert.equal(ui.record.intrinsic_hash,intrinsic);
+$('split').value='Auto'; $('split').dispatchEvent(new Event('change')); await ui.autoSave.flush(); assert.equal(ui.record.intrinsic_hash,intrinsic);
 // Consecutive local history actions track revisions created by our own restores.
-await ui.restore(true); await ui.restore(true); assert.equal(Object.keys(ui.record.source.events).length,0);
-await ui.restore(false); await ui.restore(false); assert.equal(ui.record.source.events.first.content,'hello');
+// Every change saved itself, so Undo walks back through each one to the empty trajectory.
+await ui.autoSave.flush(); const steps=ui.undo.length; assert.ok(steps>=2);
+while (ui.undo.length) await ui.restore(true); assert.equal(Object.keys(ui.record.source.events).length,0);
+while (ui.redo.length) await ui.restore(false); assert.equal(ui.undo.length,steps); assert.equal(ui.record.source.events.first.content,'hello');
 assert.equal(ui.record.source.metadata.split,'Auto');
 // Invalid advanced JSON preserves the working source.
 const saved = JSON.stringify(ui.draft); $('source-json').value='{'; $('source-apply').click(); await until(()=>$('status').textContent.includes('JSON'));
@@ -123,6 +126,7 @@ assert.deepEqual(JSON.parse($('settings-json').value).tools.fixture_tool.input_s
 $('settings-save').click(); await until(()=>!$('settings-dialog').open);
 assert.equal(ui.settings.tools.fixture_tool.input_schema.properties.payload.type,'string');
 // CAS conflict leaves the browser draft intact.
+await ui.autoSave.flush(); ui.draft.events.first.content='unsaved';
 await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:(await module.api('/trajectories/'+ui.id)).revision,patch:{metadata:{test:true}}});
 await assert.rejects(()=>ui.save(),/Revision conflict/); assert.equal(ui.draft.events.first.content,'unsaved');
 // Per-window acknowledgment persists, suppresses only its advisory, and is undoable.
@@ -136,7 +140,7 @@ assert.equal(ui.isDirty(),false); assert.match($('dirty-indicator').textContent,
 assert.equal(ui.diagnostics.filter(d=>d.code==='open_window').length,2);
 $('window-id').value='a'; $('window-id').dispatchEvent(new Event('change'));
 assert.equal($('window-left-open').checked,false);
-$('window-left-open').checked=true; $('window-save').click(); await ui.save();
+$('window-left-open').checked=true; $('window-save').click(); await ui.autoSave.flush();
 assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
 assert.deepEqual(ui.diagnostics.filter(d=>d.code==='open_window').map(d=>d.event_id),['b']);
 assert.equal(ui.record.source.events.a.close_window,false);

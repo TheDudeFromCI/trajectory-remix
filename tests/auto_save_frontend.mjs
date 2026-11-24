@@ -1,26 +1,34 @@
-/* Auto-save: saves after a quiet period when enabled, restarts on each edit, and reports failures. */
+/* Auto-save: discrete changes save at once, typing waits for a pause, flush saves what's left. */
 import assert from 'node:assert/strict';
 import {AutoSave} from '../trajectory_remix/static/auto-save.js';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-let on = true, dirty = true, saves = 0, errors = [], fail = false;
-const auto = new AutoSave({delay: 20, enabled: () => on, pending: () => dirty,
-  save: async () => { saves += 1; if (fail) throw new Error('boom'); dirty = false; }, report: e => errors.push(e.message)});
+// The draft has a version; a save stores the version it started with.
+let version = 1, stored = 0, typing = false, saves = 0, errors = [], fail = false;
+const pending = () => version !== stored;
+const edit = () => { version += 1; auto.schedule(); };
+const auto = new AutoSave({delay: 20, pending, typing: () => typing,
+  save: async () => { const sent = version; saves += 1; await wait(5); if (fail) throw new Error('boom'); stored = sent; }, report: e => errors.push(e.message)});
 
-// Each edit restarts the countdown, so a burst of edits saves once.
-auto.schedule(); await wait(10); auto.schedule(); await wait(10); assert.equal(saves, 0);
-await wait(40); assert.equal(saves, 1);
+// A discrete change (select, checkbox, button) saves straight away.
+auto.schedule(); await wait(10); assert.equal(saves, 1); assert.equal(pending(), false);
 
-// Disabled: nothing is saved.
-on = false; dirty = true; auto.schedule(); await wait(40); assert.equal(saves, 1);
+// Typing: each keystroke restarts the pause, so a burst saves once.
+typing = true;
+edit(); await wait(10); edit(); await wait(10); assert.equal(saves, 1);
+await wait(30); assert.equal(saves, 2);
 
 // Nothing pending: nothing is saved.
-on = true; dirty = false; auto.schedule(); await wait(40); assert.equal(saves, 1);
+typing = false; auto.schedule(); await wait(10); assert.equal(saves, 2);
 
-// Turning it off before the timer fires cancels the save.
-dirty = true; auto.schedule(); on = false; await wait(40); assert.equal(saves, 1);
+// Flush saves a pending typing burst immediately (for example before switching trajectory).
+typing = true; edit(); await auto.flush(); assert.equal(saves, 3); assert.equal(pending(), false);
 
-// A failed save is reported and not retried until the next edit.
-on = true; fail = true; auto.schedule(); await wait(40);
-assert.deepEqual(errors, ['boom']); assert.equal(saves, 2); await wait(40); assert.equal(saves, 2);
-console.log('Auto-save: debounce, preference off, nothing pending, cancel and error reporting passed.');
+// A change during a running save is saved after it, not lost.
+typing = false; edit(); await wait(1); edit();
+await wait(30); assert.equal(saves, 5); assert.equal(pending(), false);
+
+// A failed save is reported and not retried until the next change.
+fail = true; edit(); await wait(20);
+assert.deepEqual(errors, ['boom']); assert.equal(saves, 6); await wait(30); assert.equal(saves, 6);
+console.log('Auto-save: instant saves, typing pause, flush, overlapping changes and error reporting passed.');
