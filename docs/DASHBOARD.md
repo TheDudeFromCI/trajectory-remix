@@ -42,6 +42,7 @@ are untouched, and **Raw** on any card switches back to the exact token stream.
 | --- | --- |
 | **Chat bubbles** | Messages in a `chatroom` window. The agent's messages sit on the right; each other speaker keeps one colour. |
 | **Formatted JSON** | Tool calls, tool results and other JSON, indented and colour-coded even while it is still streaming. |
+| **Markdown** | Message and text content: headings, **bold**, *italic*, `code`, code blocks, lists, quotes, tables and links. Plain text looks exactly as before. HTML is shown as text, and only `http(s)` and `mailto` links are clickable. |
 | **Context** line | The window's header, such as its purpose and reasoning effort. |
 | **Streaming** tag, dashed border | A message, call or result whose end marker hasn't arrived at this position. |
 | **NOOP ×N** | In Tick history, an open window the agent can write to predicts NOOP on every tick it has nothing to say. NOOP is a training label ("wait"), not window content: it never enters the context. A run of them is shown as one chip with a count. |
@@ -410,7 +411,8 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |
 | `jobs-view.js` | `JobsView`: the job list and detail panel (`StudioUI.dialogs` maps job IDs to detail panels). |
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
-| `window-render.js` | Readable window view: header fields, chat bubbles, tool name lists for `tools` windows (`tool-list-view.js`), tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
+| `window-render.js` | Readable window view: header fields, chat bubbles, tool name lists for `tools` windows (`tool-list-view.js`), tolerant JSON formatting, Markdown text, collapsed NOOP runs, and the Raw view. Visual only. |
+| `markdown-view.js`, `markdown-inline.js`, `window-markdown.css` | Markdown for window text, built with DOM calls only (never `innerHTML`). Text with no Markdown syntax is returned as the plain text node. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use
