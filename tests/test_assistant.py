@@ -215,7 +215,10 @@ async def test_exchange_limit_ends_the_session_and_keeps_comments_open(tmp_path)
     job = await run(gen, record)
     assert len(fake.calls) == 2 and gen.jobs.inspect(job)["state"] == "completed"
     assert gen.store.read(record.source.id).source.events["x"].content == "after"
-    assert gen.comments.for_trajectory(record.source.id)[0]["status"] == "open"
+    comment = gen.comments.for_trajectory(record.source.id)[0]
+    assert comment["status"] == "open"
+    assert comment["replies"][-1]["author"] == "agent"
+    assert comment["replies"][-1]["body"] == "Failed to execute task. Exchange limit reached."
     assert assistant_memory.load(gen.store, record.source.id) is None
 
 

@@ -800,7 +800,9 @@ class GenerationService:
         """End an assistant session without answering; edits so far are kept."""
         if reason == "context_limit":  # Too long to continue: the next send starts afresh.
             assistant_memory.forget(self.store, source.id)
-        cp.pop("authoring_session", None)
+        session = cp.pop("authoring_session", None)
+        if session:
+            assistant.fail(self.comments, session, reason)
         cp["phase"] = "done"
         self._save(job, source, cp, ticket=ticket, outcome="fail")
         self.jobs.progress(

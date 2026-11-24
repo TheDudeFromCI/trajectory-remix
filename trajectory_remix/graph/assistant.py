@@ -19,6 +19,7 @@ import json
 from . import endpoint_prompts
 from .authoring_session import apply_tool, tool_reply
 from .authoring_tools import TOOLS, editing_tools
+from .comments import NewReply
 from .schema_errors import explain
 
 PHASE = "assist"
@@ -159,11 +160,26 @@ def missing_replies(session):
     )
 
 
+FAILURE_NOTES = {
+    "exchange_limit": "Failed to execute task. Exchange limit reached.",
+    "context_limit": "Failed to execute task. Context limit reached.",
+    "invalid_output": "Failed to execute task. The model returned an incomplete reply.",
+}
+
+
+def fail(comments, session, reason):
+    """Reply, as the assistant, to every comment it never answered. They stay open."""
+    note = FAILURE_NOTES.get(reason, "Failed to execute task.")
+    for ident in remaining(session):
+        try:
+            comments.reply(ident, NewReply(body=note), "agent")
+        except KeyError:
+            continue
+
+
 def apply(comments, replies):
     """Mark fixed comments addressed and reply to the rest; ones deleted meanwhile are
     skipped. Returns how many were addressed."""
-    from .comments import NewReply
-
     addressed = 0
     for ident, answer in replies.items():
         try:
