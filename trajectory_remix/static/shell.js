@@ -86,6 +86,9 @@ function show(target) {
   clearTimeout(timer); owner = target;
   timer = setTimeout(() => {
     if (owner !== target || !target.isConnected) return;
+    // A modal dialog draws above the page, so the bubble must live inside it to be seen.
+    const host = target.closest('dialog[open]') || document.body;
+    if (bubble.parentElement !== host) host.append(bubble);
     bubble.textContent = target.dataset.tip; bubble.classList.add('show'); place(target);
     target.setAttribute('aria-describedby', 'tooltip');
   }, 250);

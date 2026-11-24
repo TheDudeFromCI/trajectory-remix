@@ -16,6 +16,7 @@ from .log_levels import check as check_level
 from .log_levels import migrate as migrate_log_levels
 from .models import GraphSource, canonical, digest
 from .progress import observed_request, request_label
+from .stage_progress import attach as attach_stage_progress
 from .storage import GraphStore
 
 TERMINAL = {"completed", "cancelled", "failed"}
@@ -243,7 +244,13 @@ class JobService:
                 "SELECT 1 FROM graph_trajectory_revisions WHERE trajectory_id=?", (source.id,)
             ).fetchone():
                 raise OwnershipConflict("Source identity already exists")
-            self.store._commit(db, source, None, {"job_id": job, "attempt_id": attempt["id"]})
+            self.store._commit(
+                db,
+                source,
+                None,
+                {"job_id": job, "attempt_id": attempt["id"]},
+                settings_revision=json.loads(j["config"]).get("settings_revision"),
+            )
             db.execute(
                 "INSERT INTO graph_owners VALUES(?,?,'attached',?)", (source.id, job, j["epoch"])
             )
@@ -333,7 +340,7 @@ class JobService:
                 if prior["identity"] != identity:
                     raise ValueError("Idempotency key reused with different acceptance")
                 return dict(prior)
-            self._fence(db, job, epoch, trajectory)
+            current_job = self._fence(db, job, epoch, trajectory)
             if request is not None:
                 r = db.execute("SELECT * FROM graph_requests WHERE id=?", (request_id,)).fetchone()
                 if (
@@ -348,7 +355,17 @@ class JobService:
                     raise Fenced("Request is not ready for acceptance")
             old = self.store._read(db, trajectory)
             self.store._check_revision(trajectory, expected_revision, old)
-            record = self.store._commit(db, source, old, {"job_id": job, "step": step})
+            configuration = json.loads(current_job["config"])
+            settings_revision = configuration.get(
+                "settings_revision", configuration.get("options", {}).get("settings_revision")
+            )
+            record = self.store._commit(
+                db,
+                source,
+                old,
+                {"job_id": job, "step": step},
+                settings_revision=settings_revision,
+            )
             db.execute(
                 "INSERT INTO graph_steps VALUES(?,?,?,?,?,?,?)",
                 (
@@ -417,11 +434,22 @@ class JobService:
                     ).fetchone():
                         db.execute("UPDATE graph_jobs SET state='completed' WHERE id=?", (job,))
             self._notify(db, job)
-            return dict(
+            result = dict(
                 db.execute(
                     "SELECT * FROM graph_steps WHERE job_id=? AND step=?", (job, step)
                 ).fetchone()
             )
+            endpoint = checkpoint.get("exchange_limit_endpoint")
+            if endpoint is not None:
+                hits = db.execute(
+                    """SELECT count(*) FROM (
+                           SELECT 1 FROM graph_checkpoints WHERE job_id=?
+                           AND json_extract(checkpoint, '$.exchange_limit_endpoint')=? LIMIT 3
+                       )""",
+                    (job, endpoint),
+                ).fetchone()[0]
+                result["repeated_exchange_limit"] = hits == 2
+            return result
 
     def _detach(self, db, job, trajectory, outcome):
         db.execute("DELETE FROM graph_owners WHERE trajectory_id=? AND job_id=?", (trajectory, job))
@@ -804,11 +832,25 @@ class JobService:
             result[key] = json.loads(result[key])
         return result
 
+    def summaries(self, *, limit, offset):
+        with self.store.connect() as db:
+            db.execute("BEGIN")
+            rows = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
+            ]
+            attach_stage_progress(db, rows)
+            return rows
+
     def inspect(self, job, *, include_config=True):
         with self.store.connect() as db:
             if include_config:
                 result = self._decode_job(self._job(db, job))
             else:
+                db.execute("BEGIN")
                 row = db.execute(
                     "SELECT id,kind,json_extract(config,'$.action') AS action,state,epoch,run_id,progress,total,artifact,created FROM graph_jobs WHERE id=?",
                     (job,),
@@ -816,6 +858,7 @@ class JobService:
                 if row is None:
                     raise KeyError(job)
                 result = dict(row)
+                attach_stage_progress(db, [result])
             result["requests"] = [
                 dict(r)
                 for r in db.execute(

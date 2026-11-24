@@ -48,10 +48,15 @@ for you to copy, not calls this document makes.
 | One short guide | `get_authoring_guide` | `{"topic":"dependencies"}` |
 | Find drafts | `list_graphs` | `{"query":{"stage":-3},"limit":10,"offset":0}` |
 | Inspect a source | `read_graph` | `{"id":"UUID"}` |
-| Change dependencies | `patch_graph_event` | `{"id":"UUID","event_id":"think","expected_revision":2,"patch":{"after":["input"]}}` |
+| Inspect errors and enabled warnings | `view_diagnostics` | `{"id":"UUID"}` |
+| Inspect topology | `view_graph` | `{"id":"UUID"}` |
+| Inspect event text | `view_event` | `{"id":"UUID","event_id":"think"}` |
+| Create an event | `create_event` | `{"id":"UUID","expected_revision":2,"event_id":"note","window":"notes","kind":"agent_text","content":"Confirmed."}` |
+| Post initial tool schemas | `post_tool_schema` | `{"id":"UUID","expected_revision":3,"tool_ids":["chat"]}` |
+| Change dependencies | `update_event` | `{"id":"UUID","event_id":"think","expected_revision":2,"after":["input"]}` |
 | Mark an intentional Auto split | `patch_graph` | `{"id":"UUID","expected_revision":3,"patch":{"metadata":{"split":"Auto"}}}` |
 | Generate (only when authorized) | `generate_graphs` | `{"requests":[{"seed":137,"overrides":{"domain":"software_engineering"}}],"instructions":{}}` |
-| Review a saved detached source | `review_graphs` | `{"trajectory":"UUID","expected_revision":4,"mode":"standard","repair":true}` |
+| Review a saved detached source | `review_graphs` | `{"trajectory":"UUID","expected_revision":4,"mode":"standard"}` |
 | Job status | `inspect_graph_job` | `{"id":"JOB_UUID"}` |
 | Outcomes, paged | `graph_job_items` | `{"id":"JOB_UUID","limit":10,"offset":0}` |
 | Logs, by cursor | `graph_job_logs` | `{"id":"JOB_UUID","after":0,"limit":10}` |
@@ -67,7 +72,9 @@ for you to copy, not calls this document makes.
 | Trajectories with open comments | `list_graphs` | `{"query":{"comments":"open"},"limit":10}` |
 | Say a comment is fixed (the user then reviews it) | `address_graph_comment` | `{"id":"COMMENT_UUID","note":"Moved close_window to event 13."}` |
 
-There are also `create_graph` and the other lifecycle tasks. `get_authoring_guide` topics are `start`, `dependencies`,
+Use `configure_window` to set window properties, `post_chat_message` to add user or
+agent chat, and `signoff` to record manual authoring evidence. `create_graph` can initialize
+a detached draft with empty windows and events. `get_authoring_guide` topics are `start`, `dependencies`,
 `tools-chat`, `generation` and `export`.
 
 ## Behavior to know

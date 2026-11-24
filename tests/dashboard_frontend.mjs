@@ -20,13 +20,23 @@ try {
  await page.getByLabel('New endpoint ID',{exact:true}).fill('fixture');await page.getByRole('button',{name:'Add endpoint',exact:true}).click();
  await page.getByLabel('Endpoint fixture URL',{exact:true}).fill('http://127.0.0.1:1/v1');
  await page.getByLabel('Endpoint fixture model',{exact:true}).fill('fake-browser');
+ // Tooltips inside the modal settings dialog must render above it, not behind it.
+ await page.getByLabel('Endpoint fixture max_output_tokens',{exact:true}).hover();await page.waitForFunction(()=>{const t=document.getElementById('tooltip');return t.classList.contains('show')&&t.closest('dialog[open]')&&/max_tokens/.test(t.textContent);});
  await page.getByLabel('Draft endpoint',{exact:true}).selectOption('fixture');
  // Editing a tool after endpoint forms must not overwrite the shared settings draft.
  await page.getByRole('tab',{name:'Tools',exact:true}).click();
  await page.getByLabel('New tool ID',{exact:true}).fill('notes');await page.getByRole('button',{name:'Add tool to settings draft',exact:true}).click();
  assert.equal(await page.evaluate(()=>JSON.parse(document.getElementById('settings-json').value).endpoints.fixture.model),'fake-browser');
+ await page.getByRole('tab',{name:'Validation',exact:true}).click();
+ const warning=page.getByRole('checkbox',{name:'Open window',exact:true});
+ assert.equal(await warning.isChecked(),true);
+ await warning.uncheck();
+ if(process.env.VALIDATION_SCREENSHOT) {
+  await page.locator('#settings-panel-validation').evaluate(n=>n.scrollTop=0);
+  await page.screenshot({path:process.env.VALIDATION_SCREENSHOT});
+ }
  await page.locator('#settings-dialog').evaluate(n=>n.scrollTop=0);await screenshot('settings');await page.locator('#settings-save').click();await page.waitForFunction(()=>!document.getElementById('settings-dialog').open);
- const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.draft,'fixture');assert.ok(saved.settings.tools.notes);
+ const saved=await api('/settings');assert.equal(saved.settings.endpoint_roles.draft,'fixture');assert.ok(saved.settings.tools.notes);assert.deepEqual(saved.settings.disabled_warnings,['open_window']);
  await page.locator('#generation-settings-button').click();
  // The Generate dialog says what a run freezes; there is no Flow panel any more.
  await page.locator('#generation-attempts').waitFor();assert.equal(await page.locator('.flow-section').count(),0);
@@ -35,6 +45,8 @@ try {
  const jobs=await api('/job-summaries'),job=jobs[0].id;
  await page.waitForFunction(()=>!document.getElementById('jobs-view').hidden);
  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#job-detail .job-panel')?.dataset.state==='run · paused');
+ assert.match(await page.locator('#job-detail .progress-pct').first().textContent(), /^[0-2]\/2 stages$/);
+ if(process.env.GENERATION_PROGRESS_SCREENSHOT) await page.screenshot({path:process.env.GENERATION_PROGRESS_SCREENSHOT});
  await screenshot('jobs');await close();
  const attempt=(await api(`/jobs/${job}/attempts`))[0];
  await page.evaluate(async id=>await graphStudio.select(id,true),attempt.trajectory_id);

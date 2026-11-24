@@ -93,7 +93,7 @@
     </div>
     <details class="bulk-edit"><summary>Bulk edit all matches <span class="info" tabindex="0" data-tip="Applies to every trajectory matching the current search and filters, across all pages. Runs as an undoable job; locked trajectories are skipped."></span></summary>
       <div class="inline-form">
-        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="review_repair">Review &amp; Repair</option><option value="export">Export</option><option value="delete">Delete</option></select></label>
+        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="export">Export</option><option value="delete">Delete</option></select></label>
         <label id="bulk-value-label">Value<input id="bulk-value" value="3" aria-label="Bulk value"></label>
         <button id="bulk-start" class="sm">Apply</button>
       </div>
@@ -156,8 +156,7 @@
         <span class="grow"></span>
         <button class="primary sm" id="save-source">Save</button>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
-          <button id="review-source">Review</button>
-          <button id="review-repair-source">Review &amp; Repair</button>
+          <button id="review-source" data-tip="Review against the checklist, repair what fails, then sign off">Review</button>
           <button id="export-source">Export</button>
           <button id="duplicate-sample">Duplicate trajectory</button>
           <hr>
@@ -353,11 +352,13 @@
     <div class="tab-list" role="tablist" aria-label="Settings sections">
       <button role="tab" id="settings-tab-models" aria-controls="settings-panel-models" aria-selected="true">Models &amp; defaults</button>
       <button role="tab" id="settings-tab-tools" aria-controls="settings-panel-tools" aria-selected="false">Tools</button>
+      <button role="tab" id="settings-tab-validation" aria-controls="settings-panel-validation" aria-selected="false">Validation</button>
       <button role="tab" id="settings-tab-storage" aria-controls="settings-panel-storage" aria-selected="false">Storage</button>
       <button role="tab" id="settings-tab-json" aria-controls="settings-panel-json" aria-selected="false">Advanced JSON</button>
     </div>
     <div role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" class="dialog-body"><section id="endpoint-settings-editor"></section></div>
     <div role="tabpanel" id="settings-panel-tools" aria-labelledby="settings-tab-tools" class="dialog-body" hidden><section id="tool-schema-editor"></section></div>
+    <div role="tabpanel" id="settings-panel-validation" aria-labelledby="settings-tab-validation" class="dialog-body" hidden><section id="validation-settings-editor"></section></div>
     <div role="tabpanel" id="settings-panel-storage" aria-labelledby="settings-tab-storage" class="dialog-body" hidden>
       <h3>Log cache</h3>
       <div id="log-usage" class="stat-row"></div>

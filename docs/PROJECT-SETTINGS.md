@@ -2,8 +2,8 @@
 
 **Settings** (in the header) holds the things shared by everyone using a project: model
 endpoints and roles, tokenizer profiles, tools and defaults, on the **Models & defaults**,
-**Tools**, **Storage** and **Advanced JSON** tabs. The **Review Settings** tab holds review and
-repair options and the review checklists.
+**Tools**, **Storage** and **Advanced JSON** tabs. The **Review Settings** tab holds the review
+options, the generation prompts and the review checklists.
 
 ![Project settings](images/dashboard/settings.png)
 
@@ -28,13 +28,27 @@ models.
    |---|---|
    | **Draft** | The Draft stage of [Draft and Assembly](GRAPH-GENERATION.md#draft-and-assembly). Required to generate. Older projects with a Generator role are converted to Draft. |
    | **Assembly** | The Assembly stage and its fix. Optional; falls back to Draft. Give it a stronger model for better structure. |
-   | **Fast Review** | Fast Review and its repair. |
-   | **Critical Review** | Critical Review and its repair. |
+   | **Fast Review** | Fast Review, which repairs what fails and signs off. |
+   | **Critical Review** | Critical Review, which repairs what fails and signs off. |
    | **Assistant** | **Send open comments to agent** in the editor's Comments tab (see [Dashboard](DASHBOARD.md#leave-comments-for-an-agent-to-fix)). Generation never uses it. Optional. |
-5. **Save settings**, then open **Generate** to choose review and repair options.
+5. **Save settings**, then open **Review Settings** to choose which reviews run automatically.
 
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
 future work.
+
+### Token limits
+
+Each endpoint card also has two optional limits. Hover over either field for a summary.
+Both default to **-1**, which means no limit: the provider decides.
+
+| Field | What it does when set |
+| --- | --- |
+| **Max output tokens** | Caps each single response (sent as `max_tokens`). Reasoning and tool calls count toward it. It does not cap the whole pass. |
+| **Context limit (tokens)** | Remix checks every request against it before sending, and stops instead of sending one that will not fit. Max output tokens, when set, is held back from it on every request. |
+
+Set the context limit if your server silently cuts long prompts instead of returning an
+error. See [Context scope and local-model budgets](GRAPH-GENERATION.md#context-scope-and-local-model-budgets)
+for the details.
 
 ### Provider options
 
@@ -43,7 +57,7 @@ hosted routers such as OpenRouter. For a full walk-through, see [OpenRouter](OPE
 
 | Option | What it does |
 | --- | --- |
-| **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. The default, 1, can never undercount but rejects prompts that would fit. English and JSON average about 3.5 bytes per token, so **3** keeps a margin while letting you use the model's real window. |
+| **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. Used only when a **Context limit** is set. English and JSON average about 3.5 bytes per token, so the default, **3**, keeps a margin while letting you use the model's real window. 1 can never undercount but rejects prompts that would fit. |
 | **Structured output** | How replies are held to the JSON schema. **Auto** uses native JSON-schema output where possible. **JSON object** always uses JSON mode with the schema written into the prompt. **Prompt only** sends no `response_format`, for servers that support neither. |
 | **Sticky sessions** | Sends the trajectory ID as `session_id`, so a router keeps each trajectory on one provider and its prompt stays cached. |
 | **Extra request fields** | A JSON object added to every request, for example `{"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}`. Fields Remix sets itself (model, messages, response format, output limit, sampling and `session_id`) cannot be overridden. |
@@ -102,6 +116,16 @@ Two starting catalogues for a coordinating agent come with Remix:
 Every Draft and Assembly request includes the whole catalogue, so a larger one costs context
 and tokens on every trajectory. Prefer the core set and add what your episodes need. `subagent`
 takes an optional `agent`, the specialist chosen from the roster the episode shows.
+
+## Validation
+
+Open **Project Settings → Validation** to choose which warnings the compiler dry run reports.
+All warning types start enabled. Clear a checkbox to suppress that warning for current detached
+sources and new jobs. Enabled warnings block successful signoff. Structural errors always
+remain visible and block compilation.
+
+The REST settings field is `disabled_warnings`. Existing jobs keep their saved settings.
+Changing the enabled warnings can make earlier signoffs stale.
 
 ## Defaults
 

@@ -3,6 +3,7 @@
 from pydantic import Field
 
 from .models import DTO, JsonValue
+from .window_evidence import clears_body
 
 
 class ProposalInput(DTO):
@@ -47,10 +48,9 @@ def causal_view(source, after, compact=False):
     windows = {}
     for ident in ordered:
         event = source.events[ident]
-        if getattr(event, "replace_body", False):
+        if clears_body(event):
             windows.pop(event.window, None)
         if event.close_window:
-            windows.pop(event.window, None)
             continue
         window = windows.setdefault(
             event.window,

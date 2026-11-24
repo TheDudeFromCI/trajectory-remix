@@ -352,11 +352,13 @@ def create_studio_app(
         )
 
     @router.post("/diagnostics")
-    def draft_diagnostics(body: GraphSource):
+    def draft_diagnostics(body: GraphSource, settings_revision: int | None = Query(None, ge=1)):
+        settings = studio.store.settings(settings_revision)
         return dict(
             source=body.to_dict(),
             source_hash=body.intrinsic_hash,
-            diagnostics=jsonable_encoder(diagnose(body, studio.store.settings().settings)),
+            settings_revision=settings.revision,
+            diagnostics=jsonable_encoder(diagnose(body, settings.settings)),
         )
 
     @router.post("/trajectories", status_code=201)
@@ -409,7 +411,11 @@ def create_studio_app(
 
     @router.get("/trajectories/{ident}/diagnostics")
     def diagnostics(ident: str):
-        return dict(diagnostics=studio.read(ident)["diagnostics"])
+        value = studio.read(ident)
+        return dict(
+            diagnostics=value["diagnostics"],
+            settings_revision=value["diagnostics_settings_revision"],
+        )
 
     @router.post("/trajectories/{ident}/preview")
     def preview(ident: str, body: PreviewInput):
@@ -430,14 +436,7 @@ def create_studio_app(
 
     @router.get("/job-summaries")
     def job_summaries(limit: int = Query(50, ge=1, le=1000), offset: int = Query(0, ge=0)):
-        with studio.store.connect() as db:
-            return [
-                dict(r)
-                for r in db.execute(
-                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
-                    (limit, offset),
-                )
-            ]
+        return studio.jobs.summaries(limit=limit, offset=offset)
 
     @router.get("/jobs/{job}/manifest")
     def manifest(job: str):

@@ -68,3 +68,15 @@ assert.equal(windowBody([...text('{"name":"a"}\nnot json')], {raw: false, purpos
 
 console.log('Window renderers and Flow YAML: NOOP folding, segments, speakers, JSON formatting, bubbles, raw mode and lossless folding passed.');
 window.happyDOM.abort();
+
+// A tool call shows its tool ID in both views, as compiled: "tool":arguments.
+const call = [ctl('ctx_begin'), ...text('{"slot":1,"purpose":"tool","reasoning_effort":null}'), ctl('ctx_end'),
+  ctl('tool_begin'), ...text('"chat":{"content":"Ack"}'), ctl('tool_end'), ctl('eos')];
+const shown = windowBody(call, {raw: false, purpose: 'tool', isAgent});
+assert.equal(shown.querySelector('.wt-tool-id').textContent, 'chat');
+assert.ok(shown.querySelector('.wt-json').textContent.includes('"content"'));
+assert.equal(shown.querySelector('.wt-json').textContent.includes('"chat"'), false);
+assert.ok(windowBody(call, {raw: true, purpose: 'tool', isAgent}).textContent.includes('"chat":{"content":"Ack"}'));
+// Pretty-printed arguments without a tool ID are never mistaken for one.
+const bare = [ctl('tool_begin'), ...text('{"a": 1}'), ctl('tool_end')];
+assert.equal(windowBody(bare, {raw: false, purpose: 'tool', isAgent}).querySelector('.wt-tool-id'), null);

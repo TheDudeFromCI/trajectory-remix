@@ -14,7 +14,7 @@
     }
   },
   "endpoint_roles": {"draft": "openrouter"},
-  "generation": {"fast": false, "critical": false, "repair": false, "format_retries": 2, "repair_context_bytes": 65536},
+  "generation": {"fast": false, "critical": false, "format_retries": 2, "assistant_context_bytes": 65536},
   "tools": {
     "chat": {"name": "Chat", "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"], "additionalProperties": false}},
     "read": {"name": "Read document", "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": false}}
