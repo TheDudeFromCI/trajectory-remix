@@ -85,7 +85,7 @@ async function intrinsicHash(source) {
 export class StudioUI {
   constructor() {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('graph-preferences') || '{}'); } catch {}
-    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, ...saved};
+    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, autoSendComments: false, ...saved};
     if (!Number.isFinite(this.prefs.zoom)) this.prefs.zoom = 1;
     this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
@@ -101,7 +101,10 @@ export class StudioUI {
     }), value => { this.frames = value.frames; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
   }
   query() {
-    const q = {}; if ($('sample-search').value) q.text = $('sample-search').value;
+    const q = {}, size = $('sample-search').value.match(/(?:^|\s)@size:(\S+)/i); // `@size:m` or `@size:<=xs`
+    const text = $('sample-search').value.replace(/(?:^|\s)@size:\S+/gi, ' ').trim();
+    if (text) q.text = text;
+    if (size) q.size = size[1];
     if ($('search-stage').value !== '') q.stage = Number($('search-stage').value);
     if ($('search-split').value) q.split = $('search-split').value;
     if ($('search-tool').value) q.tool = $('search-tool').value;
@@ -268,6 +271,8 @@ export class StudioUI {
     const stale = this.record.review_status?.stale;
     $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
     setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
+    const size = this.record.size; $('size-tag').textContent = size?.label ? 'Size ' + size.label : '';
+    setAttr($('size-tag'), 'data-tip', size ? `Saved source: ${size.total_characters.toLocaleString()} characters (about ${size.total_tokens_estimate.toLocaleString()} tokens), ${size.agent_characters.toLocaleString()} agent-generated.` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
@@ -819,6 +824,7 @@ export class StudioUI {
     document.addEventListener('graph-job-started', e => this.jobsView.select(e.detail).then(() => message('Job started. Follow it in Jobs or from the status bar.')).catch(message));
     bindViewTabs();
     this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
+      autoSend: () => this.prefs.autoSendComments === true, onOpened: () => this.sendToAssistant(),
       els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
       onChange: () => {
         if (this.draft) this.renderTimeline();
@@ -831,7 +837,7 @@ export class StudioUI {
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
       if (e.detail === 'review-view') this.openReview().catch(message);
     });
-    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools;
+    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools; $('auto-send-comments').checked = this.prefs.autoSendComments === true;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('duplicate-sample', 'click', () => this.duplicate());
     on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
@@ -859,7 +865,7 @@ export class StudioUI {
     for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool', 'search-comments']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
-    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
+    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
     on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };

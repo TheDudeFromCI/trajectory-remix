@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from pydantic import JsonValue, TypeAdapter
 
+from . import size_query
 from .models import GraphSource, ProjectSettings, canonical
 
 PROJECT_FORMAT = "kidra-graph-project/1"
@@ -149,6 +150,7 @@ class GraphStore:
         with closing(sqlite3.connect(self.path, timeout=30)) as db:
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA foreign_keys=ON")
+            size_query.register(db)
             with db:
                 yield db
 

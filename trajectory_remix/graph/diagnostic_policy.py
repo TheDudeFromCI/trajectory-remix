@@ -104,6 +104,10 @@ WARNINGS = {
         "No tool schema listing is visible to a call.",
     ),
     "no_agent_activity": ("No agent activity", "The trajectory shows no meaningful agent output."),
+    "low_agent_share": (
+        "Low agent share",
+        "Agent-generated text accounts for less than 1/16 of the trajectory characters.",
+    ),
     "missing_chat_echo": (
         "Missing chat echo",
         "A submitted chat call with echo enabled has no linked delivery.",
