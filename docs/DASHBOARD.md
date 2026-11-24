@@ -82,7 +82,7 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
    agent can reply in the chatroom. Removing it is your choice.
 3. **Set up review (optional).** Open the **Review Settings** tab to choose automatic
-   review and repair options, edit the Core and Critical checklists, and edit the
+   review options, edit the Core and Critical checklists, and edit the
    generation prompts. Click **Save review settings** if you change them.
 4. **Open Generate.** It shows which endpoint fills each role and any pins from the
    Sampler.
@@ -198,9 +198,11 @@ work through a trajectory's open comments.
 2. Save the trajectory, then click **Send open comments to agent** on the Comments tab.
 
 The job takes the open comments as they are at that moment, with their replies. The model
-edits the trajectory with the same spot edits that repair uses, then answers every comment:
-it marks the ones it fixed **Awaiting review**, with a note on what changed, and replies to
-the rest with a reason or a question, leaving them open. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
+edits the trajectory with the same authoring tools Assembly uses, then answers every comment
+with its `reply` tool: it marks the ones it fixed **Awaiting review**, with a note on what
+changed, and replies to the rest with a reason or a question, leaving them open. The next time
+you send comments on the same trajectory, the agent continues the same conversation, so it
+remembers what it already did. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
 revert its edits, and read the answers in the Comments tab. If the session runs out of
 room, it stops with its edits so far kept and the comments still open.
 
@@ -263,8 +265,12 @@ Review** (see [Event generation](GRAPH-GENERATION.md#draft-and-assembly)). What 
 the prompts and the models:
 
 1. Open **Review Settings** and find **Generation prompts**.
-2. Edit the **Agent prompt** (how the agent behaves, and where a persona pack goes), the
-   **Draft instructions** or the **Assembly instructions**.
+2. Edit the prompts:
+   - **Agent prompt:** what a trajectory is and how the agent behaves. Every endpoint sees it,
+     and a persona pack goes at its end.
+   - **Authoring prompt:** how to use the authoring tools. Assembly, review and the Assistant
+     see it.
+   - **Draft instructions** and **Assembly instructions:** the task for each stage.
 3. **Load Default Prompts** restores the packaged prompts, after you confirm.
 4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 
@@ -286,23 +292,24 @@ endpoint in **Settings → Models & defaults**.
 
 1. Save the trajectory you want reviewed, or set up a search that matches the ones you
    want.
-2. For one trajectory, open **More** in the trajectory header and choose **Review** or
-   **Review & Repair**. For every search match, open **Bulk edit all matches**, pick
-   **Review** or **Review & Repair** as the action, and click **Apply**.
+2. For one trajectory, open **More** in the trajectory header and choose **Review**. For
+   every search match, open **Bulk edit all matches**, pick **Review** as the action, and
+   click **Apply**.
 3. Follow the job in Jobs. A message appears when it finishes.
 
-**Review** only records a verdict. **Review & Repair** also attempts a repair after a
-failure. Both use standard mode: Pending trajectories get the Fast review and Candidate
-trajectories get the Critical review.
+A review checks the trajectory against the checklist, fixes anything that fails, and signs
+off. If the reviewer decides a trajectory can't be fixed, it signs off as unfeasible with a
+reason, and the review fails. Manual reviews use standard mode: Pending trajectories get the
+Fast review, Candidate trajectories get the Critical review, and Unsuccessful or Rejected
+trajectories are reviewed again at their own tier.
 
-The **Review Settings** tab holds the automatic review and repair settings and the review
-checklists.
+The **Review Settings** tab holds the automatic review settings and the review checklists.
 
 ### Change many trajectories at once
 
 1. Filter the dataset to the trajectories you want.
 2. Open **Bulk edit all matches** at the bottom of the Dataset panel.
-3. Choose **Set stage**, **Set split**, **Review**, **Review & Repair** or **Delete**, enter the value (a stage number such
+3. Choose **Set stage**, **Set split**, **Review** or **Delete**, enter the value (a stage number such
    as `3` for Ready, or a split name; review and delete need none), and click **Apply**.
 
 Bulk edits skip locked trajectories and can be undone with **Undo** once they finish.

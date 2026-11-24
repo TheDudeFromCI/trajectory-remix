@@ -101,7 +101,7 @@ async def test_draft_and_assembly_receive_the_agent_prompt_verbatim(tmp_path):
     stages = [c.payload for c in fake.calls if c.payload["operation"] in {"draft", "assembly"}]
     assert {p["operation"] for p in stages} == {"draft", "assembly"}
     for p in stages:
-        assert p["messages"][0]["content"].endswith("Actor guide:\n" + actor)
+        assert p["messages"][0]["content"].startswith(actor)
 
 
 def test_default_checklists_are_served_for_the_dashboard_reset(tmp_path):

@@ -10,7 +10,7 @@ With it you can:
 - **Author** trajectories by hand in a browser studio, or through an AI agent over
   MCP.
 - **Generate** new ones from a tunable sampler, using your own model endpoints, then
-  have a fast and a critical reviewer check and repair them.
+  have a fast and a critical reviewer check them and repair what fails.
 - **Track** every job, review and stage, and recover cleanly from pauses and restarts.
 - **Export** approved trajectories as raw JSONL, or compiled into compressed
   **KTREMIX** shards for training.
@@ -50,7 +50,7 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 2. **Studio.** Edit sources, run jobs and review work in the browser
    ([Dashboard](docs/DASHBOARD.md), [Studio reference](docs/GRAPH-STUDIO.md)).
 3. **Generate and review.** The sampler proposes a scenario, your draft and assembly models
-   writes the events one at a time, and optional reviewers sign off or repair
+   build the graph, and optional reviewers repair what fails and sign off
    ([Event generation](docs/GRAPH-GENERATION.md)).
 4. **Stage.** Each trajectory has a stage from Unfinished (-3) up to **Ready (3)**.
    Ready is always a manual decision.
@@ -66,7 +66,7 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 | Connect models and tokenizers | [Project settings](docs/PROJECT-SETTINGS.md) |
 | Understand the source format | [Source format](docs/GRAPH-SOURCE.md), [Synthetic tools and chat](docs/TOOLS.md) |
 | Tune what gets generated | [Sampler Matrix](docs/SAMPLER-WORKBENCH.md), [Metrics](docs/METRICS.md) |
-| Generate, review and repair | [Event generation](docs/GRAPH-GENERATION.md) |
+| Generate and review | [Event generation](docs/GRAPH-GENERATION.md) |
 | Generate with small models on OpenRouter | [OpenRouter](docs/OPENROUTER.md) |
 | Edit the generation prompts (and add a persona) | [Choose how trajectories are built](docs/DASHBOARD.md#choose-how-trajectories-are-built) |
 | Watch, pause and recover jobs | [Jobs](docs/GRAPH-JOBS.md) |

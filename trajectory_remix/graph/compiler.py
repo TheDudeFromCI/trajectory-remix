@@ -1,7 +1,7 @@
 """Explicit, opt-in graph tokenization/scheduling and frontier-array lowering.
 
 No source, settings, metrics or files are changed. The same scheduler drives
-bounded visual previews and export. Ordinary graph operations do not import it.
+bounded visual previews and export. Graph edits use the tokenizer-free dry run.
 """
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from tokenizers import Tokenizer
-
 from . import ktremix as k
+from .compiler_diagnostics import diagnose_schedule, dry_run
+from .compiler_schedule import EventSchedule, is_model_event
 from .models import GraphSource, ProjectSettings, TokenizerProfile, WindowReference, digest
-from .validation import diagnose
 
 VERSION = "kidra.graph-compiler/1"
 CONTRACT = "kidra.progressive-sleep/1"
@@ -249,6 +248,8 @@ class Runtime:
 
 
 class GraphCompiler:
+    dry_run = staticmethod(dry_run)
+
     def __init__(
         self,
         profile: TokenizerProfile,
@@ -258,6 +259,8 @@ class GraphCompiler:
         settings: ProjectSettings | None = None,
         max_rows=1_000_000,
     ):
+        from tokenizers import Tokenizer
+
         self.profile = TokenizerProfile.model_validate(profile.model_dump())
         self.controls = self.profile.special_tokens
         try:
@@ -378,7 +381,8 @@ class GraphCompiler:
 
     def _frames(self, source, runtime, *, cancelled):
         """Yield schedule frames while incrementally lowering exactly the same plan."""
-        errors = [d for d in diagnose(source, self.settings) if d.severity == "error"]
+        schedule = EventSchedule(source)
+        errors = [d for d in diagnose_schedule(schedule, self.settings) if d.severity == "error"]
         if errors:
             raise CompileError("; ".join(f"{d.code}: {d.message}" for d in errors))
         pending = set(source.events)
@@ -388,31 +392,21 @@ class GraphCompiler:
         tick = 0
         last_was_noop = False
 
-        def model(event):
-            return event.kind in ("agent_text", "tool_call")
-
         def ready(ident):
-            e = source.events[ident]
-            if not all(dep in done for dep in e.after):
-                return False
-            return all(
-                t < tick
-                or (t == tick and not was_model and (model(e) or e.delivery.chain_immediately))
-                for t, was_model in (done[dep] for dep in e.after)
-            )
+            return schedule.ready(ident, done, tick)
 
         def begin(ident):
             e = source.events[ident]
             opening = e.window not in runtime.live
             if opening:
-                index = runtime.open(e.window, model(e))
+                index = runtime.open(e.window, is_model_event(e))
                 header = self.header(source, e.window, runtime.instances[index].slot)
             else:
                 header = []
             body = self.event_tokens(e, runtime)
             if getattr(e, "replace_body", False) and not any(t.control != "eos" for t in body):
                 raise CompileError("Replacement must encode nonempty content")
-            running[ident] = [header + body if model(e) else body, opening, header]
+            running[ident] = [header + body if is_model_event(e) else body, opening, header]
             pending.remove(ident)
 
         while pending or running:
@@ -422,11 +416,13 @@ class GraphCompiler:
             busy = set()
             # External chains are consumed in dependency order, irrespective of map order.
             while True:
-                candidates = sorted(i for i in pending if not model(source.events[i]) and ready(i))
+                candidates = sorted(
+                    i for i in pending if not is_model_event(source.events[i]) and ready(i)
+                )
                 progressed = False
                 for ident in sorted(set(running) | set(candidates)):
                     e = source.events[ident]
-                    if model(e) or e.window in busy:
+                    if is_model_event(e) or e.window in busy:
                         continue
                     if ident in pending:
                         begin(ident)
@@ -459,7 +455,9 @@ class GraphCompiler:
             busy = set()  # Input streaming does not suppress writable-window NOOP decisions.
             # A first agent write consumes Available; other first writes wait a tick.
             opening_used = False
-            for ident in sorted(i for i in pending if model(source.events[i]) and ready(i)):
+            for ident in sorted(
+                i for i in pending if is_model_event(source.events[i]) and ready(i)
+            ):
                 e = source.events[ident]
                 if e.window not in runtime.live:
                     if opening_used:
@@ -468,7 +466,7 @@ class GraphCompiler:
                 begin(ident)
             for ident in sorted(list(running)):
                 e = source.events[ident]
-                if not model(e):
+                if not is_model_event(e):
                     continue
                 tokens, opening, header = running[ident]
                 if e.window in busy:

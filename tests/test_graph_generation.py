@@ -3,8 +3,10 @@
 import asyncio
 import copy
 import json
+import re
 from uuid import uuid4
 
+import compact_spec
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,6 +22,8 @@ from trajectory_remix.graph.studio_api import create_studio_app
 
 
 def settings(**options):
+    if options.get("fast") is False:
+        options.setdefault("critical", False)
     return dict(
         endpoints={
             k: dict(url="http://127.0.0.1:1/v1", model=k, retries=0) for k in ("g", "f", "c")
@@ -78,21 +82,6 @@ def plan():
     }
 
 
-def report(payload, status="pass", source_ids=()):
-    schema = payload["schema"]
-    if payload["operation"] == "repair":
-        schema = schema["oneOf"][2]["properties"]["review"]
-    return dict(
-        items={
-            key: dict(
-                status=status, evidence="Observed causal evidence.", event_ids=list(source_ids)
-            )
-            for key in schema["properties"]["items"]["properties"]
-        },
-        summary="offline fixture",
-    )
-
-
 DRAFT = "Working notes. " * 20
 
 
@@ -103,28 +92,38 @@ def spec(**changes):
             dict(id="room", purpose="chatroom", writable=False),
             dict(id="notes", purpose="notes", writable=True),
             dict(id="w1", purpose="reasoning", writable=True),
-            dict(id="w2", purpose="reasoning", writable=True),
+            dict(id="w2", purpose="tool", writable=True),
+            dict(id="ack_request", purpose="tool", writable=True),
+            dict(id="tell_request", purpose="tool", writable=True),
         ],
         events=[
             dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
             dict(
-                id="ack", kind="call", window="w1", after=["ask"], tool="chat",
-                arguments={"content": "Sure, checking now."},
+                id="ack", kind="call", window="ack_request", after=["ask"], tool="chat",
+                arguments={"content": "Sure, checking now."}, close=True,
             ),
-            dict(id="plan", kind="think", window="w1", after=["ack"], content="Read it."),
+            dict(id="plan", kind="think", window="w1", after=["ack"], content="Read it.", close=True),
             dict(
-                id="look", kind="call", window="w1", after=["plan"], tool="read",
-                arguments={"path": "a.md"}, close=True,
+                id="look", kind="call", window="w2", after=["plan"], tool="read",
+                arguments={"path": "a.md"},
             ),
             dict(id="got", kind="result", window="w2", after=["look"], content="A says yes."),
             dict(id="note", kind="think", window="notes", after=["got"], content="A: yes."),
+            dict(id="close_read", kind="think", window="w2", after=["note"], content="", close=True),
             dict(
-                id="tell", kind="call", window="w2", after=["note"], tool="chat",
+                id="tell", kind="call", window="tell_request", after=["note"], tool="chat",
                 arguments={"content": "A says yes."}, close=True,
             ),
         ],
     )  # fmt: skip
     body.update(changes)
+    return body
+
+
+def tangled_spec():
+    body = spec()
+    # The result and call write to one window without a causal order.
+    body["events"][4].update(after=["plan"], call="look")
     return body
 
 
@@ -135,14 +134,17 @@ def chat_spec():
         windows=[
             dict(id="room", purpose="chatroom", writable=False),
             dict(id="w1", purpose="reasoning", writable=True),
+            dict(id="ack_request", purpose="tool", writable=True),
         ],
         events=[
             dict(id="ask", kind="user", window="room", after=[], content="Hi", speaker="Ana"),
-            dict(id="think", kind="think", window="w1", after=["ask"], content="Reply."),
+            dict(
+                id="think", kind="think", window="w1", after=["ask"], content="Reply.", close=True
+            ),
             dict(
                 id="ack",
                 kind="call",
-                window="w1",
+                window="ack_request",
                 after=["think"],
                 tool="chat",
                 arguments={"content": "Hello!"},
@@ -152,10 +154,91 @@ def chat_spec():
     )
 
 
+def tool_message(*calls):
+    return dict(
+        role="assistant",
+        content=None,
+        tool_calls=[
+            dict(
+                id=f"fixture-{i}",
+                type="function",
+                function=dict(name=name, arguments=json.dumps(args)),
+            )
+            for i, (name, args) in enumerate(calls)
+        ],
+    )
+
+
+def viewed_graph(payload):
+    """The latest view_graph result in a native conversation, or None before one."""
+    names, graph = {}, None
+    for message in payload["messages"]:
+        for call in message.get("tool_calls") or []:
+            names[call["id"]] = call["function"]["name"]
+        if message["role"] == "tool" and names.get(message["tool_call_id"]) == "view_graph":
+            graph = json.loads(message["content"])
+    return graph
+
+
+def offered_tools(payload):
+    """The project tool catalogue a Draft or Assembly user message lists."""
+    text = payload["messages"][1]["content"]
+    block = re.search(r"Project tools:\n```json\n(.*?)\n```", text, re.S)
+    return json.loads(block.group(1))
+
+
+def native_report(payload, event_ids, status="pass", graph=None):
+    parameters = next(
+        t["function"]["parameters"] for t in payload["tools"] if t["function"]["name"] == "signoff"
+    )
+    criteria = parameters["properties"]["items"]["properties"]
+    items = {
+        key: dict(status=status, evidence="Observed causal evidence.", event_ids=list(event_ids))
+        for key in criteria
+    }
+    if "causal_claims" in criteria.get("core.causal_evidence", {}).get("properties", {}):
+        graph = (graph or viewed_graph(payload) or {}).get("events", {})
+        items["core.causal_evidence"]["causal_claims"] = (
+            [dict(consumer_event_id="note", evidence_event_ids=["got"])]
+            if "note" in graph and "got" in graph
+            else []
+        )
+    return "signoff", dict(status="complete", summary="offline fixture", items=items)
+
+
+def native_assembly(payload, ident, body=None, *, signoff=True):
+    catalogue = offered_tools(payload)
+    body = body or (spec() if "read" in catalogue else chat_spec())
+    source = compact_spec.build(
+        body, {"id": ident, "format": "kidra-trajectory-graph/1"}, catalogue, 0
+    )
+    calls = [("post_tool_schema", {"tool_ids": body["tools"]})]
+    calls.extend(
+        ("configure_window", {"window_id": window, **definition})
+        for window, definition in source["windows"].items()
+        if window != "tools"
+    )
+    calls.extend(
+        ("create_event", {"event_id": event, **definition})
+        for event, definition in source["events"].items()
+        if event != "tools"
+    )
+    if signoff:
+        calls.append(native_report(payload, list(source["events"])[-2:]))
+    return tool_message(*calls)
+
+
 class Fake:
     def __init__(self):
         self.calls = []
         self.responses = []
+
+    def graph(self, ticket):
+        """The reviewed graph, read from the store when service() attached one."""
+        store = getattr(self, "store", None)
+        if store is None:
+            return None
+        return {"events": dict.fromkeys(store.read(ticket.trajectory_id).source.events)}
 
     async def __call__(self, ticket):
         self.calls.append(copy.deepcopy(ticket))
@@ -164,19 +247,17 @@ class Fake:
             value = self.responses.pop(0)
             if callable(value):
                 value = value(ticket)
-            return {"output": value, "model": "actual-fixture"}
-        if p["operation"] == "draft":
-            body = {"draft": DRAFT}
-        elif p["operation"] == "assembly":
-            offered = p["schema"]["properties"]["tools"]["items"]["enum"]
-            body = spec() if "read" in offered else chat_spec()
-        elif p["operation"] == "assembly_fix":
-            body = {"action": "done"}
-        elif p["operation"] == "repair":
-            body = {"action": "verdict", "review": report(p)}
-        else:
-            body = report(p)
-        return {"output": body, "model": "actual-fixture"}
+            return {"message" if "tools" in p else "output": value, "model": "actual-fixture"}
+        if "tools" in p:
+            if p["operation"] == "assembly":
+                message = native_assembly(p, ticket.trajectory_id)
+            elif (graph := viewed_graph(p) or self.graph(ticket)) is None:
+                message = tool_message(("view_graph", {}))
+            else:
+                message = tool_message(native_report(p, list(graph["events"])[-1:], graph=graph))
+            return {"message": message, "model": "actual-fixture"}
+        assert p["operation"] == "draft", "only Draft uses a JSON reply"
+        return {"output": {"draft": DRAFT}, "model": "actual-fixture"}
 
 
 def service(tmp_path, fake=None, **opts):
@@ -184,6 +265,7 @@ def service(tmp_path, fake=None, **opts):
     jobs = JobService(store, active_limit=2)
     sampler, bulk = SamplerService(jobs), BulkService(jobs)
     fake = fake or Fake()
+    fake.store = store  # The default review reads its graph as view_graph would.
     return GenerationService(jobs, sampler, bulk, fake), fake
 
 
@@ -269,7 +351,7 @@ def test_causal_frontiers_replacement_close_parallel(tmp_path):
 
 @pytest.mark.asyncio
 async def test_generation_format_failure_no_replacement(tmp_path):
-    gen, fake = service(tmp_path, fast=False, repair=False, format_retries=1)
+    gen, fake = service(tmp_path, fast=False, format_retries=1)
     fake.responses = [{"wrong": "x"}, {"wrong": "x"}]
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
@@ -284,7 +366,7 @@ async def test_malformed_review_pauses_without_verdict(tmp_path):
     gen, fake = service(tmp_path, format_retries=0)
     fake.responses = [
         {"draft": DRAFT},
-        spec(),
+        lambda t: native_assembly(t.payload, t.trajectory_id),
         {"items": {}},
     ]
     job = gen.start([{"seed": 137}], {})
@@ -299,7 +381,7 @@ async def test_malformed_review_pauses_without_verdict(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path):
+async def test_a_review_edits_in_one_session_and_records_one_verdict(tmp_path):
     gen, fake = service(tmp_path, critical=False)
     # Start from a detached failed source for a compact manual session.
     source = dict(
@@ -311,17 +393,11 @@ async def test_continuing_repair_keeps_patches_and_one_verdict(tmp_path):
     )
     record = gen.store.create(source)
     fake.responses = [
-        lambda t: {
-            "action": "patch",
-            "event_id": "x",
-            "expected_source_hash": t.payload["source_hash"],
-            "patch": {"content": "repaired"},
-        },
-        lambda t: {"action": "inspect", "event_id": "x"},
-        lambda t: {
-            "action": "verdict",
-            "review": report(t.payload, "pass", ["x"]),
-        },
+        tool_message(
+            ("update_event", {"event_id": "x", "content": "repaired", "close_window": True})
+        ),
+        tool_message(("view_event", {"event_id": "x"})),
+        lambda t: tool_message(native_report(t.payload, ["x"])),
     ]
     job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
     await finish(gen, job)
@@ -359,14 +435,7 @@ def test_manual_detach_settles_progress_history_and_fences_late_result(tmp_path,
     if repaired:
         gen.jobs.request_result(
             ticket,
-            {
-                "output": {
-                    "action": "patch",
-                    "event_id": "x",
-                    "expected_source_hash": ticket.payload["source_hash"],
-                    "patch": {"content": "repaired"},
-                }
-            },
+            {"message": tool_message(("update_event", {"event_id": "x", "content": "repaired"}))},
         )
         gen.consume(ticket)
         gen._prepare(job, ident)
@@ -383,7 +452,7 @@ def test_manual_detach_settles_progress_history_and_fences_late_result(tmp_path,
     assert gen.store.read(ident).source.metadata["stage"] == -1  # No invented verdict.
     with pytest.raises(Fenced):
         gen.jobs.request_result(
-            ticket, {"output": {"action": "verdict", "review": report(ticket.payload)}}
+            ticket, {"message": tool_message(native_report(ticket.payload, ["x"]))}
         )
     with pytest.raises(Fenced):
         gen.jobs.accept(job, ticket.epoch, ident, "late", current.source, current.revision, {})
@@ -412,7 +481,7 @@ def test_manual_detach_keeps_other_items_running_and_cannot_be_resettled(tmp_pat
                 metadata={"stage": 0},
             )
         )
-    job = gen.start_review({}, repair=False)
+    job = gen.start_review({})
     gen._manual_admit(job)
     first, second = gen._owners(job)
     gen._prepare(job, first)
@@ -422,7 +491,9 @@ def test_manual_detach_keeps_other_items_running_and_cannot_be_resettled(tmp_pat
     assert gen.jobs.inspect(job)["progress"] == 1
     assert gen._owners(job) == [second]
     with pytest.raises(Fenced):
-        gen.jobs.request_result(ticket, {"output": report(ticket.payload)})
+        gen.jobs.request_result(
+            ticket, {"message": tool_message(native_report(ticket.payload, []))}
+        )
     # A concurrent admission/driver failure must not overwrite the terminal item.
     with gen.store.connect() as db:
         item = next(i for i in gen.bulk.results(job) if i["trajectory_id"] == first)
@@ -444,15 +515,15 @@ async def test_manual_force_staleness_skips_locks(tmp_path):
         dict(
             format="kidra-trajectory-graph/1",
             id=str(uuid4()),
-            windows={},
-            events={},
+            windows={"notes": dict(purpose="notes", agent_writable=True)},
+            events={"note": dict(kind="agent_text", window="notes", content="Ready")},
             metadata={"stage": 3},
         )
     )
     job = gen.start_review({})
     await finish(gen, job)
     assert gen.bulk.results(job)[0]["state"] == "skipped" and not fake.calls
-    job = gen.start_review({}, mode="force_fast", repair=False)
+    job = gen.start_review({}, mode="force_fast")
     await finish(gen, job)
     source = gen.store.read(record.source.id).source
     assert source.metadata["stage"] == 3 and source.metadata["evaluations"][-1]["tier"] == "fast"
@@ -532,7 +603,6 @@ def test_rest_generation_and_manual_popup_contract(tmp_path):
                 "arguments": {
                     "trajectory": a["trajectory_id"],
                     "expected_revision": record["revision"],
-                    "repair": False,
                 },
             },
         )
@@ -550,7 +620,7 @@ def test_rest_generation_and_manual_popup_contract(tmp_path):
         )
         bulk = client.post(
             "/api/v1/bulk",
-            json={"query": {"stage": 1}, "action": "review_repair", "config": {"repair": False}},
+            json={"query": {"stage": 1}, "action": "review_repair", "config": {}},
         )
         assert bulk.status_code == 202, bulk.text
         bulk_job = bulk.json()["job_id"]
@@ -623,28 +693,57 @@ async def test_transport_exhaustion_pause_and_cancel_no_quality_failure(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_automatic_fast_failure_repair_then_critical(tmp_path):
+async def test_a_failing_signoff_keeps_the_review_fixing_then_critical(tmp_path):
     gen, fake = service(tmp_path)
     fake.responses = [
         {"draft": DRAFT},
-        spec(),
-        lambda t: report(t.payload, "fail"),
-        lambda t: {"action": "verdict", "review": report(t.payload, "pass")},
+        lambda t: native_assembly(t.payload, t.trajectory_id),
+        lambda t: tool_message(native_report(t.payload, ["plan"], "fail")),
+        lambda t: tool_message(native_report(t.payload, ["plan"])),
     ]
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     assert source.metadata["stage"] == 2
     assert [(r["tier"], r["operation"], r["verdict"]) for r in source.metadata["evaluations"]] == [
-        ("fast", "review", "fail"),
-        ("fast", "repair", "pass"),
+        ("fast", "review", "pass"),
         ("critical", "review", "pass"),
     ]
+    refused = json.loads(fake.calls[3].payload["messages"][-2]["content"])
+    assert refused["accepted"] is False and "Continue fixing" in refused["error"]
+    assert all(
+        "signoff" in [t["function"]["name"] for t in c.payload["tools"]] for c in fake.calls[1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unfeasible_review_records_a_failed_verdict(tmp_path):
+    gen, fake = service(tmp_path, critical=False)
+    record = gen.store.create(
+        dict(
+            format="kidra-trajectory-graph/1",
+            id=str(uuid4()),
+            windows=plan()["windows"],
+            events={"x": dict(kind="agent_text", window="reason", content="before")},
+            metadata={"stage": 0},
+        )
+    )
+    unfeasible = ("signoff", dict(status="unfeasible", summary="The episode has no request."))
+    fake.responses = [
+        tool_message(("update_event", {"event_id": "x", "content": "after"}), unfeasible)
+    ]
+    job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
+    await finish(gen, job)
+    source = gen.store.read(record.source.id).source
+    assert source.metadata["stage"] == -1 and source.events["x"].content == "after"
+    (evaluation,) = source.metadata["evaluations"]
+    assert evaluation["verdict"] == "fail" and evaluation["unfeasible"] is True
+    assert evaluation["summary"] == "The episode has no request."
 
 
 @pytest.mark.asyncio
 async def test_invalid_review_evidence_never_publishes_pass(tmp_path):
-    gen, fake = service(tmp_path, format_retries=0)
+    gen, fake = service(tmp_path, max_authoring_exchanges=1)
     record = gen.store.create(
         dict(
             format="kidra-trajectory-graph/1",
@@ -654,12 +753,13 @@ async def test_invalid_review_evidence_never_publishes_pass(tmp_path):
             metadata={"stage": 0},
         )
     )
-    fake.responses = [lambda t: report(t.payload, "pass", ["missing-event"])]
-    job = gen.start_review({}, repair=False)
+    fake.responses = [lambda t: tool_message(native_report(t.payload, ["missing-event"]))]
+    job = gen.start_review({})
     await finish(gen, job)
     source = gen.store.read(record.source.id).source
     assert source.metadata["stage"] == 0 and "evaluations" not in source.metadata
-    assert gen.jobs.inspect(job)["state"] == "paused"
+    assert gen.jobs.inspect(job)["state"] == "completed"
+    assert source.metadata["review_outcomes"][-1]["outcome"] == "exchange_limit"
 
 
 @pytest.mark.asyncio
@@ -677,13 +777,8 @@ async def test_manual_repair_structurally_broken_draft(tmp_path):
         )
     )
     fake.responses = [
-        lambda t: {
-            "action": "patch",
-            "event_id": "x",
-            "expected_source_hash": t.payload["source_hash"],
-            "patch": {"after": []},
-        },
-        lambda t: {"action": "verdict", "review": report(t.payload, "pass", ["x"])},
+        tool_message(("update_event", {"event_id": "x", "after": [], "close_window": True})),
+        lambda t: tool_message(native_report(t.payload, ["x"])),
     ]
     job = gen.start_review({}, trajectory=record.source.id, expected_revision=record.revision)
     await finish(gen, job)

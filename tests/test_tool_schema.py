@@ -4,9 +4,8 @@ import json
 
 import pytest
 from test_graph_compiler import compile_source, event, source
-from test_graph_generation import service, spec
+from test_graph_generation import service
 
-from trajectory_remix.graph import compact_spec
 from trajectory_remix.graph.models import GraphSource, ProjectSettings, ToolDefinition
 
 
@@ -40,16 +39,6 @@ def test_project_chance_defaults_to_half_and_rejects_out_of_range():
     assert ProjectSettings().tool_schema_extra_chance == 0.5
     with pytest.raises(ValueError):
         ProjectSettings(tool_schema_extra_chance=1.5)
-
-
-def test_builder_records_extras_and_chance_zero_disables_them():
-    tools = {n: ToolDefinition(name=n).model_dump(mode="json") for n in ("chat", "read", "a", "b")}
-    base = dict(format="kidra-trajectory-graph/1", id="7d3f8a2e-1b4c-4e5f-9a6b-0c1d2e3f4a5b")
-    none = compact_spec.build(spec(), base, tools, 0)["events"]["tools"]
-    every = compact_spec.build(spec(), base, tools, 1)["events"]["tools"]
-    assert none["kind"] == every["kind"] == "tool_schema"
-    assert none["extra_tools"] == []
-    assert set(every["extra_tools"]) == {"a", "b"} - set(spec()["tools"])
 
 
 def test_listing_route_uses_the_project_chance_when_none_is_sent(tmp_path):
