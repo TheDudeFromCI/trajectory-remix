@@ -14,7 +14,18 @@ def test_message_opens_with_the_instructions_and_keeps_the_reply_contract():
     comments = [dict(id="c1", target=dict(kind="trajectory", id="t"), body="Fix it", replies=[])]
     text = endpoint_prompts.assistant_user("Be terse.", comments, "t")
     assert text.startswith("Be terse.\n\n| ID | Target |")
-    assert text.endswith(endpoint_prompts.ASSIST_AFTER)
+    assert text.endswith("Trajectory Id: `t`"), "nothing fixed follows the table"
+
+
+def test_default_asks_for_replies_and_announces_later_comments():
+    text = prompt_defaults.assistant()
+    assert "`reply` tool" in text and "Further user comments will be appended" in text
+
+
+def test_the_earlier_short_default_upgrades_to_the_current_one():
+    old = "Please address the following issues:"
+    assert GenerationPrompts(assistant=old).assistant == prompt_defaults.assistant()
+    assert GenerationPrompts(assistant="Custom.").assistant == "Custom."
 
 
 def test_editing_them_leaves_the_generation_prompt_version_alone(tmp_path):

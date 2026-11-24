@@ -6,7 +6,7 @@ const PROMPTS = [
   ['authoring', 'Authoring prompt', 'How to use the authoring tools. Assembly, review and Assistant sessions see it after the agent prompt.'],
   ['draft', 'Draft instructions', 'The Draft task: write plain-prose working notes for the whole episode from the sampled proposal.'],
   ['assembly', 'Assembly instructions', 'The Assembly task: build the trajectory from the Draft with the authoring tools.'],
-  ['assistant', 'Assistant instructions', 'The Assistant task: opens each Send to agent message, before the comments table. The reply instructions after the table are fixed.'],
+  ['assistant', 'Assistant instructions', 'The Assistant task: opens each Send to agent message, before the comments table. Keep the instruction to answer each comment with the `reply` tool.'],
 ];
 
 export function renderPromptSettings(target, {current, write, error, render, loadDefault, actions = null}) {

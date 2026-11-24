@@ -15,10 +15,6 @@ REVIEW = (
     "Please review the trajectory to ensure it meets the qualifications in this checklist."
     " Repair any issues, and call `signoff` when you're done."
 )
-ASSIST_AFTER = (
-    "After addressing the listed issues, reply to the comments using the `reply` tool."
-    " Further user comments will be appended to this conversation."
-)
 FOLLOW_UP = (
     "The user sent more comments. The trajectory may have changed since your last turn,"
     " so view it again before editing."
@@ -118,5 +114,5 @@ def comment_table(comments):
 
 def assistant_user(instruction, comments, trajectory_id, *, follow_up=False):
     parts = [FOLLOW_UP] if follow_up else []
-    parts += [instruction, comment_table(comments), _identity(trajectory_id), ASSIST_AFTER]
+    parts += [instruction, comment_table(comments), _identity(trajectory_id)]
     return "\n\n".join(parts)
