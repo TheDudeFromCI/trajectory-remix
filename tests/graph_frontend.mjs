@@ -145,6 +145,11 @@ $('window-id').value='b'; $('window-id').dispatchEvent(new Event('change'));
 assert.equal($('window-left-open').checked,false);
 await ui.restore(true); assert.equal(ui.record.source.windows.a.intentionally_left_open ?? false,false);
 await ui.restore(false); assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
+// Clicking a window header jumps the event panel to the latest event that edited it (buttons excluded).
+const headModel={tokens:[{control:'ctx_begin'},{text:'x',event:'a'},{text:'y',event:'b'}],closed:false};
+let head=ui.windowCard('a',headModel).querySelector('.window-card-head'); head.click(); assert.equal(ui.event,'b');
+ui.selectEvent('a'); head.querySelector('button').click(); assert.equal(ui.event,'a');
+head=ui.windowCard('a',{tokens:[{text:'x',event:'a'},{text:'y',event:'a:echo'},{text:'z'}],closed:false}).querySelector('.window-card-head'); head.click(); assert.equal(ui.event,'a');
 // Deleting the selected trajectory must clear the event panel immediately.
 await ui.select(ack.source.id); ui.selectEvent('a'); assert.notEqual($('event-content').value,'');
 globalThis.confirm=()=>true; window.confirm=()=>true;
