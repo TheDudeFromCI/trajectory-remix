@@ -409,7 +409,7 @@ class GenerationService:
                     segmented=segmented,
                 )
                 if segmented:
-                    scaling.begin_pass(source, cp, session)
+                    scaling.begin_pass(source, cp, session, settings)
                 cp["authoring_session"] = session
             tier = draft_assembly.role(settings, "assembly") if phase == "event" else cp["tier"]
             payload = authoring_session.payload(session)

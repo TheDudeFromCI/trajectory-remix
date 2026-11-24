@@ -82,7 +82,7 @@ class Provider:
                     kind="agent_text",
                     window=f"reason-{i}",
                     after=[f"doc-{i}"],
-                    content="An agent decision with a deliberately unverified detail. " * 18,
+                    content="An agent decision with a deliberately unverified detail. " * 28,
                     close_window=True,
                 ),
             ),
@@ -102,7 +102,8 @@ class Provider:
                     "update_event",
                     {
                         "event_id": "think-1",
-                        "content": "Grounded in the earlier document.",
+                        "content": "Compare the current observation with the earlier document. "
+                        * 28,
                         "after": ["doc-0", "doc-1"],
                     },
                 )

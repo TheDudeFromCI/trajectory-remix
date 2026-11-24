@@ -7,6 +7,7 @@ from copy import deepcopy
 from pydantic import Field
 
 from . import endpoint_prompts
+from .agent_share import MIN_AGENT_SHARE
 from .compiler_schedule import is_model_event
 from .models import DTO, GraphSource, WindowReference, canonical
 
@@ -200,7 +201,7 @@ def section(source, index, *, with_draft):
     return result
 
 
-def begin_pass(source, cp, session):
+def begin_pass(source, cp, session, settings):
     """Add the current section's bounded brief and survive a transcript reset."""
     layout = source.metadata["scaling"]
     state = cp.setdefault("scale_pass", dict(index=0, reports=[], exchanges=0, resets=0))
@@ -266,6 +267,12 @@ def begin_pass(source, cp, session):
         "Checkpoint summaries describe the graph "
         "for the author and never replace evidence the in-episode agent needs to see."
     )
+    if "low_agent_share" not in settings.disabled_warnings:
+        task += (
+            f" Keep at least {MIN_AGENT_SHARE:.2%} of the complete graph's characters as "
+            "agent-generated characters. Plan room for substantive agent decisions, tool "
+            "arguments, and messages as you add external evidence."
+        )
     if not final:
         task += (
             " If more work remains than fits in this conversation, checkpoint accepted progress "
