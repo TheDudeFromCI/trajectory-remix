@@ -5,6 +5,7 @@ import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
 import {AssistantStatus, isAssistantOwner} from './assistant-indicator.js';
+import {AssistantQueue} from './assistant-queue.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
 import {duplicateTrajectory} from './duplicate.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
@@ -654,9 +655,24 @@ export class StudioUI {
     if (!this.settings.endpoint_roles?.assistant) throw new Error('Assign the Assistant endpoint role in Project Settings first.');
     if (this.record?.owner) throw new Error('A job is working on this trajectory. Wait for it to settle or detach it.');
     if (this.isDirty()) throw new Error('Save or reload your draft first, so the agent edits what you see.');
+    this.assistantQueue.clear(this.id); // Before the call, so a failed send isn't retried on every poll.
     const r = await api(`/trajectories/${this.id}/assistant`, 'POST', {expected_revision: this.record.revision});
     this.ownedBulk.add(r.job_id);
     message(`Sent to ${this.settings.endpoint_roles.assistant}. Follow it in Jobs; answers appear here.`);
+  }
+  /** Auto-send: while a job owns the trajectory, queue the send instead of refusing it. */
+  async autoSendToAssistant() {
+    if (this.id && this.record?.owner) {
+      this.assistantQueue.hold(this.id);
+      return message('A job is working on this trajectory. Your comment is queued and goes to the assistant when it settles.');
+    }
+    await this.sendToAssistant();
+  }
+  /** Send a queued trajectory once its owner is gone and the draft is saved. */
+  async flushAssistantQueue() {
+    const id = this.id;
+    if (!id || !this.assistantQueue.ready(id, {owner: this.record?.owner, dirty: this.isDirty(), comments: this.comments.items, auto: this.prefs.autoSendComments === true})) return;
+    await this.sendToAssistant();
   }
   async openGenerationSettings() {
     await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
@@ -827,8 +843,9 @@ export class StudioUI {
     // Started elsewhere (e.g. the Sampler): track it without leaving the current view.
     document.addEventListener('graph-job-started', e => this.jobsView.select(e.detail).then(() => message('Job started. Follow it in Jobs or from the status bar.')).catch(message));
     bindViewTabs();
+    this.assistantQueue = new AssistantQueue();
     this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
-      autoSend: () => this.prefs.autoSendComments === true, onOpened: () => this.sendToAssistant(),
+      autoSend: () => this.prefs.autoSendComments === true, onOpened: () => this.autoSendToAssistant(),
       els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
       onChange: () => {
         if (this.draft) this.renderTimeline();
@@ -925,6 +942,7 @@ export class StudioUI {
     }
     await this.refreshSelected();
     if (this.id) await this.comments.load(this.id);
+    await this.flushAssistantQueue();
     if (currentView() === 'jobs-view') await this.jobsView.renderList();
   }
   async loadMetrics() {
