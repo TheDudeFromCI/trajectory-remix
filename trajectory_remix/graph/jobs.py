@@ -835,10 +835,11 @@ class JobService:
     def summaries(self, *, limit, offset):
         with self.store.connect() as db:
             db.execute("BEGIN")
+            now = self.clock()
             rows = [
-                dict(row)
+                {**dict(row), "age": max(0.0, now - row["created"])}  # Seconds, server clock.
                 for row in db.execute(
-                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact,created FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
                     (limit, offset),
                 )
             ]

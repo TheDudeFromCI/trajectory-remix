@@ -76,7 +76,9 @@ def reply_tool(comment_ids):
 
 def begin(source, settings, comments, prior=None):
     """A new session, or the prior conversation with the new comments appended."""
-    user = endpoint_prompts.assistant_user(comments, source.id, follow_up=bool(prior))
+    user = endpoint_prompts.assistant_user(
+        settings.prompts.assistant, comments, source.id, follow_up=bool(prior)
+    )
     if prior:
         messages = [*prior, dict(role="user", content=user)]
     else:

@@ -1,9 +1,9 @@
-/* Review Settings → export/import a shareable pack: the four prompts plus every checklist item. */
+/* Review Settings → export/import a shareable pack: the prompts plus every checklist item. */
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const FORMAT = 'trajectory-remix-review-pack', VERSION = 1;
-const PROMPT_KEYS = ['actor', 'authoring', 'draft', 'assembly'], GROUPS = ['core', 'critical'];
-// Packs exported before the authoring prompt existed import without one.
-const OPTIONAL_PROMPTS = new Set(['authoring']);
+const PROMPT_KEYS = ['actor', 'authoring', 'draft', 'assembly', 'assistant'], GROUPS = ['core', 'critical'];
+// Packs exported before the authoring or Assistant prompt existed import without them.
+const OPTIONAL_PROMPTS = new Set(['authoring', 'assistant']);
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
 const isObject = v => v && typeof v === 'object' && !Array.isArray(v);
 

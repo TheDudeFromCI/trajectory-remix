@@ -4,6 +4,7 @@
 <meta name="remix-token" content="__REMIX_TOKEN__"><title>Trajectory Remix</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/graph.css">
+<link rel="stylesheet" href="/static/window-markdown.css">
 <link rel="stylesheet" href="/static/sampler.css">
 <link rel="stylesheet" href="/static/project-settings.css">
 <script type="module" src="/static/shell.js"></script>
@@ -264,6 +265,7 @@
           <button id="comment-send" class="sm" disabled data-tip="The Assistant endpoint (Project Settings) fixes what the open comments describe, then resolves or replies to each">Send open comments to agent</button>
         </div>
         <div id="comment-list" class="comment-list"></div>
+        <div id="assistant-status" class="assistant-working" hidden></div>
       </div>
 
       <div role="tabpanel" id="panel-json" aria-labelledby="tab-json" class="panel-body" hidden>

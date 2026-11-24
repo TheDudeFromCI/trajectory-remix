@@ -7,7 +7,7 @@ import pytest
 from test_graph_generation import Fake, finish, plan, settings, tool_message
 from test_graph_studio import client, create  # noqa: F401  (pytest fixture)
 
-from trajectory_remix.graph import assistant, assistant_memory, endpoint_prompts
+from trajectory_remix.graph import assistant, assistant_memory, endpoint_prompts, prompt_defaults
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.comments import CommentService, NewComment, NewReply
 from trajectory_remix.graph.generation import GenerationService
@@ -91,11 +91,11 @@ async def test_assistant_edits_then_replies_with_native_tools(tmp_path):
     names = [tool["function"]["name"] for tool in first.payload["tools"]]
     assert "reply" in names and "update_event" in names and "signoff" not in names
     task = first.payload["messages"][1]["content"]
-    assert task.startswith("Please address the following issues:\n\n| ID | Target |")
+    assert task.startswith(prompt_defaults.assistant() + "\n\n| ID | Target |")
     assert f"| `{fixed}` | event `x` | Content is wrong. | - |" in task
     assert "Is this \\| the right<br>window?" in task and "user: I think reason is wrong." in task
     assert f"Trajectory Id: `{record.source.id}`" in task
-    assert task.endswith("Further user comments will be appended to this conversation.")
+    assert task.endswith(f"Trajectory Id: `{record.source.id}`")
     states = {c["id"]: c for c in gen.comments.for_trajectory(record.source.id)}
     assert states[fixed]["status"] == "addressed", "only the user resolves"
     assert states[fixed]["replies"][-1]["body"] == "Rewrote x."

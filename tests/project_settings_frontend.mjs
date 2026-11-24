@@ -124,11 +124,14 @@ window.happyDOM.abort();
 // Review pack export/import
 {
   const {buildPack, parsePack} = await import('../trajectory_remix/static/review-pack.js');
-  const src = {prompts:{actor:'A',authoring:'T',draft:'D',assembly:'S'},review_checklists:{core:{evidence:{text:'E',allow_not_applicable:true}},critical:{deep:{text:'X'}}}};
+  const src = {prompts:{actor:'A',authoring:'T',draft:'D',assembly:'S',assistant:'I'},review_checklists:{core:{evidence:{text:'E',allow_not_applicable:true}},critical:{deep:{text:'X'}}}};
   const pack = buildPack(src);
   assert.equal(pack.prompts.authoring,'T');
   const older = structuredClone(pack); delete older.prompts.authoring;  // Exported before the authoring prompt.
-  assert.deepEqual(parsePack(JSON.stringify(older)).prompts,{actor:'A',draft:'D',assembly:'S'});
+  assert.deepEqual(parsePack(JSON.stringify(older)).prompts,{actor:'A',draft:'D',assembly:'S',assistant:'I'});
+  assert.equal(pack.prompts.assistant,'I');
+  const oldest = structuredClone(pack); delete oldest.prompts.assistant;  // Exported before the Assistant instructions.
+  assert.deepEqual(parsePack(JSON.stringify(oldest)).prompts,{actor:'A',authoring:'T',draft:'D',assembly:'S'});
   assert.deepEqual(pack.review_checklists.critical.deep,{text:'X',allow_not_applicable:false});
   assert.deepEqual(parsePack(JSON.stringify(pack)),{prompts:pack.prompts,review_checklists:pack.review_checklists});
   assert.throws(()=>parsePack('nope'),/not valid JSON/);

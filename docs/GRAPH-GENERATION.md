@@ -168,6 +168,7 @@ prompts**:
 | **Authoring prompt** | Assembly, Fast and Critical Review, Assistant | How to use the authoring tools, like a small skill file. |
 | **Draft instructions** | Draft | The Draft task: how to write the working notes. |
 | **Assembly instructions** | Assembly | The Assembly task: how to turn the notes into a graph. |
+| **Assistant instructions** | Assistant | The Assistant task, placed before the comments table, including how to answer with `reply`. |
 
 **Load Default Prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
 you to confirm; nothing is saved until you choose **Save settings**. Runs freeze the prompts
@@ -192,7 +193,7 @@ tools add the **Authoring prompt** after it. The task and its data go in the fir
 | **Draft** | Agent prompt | Draft instructions, then the sampled proposal and the project tools as JSON. |
 | **Assembly** | Agent and authoring prompts | Assembly instructions, the trajectory ID, the project tools and the Draft. |
 | **Fast / Critical Review** | Agent and authoring prompts | A request to review the trajectory against the checklist, repair any issues and call `signoff`; the review checklist, the objective and sampled targets, the project tools, and the trajectory ID. |
-| **Assistant** | Agent and authoring prompts | The open comments as a table with their IDs and threads, the trajectory ID, and a request to answer each with the `reply` tool. |
+| **Assistant** | Agent and authoring prompts | Assistant instructions (which ask for a `reply` to each comment), then the open comments as a table with their IDs and threads, and the trajectory ID. A follow-up send starts with a note that the trajectory may have changed. |
 
 - Sessions with tools start from the trajectory ID and read the graph with `view_graph`,
   `view_diagnostics`, `view_event` and `view_window`. The criteria are also in the `signoff`

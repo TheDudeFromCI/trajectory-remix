@@ -825,6 +825,7 @@ class GenerationService:
             finished = False
         else:
             cp["errors"] = 0
+            self._log_assist_tools(ticket.job_id, message)
             source, finished = assistant.step(source, settings, session, message)
         if finished:
             self._assist_finish(ticket, source, cp)
@@ -832,6 +833,11 @@ class GenerationService:
             self._assist_end(ticket.job_id, source, cp, "exchange_limit", ticket)
         else:
             self._save(ticket.job_id, source, cp, ticket=ticket)
+
+    def _log_assist_tools(self, job, message):
+        """One line per tool call; the editor reads them to show "Running <tool>"."""
+        for call in message.get("tool_calls", []):
+            self.jobs.progress(job, f"Assistant tool: {call['function']['name']}")
 
     def _assist_finish(self, ticket, source, cp):
         session = cp.pop("authoring_session")
