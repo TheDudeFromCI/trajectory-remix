@@ -860,6 +860,9 @@ class GenerationService:
 
     def _repair_action(self, ticket, source, cp, body):
         settings = self.settings_for(ticket.job_id)
+        if cp["phase"] == assistant.PHASE:
+            # The editor reads this line to show "Running <tool>" while the assistant works.
+            self.jobs.progress(ticket.job_id, f"Assistant tool: {body['action']}")
         reply = {}
         ident = body.get("event_id", body.get("window_id"))
         try:

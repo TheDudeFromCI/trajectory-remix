@@ -431,10 +431,11 @@ def create_studio_app(
     @router.get("/job-summaries")
     def job_summaries(limit: int = Query(50, ge=1, le=1000), offset: int = Query(0, ge=0)):
         with studio.store.connect() as db:
+            now = studio.jobs.clock()
             return [
-                dict(r)
+                {**dict(r), "age": max(0.0, now - r["created"])}  # Seconds on the server's clock.
                 for r in db.execute(
-                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
+                    "SELECT id,kind,json_extract(config,'$.action') AS action,state,progress,total,artifact,created FROM graph_jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",
                     (limit, offset),
                 )
             ]
