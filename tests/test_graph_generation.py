@@ -82,7 +82,7 @@ def plan():
     }
 
 
-DRAFT = "Working notes. " * 20
+DRAFT = ("Working notes. " * 20).strip()
 
 
 def spec(**changes):
@@ -247,7 +247,7 @@ class Fake:
             value = self.responses.pop(0)
             if callable(value):
                 value = value(ticket)
-            return {"message" if "tools" in p else "output": value, "model": "actual-fixture"}
+            return {"message" if "tools" in p else "text": value, "model": "actual-fixture"}
         if "tools" in p:
             if p["operation"] == "assembly":
                 message = native_assembly(p, ticket.trajectory_id)
@@ -256,8 +256,8 @@ class Fake:
             else:
                 message = tool_message(native_report(p, list(graph["events"])[-1:], graph=graph))
             return {"message": message, "model": "actual-fixture"}
-        assert p["operation"] == "draft", "only Draft uses a JSON reply"
-        return {"output": {"draft": DRAFT}, "model": "actual-fixture"}
+        assert p["operation"] == "draft", "only Draft replies in plain text"
+        return {"text": DRAFT, "model": "actual-fixture"}
 
 
 def service(tmp_path, fake=None, **opts):
@@ -365,7 +365,7 @@ async def test_generation_format_failure_no_replacement(tmp_path):
 async def test_malformed_review_pauses_without_verdict(tmp_path):
     gen, fake = service(tmp_path, format_retries=0)
     fake.responses = [
-        {"draft": DRAFT},
+        DRAFT,
         lambda t: native_assembly(t.payload, t.trajectory_id),
         {"items": {}},
     ]
@@ -546,7 +546,7 @@ async def test_restart_manual_resume_discard_cancel(tmp_path):
     ident = gen.jobs.attempts(job)[0]["trajectory_id"]
     gen._prepare(job, ident)
     ticket = gen.jobs.claim("g")
-    gen.jobs.request_result(ticket, {"output": {"content": "discarded"}})
+    gen.jobs.request_result(ticket, {"text": "discarded"})
     restarted_jobs = JobService(gen.store)
     restarted = GenerationService(
         restarted_jobs, SamplerService(restarted_jobs), BulkService(restarted_jobs), fake
@@ -696,7 +696,7 @@ async def test_transport_exhaustion_pause_and_cancel_no_quality_failure(tmp_path
 async def test_a_failing_signoff_keeps_the_review_fixing_then_critical(tmp_path):
     gen, fake = service(tmp_path)
     fake.responses = [
-        {"draft": DRAFT},
+        DRAFT,
         lambda t: native_assembly(t.payload, t.trajectory_id),
         lambda t: tool_message(native_report(t.payload, ["plan"], "fail")),
         lambda t: tool_message(native_report(t.payload, ["plan"])),
@@ -799,9 +799,7 @@ async def test_openai_transport_mock_complete_invalid_and_context(monkeypatch):
             200,
             json={
                 "model": "actual",
-                "choices": [
-                    {"finish_reason": "stop", "message": {"content": '{"content":"complete"}'}}
-                ],
+                "choices": [{"finish_reason": "stop", "message": {"content": "complete"}}],
             },
         ),
         httpx.Response(
@@ -827,16 +825,15 @@ async def test_openai_transport_mock_complete_invalid_and_context(monkeypatch):
     )
     monkeypatch.setenv("REMIX_API_KEY_FAKE_ENDPOINT", "fixture-key")
     payload = {
-        "operation": "event",
+        "operation": "draft",
         "endpoint_config": {"url": "http://127.0.0.1:1/v1", "model": "requested"},
         "messages": [{"role": "user", "content": "visible only"}],
-        "schema": {"type": "object"},
         "private_envelope": "not sent",
     }
     ticket = Ticket("id", "job", "source", "fake-endpoint", "step", 1, "lease", payload)
     transport = OpenAITransport()
     assert await transport(ticket) == {
-        "output": {"content": "complete"},
+        "text": "complete",
         "model": "actual",
         "usage": None,
     }

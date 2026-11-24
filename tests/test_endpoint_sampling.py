@@ -31,9 +31,7 @@ async def test_wire_controls_and_timeout(monkeypatch, controls):
         seen.append(json.loads(request.content))
         return httpx.Response(
             200,
-            json={
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"content":"ok"}'}}]
-            },
+            json={"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}]},
         )
 
     original = httpx.AsyncClient
@@ -50,10 +48,9 @@ async def test_wire_controls_and_timeout(monkeypatch, controls):
         operation="event",
         endpoint_config=endpoint.model_dump(mode="json"),
         messages=[],
-        schema={"type": "object"},
     )
     ticket = Ticket("id", "job", "source", "endpoint", "step", 1, "lease", payload)
-    assert (await OpenAITransport()(ticket))["output"] == {"content": "ok"}
+    assert (await OpenAITransport()(ticket))["text"] == "ok"
     assert clients[0]["timeout"] == 321.5
     for key in ("temperature", "top_p", "presence_penalty"):
         if controls.get(key) is None:
@@ -84,7 +81,6 @@ async def test_timeout_bounds_entire_attempt(monkeypatch):
         operation="event",
         endpoint_config=dict(url="http://127.0.0.1:1", model="fixture", timeout_seconds=0.02),
         messages=[],
-        schema={"type": "object"},
     )
     with pytest.raises(TimeoutError):
         await OpenAITransport()(

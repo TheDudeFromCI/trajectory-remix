@@ -531,8 +531,18 @@ export class StudioUI {
     comment.setAttribute('aria-label', `Comment on window ${id}${notes ? ` (${notes} open)` : ''}`);
     comment.dataset.tip = notes ? `${notes} open comment${notes === 1 ? '' : 's'}. Click to add another.` : 'Comment on this window, for example a problem an agent should fix';
     head.append(comment, toggle, size);
+    head.classList.add('clickable'); head.title = 'Jump to the latest event that edits this window';
+    head.addEventListener('click', click => { if (!click.target.closest('button')) this.selectLatestWindowEvent(w); });
     card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.draft.events[event]?.extra_tools || [], hideExtras: !this.prefs.showRandomTools}));
     return card;
+  }
+  /** Select the last event (at or before the current position) that wrote tokens into this window. */
+  selectLatestWindowEvent(w) {
+    for (let i = w.tokens.length - 1; i >= 0; i--) {
+      const raw = w.tokens[i].event; if (!raw) continue;
+      const id = this.draft.events[raw] ? raw : String(raw).replace(/:echo$/, '');
+      if (this.draft.events[id]) { this.selectEvent(id); return; }
+    }
   }
   commentOn(kind, id) {
     if (!this.draft) return;
