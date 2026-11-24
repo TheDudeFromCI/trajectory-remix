@@ -382,17 +382,19 @@ heartbeat lines ("Still waiting for model response") are off by default; set
 `JobService.heartbeat_interval` to a number of seconds to bring them back. Queue
 messages identify paused endpoints, and retry messages distinguish another attempt
 (`warning`) from exhausted retries requiring Resume (`error`). Request failures say why:
-the HTTP status with a plain-language hint, a short provider error code when it is a
-plain identifier, the timeout that applied, a refused connection, or the missing
-`REMIX_API_KEY_*` variable. Local errors name the exception type and the file, line and
-function that raised it, with the traceback in the server output.
+the HTTP status with a plain-language hint, the timeout that applied, a refused
+connection, or the missing `REMIX_API_KEY_*` variable. When the provider supplies
+them, HTTP errors also show the error code, the request field involved (for
+example, `reasoning_effort`), and the provider request ID for tracing. Local errors
+name the exception type and the file, line and function that raised it, with the
+traceback in the server output.
 Responses report provider token counts when supplied, and input sizes are bytes,
 not estimated token counts.
 
 Logs contain operation, endpoint and trajectory/request/event IDs, timings and
-counts. They do not include prompts, model output, provider error bodies, exception
-messages or keys (the provider's error `code` is copied only if it is a short
-identifier such as `rate_limit_exceeded`).
+counts. They do not include prompts, model output, raw provider error bodies,
+exception messages or keys. Provider codes, field paths and request IDs are
+included only when they match the expected identifier formats.
 The transport still receives whole responses rather than streaming tokens. The
 existing log endpoint and job dialog need no API changes; polling an open job's
 log shows new entries even while the model is busy. Existing log-cache retention

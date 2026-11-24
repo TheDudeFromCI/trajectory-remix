@@ -15,9 +15,9 @@ def lines(jobs, job):
     return [(r["level"], r["text"]) for r in jobs.logs(job, limit=1000)["items"]]
 
 
-def status_error(status, body=None):
+def status_error(status, body=None, headers=None):
     request = httpx.Request("POST", "https://api.example.test/v1/chat/completions")
-    response = httpx.Response(status, json=body, request=request)
+    response = httpx.Response(status, json=body, headers=headers, request=request)
     return httpx.HTTPStatusError("boom", request=request, response=response)
 
 
@@ -57,6 +57,31 @@ def test_http_failures_name_the_status_and_provider_code_only():
     assert "secrets" not in odd and "provider code" not in odd
 
 
+def test_http_failure_accepts_nested_parameter_paths():
+    reason = endpoint_failure(
+        status_error(422, {"error": {"type": "invalid_value", "param": "messages[0].role"}}),
+        "a",
+    )
+    assert "rejected the value for this request field" in reason
+    assert "[provider code invalid_value] [parameter messages[0].role]" in reason
+
+
+@pytest.mark.parametrize("param", ["field=SECRET", "field\nSECRET", "x" * 121, 123, None])
+def test_http_failure_omits_invalid_provider_metadata(param):
+    reason = endpoint_failure(
+        status_error(
+            400,
+            {"error": {"code": "unknown_parameter", "param": param}},
+            {"x-request-id": "SECRET value"},
+        ),
+        "a",
+    )
+    assert "check the model name, output mode and extra request fields" in reason
+    assert "[provider code unknown_parameter]" in reason
+    assert "[parameter " not in reason
+    assert "provider request ID" not in reason and "SECRET" not in reason
+
+
 def test_missing_key_is_named_on_401(monkeypatch):
     monkeypatch.delenv("REMIX_API_KEY_MY_MODEL", raising=False)
     assert "REMIX_API_KEY_MY_MODEL" in endpoint_failure(status_error(401), "my-model")
@@ -86,21 +111,46 @@ def test_local_failure_names_type_and_place_not_message():
 
 
 @pytest.mark.asyncio
-async def test_request_failure_log_is_levelled_and_explains_why(runtime):  # noqa: F811
+@pytest.mark.parametrize(
+    ("status", "details", "expected"),
+    [
+        (503, {"code": "overloaded"}, "the endpoint is overloaded or unavailable"),
+        (
+            400,
+            {"code": "unknown_parameter", "param": "reasoning_effort"},
+            "the endpoint does not recognize this request field",
+        ),
+    ],
+)
+async def test_request_failure_log_is_levelled_and_explains_why(
+    runtime,  # noqa: F811
+    status,
+    details,
+    expected,
+):
     store, jobs = runtime
     job = run(jobs)
     queue(jobs, job, start(jobs, job))
 
     async def failing(ticket):
-        raise status_error(503, {"error": {"code": "overloaded", "message": "SECRET BODY"}})
+        raise status_error(
+            status,
+            {"error": {**details, "message": "SECRET BODY"}},
+            {"x-request-id": "req_example_123"},
+        )
 
     await jobs.execute_one("a", failing)  # endpoint a retries once, then pauses
     failed = [(level, text) for level, text in lines(jobs, job) if "Request failed" in text]
     assert [level for level, _ in failed] == ["warning", "error"]
     assert "retrying in the same queue slot" in failed[0][1]
     assert "endpoint paused after retry exhaustion" in failed[1][1]
-    assert all("HTTP 503" in text and "overloaded" in text for _, text in failed)
-    assert "SECRET BODY" not in "".join(text for _, text in failed)
+    for _, text in failed:
+        assert f"HTTP {status}" in text and expected in text
+        assert f"[provider code {details['code']}]" in text
+        if "param" in details:
+            assert f"[parameter {details['param']}]" in text
+        assert "[provider request ID req_example_123]" in text
+        assert "SECRET BODY" not in text
 
 
 @pytest.mark.asyncio
