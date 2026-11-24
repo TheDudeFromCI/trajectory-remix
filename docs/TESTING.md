@@ -16,6 +16,7 @@ node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs
 node tests/comments_auto_send_frontend.mjs
 node tests/assistant_indicator_frontend.mjs
+node tests/assistant_queue_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/endpoint_collapse_frontend.mjs
