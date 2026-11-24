@@ -16,6 +16,7 @@ const ENTRY_SIZE: usize = 64;
 const RECORD_SIZE: usize = 64;
 const COLUMN_SIZE: usize = 32;
 const MAX_MANIFEST: usize = 1 << 20;
+/// Largest uncompressed record [`Shard::open`] accepts. Guards against corrupt or hostile files.
 pub const DEFAULT_MAX_RECORD_BYTES: usize = 512 << 20;
 
 const NAMES: [&str; 16] = [
@@ -138,11 +139,15 @@ pub(crate) fn compatibility(manifest: &Value) -> Result<Value> {
     ]))
 }
 
+/// Compression applied to each sample record.
 #[derive(Clone, Copy, Debug, Default)]
 pub enum Codec {
+    /// Store records raw.
     None,
+    /// LZ4 block compression (default). Fast to read.
     #[default]
     Lz4,
+    /// Zlib compression. Smaller files, slower to read.
     Zlib,
 }
 
@@ -231,10 +236,15 @@ impl Entry {
 
 /// An owned sample whose columns can be borrowed directly as little-endian bytes.
 pub struct Sample {
+    /// Sample UUID.
     pub id: Uuid,
+    /// Number of rows.
     pub rows: u32,
+    /// Number of frames.
     pub frames: u32,
+    /// Number of window instances.
     pub windows: u32,
+    /// Number of rows with positive loss weight.
     pub targets: u32,
     data: Vec<u8>,
     columns: [Range<usize>; 16],
@@ -331,6 +341,9 @@ impl Sample {
         })
     }
 
+    /// Returns a column as little-endian bytes, or `None` for an unknown name.
+    ///
+    /// Names match the fields of [`Columns`], for example `"token_ids"`.
     pub fn column(&self, name: &str) -> Option<&[u8]> {
         NAMES
             .iter()
@@ -338,6 +351,7 @@ impl Sample {
             .map(|index| &self.data[self.columns[index].clone()])
     }
 
+    /// Iterates over `(name, dtype code, byte range)` for every column. Ranges index into [`Sample::record_bytes`].
     pub fn columns(&self) -> impl Iterator<Item = (&'static str, u8, Range<usize>)> + '_ {
         NAMES
             .into_iter()
@@ -346,10 +360,12 @@ impl Sample {
             .map(|((name, dtype), range)| (name, dtype, range))
     }
 
+    /// The whole decoded record, including header and metadata.
     pub fn record_bytes(&self) -> &[u8] {
         &self.data
     }
 
+    /// Returns the sample's JSON metadata object (empty if none was stored).
     pub fn metadata(&self) -> Result<Value> {
         if self.metadata.is_empty() {
             return Ok(json!({}));
@@ -363,20 +379,29 @@ impl Sample {
     }
 }
 
+/// An open `.ktremix` file.
+///
+/// Opening reads only the header, manifest and sample index, so it is cheap even
+/// for large shards. Samples are read and decompressed on demand.
 pub struct Shard {
     path: PathBuf,
     header_crc: u32,
+    /// Shard manifest: format, compiler and tokenizer details.
     pub manifest: Value,
+    /// ID shared by every shard of one dataset.
     pub dataset_id: Uuid,
+    /// ID of this shard.
     pub shard_id: Uuid,
     entries: Vec<Entry>,
 }
 
 impl Shard {
+    /// Opens a shard, rejecting records larger than [`DEFAULT_MAX_RECORD_BYTES`].
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limit(path, DEFAULT_MAX_RECORD_BYTES)
     }
 
+    /// Opens a shard with a custom cap on uncompressed record size.
     pub fn open_with_limit(path: impl AsRef<Path>, max_record_bytes: usize) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let mut file = File::open(&path)?;
@@ -453,18 +478,22 @@ impl Shard {
         })
     }
 
+    /// Number of samples in the shard.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Returns `true` if the shard holds no samples.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    /// UUID of sample `index`, or `None` if out of range.
     pub fn sample_id(&self, index: usize) -> Option<Uuid> {
         self.entries.get(index).map(|entry| entry.id)
     }
 
+    /// Reads, decompresses and validates sample `index`.
     pub fn read(&self, index: usize) -> Result<Sample> {
         self.read_block(index, &mut self.open_file()?)?.decode()
     }
@@ -545,6 +574,10 @@ pub struct ShardWriter {
 }
 
 impl ShardWriter {
+    /// Starts a shard at `path` that will hold exactly `count` samples.
+    ///
+    /// Fails if `path` already exists. Nothing is visible at `path` until
+    /// [`ShardWriter::finish`] succeeds.
     pub fn new(
         path: impl AsRef<Path>,
         mut manifest: Value,
@@ -626,6 +659,7 @@ impl ShardWriter {
         })
     }
 
+    /// Encodes and appends one sample. Fails on a duplicate `id` or when more than `count` samples are pushed.
     pub fn push(&mut self, id: Uuid, columns: &Columns, metadata: Option<&Value>) -> Result<()> {
         valid(
             self.ids.len() < self.count,
@@ -670,6 +704,7 @@ impl ShardWriter {
         Ok(())
     }
 
+    /// Verifies that exactly `count` samples were pushed, then atomically publishes the shard.
     pub fn finish(mut self) -> Result<()> {
         valid(
             self.ids.len() == self.count,
@@ -797,6 +832,9 @@ pub struct CompileWriter {
 }
 
 impl CompileWriter {
+    /// Creates a writer for a shard of exactly `count` samples, compiled by `workers` threads.
+    ///
+    /// See [`ShardWriter::new`] for the meaning of the other arguments.
     pub fn new(
         path: impl AsRef<Path>,
         manifest: Value,
@@ -815,7 +853,11 @@ impl CompileWriter {
         })
     }
 
+    /// Compiles a batch of graph sources in parallel and appends them in input order.
+    ///
     /// The caller controls the memory bound through the size of each input batch.
+    /// A source that fails to compile aborts the shard; `cancelled` is polled
+    /// during scheduling.
     pub fn append(
         &mut self,
         compiler: &crate::Compiler,
@@ -825,7 +867,8 @@ impl CompileWriter {
         self.append_with(compiler, sources, Ok, cancelled)
     }
 
-    /// Read each JSON source inside its native compilation worker.
+    /// Like [`CompileWriter::append`], but each worker reads its own file, so
+    /// source text is never held by the caller.
     pub fn append_files<P: AsRef<Path> + Send>(
         &mut self,
         compiler: &crate::Compiler,
@@ -879,6 +922,7 @@ impl CompileWriter {
         Ok(())
     }
 
+    /// Publishes the shard once every expected sample has been appended.
     pub fn finish(self) -> Result<()> {
         self.writer
             .ok_or_else(|| invalid("KTREMIX writer is closed"))?

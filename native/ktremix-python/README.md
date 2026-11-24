@@ -1,5 +1,8 @@
 # KTREMIX native library
 
+*For how this package fits with the Rust crate and the studio, see
+[Native compiler](../../docs/NATIVE-COMPILER.md).*
+
 Compile Trajectory Remix graph JSON and raw text into KTREMIX 1.0 training shards.
 The Rust `ktremix` crate contains the compiler, diagnostics, wire format, corpus
 converter and sampler. The separately installable `ktremix-native` Python

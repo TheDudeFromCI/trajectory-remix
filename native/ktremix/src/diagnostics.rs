@@ -3,20 +3,30 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
+/// How serious a [`Diagnostic`] is.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    /// Blocks compilation.
     Error,
+    /// Reported, but compilation can continue.
     Warning,
 }
 
+/// A problem found while analysing or scheduling a graph.
 #[derive(Clone, Debug, Serialize)]
 pub struct Diagnostic {
+    /// Whether the finding blocks compilation.
     pub severity: Severity,
+    /// Stable machine-readable code such as `compile_error`.
     pub code: &'static str,
+    /// JSON path to the offending value in the source graph.
     pub path: Vec<Value>,
+    /// Event the finding is about, if any.
     pub event_id: Option<String>,
+    /// Human-readable explanation.
     pub message: String,
+    /// Other events involved, such as the members of a dependency cycle.
     pub related_events: Vec<String>,
 }
 

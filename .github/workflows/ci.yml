@@ -59,6 +59,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - run: cargo doc --no-deps -p ktremix --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
 
   test:
     name: Python tests (${{ matrix.python-version }})

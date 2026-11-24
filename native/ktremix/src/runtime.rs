@@ -12,23 +12,51 @@ pub(crate) const BOS: u8 = 16;
 pub(crate) const READ_ONLY: u8 = 1;
 pub(crate) const INITIALLY_AVAILABLE: u8 = 2;
 
+/// The compiled arrays of one trajectory.
+///
+/// Three groups of columns are parallel arrays:
+///
+/// * **Row columns** (`token_ids` through `loss_weights`, plus `row_flags`) have
+///   one entry per row. A row is one token occurrence in one window.
+/// * **Frame columns**: `frame_offsets` holds row boundaries per frame
+///   (`frames + 1` entries).
+/// * **Window columns** (`window_*`) have one entry per physical window instance.
+///
+/// `target_rows` lists the rows with positive loss weight, in ascending order.
+/// Frontier values are counted in frames; `u64::MAX` means "never".
 #[derive(Debug, Default, Serialize)]
 pub struct Columns {
+    /// Token ID of each row.
     pub token_ids: Vec<u32>,
+    /// Index of the window instance each row belongs to.
     pub window_ids: Vec<u32>,
+    /// Position of each row within its own window.
     pub position_ids: Vec<u32>,
+    /// Frontier at which each row is constructed or predicted.
     pub query_frontiers: Vec<u64>,
+    /// First frontier at which the row is visible as context.
     pub visible_from: Vec<u64>,
+    /// Frontier at which the row stops being visible (exclusive).
     pub visible_until: Vec<u64>,
+    /// Preceding row in the same window, or `u32::MAX` if there is none.
     pub previous_rows: Vec<u32>,
+    /// Loss weight of each row. Zero means the row is context only.
     pub loss_weights: Vec<f64>,
+    /// Bit flags per row: `1` durable, `2` model-produced, `4` NOOP, `8` EOS, `16` BOS.
     pub row_flags: Vec<u8>,
+    /// Index of the first row of each frame, followed by the total row count.
     pub frame_offsets: Vec<u64>,
+    /// Physical slot of each window instance. A later window may reuse a slot.
     pub window_slots: Vec<u32>,
+    /// Frontier at which each window instance opens.
     pub window_open_frontiers: Vec<u64>,
+    /// Frontier at which each window instance closes, or `u64::MAX` if it never does.
     pub window_close_frontiers: Vec<u64>,
+    /// Frontier at which each window instance becomes active (counts toward the limit).
     pub window_activation_frontiers: Vec<u64>,
+    /// Bit flags per window instance: `1` read-only, `2` initially available.
     pub window_flags: Vec<u8>,
+    /// Sorted indices of rows with positive loss weight.
     pub target_rows: Vec<u32>,
 }
 

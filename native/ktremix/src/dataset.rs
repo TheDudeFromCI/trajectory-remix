@@ -11,16 +11,21 @@ use std::fs::File;
 use std::path::Path;
 use uuid::Uuid;
 
+/// Settings for [`Dataset`].
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SamplingOptions {
+    /// Samples returned by each [`Dataset::next_batch`] call.
     pub batch_size: usize,
     /// Absolute shard probabilities. By default every record has equal probability.
     pub shard_weights: Option<Vec<f64>>,
     /// Visit each positively weighted sample UUID at most once per epoch.
     pub without_replacement: bool,
+    /// Seed for sampling. Combined with the epoch number by [`Dataset::reset_epoch`].
     pub seed: u64,
+    /// Shard files kept open at once.
     pub max_open_shards: usize,
+    /// Threads used to decompress and decode a batch.
     pub decode_workers: usize,
 }
 
@@ -54,6 +59,10 @@ impl Selection {
     }
 }
 
+/// Draws batches of samples from one or more shards.
+///
+/// Sampling is reproducible for a given seed and epoch. Without replacement, each
+/// sample UUID appears at most once per epoch.
 pub struct Dataset {
     shards: Vec<Shard>,
     options: SamplingOptions,
@@ -66,6 +75,10 @@ pub struct Dataset {
 }
 
 impl Dataset {
+    /// Opens the shards at `paths`.
+    ///
+    /// Fails if the options are invalid, the number of weights differs from the
+    /// number of shards, or no sample has a positive weight.
     pub fn open<P: AsRef<Path>>(
         paths: impl IntoIterator<Item = P>,
         options: SamplingOptions,
@@ -127,6 +140,7 @@ impl Dataset {
         Ok(dataset)
     }
 
+    /// Starts a new epoch: forgets visited samples, reseeds with `seed + epoch` and clears any earlier failure.
     pub fn reset_epoch(&mut self, epoch: u64) {
         self.failed = false;
         self.rng = StdRng::seed_from_u64(self.options.seed.wrapping_add(epoch));
@@ -141,10 +155,12 @@ impl Dataset {
             .collect();
     }
 
+    /// Total samples across all shards.
     pub fn len(&self) -> usize {
         self.shards.iter().map(Shard::len).sum()
     }
 
+    /// Returns `true` if there are no samples.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

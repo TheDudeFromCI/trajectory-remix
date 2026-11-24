@@ -246,11 +246,16 @@ impl Event {
     }
 }
 
+/// One token produced for a window, either literal text or a control.
 #[derive(Clone, Debug, Serialize)]
 pub struct Token {
+    /// Token ID. `None` for window references, which are resolved after slots are assigned.
     pub id: Option<u32>,
+    /// Control name (for example `"bos"`) if this is a control token.
     pub control: Option<&'static str>,
+    /// Whether the token belongs to the window header rather than its body.
     pub header: bool,
+    /// For a window reference: the referenced window and which slot digit this token encodes.
     pub reference: Option<(String, usize)>,
 }
 
@@ -274,20 +279,32 @@ impl Token {
     }
 }
 
+/// Tokens one event writes into one window.
 #[derive(Debug, Serialize)]
 pub struct Emission {
+    /// Source event ID, or `None` for scheduler-inserted tokens.
     pub event: Option<String>,
+    /// Logical name of the destination window.
     pub window: String,
+    /// The tokens to append.
     pub tokens: Vec<Token>,
+    /// `true` if the model must predict these tokens, `false` if they arrive as input.
     pub model: bool,
+    /// Loss weight applied to each token.
     pub weight: f64,
+    /// Replace the window body (keeping its header) instead of appending.
     pub replace: bool,
+    /// `true` if this emission opens its window.
     pub opening: bool,
 }
 
+/// One scheduler step: external inputs first, then the model's outputs.
 #[derive(Debug, Serialize)]
 pub struct Frame {
+    /// Scheduler time of the frame.
     pub tick: u64,
+    /// External content that arrives in this frame.
     pub inputs: Vec<Emission>,
+    /// Content the model predicts in this frame, possibly across several windows.
     pub outputs: Vec<Emission>,
 }

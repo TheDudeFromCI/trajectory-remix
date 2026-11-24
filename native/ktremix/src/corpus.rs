@@ -16,22 +16,30 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+/// One raw-text document to convert.
 #[derive(Debug, Deserialize)]
 pub struct Document {
+    /// UTF-8 document body.
     pub text: String,
+    /// Stable document ID. When absent, one is derived from the file and position.
     #[serde(default)]
     pub id: Option<String>,
+    /// Free-form JSON recorded in the sample metadata.
     #[serde(default)]
     pub provenance: Value,
 }
 
 /// One UTF-8 document per file, or a stream of JSONL objects with a `text` field.
+/// How corpus files are split into [`Document`]s.
 #[derive(Clone, Copy)]
 pub enum Input {
+    /// The whole file is one document.
     Text,
+    /// Each line is a JSON object with a `text` field and optional `id` and `provenance`.
     JsonLines,
 }
 
+/// Lazily reads [`Document`]s from a sequence of files, so large corpora never need to fit in memory.
 pub struct Documents<P, I> {
     paths: I,
     input: Input,
@@ -40,6 +48,7 @@ pub struct Documents<P, I> {
 }
 
 impl<P: AsRef<Path>, I: Iterator<Item = P>> Documents<P, I> {
+    /// Reads `paths` in order. Any document larger than `max_document_bytes` yields an error.
     pub fn new(paths: I, input: Input, max_document_bytes: usize) -> Self {
         Self {
             paths,
@@ -110,22 +119,42 @@ impl<P: AsRef<Path>, I: Iterator<Item = P>> Iterator for Documents<P, I> {
     }
 }
 
+/// Settings for [`Compiler::convert_corpus`].
+///
+/// Sections of a document are placed in separate windows so the model learns to
+/// use text from windows that are still visible. Output is deterministic for the
+/// same documents and options; `resume`, `workers` and `queue_size` do not affect
+/// the output and are ignored when checking whether a resume matches.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CorpusOptions {
+    /// Seed for section sizes, window layout and tick offsets.
     pub seed: u64,
+    /// Documents interleaved in one sample. The extra documents act as distractors.
     pub documents_per_sample: usize,
+    /// Smallest section a document is split into, in tokens.
     pub min_section_tokens: usize,
+    /// Largest section a document is split into, in tokens.
     pub max_section_tokens: usize,
+    /// Long documents are cut into parts of at most this many tokens, so every sample stays bounded.
     pub max_tokens_per_document_part: usize,
+    /// Fraction (0 to 1) of samples written as one plain window with no interleaving.
     pub single_window_fraction: f64,
+    /// How many earlier sections stay visible after later sections begin.
     pub retained_sections: usize,
+    /// Largest random delay, in ticks, between the starts of concurrent documents.
     pub max_tick_offset: u64,
+    /// Loss weight for control tokens such as BOS and EOS.
     pub control_loss_weight: f64,
+    /// Loss weight for NOOP rows.
     pub noop_loss_weight: f64,
+    /// Samples written to each output shard.
     pub samples_per_shard: usize,
+    /// Worker threads used for conversion.
     pub workers: usize,
+    /// Documents held in flight at once. Bounds memory use.
     pub queue_size: usize,
+    /// Continue a previous run: shards already on disk are checked against this configuration and skipped.
     pub resume: bool,
 }
 
@@ -197,6 +226,11 @@ struct Part {
 impl Compiler {
     /// Convert caller-provided documents into atomic KTREMIX shards. Input order
     /// determines sample IDs and output order regardless of worker count.
+    /// Converts documents into KTREMIX shards under `output`.
+    ///
+    /// Returns the paths of the shards written. Input order fixes sample IDs and
+    /// output order regardless of `workers`. Shards are published atomically, so a
+    /// failed run never leaves a partial shard behind.
     pub fn convert_corpus(
         &self,
         input: impl IntoIterator<Item = Result<Document>>,
