@@ -1,7 +1,7 @@
 """The packaged generation prompts (graph/draft_assembly.yaml), read once.
 
-Projects keep their own copy in settings.prompts; these are the defaults and what
-Load default restores.
+Projects keep the agent (actor), authoring, Draft and Assembly prompts in
+settings.prompts. endpoint_prompts lays them out for each endpoint.
 """
 
 from functools import cache
@@ -21,9 +21,18 @@ def actor():
     return packaged()["actor_instruction"]
 
 
+def authoring():
+    return packaged()["authoring_instruction"]
+
+
 def draft():
     return packaged()["draft_instruction"]
 
 
 def assembly():
     return packaged()["assemble_instruction"]
+
+
+def retired_actors():
+    """Earlier shipped agent prompts, newest first."""
+    return tuple(packaged()["retired"]["actor"])

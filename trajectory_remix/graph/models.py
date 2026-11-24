@@ -18,7 +18,7 @@ from pydantic import (
     model_validator,
 )
 
-from . import prompt_defaults
+from . import prompt_defaults, token_limits
 
 Identifier = Annotated[str, Field(min_length=1)]
 Weight = Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -306,12 +306,14 @@ class Endpoint(DTO):
     top_p: Annotated[float, Field(ge=0, le=1)] | None = None
     presence_penalty: Annotated[float, Field(ge=-2, le=2)] | None = None
 
-    context_window_tokens: Annotated[int, Field(ge=1024)] = 65536
-    max_output_tokens: Annotated[int, Field(ge=1)] = 8192
+    # Token limits; -1 (the default) disables one and leaves it to the provider. See
+    # token_limits for how each is used.
+    context_window_tokens: Annotated[int, Field(ge=token_limits.DISABLED)] = token_limits.DISABLED
+    max_output_tokens: Annotated[int, Field(ge=token_limits.DISABLED)] = token_limits.DISABLED
     # The context guard estimates input tokens as UTF-8 bytes / bytes_per_token. 1.0 can
     # never undercount; English and compact JSON average about 3.5 bytes per token, so
     # 3.0 keeps a margin while letting a model's real window be used.
-    bytes_per_token: Annotated[float, Field(ge=1, le=6)] = 1.0
+    bytes_per_token: Annotated[float, Field(ge=1, le=6)] = 3.0
     # Send the trajectory ID as session_id so routers such as OpenRouter keep one
     # trajectory on one provider, where its prompt prefix stays cached.
     sticky_sessions: bool = False
@@ -325,8 +327,9 @@ class Endpoint(DTO):
 
     @model_validator(mode="after")
     def context_budget(self):
-        if self.max_output_tokens + 512 >= self.context_window_tokens:
-            raise ValueError("Reserve input space beyond output tokens and framing")
+        problem = token_limits.problem(self.context_window_tokens, self.max_output_tokens)
+        if problem:
+            raise ValueError(problem)
         reserved = set(self.extra_body) & RESERVED_BODY_FIELDS
         if reserved:
             raise ValueError("extra_body cannot set " + ", ".join(sorted(reserved)))
@@ -399,8 +402,44 @@ class GenerationPrompts(DTO):
     """The project's generation prompts; Load default restores the packaged ones."""
 
     actor: str = Field(default_factory=prompt_defaults.actor, min_length=1)
+    authoring: str = Field(default_factory=prompt_defaults.authoring, min_length=1)
     draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
     assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
+
+    @field_validator("actor")
+    @classmethod
+    def upgrade_packaged_actor(cls, value):
+        # A shipped agent prompt, possibly with a persona appended, gets the current one.
+        for retired in prompt_defaults.retired_actors():
+            if value.startswith(retired):
+                return prompt_defaults.actor() + value[len(retired) :]
+        return value
+
+    @field_validator("authoring", "draft", "assembly")
+    @classmethod
+    def upgrade_packaged_prompt(cls, value, info):
+        # Only replace exact shipped defaults. Custom guidance stays with the project.
+        previous = {
+            "authoring": {
+                "2f5c97260d020513efe645f4f77ea59b04e8cb26cdf70f4fada584bc59a789a9",
+            },
+            "draft": {
+                "3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a",
+                "379f799bc52e67227994ec99bd671a194b2cabd11558d584e897551f2b0bd250",
+                "81fc1038e09cb959a01f19554ee649fe5cd4b37759fd03f10c953b2253a3a424",
+            },
+            "assembly": {
+                "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b",
+                "325bbdc768a88d57609bd1cc38f2dec2b61632f395de754a096d3d35518dee51",
+                "9cdbe536af2c43734bb288e2d14ced358643bde21a3106b8a8ba9eae81ed6d87",
+                "5503627261f2d0c6e7541468d9150a6e3562e6cccd67fb3df9638001ab724058",
+                "f5bda2ec207ce5c99a8e25205f127ab9a31c25bf64234e343d776e939dfee6c3",
+                "063330936af9ac7e59136dc4c5cb9c26cfeda60c21d98c322c21bd04a5a8fa46",
+            },
+        }
+        if digest(value) in previous[info.field_name]:
+            return getattr(prompt_defaults, info.field_name)()
+        return value
 
 
 class GenerationOptions(DTO):
@@ -410,20 +449,23 @@ class GenerationOptions(DTO):
         # Projects saved while the step-by-step Flow existed carry a method field;
         # Draft and Assembly is now the only way to generate.
         # phase_barrier moved to the Generate trajectories panel (chosen per job).
+        # Review now always repairs, so repair and repair_rounds are gone; the context
+        # budget they shared belongs to the Assistant alone.
         if isinstance(data, dict):
-            data = {k: v for k, v in data.items() if k not in {"method", "phase_barrier"}}
+            retired = {"method", "phase_barrier", "repair", "repair_rounds"}
+            data = {k: v for k, v in data.items() if k not in retired}
+            if "repair_context_bytes" in data:
+                data.setdefault("assistant_context_bytes", data.pop("repair_context_bytes"))
         return data
 
     fast: bool = True
     critical: bool = True
-    repair: bool = True
+    review_include_draft: bool = False
+    max_authoring_exchanges: Annotated[int, Field(ge=1)] = 10
     format_retries: Annotated[int, Field(ge=0, le=5)] = 2
-    # An explicit byte budget for the continuing repair transcript, not a token
-    # estimate or a spending limit. Provider context exhaustion also terminates it.
-    repair_context_bytes: Annotated[int, Field(ge=256)] = 65536
-    # A spending guard: a repair session that outgrows repair_context_bytes starts a
-    # fresh round on the current graph, up to this many rounds in all.
-    repair_rounds: Annotated[int, Field(ge=1, le=10)] = 3
+    # An explicit byte budget for an Assistant conversation, kept between sends; not a
+    # token estimate. The endpoint's context limit also ends a session.
+    assistant_context_bytes: Annotated[int, Field(ge=256)] = 65536
 
 
 class ProjectSettings(DTO):
@@ -432,11 +474,22 @@ class ProjectSettings(DTO):
     def migrate_generator_role(cls, data):
         # Projects saved while a Generator endpoint role existed: Draft replaces it.
         roles = data.get("endpoint_roles") if isinstance(data, dict) else None
-        if isinstance(roles, dict) and "generator" in roles:
-            roles = {k: v for k, v in roles.items() if k != "generator"}
-            roles.setdefault("draft", data["endpoint_roles"]["generator"])
-            data = {**data, "endpoint_roles": roles}
-        return data
+        if not isinstance(roles, dict):
+            return data
+        endpoints = data.get("endpoints", {})
+        roles = {
+            key: value
+            for key, value in roles.items()
+            if key not in ("fast", "critical")
+            or (
+                value is not None
+                and (value != "none" or (isinstance(endpoints, dict) and "none" in endpoints))
+            )
+        }
+        if "generator" in roles:
+            old_role = roles.pop("generator")
+            roles.setdefault("draft", old_role)
+        return {**data, "endpoint_roles": roles}
 
     format: Literal["kidra-graph-settings/1"] = "kidra-graph-settings/1"
     tools: dict[Identifier, ToolDefinition] = Field(
@@ -473,6 +526,7 @@ class ProjectSettings(DTO):
     log_cache_mib: Annotated[int, Field(ge=0)] | None = 1024
     # Chance that each tool outside a tool_schema event's chosen tools is listed anyway (0 = never).
     tool_schema_extra_chance: Annotated[float, Field(ge=0, le=1)] = 0.5
+    disabled_warnings: list[Identifier] = Field(default_factory=list)
     size_labels: list[SizeLabel] = Field(default_factory=default_size_labels)
 
     @field_validator("size_labels")

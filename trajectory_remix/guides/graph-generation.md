@@ -11,9 +11,9 @@ job; pause/resume/cancel remain explicit lifecycle controls. No replacement
 attempt is created for failure or detachment.
 
 Read a detached source and its revision before
-`review_graphs(trajectory="UUID",expected_revision=REV,mode="standard",repair=true)`.
-Standard reviews Pending with Fast only, Candidate with Critical, and repairs
-failed stages at their tier. Other stages skip. Use `force_fast` or
+`review_graphs(trajectory="UUID",expected_revision=REV,mode="standard")`.
+Each review repairs what fails, then signs off. Standard reviews Pending with Fast if assigned,
+otherwise with Critical. It reviews Candidate with Critical and failed stages again at their tier. Other stages skip. Use `force_fast` or
 `force_critical` only when requested. Locks cannot be overridden. Search-wide
 review uses `query` instead of a selected UUID and freezes all pages.
 
@@ -21,15 +21,16 @@ Review evidence is bound to source/checklist/model identities. Source/checklist
 edits stale signoffs without resetting stages or automatically calling models.
 Malformed/provider failures are not quality verdicts: a trajectory that needs manual
 intervention is held while the rest of the job continues. Endpoint exhaustion and
-server restart require manual Resume. Repair continues across failing verdicts and
-fresh rounds; it fails only on `give_up` or at the round cap (detached Unfinished).
+server restart require manual Resume. A review is one continuing tool conversation.
+An unfeasible signoff fails the review; a context limit or the exchange cap ends it with
+no verdict. Either way its partial edits are saved.
 
-Generation/review/repair never token-compile or execute synthetic tools. Prepared
+Generation and review never token-compile or execute synthetic tools. Prepared
 local-model checks are described in `docs/GRAPH-LOCAL-LLM.md`; do not run live models
 or benchmarks without task authorization.
 
 Generation is Draft → Assembly → Fast Review → Critical Review. Draft writes prose
-working notes; Assembly writes one compact spec that Remix builds into a graph, then
-fixes it from validator diagnostics. The prompts (agent prompt, Draft and Assembly
-instructions) are project settings (`settings.prompts`) and freeze with the run;
+working notes. Assembly edits the graph with native tools and signs off after every
+error and enabled warning is resolved. The prompts (agent prompt, authoring prompt, Draft and
+Assembly instructions) are project settings (`settings.prompts`) and freeze with the run;
 `instructions` takes no keys. See `docs/GRAPH-GENERATION.md`.

@@ -36,7 +36,7 @@ What to look for:
 | Check | Why it matters |
 | --- | --- |
 | **Ready** | Remix sends JSON-schema requests. Models without structured outputs ignore them or cannot be routed. |
-| **Cache discount** | Each assembly fix and repair turn repeats the previous one. With a discount, that cached input costs a fraction of the normal price. |
+| **Cache discount** | Each native tool turn extends the conversation for that pass. With a discount, that cached input costs a fraction of the normal price. |
 | **Reasoning** | Reasoning (thinking) tokens are billed as output. The estimate assumes medium reasoning, as in the pilots; turning it off costs less, and the checker gives the right field. |
 
 A good first choice is **Mistral Small 3.2 24B**: structured outputs, no reasoning, a
@@ -80,8 +80,8 @@ Why these settings:
   scatter across providers and miss the cache.
 - **`require_parameters: true`** routes only to providers that honour the structured
   output request. Without it, a provider may ignore it and the reply will need retries.
-- **Bytes per token 3** lets the context check use most of the 32k window. At the default
-  of 1, a prompt of about 30 KB (roughly 9k real tokens) would already be refused.
+- **Bytes per token 3** (the default) lets the context check use most of the 32k window.
+  At 1, a prompt of about 30 KB (roughly 9k real tokens) would already be refused.
 
 ## 3. Check one trajectory first
 

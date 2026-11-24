@@ -79,7 +79,7 @@ async def run(args):
                 state=jobs.inspect(job)["state"],
                 outcome=attempt["outcome"],
                 stage=source.metadata.get("stage") if source else None,
-                assembly_fix=source.metadata.get("assembly_fix") if source else None,
+                review_outcomes=source.metadata.get("review_outcomes", []) if source else [],
                 evaluations=source.metadata.get("evaluations", []) if source else [],
             )
         )

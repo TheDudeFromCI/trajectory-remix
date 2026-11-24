@@ -100,6 +100,8 @@ def test_graph_operations_never_construct_tokenizer(client, monkeypatch):
     assert r2["intrinsic_hash"] == r["intrinsic_hash"]
     assert r2["intrinsic_revision"] == r["intrinsic_revision"]
     assert r2["metadata_revision"] == r["metadata_revision"] + 1
+    assert r2["size"] == client.get(f"/api/v1/trajectories/{ident}").json()["size"]
+    assert (r2["size"]["total_characters"], r2["size"]["agent_characters"]) == (10, 5)
 
 
 def test_no_tokenizer_project(tmp_path):

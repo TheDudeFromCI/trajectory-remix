@@ -3,7 +3,7 @@
 import pytest
 from test_graph_generation import finish, service
 
-from trajectory_remix.graph import reviews
+from trajectory_remix.graph import authoring_session
 
 
 def picky(fake, broken):
@@ -51,15 +51,16 @@ async def test_invalid_review_holds_one_trajectory_and_the_rest_finish(tmp_path)
 @pytest.mark.asyncio
 async def test_local_error_preparing_one_trajectory_holds_only_it(tmp_path, monkeypatch):
     gen, fake = service(tmp_path, critical=False)
-    original, chosen = reviews.payload, {}
+    original, chosen = authoring_session.begin, {}
 
     def failing(source, *args, **kwargs):
-        chosen.setdefault("id", source.id)
-        if source.id == chosen["id"]:
-            raise KeyError("missing window")
+        if args[1] == "review":
+            chosen.setdefault("id", source.id)
+            if source.id == chosen["id"]:
+                raise KeyError("missing window")
         return original(source, *args, **kwargs)
 
-    monkeypatch.setattr(reviews, "payload", failing)
+    monkeypatch.setattr(authoring_session, "begin", failing)
     job = gen.start([{"seed": 43}, {"seed": 44}], {})
     await finish(gen, job)
     outcomes = {a["trajectory_id"]: a["outcome"] for a in gen.jobs.attempts(job)}

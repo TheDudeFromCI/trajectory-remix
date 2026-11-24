@@ -119,6 +119,6 @@ records or expired artifacts. Structurally invalid graphs return diagnostics ins
 an error, so they stay editable.
 
 For agents, [MCP](MCP.md) offers matching tasks (`get_graph_session`, `list_graphs`,
-`read_graph`, `patch_graph_event`, `export_graphs` and more). It calls the same services
+`view_graph`, `update_event`, `export_graphs` and more). It calls the same services
 as the studio and has a focused guide per topic: `start`, `dependencies`, `tools-chat`,
 `generation` and `export`.
