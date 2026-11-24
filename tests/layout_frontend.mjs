@@ -48,15 +48,13 @@ try {
   await page.locator('#view-menu summary').click(); await page.locator('#show-all-panels').click();
   assert.equal(await page.locator('#split-dataset').isVisible(), true);
 
-  // The trajectory header collapses to its title row and remembers that.
-  assert.equal(await page.locator('#trajectory-meta').isVisible(), true);
-  await page.locator('#header-toggle').click();
-  assert.equal(await page.locator('#trajectory-meta').isVisible(), false);
-  assert.equal(await page.locator('#header-toggle').getAttribute('aria-expanded'), 'false');
-  await open();
-  assert.equal(await page.locator('#trajectory-meta').isVisible(), false);
-  await page.locator('#header-toggle').click();
-  assert.equal(await page.locator('#trajectory-meta').isVisible(), true);
+  // The trajectory header is one fixed row; Stage, Split, Complexity and Size live in the Metrics tab.
+  assert.equal(await page.locator('#header-toggle').count(), 0);
+  assert.equal(await page.locator('#lock-slot').isVisible(), false);
+  assert.equal(await page.locator('#stage').isVisible(), false);
+  await page.locator('#tab-metrics').click();
+  for (const id of ['#stage', '#split', '#complexity']) assert.equal(await page.locator(id).isVisible(), true);
+  await page.locator('#tab-content').click();
 
   // With the timeline hidden its media controls move to the status bar, only while the Editor shows.
   const inStatus = () => page.evaluate(() => document.getElementById('status-transport').contains(document.getElementById('play')));

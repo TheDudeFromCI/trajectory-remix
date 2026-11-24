@@ -29,8 +29,9 @@ export class MetricsEditor {
   /** els: {list, note, unset}; beforeSave() saves pending trajectory edits first;
      onSaved(view) runs after each stored change with its Undo delta in view.delta;
      onView(view, state) runs whenever the shown values change. */
-  constructor({api, report, els, beforeSave = async () => {}, onSaved = async () => {}, onView = () => {}}) {
-    Object.assign(this, {api, report, els, beforeSave, onSaved, onView});
+  /** `shownElsewhere` lists metric keys with their own control (left out of the list). */
+  constructor({api, report, els, beforeSave = async () => {}, onSaved = async () => {}, onView = () => {}, shownElsewhere = []}) {
+    Object.assign(this, {api, report, els, beforeSave, onSaved, onView, shownElsewhere: new Set(shownElsewhere)});
     this.view = null; this.key = ''; this.busy = Promise.resolve(); this.state = {id: null};
     els.unset.addEventListener('change', () => this.render());
   }
@@ -63,7 +64,7 @@ export class MetricsEditor {
     if (!this.view) { list.replaceChildren(node('div', this.state.id ? 'Loading metrics…' : 'Select a trajectory to edit its metrics.', 'empty')); return; }
     const onlyUnset = this.els.unset.checked, sections = [];
     for (const [group, title, hint] of GROUPS) {
-      const rows = Object.entries(this.view.values).filter(([, v]) => groupOf(v.definition) === group && (!onlyUnset || v.status !== 'available'));
+      const rows = Object.entries(this.view.values).filter(([key, v]) => !this.shownElsewhere.has(key) && groupOf(v.definition) === group && (!onlyUnset || v.status !== 'available'));
       if (rows.length) sections.push(this.section(title, hint, rows.map(([key, value]) => this.row(key, value))));
     }
     list.replaceChildren(...(sections.length ? sections : [node('div', 'Every metric has a value.', 'empty')]));

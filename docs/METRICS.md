@@ -23,7 +23,9 @@ Categories, labels and outcomes can't be calculated, so you set them by hand in 
 
 1. Select a trajectory.
 2. Open the **Metrics** tab in the event panel (after **JSON**).
-3. Pick a value, tick labels or type an outcome. Each change saves at once.
+3. At the top, under **Trajectory**, set **Stage**, **Split** and **Complexity**, and read the trajectory's
+   **Size** (with a *Missing split* warning when no split is chosen).
+4. Below that, pick a value, tick labels or type an outcome. Each change saves at once.
 
 | Group | What it holds | How you set it |
 | --- | --- | --- |
@@ -37,8 +39,8 @@ source or definition; **Confirm** records it again for the current source. Tick 
 list just the values still missing. Each change is one **Undo** step. The tab is read-only while a job
 holds the trajectory.
 
-**Complexity** also has a picker in the trajectory bar, next to Stage and Split. When it's unset, the picker
-shows the sampler's target as a hint.
+**Complexity** sits in the **Trajectory** section, next to Stage and Split, rather than in the category
+list. When it's unset, the picker shows the sampler's target as a hint.
 
 A value you set is recorded against the trajectory's current content. If the content changes afterwards,
 the value is marked **Stale** until you **Confirm** it again.

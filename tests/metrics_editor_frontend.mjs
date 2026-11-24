@@ -56,6 +56,11 @@ editor.sync({id: 't1', revision: 3, locked: true});
 assert.ok([...els.list.querySelectorAll('[data-metric-input]')].every(i => i.disabled));
 assert.match(els.note.textContent, /job holds/);
 
+// A metric with its own control elsewhere is left out of the list.
+const trimmed = new MetricsEditor({api, report: e => { throw e; }, els: {list: document.createElement('div'), note: document.createElement('span'), unset: document.createElement('input')}, shownElsewhere: ['lifecycle']});
+trimmed.sync({id: 't1', revision: 3, locked: false}); await settle();
+assert.doesNotMatch(trimmed.els.list.textContent, /lifecycle/); assert.match(trimmed.els.list.textContent, /event tags/);
+
 // "Only show unset" hides set values.
 editor.sync({id: 't1', revision: 3, locked: false}); await settle();
 els.unset.checked = true; els.unset.dispatchEvent(new Event('change'));

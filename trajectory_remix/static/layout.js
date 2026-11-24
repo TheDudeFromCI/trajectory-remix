@@ -3,7 +3,7 @@
    Sizes and the collapsed state are remembered in this browser. */
 
 const $ = id => document.getElementById(id);
-const SIZES_KEY = 'studio-sizes', HEADER_KEY = 'studio-header-collapsed';
+const SIZES_KEY = 'studio-sizes';
 const STEP = 16;
 
 /** Each splitter resizes one panel: `sign` is +1 when dragging right/down grows it. `reserve` is
@@ -75,18 +75,6 @@ function bindSplitter(handle) {
 }
 for (const handle of document.querySelectorAll('.splitter[data-resize]')) bindSplitter(handle);
 addEventListener('resize', () => { for (const handle of document.querySelectorAll('.splitter[data-resize]')) describe(handle.dataset.resize, handle); });
-
-// Trajectory header: collapse to its title row.
-const bar = $('metadata-panel'), toggle = $('header-toggle');
-function setCollapsed(collapsed, remember = true) {
-  if (!bar || !toggle) return;
-  bar.classList.toggle('collapsed', collapsed);
-  const label = collapsed ? 'Expand trajectory details' : 'Collapse trajectory details';
-  toggle.setAttribute('aria-expanded', String(!collapsed)); toggle.setAttribute('aria-label', label); toggle.dataset.tip = label;
-  if (remember) write(HEADER_KEY, collapsed);
-}
-toggle?.addEventListener('click', () => setCollapsed(!bar.classList.contains('collapsed')));
-setCollapsed(read(HEADER_KEY, false) === true, false);
 
 // Timeline controls: with the timeline panel hidden they live in the status bar, and only while the Editor is showing.
 const workspace = $('workspace'), slot = $('status-transport'), transport = document.querySelector('.timeline-controls .transport');

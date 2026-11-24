@@ -28,7 +28,7 @@ tooltips rather than in extra text on screen.
 | **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, comment state or size (type `@size:m` or `@size:<=xs` in the search box; see [Metrics](METRICS.md#character-counts-and-trajectory-sizes)). Each row shows a short ID, its stage and split, a speech bubble with the number of unresolved comments (amber when some await your review), and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage**, **Split** and **Complexity** (Trivial to Expert; the same value as the Metrics tab). Every change saves itself, so there is no Save button. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (set the trajectory's categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
+| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state, problem count and any *Review stale* tag. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -112,7 +112,7 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
 5. Want the agent to see its tools? Add an event of kind **Tool schema** in a `tools`
    window and tick the tools. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
    Randomly added tools are grayed out; hide them under **Preferences**.
-6. Set the trajectory's **Stage**, **Split** and **Complexity** in the trajectory bar.
+6. Set the trajectory's **Stage**, **Split** and **Complexity** at the top of the **Metrics** tab.
 
 Every change saves as soon as you make it; there is no Save button. Choices, checkboxes and
 buttons save at once. Typing saves when you pause, so a sentence is one save. The badge reads
@@ -259,12 +259,6 @@ works from the keyboard: focus it and press the arrow keys (hold **Shift** for b
 steps). **Double-click** a handle or press **Home** to restore its default size. Sizes are
 remembered in this browser, and panels can't shrink below a usable minimum or squeeze the
 windows out.
-
-### Collapse the trajectory bar
-
-Click the chevron at the left of the trajectory bar to hide its **Stage**, **Split** and
-**Complexity** row and keep just the title and save state. Click it again to expand. The choice is
-remembered in this browser.
 
 ### Choose how trajectories are built
 
@@ -417,7 +411,7 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.css` | Layout of the shell, Editor, Jobs and Metrics views and the status bar. |
 | `sampler.css`, `project-settings.css` | The Sampler view and the settings forms. |
 | `shell.js` | View tabs, disclosure menus, keyboard-navigable tab panels and the `[data-tip]` tooltip. |
-| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), the collapsible trajectory bar, and moving the timeline controls into the status bar while the timeline is hidden. |
+| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), and moving the timeline controls into the status bar while the timeline is hidden. |
 | `views.js` | `showView()` / `currentView()`; dispatches a `studio-view` event that loads Jobs, Metrics and the Sampler on demand. |
 | `ui-kit.js` | DOM helpers: keyed `reconcile()`, idempotent `setText`/`setAttr`/`toggleClass`, `progressBar()`, `makeTabs()`, stage and job tone maps. |
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |

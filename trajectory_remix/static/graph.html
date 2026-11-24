@@ -150,9 +150,9 @@
   <aside class="widget event-panel editor-panel" id="event-editor-panel" aria-label="Event editor">
     <section class="trajectory-bar" id="metadata-panel" aria-label="Trajectory">
       <div class="bar-row">
-        <button id="header-toggle" class="ghost icon sm" type="button" aria-expanded="true" aria-controls="trajectory-meta" aria-label="Collapse trajectory details" data-tip="Collapse trajectory details"><svg class="ico"><use href="#i-chevron"/></svg></button>
         <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
         <span id="dirty-indicator" class="tag"></span>
+        <small id="review-stale" class="tag tone-warning"></small>
         <button id="diagnostics-summary" class="sm ghost" hidden></button>
         <span class="grow"></span>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
@@ -165,14 +165,7 @@
           <button id="delete-sample" class="danger">Delete trajectory</button>
         </div></details>
       </div>
-      <div class="bar-row meta-row" id="trajectory-meta">
-        <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
-        <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
-        <label class="inline-label">Complexity <select id="complexity" data-lock-exempt aria-label="Complexity"><option value="">Not set</option></select></label>
-        <small id="size-tag" class="tag tone-muted"></small>
-        <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
-        <span id="lock-slot" class="row"></span>
-      </div>
+      <div class="bar-row lock-row row" id="lock-slot" hidden></div>
     </section>
     <div class="widget-head">
       <h2 class="event-heading">Event</h2>
@@ -257,6 +250,15 @@
       </div>
 
       <div role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" class="panel-body" data-lock-exempt hidden>
+        <section class="option-group trajectory-fields" aria-label="Trajectory">
+          <h3>Trajectory</h3>
+          <div class="form-grid two">
+            <label>Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
+            <label>Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
+            <label>Complexity <select id="complexity"><option value="">Not set</option></select></label>
+            <div class="field-tags"><span class="small muted">Size</span> <small id="size-tag" class="tag tone-muted"></small> <small id="split-warning" class="tag tone-warning"></small></div>
+          </div>
+        </section>
         <div class="metrics-editor-head">
           <span id="metrics-editor-note" class="small muted metrics-note"></span>
           <label class="small inline-label"><input type="checkbox" id="metrics-only-unset"> Only show unset</label>

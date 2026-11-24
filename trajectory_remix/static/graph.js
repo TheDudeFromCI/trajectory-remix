@@ -297,7 +297,7 @@ export class StudioUI {
     const stale = this.record.review_status?.stale;
     $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
     setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
-    const size = this.record.size; $('size-tag').textContent = size?.label ? 'Size ' + size.label : '';
+    const size = this.record.size; $('size-tag').textContent = size?.label || '';
     setAttr($('size-tag'), 'data-tip', size ? `Saved source: about ${size.total_tokens_estimate.toLocaleString()} tokens total, about ${size.agent_tokens_estimate.toLocaleString()} agent-generated.` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
@@ -904,6 +904,7 @@ export class StudioUI {
     this.metricsEditor = new MetricsEditor({api, report: message, beforeSave: () => this.autoSave.flush(),
       onSaved: view => { if (view.delta) this.history([view.delta]); return this.refreshSelected(); },
       onView: (view, state) => renderComplexity($('complexity'), view, state.locked),
+      shownElsewhere: ['complexity'],
       els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset')}});
     on('complexity', 'change', () => this.metricsEditor.save('complexity', $('complexity').value || undefined));
     $('tab-metrics').addEventListener('click', () => this.metricsEditor.load().catch(message));

@@ -71,13 +71,11 @@ body.resizing * { cursor: inherit !important; }
 /* Center column */
 .editor-center { display: grid; grid-template-rows: minmax(120px, 1fr) var(--split) minmax(100px, var(--timeline-h)); min-width: 0; min-height: 0; }
 
-/* Trajectory header: the top of the event panel; collapsing hides everything but the title row. */
+/* Trajectory header: the top of the event panel, one fixed row (plus a lock notice while a job holds it). */
 .trajectory-bar { flex: none; overflow: visible; border-bottom: 1px solid var(--border); }
-.trajectory-bar.collapsed .meta-row { display: none; }
-#header-toggle .ico { transition: transform var(--dur-med) var(--ease); }
-.trajectory-bar.collapsed #header-toggle .ico { transform: rotate(-90deg); }
 .bar-row { display: flex; align-items: center; flex-wrap: wrap; row-gap: var(--space-1); gap: var(--space-2); min-width: 0; padding: var(--space-2); background: var(--surface-200); }
-.bar-row.meta-row { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); background: var(--surface-100); flex-wrap: wrap; }
+.bar-row.lock-row { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); background: var(--surface-100); }
+.bar-row.lock-row[hidden] { display: none; }
 #trajectory-title { min-width: 64px; flex: 0 1 auto; font-size: 13px; }
 .trajectory-bar > .bar-row:first-child { flex-wrap: nowrap; }
 .trajectory-bar > .bar-row:first-child > :not(#trajectory-title) { flex-shrink: 0; }
@@ -87,8 +85,9 @@ body.resizing * { cursor: inherit !important; }
 .no-event #panel-content > :not(#event-empty) { display: none; }
 .inline-label { flex-direction: row; align-items: center; gap: var(--space-2); }
 .inline-label select { height: 28px; }
-.meta-row .tag:empty { display: none; }
-#lock-slot { gap: var(--space-2); min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
+.trajectory-bar .tag:empty, .trajectory-fields .tag:empty { display: none; }
+#lock-slot { gap: var(--space-2); min-width: 0; justify-content: space-between; }
+.trajectory-fields .field-tags { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; align-self: end; min-height: 32px; }
 .lock-note { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: 340px; color: var(--warning); font-size: 12px; }
 #diagnostics-summary { gap: var(--space-1); padding: 0 var(--space-1); }
 
@@ -386,6 +385,7 @@ td.faint { color: var(--ink-faint); }
 @keyframes working-dot { 0%, 20% { opacity: 0; } 40%, 100% { opacity: 1; } }
 
 /* Editor › Metrics tab */
+.trajectory-fields { margin-bottom: var(--space-2); }
 .metrics-editor-head { display: flex; flex-direction: column; gap: var(--space-1); padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
 .metrics-editor-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .metrics-group p { margin: 0 0 var(--space-1); }
