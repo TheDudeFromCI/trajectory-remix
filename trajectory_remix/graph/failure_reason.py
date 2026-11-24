@@ -2,9 +2,9 @@
 
 Job logs never carry prompts, model output, provider error bodies or keys. These
 helpers keep that rule while still telling the reader *why* something failed: the
-failure class, the HTTP status with a plain-language hint, a short machine-readable
-provider error code (validated, never free text), the endpoint host, and for local
-bugs the place in the code where the error was raised.
+failure class, the HTTP status with a plain-language hint, validated provider
+metadata, the endpoint host, and for local bugs the place in the code where the
+error was raised.
 """
 
 from __future__ import annotations
@@ -21,6 +21,16 @@ import httpx
 PACKAGE = Path(__file__).resolve().parent.parent
 # OpenAI-style error codes such as ``model_not_found``; free text never matches.
 CODE = re.compile(r"[A-Za-z0-9_.:-]{1,60}")
+PARAMETER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+|\[[0-9]+\])*")
+REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+PARAMETER_HINTS = {
+    "unknown_parameter": "the endpoint does not recognize this request field",
+    "unsupported_parameter": "the endpoint or model does not support this request field",
+    "unsupported_value": "the endpoint or model does not support the value for this request field",
+    "invalid_value": "the endpoint rejected the value for this request field",
+    "missing_required_parameter": "the endpoint requires this request field",
+}
 
 STATUS_HINTS = {
     400: "the endpoint rejected the request (check the model name, output mode and extra request fields)",
@@ -68,14 +78,21 @@ def log_local_error(error: BaseException, context: str, job: str) -> None:
     )
 
 
-def provider_code(response) -> str | None:
-    """The provider's error ``code``/``type`` identifier when it is a short token."""
+def provider_error(response: httpx.Response) -> tuple[str | None, str | None]:
+    """Read only a short error identifier and a parameter path from the provider."""
     try:
         error = response.json().get("error")
-        value = error.get("code") or error.get("type") if isinstance(error, dict) else None
     except (ValueError, AttributeError, UnicodeError):
-        return None
-    return value if isinstance(value, str) and CODE.fullmatch(value) else None
+        return None, None
+    if not isinstance(error, dict):
+        return None, None
+    code = error.get("code") or error.get("type")
+    param = error.get("param")
+    if not isinstance(code, str) or not CODE.fullmatch(code):
+        code = None
+    if not isinstance(param, str) or len(param) > 120 or not PARAMETER.fullmatch(param):
+        param = None
+    return code, param
 
 
 def host(config: dict) -> str:
@@ -93,11 +110,16 @@ def status_reason(error: httpx.HTTPStatusError, endpoint: str) -> str:
     )
     if status in (401, 403) and not os.environ.get(key_variable(endpoint)):
         hint += f"; no key is set (export {key_variable(endpoint)})"
-    code = provider_code(error.response)
+    code, param = provider_error(error.response)
+    if status in (400, 422) and param:
+        hint = PARAMETER_HINTS.get(code, hint)
+    request_id = error.response.headers.get("x-request-id", "")
     return (
         f"HTTP {status} {error.response.reason_phrase or ''}".rstrip()
         + f": {hint}"
         + (f" [provider code {code}]" if code else "")
+        + (f" [parameter {param}]" if param else "")
+        + (f" [provider request ID {request_id}]" if REQUEST_ID.fullmatch(request_id) else "")
     )
 
 
