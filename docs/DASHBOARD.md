@@ -210,13 +210,13 @@ revert its edits, and read the answers in the Comments tab. If the session runs 
 room, it stops with its edits so far kept and the comments still open.
 
 To skip the button, turn on **Automatically send new comments to the assistant** in
-**Preferences** (off by default, stored in this browser). Adding a comment, or requesting
+**Preferences** (off by default, stored in this browser). Adding a comment, replying to a comment that is still open, or requesting
 changes on an agent's fix, then sends the trajectory's open comments at once. The same
 checks apply, so save your draft first. If a job is already working on the trajectory (for
 example the assistant's previous run), the comment is saved and queued instead. When the job
 settles, the open comments, however many you added, go out together as one more job. A queued
-send waits while you have unsaved edits, and is dropped if nothing is left open. While it's on, **Send open comments to agent** is
-greyed out and its tooltip says auto-send is enabled.
+send waits while you have unsaved edits, and is dropped if nothing is left open. **Send open comments to agent** stays enabled in this mode, so you can resend by hand
+(for example after the assistant hits its context limit).
 
 ### Preview the tokens
 
