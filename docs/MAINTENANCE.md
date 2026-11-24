@@ -90,6 +90,7 @@ node tests/tool_import_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs
 node tests/comments_auto_send_frontend.mjs
+node tests/auto_save_frontend.mjs
 node tests/assistant_indicator_frontend.mjs
 node tests/assistant_queue_frontend.mjs
 node tests/job_log_levels_frontend.mjs
@@ -188,9 +189,10 @@ and the model checker (its cost estimate uses Draft and Assembly token counts fr
 `scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
 `graph/usage.py` stores counts only, never prompts, responses or credentials.
 
-Output modes: `python -m pytest -q tests/test_output_modes.py` checks that `auto`,
-`json_object` and `prompt` endpoints send the right `response_format` (or none) and always
-state the schema in the prompt when the server does not enforce it.
+Plain-text Drafts: `python -m pytest -q tests/test_draft_reply.py tests/test_graph_provider.py`
+checks that no request sends `response_format` or a schema contract, that the Draft reply is
+read as plain text (a habitual `{"draft": ...}` wrapper is unwrapped, results saved before the
+change still load), and that saved `output_mode` settings and the old JSON Draft prompt upgrade.
 
 Schema corrections: `graph/schema_errors.py` turns a schema violation into a short
 correction naming each failing field (it looks inside "object or null" alternatives and

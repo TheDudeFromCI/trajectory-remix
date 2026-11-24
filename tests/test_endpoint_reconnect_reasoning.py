@@ -15,7 +15,6 @@ def body(**options):
         operation="event",
         endpoint_config=endpoint.model_dump(mode="json"),
         messages=[],
-        schema={"type": "object"},
     )
     return request_body(payload, "t")[0]
 

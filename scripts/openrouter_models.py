@@ -1,7 +1,7 @@
 """Check OpenRouter models for Trajectory Remix generation and estimate their cost.
 
 Reads OpenRouter's public model list (no API key, no generation requests) and reports,
-for each model: whether it supports the structured output Remix sends, how its
+for each model: whether it supports the native tool calls Remix sends, how its
 reasoning must be configured, the extra request fields to put in the endpoint's
 settings, and a rough Draft and Assembly cost per 1,000 trajectories (no reviews or repairs).
 
@@ -91,12 +91,9 @@ def assess(model):
     if reasoning is not None:
         extra["reasoning"] = reasoning
     problems = []
-    if "response_format" not in supported:
-        problems.append("no response_format: Remix requests would be ignored or rejected")
-    if "structured_outputs" not in supported:
-        problems.append(
-            "no json_schema structured outputs: event requests need it with require_parameters"
-        )
+    # Draft replies are plain text; Assembly, review and the Assistant use native tools.
+    if "tools" not in supported:
+        problems.append("no tools: Assembly and review need native tool calls")
     if reasoning is not None and reasoning.get("exclude"):
         problems.append("reasoning cannot be turned off: expect extra output tokens and cost")
     pricing = model.get("pricing", {})

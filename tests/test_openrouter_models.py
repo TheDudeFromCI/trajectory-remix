@@ -10,7 +10,7 @@ checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 PRICES = {"prompt": "0.0000001", "completion": "0.0000003", "input_cache_read": "0.00000001"}
-FULL = ["response_format", "structured_outputs"]
+FULL = ["tools", "tool_choice"]
 
 
 def model(**fields):
@@ -40,10 +40,15 @@ def test_reasoning_is_switched_off_the_way_each_model_accepts():
     assert result["ready"] and any("cannot be turned off" in p for p in result["problems"])
 
 
-def test_models_without_structured_output_are_not_ready():
+def test_models_without_native_tools_are_not_ready():
     result = checker.assess(model(supported_parameters=["response_format"]))
-    assert not result["ready"] and "json_schema" in result["problems"][0]
+    assert not result["ready"] and "tools" in result["problems"][0]
     assert not checker.assess(model(supported_parameters=[]))["ready"]
+
+
+def test_json_output_support_is_not_required():
+    # Drafts are plain text, so models without response_format are still ready.
+    assert checker.assess(model(supported_parameters=["tools"]))["ready"]
 
 
 def test_cost_grows_with_episode_length_and_falls_with_a_cache_discount():

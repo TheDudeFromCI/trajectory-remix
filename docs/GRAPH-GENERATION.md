@@ -98,7 +98,8 @@ sampler. Trivial and small proposals aim for about 32,500 content tokens and 2,0
 supervised agent tokens. Medium proposals aim for about 65,000 and 4,000. Large
 proposals aim for about 130,000 and 8,000. These guide the models. Actual lengths can vary.
 
-Draft creates an outline, then writes one prose section per call. Assembly checkpoints
+Draft creates a small outline from the endpoint's text reply, then writes one prose
+section per call with a short handoff for the next section. Assembly checkpoints
 each section into the same graph and opens a fresh conversation for the next section.
 Reviews inspect and repair one section at a time, then check the combined graph at
 signoff. Reads can fetch exact event text, causal evidence and Draft sections in pages.
@@ -331,7 +332,8 @@ and `repair_rounds` options still load, and `repair_context_bytes` becomes
 `settings.prompts`.
 
 **Endpoints.** Remix sends non-streamed OpenAI-compatible `/chat/completions` requests.
-Draft uses the endpoint's configured JSON output mode. Assembly, review and the Assistant
+Draft replies in plain text (no `response_format`, JSON mode or grammar), and Remix stores the
+reply as the Draft; it must be at least 200 characters. Assembly, review and the Assistant
 require native function tools. Credentials come from `REMIX_API_KEY_<ENDPOINT>` in the environment.
 
 **REST routes:**

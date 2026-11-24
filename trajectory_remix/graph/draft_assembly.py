@@ -1,7 +1,7 @@
 """Draft and Assembly: a prose draft of the whole episode, then one assembled graph.
 
-Draft writes working notes in one JSON reply: messages, reasoning, tool calls with example
-outputs. Assembly builds the graph from them in a native tool session (authoring_session).
+Draft writes working notes as one plain-text reply: messages, reasoning, tool calls with
+example outputs (draft_reply reads them). Assembly builds the graph from them in a native tool session (authoring_session).
 The prompts come from the project settings (settings.prompts) and freeze with the run.
 """
 
@@ -14,12 +14,6 @@ from .models import GraphSource, digest
 # earlier pipeline pause with a message instead of resuming into phases that are gone.
 DRIVER = "draft-assembly/3"
 DRAFT, ASSEMBLE = "draft", "assembly"
-DRAFT_SCHEMA = dict(
-    type="object",
-    properties=dict(draft=dict(type="string", minLength=200)),
-    required=["draft"],
-    additionalProperties=False,
-)
 
 
 def prompts(settings):
@@ -83,7 +77,6 @@ def payload(cp, plan):
     return dict(
         operation=DRAFT,
         prompt_version=plan["prompts"]["version"],
-        schema=DRAFT_SCHEMA,
         messages=_draft_messages(plan, correction),
     )
 

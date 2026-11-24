@@ -94,7 +94,7 @@ so check them with a one-trajectory run (see below) before a larger one:
 
 | Not documented | What to set in Remix |
 | --- | --- |
-| JSON-schema output (`response_format`) | Start with **Structured output: Auto**. If replies come back in the wrong shape or the request is refused, switch to **JSON object**, then **Prompt only**. Both put the schema in the prompt. |
+| Native tool calls (`tools`) | Assembly, review and the Assistant need them. The Draft is plain text, so no JSON-schema output or grammar support is needed. |
 | The request field for reasoning effort | The README names reasoning levels off, low, medium and high. Try `{"reasoning_effort": "none"}` in **Extra request fields**, or `"low"` if `none` is refused, and check the **Reasoning** column in **Usage**. |
 | Parallel requests | Only models configured with `"parallel"` in their `strata-<model>.json` answer more than one request at a time. Otherwise set **Concurrent requests** to 1. |
 
@@ -123,9 +123,8 @@ Qwen3-family hybrid models, `{"chat_template_kwargs": {"enable_thinking": false}
    | Model identifier | The model's name, for example its GGUF file name; it is recorded with each response |
    | Concurrent requests | What the server can answer at once (see above) |
    | Context limit (tokens) | The server's context per request |
-   | Max output tokens | `8192` (reasoning models need room to think before the JSON) |
+   | Max output tokens | `8192` (reasoning models need room to think before they answer) |
    | Provider options → Bytes per token | `3` |
-   | Provider options → Structured output | **Auto** to start (see above) |
    | Provider options → Sticky sessions | Off (a single local server needs no routing) |
    | Provider options → Extra request fields | The server's setting that turns thinking off (see above) |
 

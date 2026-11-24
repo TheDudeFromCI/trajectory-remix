@@ -7,100 +7,11 @@ import os
 
 import httpx
 
-from ..structured_output import decoding_schema
 from . import token_limits
 from .failure_reason import key_variable
 
 
-def strict_schema_supported(schema):
-    """Conservative common strict-schema subset; arbitrary patches use JSON mode.
-
-    Decoding is only a convenience. The original local schema remains authoritative.
-    In particular, arbitrary tool arguments and root repair unions are valid graph
-    contracts but are not valid OpenAI strict response schemas.
-    """
-    if not isinstance(schema, dict) or schema.get("type") != "object":
-        return False
-
-    def supported(node):
-        if (
-            not isinstance(node, dict)
-            or not node
-            or any(
-                k in node
-                for k in (
-                    "oneOf",
-                    "allOf",
-                    "not",
-                    "patternProperties",
-                    "$ref",
-                    "if",
-                    "then",
-                    "else",
-                )
-            )
-        ):
-            return False
-        if "anyOf" in node:
-            return all(supported(child) for child in node["anyOf"])
-        kind = node.get("type")
-        if kind == "object":
-            props = node.get("properties", {})
-            return (
-                node.get("additionalProperties") is False
-                and set(node.get("required", [])) == set(props)
-                and all(supported(value) for value in props.values())
-            )
-        if kind == "array":
-            return supported(node.get("items"))
-        return kind in ("string", "number", "integer", "boolean", "null")
-
-    return supported(schema)
-
-
-def response_contract(payload):
-    """(response_format, messages) for a request. response_format None means omit it.
-
-    The endpoint's output_mode chooses: "auto" uses native strict JSON schema when the
-    schema allows it and JSON mode otherwise; "json_object" always uses JSON mode with the
-    schema in the prompt; "prompt" puts the schema in the prompt and sends no
-    response_format, for servers that support neither.
-    """
-    mode = (payload.get("endpoint_config") or {}).get("output_mode", "auto")
-    schema = decoding_schema(payload["schema"])
-    if mode == "auto" and strict_schema_supported(schema):
-        return (
-            {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "graph_" + payload["operation"],
-                    "strict": True,
-                    "schema": schema,
-                },
-            },
-            payload["messages"],
-        )
-    # This is a wire-format choice, not a retry, alternate model or endpoint.
-    # JSON mode still receives the complete schema and is validated after return.
-    # The schema never changes between calls, so it goes right after the system prompt,
-    # ahead of the per-call data, where a prefix cache can reuse it. It is joined to the
-    # first user message rather than sent separately: some open-weight chat templates
-    # reject two user messages in a row.
-    contract = (
-        "Return one JSON object matching this complete output schema. "
-        "Do not include Markdown or explanations. Schema: " + json.dumps(payload["schema"])
-    )
-    messages = [dict(m) for m in payload["messages"]]
-    first = next((m for m in messages if m["role"] != "system"), None)
-    if first is not None and first["role"] == "user":
-        first["content"] = contract + "\n\n" + first["content"]
-    else:
-        at = messages.index(first) if first is not None else len(messages)
-        messages.insert(at, {"role": "user", "content": contract})
-    return (None if mode == "prompt" else {"type": "json_object"}), messages
-
-
-def context_budget(payload, response_format, messages):
+def context_budget(payload, messages):
     """Conservative byte-token ceiling, independent of training tokenizers.
 
     UTF-8 bytes bound byte-backed BPE input tokens; reserve additional template
@@ -114,7 +25,7 @@ def context_budget(payload, response_format, messages):
     wire_contract = {"tools": payload["tools"], "tool_choice": "auto"} if "tools" in payload else {}
     size = len(
         json.dumps(
-            dict(messages=messages, response_format=response_format, **wire_contract),
+            dict(messages=messages, **wire_contract),
             ensure_ascii=False,
         ).encode()
     )
@@ -132,10 +43,10 @@ def request_body(payload, trajectory_id):
     """The exact HTTP body for a request (no credentials) and its context budget."""
     endpoint = payload["endpoint_config"]
     native = "tools" in payload
-    response_format, messages = (
-        (None, payload["messages"]) if native else response_contract(payload)
-    )
-    budget = context_budget(payload, response_format, messages)
+    # Requests without tools (the Draft) ask for plain text: no response_format, so
+    # servers without JSON mode or grammar support work unchanged.
+    messages = payload["messages"]
+    budget = context_budget(payload, messages)
     extras = endpoint.get("extra_body", {})
     if native:
         extras = {
@@ -149,7 +60,6 @@ def request_body(payload, trajectory_id):
         model=endpoint["model"],
         messages=messages,
         stream=False,
-        **({"response_format": response_format} if response_format else {}),
     )
     if budget["max_output_tokens"] != token_limits.DISABLED:
         body["max_tokens"] = budget["max_output_tokens"]
@@ -255,11 +165,10 @@ class OpenAITransport:
         # Incomplete text never leaves this local buffer; jobs never store it.
         if choice.get("finish_reason") != "stop":
             return dict(meta, invalid_output=True, finish_reason=choice.get("finish_reason"))
-        try:
-            output = json.loads(choice["message"]["content"])
-        except (ValueError, TypeError):
+        text = (choice.get("message") or {}).get("content")
+        if not isinstance(text, str):
             return dict(meta, invalid_output=True, finish_reason="stop")
-        return dict(meta, output=output)
+        return dict(meta, text=text)
 
 
 def invalid_reason(result):
@@ -267,6 +176,6 @@ def invalid_reason(result):
     if result.get("finish_reason") == "length":
         return (
             "The previous reply was cut off at the output token limit before it finished. "
-            "Return a shorter, complete JSON object."
+            "Write shorter notes that still cover the whole episode."
         )
-    return "The previous reply was not a single valid JSON object. Return only that object."
+    return "The previous reply had no text. Reply with the Draft notes as plain text."

@@ -114,6 +114,9 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    Randomly added tools are grayed out; hide them under **Preferences**.
 6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
    **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
+   By default the dashboard also saves for you about a second and a half after your last
+   edit. Turn off **Automatically save the trajectory** under **Preferences** (stored in
+   this browser) to save only with the button.
 
 You can switch to another trajectory without saving. Your draft is kept and comes back
 when you return.

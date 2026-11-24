@@ -25,12 +25,6 @@ OPENROUTER_USAGE = {
     "completion_tokens_details": {"reasoning_tokens": 0},
     "cost": 0.00012,
 }
-SCHEMA = {
-    "type": "object",
-    "properties": {"content": {"type": "string"}},
-    "required": ["content"],
-    "additionalProperties": False,
-}
 
 
 def mock_http(monkeypatch, reply):
@@ -51,15 +45,14 @@ def mock_http(monkeypatch, reply):
 
 def ticket(endpoint, content="x"):
     payload = dict(
-        operation="event",
+        operation="draft",
         endpoint_config=Endpoint.model_validate(endpoint).model_dump(mode="json"),
         messages=[dict(role="user", content=content)],
-        schema=SCHEMA,
     )
     return Ticket("id", "job", "trajectory-7", "openrouter", "step", 1, "lease", payload)
 
 
-def reply(content='{"content":"ok"}', finish_reason="stop"):
+def reply(content="Working notes.", finish_reason="stop"):
     return {
         "model": "vendor/model",
         "choices": [{"finish_reason": finish_reason, "message": {"content": content}}],
@@ -74,15 +67,14 @@ def test_bytes_per_token_lets_a_real_window_be_used():
     payload = dict(
         operation="event",
         messages=[dict(role="user", content="x" * 20000)],
-        schema=SCHEMA,
         endpoint_config=dict(
             context_window_tokens=16384, max_output_tokens=2048, bytes_per_token=1.0
         ),
     )
-    strict = context_budget(payload, {"type": "json_object"}, payload["messages"])
+    strict = context_budget(payload, payload["messages"])
     assert strict["input_tokens_estimate"] > strict["input_ceiling"]  # 1 byte = 1 token.
     payload["endpoint_config"]["bytes_per_token"] = 3.0
-    relaxed = context_budget(payload, {"type": "json_object"}, payload["messages"])
+    relaxed = context_budget(payload, payload["messages"])
     assert relaxed["input_tokens_estimate"] < relaxed["input_ceiling"]
     assert relaxed["input_bytes"] == strict["input_bytes"]
     with pytest.raises(ValidationError):
@@ -102,7 +94,7 @@ async def test_extra_body_and_sticky_session_reach_the_request(monkeypatch):
     assert body["reasoning"] == {"effort": "none"}
     assert body["provider"] == {"require_parameters": True}
     assert body["session_id"] == "trajectory-7"
-    assert body["model"] == "vendor/model" and body["response_format"]["type"] == "json_schema"
+    assert body["model"] == "vendor/model" and "response_format" not in body
     assert result["usage"]["cost"] == 0.00012
     await OpenAITransport()(ticket(BASE))
     assert "session_id" not in sent[1] and "reasoning" not in sent[1]  # Off by default.
@@ -117,7 +109,7 @@ def test_extra_body_cannot_replace_controlled_fields(field):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "content,finish,phrase",
-    [('{"content":"half', "length", "cut off"), ("not json", "stop", "not a single valid JSON")],
+    [("Half the notes", "length", "cut off"), (None, "stop", "no text")],
 )
 async def test_unusable_replies_keep_usage_and_explain_themselves(
     monkeypatch, content, finish, phrase
@@ -126,7 +118,7 @@ async def test_unusable_replies_keep_usage_and_explain_themselves(
 
     mock_http(monkeypatch, reply(content, finish))
     result = await OpenAITransport()(ticket(BASE))
-    assert result["invalid_output"] is True and "output" not in result
+    assert result["invalid_output"] is True and "text" not in result
     assert result["usage"] == OPENROUTER_USAGE  # Billed tokens are still recorded.
     assert phrase in invalid_reason(result)
 
@@ -238,7 +230,7 @@ async def test_full_job_through_the_real_transport_with_the_example_settings(tmp
             message = native_assembly(body, body["session_id"])
             finish_reason = "tool_calls"
         else:
-            message = {"content": json.dumps({"draft": DRAFT})}
+            message = {"content": DRAFT}  # Plain text: no JSON wrapper.
             finish_reason = "stop"
         return httpx.Response(
             200,

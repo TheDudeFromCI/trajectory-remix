@@ -15,13 +15,13 @@ from . import (
     signoffs,
     trajectory_hold,
 )
+from .draft_reply import draft_text
 from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
 from .models import GraphSource, ProjectSettings, canonical
 from .progress import label
 from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
-from .schema_errors import explain
 from .storage import RevisionConflict
 
 DRIVER = draft_assembly.DRIVER
@@ -543,7 +543,7 @@ class GenerationService:
         cp["errors"] += 1
         self.jobs.progress(
             ticket.job_id,
-            f"Invalid structured output; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
+            f"Unusable Draft reply; correction {cp['errors']}/{settings.generation.format_retries}: {label(ticket.payload.get('operation', cp['phase']))} trajectory={label(source.id)}",
             "warning",
         )
         if cp["errors"] <= settings.generation.format_retries:
@@ -578,25 +578,30 @@ class GenerationService:
             self._consume_draft(ticket, source, cp, complete)
 
     def _consume_draft(self, ticket, source, cp, complete):
-        body = complete.get("output")
+        plan = self._plan(ticket.job_id, source.id)
+        segmented = "scaling" in plan
         try:
             if complete.get("invalid_output"):
+                if segmented and complete.get("finish_reason") == "length":
+                    raise ValueError(
+                        "The reply was cut off. Return a shorter, complete reply for this step."
+                    )
                 raise ValueError(invalid_reason(complete))
-            problem = explain(ticket.payload["schema"], body)
-            if problem:
-                raise ValueError(problem)
-        except (ValueError, TypeError, KeyError) as error:
+            if segmented:
+                body = scaling.draft_reply(cp, plan, complete)
+            else:
+                draft = draft_text(complete)
+        except ValueError as error:
             cp["flow_error"] = str(error)[:2000]
             self._invalid(ticket, source, cp)
             return
         cp["errors"] = 0
         cp.pop("flow_error", None)
-        plan = self._plan(ticket.job_id, source.id)
-        if "scaling" in plan:
+        if segmented:
             source = scaling.consume_draft(cp, source, plan, body)
         else:
-            cp["draft"] = body["draft"]
-            source = draft_assembly.with_draft(source, body["draft"])
+            cp["draft"] = draft
+            source = draft_assembly.with_draft(source, draft)
         self._save(ticket.job_id, source, cp, ticket=ticket)
         if "draft" in cp:
             self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
@@ -857,7 +862,9 @@ class GenerationService:
         """End an assistant session without answering; edits so far are kept."""
         if reason == "context_limit":  # Too long to continue: the next send starts afresh.
             assistant_memory.forget(self.store, source.id)
-        cp.pop("authoring_session", None)
+        session = cp.pop("authoring_session", None)
+        if session:
+            assistant.fail(self.comments, session, reason)
         cp["phase"] = "done"
         self._save(job, source, cp, ticket=ticket, outcome="fail")
         self.jobs.progress(

@@ -1,5 +1,6 @@
 """Bounded drafting and resumable authoring for the long-trajectory experiment."""
 
+import json
 import math
 from collections import Counter
 from copy import deepcopy
@@ -70,23 +71,56 @@ class Prose(DTO):
     handoff: str = Field(min_length=1, max_length=1500)
 
 
+def draft_reply(cp, frozen, complete):
+    """Validate a planning outline or a prose section from a text-only endpoint."""
+    text = complete.get("text")
+    body = complete.get("output") if text is None else None  # Queued pre-merge replies.
+    if isinstance(text, str):
+        text = text.replace("\r\n", "\n").strip()
+    if "scale_draft" not in cp:
+        if isinstance(text, str):
+            if text.startswith(("```json\n", "```\n")) and text.endswith("```"):
+                text = text.split("\n", 1)[1][:-3]
+            try:
+                body = json.loads(text)
+            except ValueError as error:
+                raise ValueError("Reply with the outline JSON object as text.") from error
+        outline = Outline.model_validate(body)
+        count = frozen["scaling"]["sections"]
+        if len(outline.sections) != count:
+            raise ValueError(f"The outline needs exactly {count} sections.")
+        return outline.model_dump()
+    if isinstance(text, str):
+        draft, heading, handoff = text.rpartition("\n## Handoff\n")
+        if heading:
+            body = dict(draft=draft.strip(), handoff=handoff.strip())
+        else:
+            # A queued section may still ask for the pre-merge JSON shape.
+            try:
+                body = json.loads(text)
+            except ValueError as error:
+                raise ValueError(
+                    "End the Draft prose with a separate ## Handoff heading and note."
+                ) from error
+    return Prose.model_validate(body).model_dump()
+
+
 def draft_request(cp, frozen):
     target = frozen["scaling"]
     count = target["sections"]
     state = cp.get("scale_draft")
     if state is None:
-        schema = Outline.model_json_schema()
-        schema["properties"]["sections"].update(minItems=count, maxItems=count)
         task = (
             f"Outline one complete parallel episode in exactly {count} ordered sections. "
             f"The approximate final episode target is {target['total_tokens']} content tokens, "
             f"with at least about {target['agent_tokens']} supervised agent tokens. "
             "Distribute meaningful evidence, task progress, and continuity across sections. "
             "Give each section one specific milestone. Include genuine opportunities to use "
-            "and revisit evidence, plus a meaningful ending. Reply with the outline only."
+            "and revisit evidence, plus a meaningful ending. Write only a JSON object as text "
+            'with this shape: {"premise":"...","sections":[{"title":"...","milestone":"..."}]}. '
+            "Use a short title (90 characters or less) and milestone (220 characters or less)."
         )
     else:
-        schema = Prose.model_json_schema()
         index = len(state["sections"])
         task = (
             f"Write the Draft prose for section {index + 1} of {count} only. "
@@ -96,8 +130,9 @@ def draft_request(cp, frozen):
             "agent decisions, and exact facts future sections need. Describe long documents "
             "or tool results with enough concrete detail to expand them during Assembly. "
             f"Aim for no more than about {target['draft_tokens']} visible prose tokens in this "
-            "reply. Preserve earlier state and avoid repeating it. Return the prose in draft and a "
-            "short handoff of resulting state, open obligations, and relevant evidence.\n"
+            "reply. Preserve earlier state and avoid repeating it. Write the notes as prose. "
+            "Finish with a separate line containing ## Handoff, followed by a short note of "
+            "resulting state, open obligations, and relevant evidence (up to 1,500 characters).\n"
             + endpoint_prompts.fence(canonical(state["outline"]), "json")
             + "\nPrevious handoff:\n"
             + endpoint_prompts.fence(state["handoff"])
@@ -106,7 +141,6 @@ def draft_request(cp, frozen):
     return dict(
         operation="draft",
         prompt_version=frozen["prompts"]["version"],
-        schema=schema,
         messages=[
             dict(role="system", content=frozen["actor_instruction"]),
             dict(

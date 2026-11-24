@@ -233,7 +233,7 @@ def test_read_only_write_error_cannot_be_disabled_and_agent_opening_warns():
 async def test_assembly_rejects_enabled_warning_then_continues_to_explicit_signoff(tmp_path):
     gen, fake = service(tmp_path, fast=False)
     fake.responses = [
-        {"draft": DRAFT},
+        DRAFT,
         lambda t: tool_message(
             (
                 "create_event",
@@ -275,7 +275,7 @@ async def test_restart_replays_saved_partial_graph_and_native_conversation(tmp_p
         ticket = gen.jobs.claim("g")
         assert ticket.payload["operation"] == step
         result = (
-            {"output": {"draft": DRAFT}}
+            {"text": DRAFT}
             if step == "draft"
             else {"message": native_assembly(ticket.payload, ident, signoff=False)}
         )
@@ -374,7 +374,7 @@ async def test_attached_diagnostics_and_signoff_keep_frozen_warning_settings(tmp
     project.settings.disabled_warnings = []
     current = gen.store.update_settings(project.settings, frozen.revision)
     fake.responses = [
-        {"draft": DRAFT},
+        DRAFT,
         tool_message(
             (
                 "create_event",

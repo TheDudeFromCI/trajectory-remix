@@ -1,5 +1,7 @@
 """The opt-in pipeline keeps one graph and can restart a bounded section."""
 
+import json
+import re
 from copy import deepcopy
 
 import pytest
@@ -25,18 +27,26 @@ class Provider:
         assert body["max_tokens"] <= 8192
         cp = payload["checkpoint"]
         if payload["operation"] == "draft":
+            assert "response_format" not in body
             if "scale_draft" not in cp:
-                n = payload["schema"]["properties"]["sections"]["minItems"]
-                output = dict(
-                    premise="A continuous episode",
-                    sections=[
-                        dict(title=f"Part {i}", milestone=f"Complete phase {i}") for i in range(n)
-                    ],
+                n = int(
+                    re.search(r"exactly (\d+) ordered sections", body["messages"][1]["content"])[1]
+                )
+                text = json.dumps(
+                    dict(
+                        premise="A continuous episode",
+                        sections=[
+                            dict(title=f"Part {i}", milestone=f"Complete phase {i}")
+                            for i in range(n)
+                        ],
+                    )
                 )
             else:
                 i = len(cp["scale_draft"]["sections"])
-                output = dict(draft=f"Source for section {i}. " * 40, handoff=f"Saved phase {i}.")
-            return {"output": output}
+                text = (
+                    f"Source for section {i}. " * 40
+                ).strip() + f"\n\n## Handoff\nSaved phase {i}."
+            return {"text": text}
 
         session = cp["authoring_session"]
         i = cp["scale_pass"]["index"]
@@ -151,6 +161,7 @@ async def test_scaled_run_rolls_over_and_repairs_cross_section_evidence(
     assert attempt["outcome"] == "pass"
     graph = gen.store.read(attempt["trajectory_id"]).source
     layout = graph.metadata["scaling"]
+    assert "## Handoff" not in graph.metadata["draft"]
     assert layout["size"] == size
     assert (layout["total_tokens"], layout["agent_tokens"]) == scaling.TARGETS[size]
     assert len(layout["outline"]) == sections
