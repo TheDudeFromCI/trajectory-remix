@@ -11,6 +11,7 @@ from pydantic import Field
 from referencing import Registry
 from referencing.exceptions import Unresolvable
 
+from .agent_share import low_agent_share_message
 from .compiler_schedule import EventSchedule, is_model_event
 from .diagnostic_policy import ERRORS, WARNINGS, disabled
 from .models import (
@@ -97,6 +98,9 @@ def diagnose_schedule(
         for event in events.values()
     ):
         emit("no_agent_activity", "Add meaningful agent reasoning or a tool call", path=["events"])
+    share_message = low_agent_share_message(source)
+    if share_message:
+        emit("low_agent_share", share_message, path=["events"])
     for ident, dependencies in schedule.dependencies.items():
         event = events[ident]
         window = source.windows.get(event.window)

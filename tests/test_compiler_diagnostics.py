@@ -54,12 +54,12 @@ def test_parallel_fragments_use_window_order_and_consistency_diagnostics(kind, s
     if kind == "tool_call":
         events = {
             "first": event(
-                kind, "w", "{", call_id="request", tool="example", insert_tool_end=False
+                kind, "w", '{"query":', call_id="request", tool="example", insert_tool_end=False
             ),
             "second": event(
                 kind,
                 "w" if same_window else "other",
-                "}",
+                '"example"}',
                 call_id="request",
                 tool="example",
                 insert_tool_begin=False,
@@ -68,7 +68,9 @@ def test_parallel_fragments_use_window_order_and_consistency_diagnostics(kind, s
         inconsistent = "inconsistent_call"
     else:
         events = {
-            "request": event("tool_call", "tool", "{}", call_id="request", tool="example"),
+            "request": event(
+                "tool_call", "tool", '{"query":"example"}', call_id="request", tool="example"
+            ),
             "first": event(
                 kind, "w", after=["request"], call_id="request", insert_response_end=False
             ),

@@ -6,8 +6,10 @@ import json
 from copy import deepcopy
 from uuid import uuid4
 
+from . import size_query
 from .jobs import TERMINAL, Fenced, OwnershipConflict, page
 from .models import GraphSource, canonical
+from .size_labels import default_size_labels
 from .storage import RevisionConflict
 
 SCHEMA = """
@@ -25,7 +27,7 @@ class BulkService:
             db.executescript(SCHEMA)
 
     @staticmethod
-    def _where(query):
+    def _where(query, size_labels=None):
         # Small explicit graph query grammar, independent of legacy replay search.
         # The studio may extend this shared selector, never pass a page of IDs.
         if not isinstance(query, dict) or set(query) - {
@@ -34,6 +36,7 @@ class BulkService:
             "text",
             "tool",
             "comments",
+            "size",
         }:
             raise ValueError("Unknown graph search fields")
         clauses, args = [], []
@@ -70,6 +73,11 @@ class BulkService:
                 f"EXISTS(SELECT 1 FROM graph_comments c WHERE c.trajectory_id=t.id AND {clause})"
             )
             args.extend(extra)
+        if "size" in query:
+            labels = size_labels if size_labels is not None else default_size_labels()
+            clause, extra = size_query.clause(query["size"], labels)
+            clauses.append(clause)
+            args.extend(extra)
         return " AND ".join(clauses) or "1", args
 
     def start(self, query, action, config=None):
@@ -87,7 +95,7 @@ class BulkService:
             or config["value"] not in {"Train", "Development", "Test", "Auto"}
         ):
             raise ValueError("Invalid split")
-        where, args = self._where(query)
+        where, args = self._where(query, size_query.labels_for(self.store, query))
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             job = self.jobs._create(db, "bulk", dict(query=query, action=action, options=config), 0)

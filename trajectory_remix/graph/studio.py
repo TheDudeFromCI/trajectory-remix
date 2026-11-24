@@ -12,11 +12,13 @@ from threading import Lock
 
 from fastapi.encoders import jsonable_encoder
 
+from . import size_query
 from .bulk import BulkService
 from .commands import GraphCommands, GraphResult
 from .diagnostic_policy import choices
 from .jobs import page
 from .models import GraphSource, ProjectSettings, digest
+from .size_labels import size_of
 from .validation import diagnose
 
 
@@ -46,7 +48,7 @@ class Studio:
 
     def listing(self, query=None, *, limit=50, offset=0):
         page(limit, offset)
-        where, args = BulkService._where(query or {})
+        where, args = BulkService._where(query or {}, size_query.labels_for(self.store, query))
         with self.store.connect() as db:
             db.execute("BEGIN")
             join = """FROM graph_trajectories t JOIN graph_trajectory_revisions r
@@ -74,10 +76,11 @@ class Studio:
     def present(self, value):
         from .reviews import stale
 
+        record = value.record
+        settings = self.store.settings(record.settings_revision).settings
         return result(value) | dict(
-            review_status=stale(
-                value.record.source, self.store.settings(value.record.settings_revision).settings
-            )
+            review_status=stale(record.source, settings),
+            size=size_of(record.source, [label.model_dump() for label in settings.size_labels]),
         )
 
     def update_settings(self, settings, expected_revision):
@@ -100,6 +103,7 @@ class Studio:
             owner=owner,
             review_status=stale(source, settings),
             diagnostics_settings_revision=snapshot.revision,
+            size=size_of(source, [label.model_dump() for label in settings.size_labels]),
         )
 
     def graph(self, ident):

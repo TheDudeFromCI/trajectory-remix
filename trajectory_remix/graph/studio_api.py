@@ -14,6 +14,7 @@ from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
 
+from . import size_query
 from .bulk import BulkService
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
@@ -312,13 +313,14 @@ def create_studio_app(
         split: str | None = None,
         tool: str | None = None,
         comments: Literal["open", "addressed", "unresolved"] | None = None,
+        size: str | None = None,
         limit: int = Query(50, ge=1, le=1000),
         offset: int = Query(0, ge=0),
     ):
         query = {
             k: v
             for k, v in dict(
-                text=text, stage=stage, split=split, tool=tool, comments=comments
+                text=text, stage=stage, split=split, tool=tool, comments=comments, size=size
             ).items()
             if v is not None
         }
@@ -331,15 +333,18 @@ def create_studio_app(
         split: str | None = None,
         tool: str | None = None,
         comments: Literal["open", "addressed", "unresolved"] | None = None,
+        size: str | None = None,
     ):
         query = {
             k: v
             for k, v in dict(
-                text=text, stage=stage, split=split, tool=tool, comments=comments
+                text=text, stage=stage, split=split, tool=tool, comments=comments, size=size
             ).items()
             if v is not None
         }
-        BulkService._where(query)  # Validate before the stream starts.
+        BulkService._where(
+            query, size_query.labels_for(studio.store, query)
+        )  # Validate before the stream starts.
         return StreamingResponse(
             iter_jsonl(studio.store, query),
             media_type="application/x-ndjson",
