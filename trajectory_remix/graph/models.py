@@ -401,6 +401,7 @@ class GenerationPrompts(DTO):
     actor: str = Field(default_factory=prompt_defaults.actor, min_length=1)
     draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
     assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
+    assistant: str = Field(default_factory=prompt_defaults.assistant, min_length=1)
 
 
 class GenerationOptions(DTO):

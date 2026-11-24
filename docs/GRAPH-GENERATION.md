@@ -141,6 +141,7 @@ prompts**:
 | **Agent prompt** | Draft and Assembly | How the agent behaves. Add a persona pack here. |
 | **Draft instructions** | Draft | How to write the working notes. |
 | **Assembly instructions** | Assembly | How to lay the notes out as the compact spec, with a worked example. |
+| **Assistant prompt** | Assistant | How the Assistant endpoint answers reviewer comments (Send to agent). Generation never uses it. |
 
 **Load Default Prompts** restores the packaged ones (`graph/draft_assembly.yaml`) after asking
 you to confirm; nothing is saved until you choose **Save settings**. Runs freeze the prompts

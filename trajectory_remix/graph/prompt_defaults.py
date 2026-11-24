@@ -27,3 +27,7 @@ def draft():
 
 def assembly():
     return packaged()["assemble_instruction"]
+
+
+def assistant():
+    return packaged()["assistant_instruction"]
