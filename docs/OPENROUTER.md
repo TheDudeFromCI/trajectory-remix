@@ -9,7 +9,7 @@ implementation team: treat it as a checklist to follow and report on.
 
 - An OpenRouter API key with a few dollars of credit. A 10-trajectory pilot on the models
   below costs well under $1.
-- A model that supports **structured outputs** and, ideally, a **cache discount**. Use the
+- A model that supports **tool calling** and, ideally, a **cache discount**. Use the
   model checker below rather than picking by price alone.
 
 To check generation for free first, run a few trajectories on a local server: see
@@ -35,11 +35,11 @@ What to look for:
 
 | Check | Why it matters |
 | --- | --- |
-| **Ready** | Remix sends JSON-schema requests. Models without structured outputs ignore them or cannot be routed. |
+| **Ready** | Assembly, review and the Assistant use native tool calls. Models without tool support cannot be routed. Drafts are plain text, so JSON output support is not needed. |
 | **Cache discount** | Each native tool turn extends the conversation for that pass. With a discount, that cached input costs a fraction of the normal price. |
 | **Reasoning** | Reasoning (thinking) tokens are billed as output. The estimate assumes medium reasoning, as in the pilots; turning it off costs less, and the checker gives the right field. |
 
-A good first choice is **Mistral Small 3.2 24B**: structured outputs, no reasoning, a
+A good first choice is **Mistral Small 3.2 24B**: tool calling, no reasoning, a
 cache discount and a 256k window.
 
 ## 2. Configure the endpoint
@@ -103,7 +103,7 @@ Open **Generate**, set **Attempts** to 10, keep the seed and start the run. Then
 | --- | --- |
 | **Usage** | Total and per-trajectory cost, prompt and output tokens, and the cached share of prompt tokens. Multiply the per-trajectory cost by 1,000 for the real price of a larger run. |
 | **Attempts** | How many trajectories finished, and which ended Unsuccessful or Unfinished. |
-| **Logs** | Look for `Invalid structured output; correction`, `Local context guard`, `Request failed` and `endpoint paused`. |
+| **Logs** | Look for `Unusable Draft reply; correction`, `Local context guard`, `Request failed` and `endpoint paused`. |
 
 Open a few finished trajectories in the **Editor** to judge the content itself.
 
@@ -114,7 +114,7 @@ Open a few finished trajectories in the **Editor** to judge the content itself.
 | `Request failed (HTTPStatusError HTTP 400)` and the endpoint pauses | Usually an unsupported request field. Read the provider's message in the job log, fix **Extra request fields**, then **Resume** the endpoint. |
 | HTTP 401 or 402 | The key is missing (set it before starting the studio) or the account is out of credit. |
 | HTTP 429 | Too many concurrent requests. Lower **Concurrent requests**, then **Resume**. |
-| Many `Invalid structured output` corrections | The model struggles with the format. Make sure `require_parameters` is set; otherwise try another model. |
+| Many `Unusable Draft reply` corrections | The Draft came back empty or under 200 characters. Check **Max output tokens**; otherwise try another model. |
 | Corrections saying the reply was **cut off** | The reply hit **Max output tokens**. With reasoning on, the thinking used it up: turn reasoning off, or raise the limit. With reasoning off, the model probably got stuck repeating itself. That costs a minute or two and the full output limit each time, so for a model without reasoning set **Max output tokens** to about `3000`: a stuck reply then fails fast and is retried. |
 | `Local context guard` holds a trajectory | A request was over the allowance. Raise **Context limit** toward the model's real window, or check **Bytes per token**. |
 | Cached share near 0% on the **Usage** tab | Check **Sticky sessions** is on and the model has a cache discount. |

@@ -66,7 +66,7 @@ async def test_skipped_roles_and_failed_assembly_keep_exact_stage_counts(tmp_pat
     def no_signoff(ticket):
         return {"role": "assistant", "content": "Still working."}
 
-    fake.responses = [{"draft": "Complete working notes. " * 20}, no_signoff]
+    fake.responses = ["Complete working notes. " * 20, no_signoff]
     await finish(gen, job)
     assert gen.jobs.inspect(job)["state"] == "completed"
     assert gen.jobs.inspect(job)["progress"] == 1

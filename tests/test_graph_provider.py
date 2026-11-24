@@ -1,4 +1,4 @@
-"""Wire schema choices preserve the local graph contract and endpoint identity."""
+"""Requests without tools (the Draft) ask for plain text: no JSON mode or grammar."""
 
 import json
 
@@ -9,50 +9,7 @@ from trajectory_remix.graph.jobs import Ticket
 from trajectory_remix.graph.provider import OpenAITransport
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "operation,schema,mode",
-    [
-        (
-            "event",
-            {
-                "type": "object",
-                "properties": {"content": {"type": "string"}},
-                "required": ["content"],
-                "additionalProperties": False,
-            },
-            "json_schema",
-        ),
-        (
-            "event",
-            {
-                "type": "object",
-                "properties": {"arguments": {}},
-                "required": ["arguments"],
-                "additionalProperties": False,
-            },
-            "json_object",
-        ),
-        (
-            "repair",
-            {
-                "oneOf": [
-                    {
-                        "type": "object",
-                        "properties": {
-                            "action": {"const": "inspect"},
-                            "event_id": {"type": "string"},
-                        },
-                        "required": ["action", "event_id"],
-                        "additionalProperties": False,
-                    }
-                ]
-            },
-            "json_object",
-        ),
-    ],
-)
-async def test_native_and_arbitrary_output_contracts(monkeypatch, operation, schema, mode):
+def mock(monkeypatch, content):
     captured = []
 
     async def handler(request):
@@ -61,9 +18,7 @@ async def test_native_and_arbitrary_output_contracts(monkeypatch, operation, sch
             200,
             json={
                 "model": "real-model",
-                "choices": [
-                    {"finish_reason": "stop", "message": {"content": '{"content":"complete"}'}}
-                ],
+                "choices": [{"finish_reason": "stop", "message": {"content": content}}],
             },
         )
 
@@ -73,27 +28,33 @@ async def test_native_and_arbitrary_output_contracts(monkeypatch, operation, sch
         "AsyncClient",
         lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs),
     )
-    messages = [{"role": "user", "content": "visible actor context"}]
+    return captured
+
+
+def ticket(messages):
     payload = dict(
-        operation=operation,
+        operation="draft",
         endpoint_config={"url": "http://127.0.0.1:1/v1", "model": "same-model"},
         messages=messages,
-        schema=schema,
     )
-    ticket = Ticket("id", "job", "source", "endpoint", "step", 1, "lease", payload)
-    assert (await OpenAITransport()(ticket))["output"] == {"content": "complete"}
+    return Ticket("id", "job", "source", "endpoint", "step", 1, "lease", payload)
+
+
+@pytest.mark.asyncio
+async def test_plain_text_request_sends_no_response_format(monkeypatch):
+    captured = mock(monkeypatch, "Plain working notes, not JSON.")
+    messages = [{"role": "user", "content": "visible actor context"}]
+    result = await OpenAITransport()(ticket(messages))
+    assert result["text"] == "Plain working notes, not JSON."
     (body,) = captured
     assert body["model"] == "same-model" and body["stream"] is False
-    assert body["response_format"]["type"] == mode
-    assert messages == [{"role": "user", "content": "visible actor context"}]
-    if mode == "json_object":
-        # The fixed schema contract precedes the per-call data for prefix caching, in
-        # the same user message so roles still alternate.
-        (only,) = body["messages"]
-        assert only["role"] == "user" and only["content"].startswith("Return one JSON object")
-        assert json.dumps(schema) in only["content"]
-        assert only["content"].endswith("\n\nvisible actor context")
-    else:
-        assert body["messages"] == messages
-        assert body["response_format"]["json_schema"]["schema"] == schema
-        assert body["response_format"]["json_schema"]["strict"] is True
+    assert "response_format" not in body
+    # Messages go out unchanged: no schema contract is added to the prompt.
+    assert body["messages"] == messages
+
+
+@pytest.mark.asyncio
+async def test_json_looking_reply_is_returned_as_text(monkeypatch):
+    mock(monkeypatch, '{"draft": "notes"}')
+    result = await OpenAITransport()(ticket([{"role": "user", "content": "x"}]))
+    assert result["text"] == '{"draft": "notes"}' and "output" not in result

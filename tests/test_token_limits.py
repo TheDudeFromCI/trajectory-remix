@@ -15,7 +15,6 @@ def payload(**limits):
     return dict(
         operation="event",
         messages=[dict(role="user", content="x" * 30000)],
-        schema={"type": "object"},
         endpoint_config=endpoint,
     )
 

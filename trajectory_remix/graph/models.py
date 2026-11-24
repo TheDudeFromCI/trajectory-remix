@@ -320,10 +320,15 @@ class Endpoint(DTO):
     # Extra request-body fields for this provider, such as OpenRouter's reasoning or
     # provider routing options. Fields the transport controls cannot be replaced.
     extra_body: dict[str, JsonValue] = Field(default_factory=dict)
-    # How replies are kept to the JSON schema. "auto" uses native strict JSON schema
-    # where possible. "json_object" always uses JSON mode with the schema in the prompt.
-    # "prompt" sends no response_format at all, for servers that support neither.
-    output_mode: Literal["auto", "json_object", "prompt"] = "auto"
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_output_mode(cls, data):
+        # output_mode chose a JSON response_format for Draft replies. Drafts are plain
+        # text now and no request sends response_format, so saved settings drop it.
+        if isinstance(data, dict) and "output_mode" in data:
+            data = {k: v for k, v in data.items() if k != "output_mode"}
+        return data
 
     @model_validator(mode="after")
     def context_budget(self):
@@ -428,6 +433,8 @@ class GenerationPrompts(DTO):
                 "3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a",
                 "379f799bc52e67227994ec99bd671a194b2cabd11558d584e897551f2b0bd250",
                 "81fc1038e09cb959a01f19554ee649fe5cd4b37759fd03f10c953b2253a3a424",
+                # The default that asked for a JSON object, before plain-text Drafts.
+                "e86e67f1e0d967affca80621f9194e329cc6b4be1aa9601a749225ac0b2df4db",
             },
             "assistant": {
                 # The lead-in alone, before the reply instructions moved into the prompt.
