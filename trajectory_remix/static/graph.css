@@ -366,3 +366,10 @@ td.faint { color: var(--ink-faint); }
 .event-tabs .tab-list #tab-problems { margin-left: auto; }
 .event-tabs .tab-list .issue-tab .ico { width: 15px; height: 15px; }
 .comment-head .small.muted { white-space: nowrap; }
+
+.assistant-working { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--accent); font-size: 12px; font-weight: 500; }
+.assistant-working[hidden] { display: none; }
+.working-dots span { animation: working-dot 1.4s infinite both; }
+.working-dots span:nth-child(2) { animation-delay: 0.2s; }
+.working-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes working-dot { 0%, 20% { opacity: 0; } 40%, 100% { opacity: 1; } }

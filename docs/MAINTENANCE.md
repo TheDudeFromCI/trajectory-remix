@@ -88,6 +88,7 @@ node tests/tool_import_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs
 node tests/comments_auto_send_frontend.mjs
+node tests/assistant_indicator_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 node tests/job_names_tabs_frontend.mjs
 node tests/duplicate_frontend.mjs

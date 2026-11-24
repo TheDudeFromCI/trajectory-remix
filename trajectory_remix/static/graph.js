@@ -3,6 +3,7 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
+import {isAssistantOwner, renderAssistantIndicator} from './assistant-indicator.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
 import {duplicateTrajectory} from './duplicate.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
@@ -245,6 +246,7 @@ export class StudioUI {
       $('lock-slot').append(note, ownerLink);
     }
     $('lock-slot').hidden = !locked;
+    renderAssistantIndicator($('lock-slot'), locked && isAssistantOwner(this.record.owner, this.jobs));
     if (locked) setAttr(ownerLink, 'data-tip', 'Job ' + this.record.owner);
     $('workspace').classList.toggle('is-locked', locked);
     this.renderDirty();
@@ -736,6 +738,7 @@ export class StudioUI {
       }
       if (this.jobsView.isOpen(job.id)) await this.jobsView.refresh(job.id);
     }
+    if (this.record) renderAssistantIndicator($('lock-slot'), !!this.record.owner && isAssistantOwner(this.record.owner, this.jobs));
   }
   async inspectJob(id) {
     showView('jobs-view');
