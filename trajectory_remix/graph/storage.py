@@ -269,20 +269,26 @@ class GraphStore:
             return self._commit(db, source, old, provenance)
 
     @staticmethod
-    def _check_owner(db, trajectory_id):
+    def _owner(db, trajectory_id):
         # Jobs are an additive service on the new graph store. Foundation-only
         # projects need no runtime tables, but all edit transports honor owners.
         if db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_owners'"
         ).fetchone():
-            if db.execute(
-                "SELECT 1 FROM graph_owners WHERE trajectory_id=?", (trajectory_id,)
-            ).fetchone():
-                from .jobs import OwnershipConflict
+            row = db.execute(
+                "SELECT job_id FROM graph_owners WHERE trajectory_id=?", (trajectory_id,)
+            ).fetchone()
+            return row[0] if row else None
+        return None
 
-                raise OwnershipConflict("Trajectory is owned by an active operation")
+    @staticmethod
+    def _check_owner(db, trajectory_id):
+        if GraphStore._owner(db, trajectory_id) is not None:
+            from .jobs import OwnershipConflict
 
-    def _commit(self, db, source, old, provenance):
+            raise OwnershipConflict("Trajectory is owned by an active operation")
+
+    def _commit(self, db, source, old, provenance, *, settings_revision=None):
         revision, commit = (old.revision + 1 if old else 1), str(uuid4())
         source_hash = source.intrinsic_hash
         intrinsic_revision = (
@@ -292,7 +298,10 @@ class GraphStore:
         metadata_revision = (
             old.metadata_revision + (old_metadata != source.to_dict().get("metadata")) if old else 1
         )
-        settings_revision = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
+        if settings_revision is None:
+            settings_revision = db.execute(
+                "SELECT settings_revision FROM graph_project"
+            ).fetchone()[0]
         db.execute(
             """INSERT INTO graph_trajectory_revisions(trajectory_id,revision,commit_id,parent_commit_id,
             source,intrinsic_hash,intrinsic_revision,metadata_revision,settings_revision,provenance)

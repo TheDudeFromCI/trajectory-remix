@@ -4,8 +4,8 @@ Each barrier is chosen per job when the run starts (`barriers` in the run's froz
 A gate is the point a trajectory reaches next:
 
 - assembly: Draft is done, Assembly is next.
-- fast: the graph is assembled, Fast review (or Fast repair) is next.
-- critical: Fast passed, Critical review (or Critical repair) is next.
+- fast: the graph is assembled, Fast review is next.
+- critical: Fast passed, Critical review is next.
 
 A trajectory that reaches an enabled, closed gate parks: its owner row becomes mode 'parked',
 which does not count toward the active-trajectory cap, so later attempts can start. When no
@@ -19,7 +19,7 @@ TABLE = """CREATE TABLE IF NOT EXISTS graph_job_phases (
  job_id TEXT PRIMARY KEY REFERENCES graph_jobs(id), phase INTEGER NOT NULL)"""
 GATES = ("assembly", "fast", "critical")
 OPEN_ALL = len(GATES)
-REVIEW_PHASES = {"review", "repair"}
+REVIEW_PHASES = {"review"}
 
 
 def phase(store, job):

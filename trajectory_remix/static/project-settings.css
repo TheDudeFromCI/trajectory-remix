@@ -61,3 +61,9 @@
   .review-column-settings, .review-column-checklist { overflow-y: visible; }
   .review-column-prompts > .settings-limits > label { min-height: 200px; }
 }
+
+.validation-intro { margin-top: 0; }
+.validation-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr)); gap: var(--space-3); }
+.validation-options label { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-0); }
+.validation-options label > span { display: grid; gap: var(--space-1); }
+.validation-options label span span, .validation-options code { color: var(--ink-muted); font-size: 12px; overflow-wrap: anywhere; }

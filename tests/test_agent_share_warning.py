@@ -1,4 +1,5 @@
-from trajectory_remix.graph.models import GraphSource
+from trajectory_remix.graph.compiler import GraphCompiler
+from trajectory_remix.graph.models import GraphSource, ProjectSettings
 from trajectory_remix.graph.validation import diagnose
 
 
@@ -32,6 +33,13 @@ def test_warns_below_one_sixteenth():
     result = [d for d in diagnose(src) if d.code == "low_agent_share"]
     assert len(result) == 1 and result[0].severity == "warning"
     assert "5 of 100" in result[0].message
+
+
+def test_warning_uses_compiler_policy():
+    src = source("a" * 5, "c" * 95)
+    assert GraphCompiler.dry_run(src) == diagnose(src)
+    settings = ProjectSettings(disabled_warnings=["low_agent_share"])
+    assert GraphCompiler.dry_run(src, settings) == diagnose(src, settings) == []
 
 
 def test_no_warning_at_or_above_one_sixteenth():

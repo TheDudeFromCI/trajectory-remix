@@ -23,7 +23,8 @@ Read one focused topic at a time: `dependencies`, `tools-chat`, `generation`,
    Metadata is optional and must not affect compilation.
 6. Model actions require authorization in the current task. `generate_graphs`
    freezes proposals/settings/instructions. `review_graphs` operates on detached
-   sources or frozen search matches. Repairs are one continuing tier session.
+   sources or frozen search matches. Each review is one continuing tier session that
+   repairs what fails, then signs off.
    Provider errors/pause are not negative quality verdicts. Ready remains manual.
 7. Follow the returned job ID with `inspect_graph_job`, `graph_job_items` and
    `graph_job_logs`. Use explicit `control_graph_job` or

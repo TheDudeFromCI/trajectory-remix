@@ -178,8 +178,8 @@ def job_router(jobs, bulk, artifacts, worker):
     @router.post("/bulk")
     async def start_bulk(body: BulkInput):
         if body.action == "review_repair" and worker.review_start:
-            if set(body.config) - {"mode", "repair"}:
-                raise ValueError("Review options are mode and repair")
+            if set(body.config) - {"mode"}:
+                raise ValueError("The only review option is mode")
             job = worker.review_start(body.query, **body.config)
             worker.kick(job)
             return accepted(job)
