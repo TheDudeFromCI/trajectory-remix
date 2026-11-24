@@ -405,6 +405,7 @@ class GenerationPrompts(DTO):
     authoring: str = Field(default_factory=prompt_defaults.authoring, min_length=1)
     draft: str = Field(default_factory=prompt_defaults.draft, min_length=1)
     assembly: str = Field(default_factory=prompt_defaults.assembly, min_length=1)
+    assistant: str = Field(default_factory=prompt_defaults.assistant, min_length=1)
 
     @field_validator("actor")
     @classmethod
@@ -415,7 +416,7 @@ class GenerationPrompts(DTO):
                 return prompt_defaults.actor() + value[len(retired) :]
         return value
 
-    @field_validator("authoring", "draft", "assembly")
+    @field_validator("authoring", "draft", "assembly", "assistant")
     @classmethod
     def upgrade_packaged_prompt(cls, value, info):
         # Only replace exact shipped defaults. Custom guidance stays with the project.
@@ -427,6 +428,10 @@ class GenerationPrompts(DTO):
                 "3f4b2567d48cfe2c6f3e36ee34e20f68923f0123f55687a01e360971d5fbca4a",
                 "379f799bc52e67227994ec99bd671a194b2cabd11558d584e897551f2b0bd250",
                 "81fc1038e09cb959a01f19554ee649fe5cd4b37759fd03f10c953b2253a3a424",
+            },
+            "assistant": {
+                # The lead-in alone, before the reply instructions moved into the prompt.
+                "ee85df4ba298caba9feec68c73c5dc42de11fb96bbf88ac093dd615ce4a79139",
             },
             "assembly": {
                 "eb7363281b287f472a6197ecf16cb77cb9b42f9abe4e8dd6eea14ceaea4a5c3b",

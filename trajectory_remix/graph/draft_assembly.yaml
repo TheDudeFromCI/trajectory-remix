@@ -213,6 +213,11 @@ assemble_instruction: |-
   4. Run `view_diagnostics` and fix what it reports.
   5. Call `signoff` with completeness and Draft-fidelity evidence, citing actual
      event IDs.
+# The Assistant task, placed before the comments table in each Send to agent message.
+assistant_instruction: >-
+  Please address the issues in the table below. After addressing them, reply to each
+  comment using the `reply` tool. Further user comments will be appended to this
+  conversation.
 retired:
   # Earlier shipped agent prompts. A project still using one, possibly with a persona
   # appended, is upgraded to the current prompt with its persona kept.

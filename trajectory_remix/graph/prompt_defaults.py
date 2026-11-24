@@ -33,6 +33,10 @@ def assembly():
     return packaged()["assemble_instruction"]
 
 
+def assistant():
+    return packaged()["assistant_instruction"]
+
+
 def retired_actors():
     """Earlier shipped agent prompts, newest first."""
     return tuple(packaged()["retired"]["actor"])

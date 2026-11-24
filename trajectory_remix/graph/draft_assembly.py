@@ -24,9 +24,10 @@ DRAFT_SCHEMA = dict(
 
 def prompts(settings):
     """The frozen prompts for a run, with a version that changes when they are edited."""
-    chosen = settings.prompts.model_dump(mode="json")
+    # The Assistant instructions are not part of generation, so editing them keeps run versions.
+    chosen = settings.prompts.model_dump(mode="json", exclude={"assistant"})
     base = prompt_defaults.packaged()["version"]
-    custom = chosen != type(settings.prompts)().model_dump(mode="json")
+    custom = chosen != type(settings.prompts)().model_dump(mode="json", exclude={"assistant"})
     return dict(
         version=f"{base}+{digest(chosen)[:12]}" if custom else base,
         draft_instruction=chosen["draft"],

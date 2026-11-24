@@ -265,12 +265,14 @@ Review** (see [Event generation](GRAPH-GENERATION.md#draft-and-assembly)). What 
 the prompts and the models:
 
 1. Open **Review Settings** and find **Generation prompts**.
-2. Edit the prompts:
+2. Edit the prompts (click a prompt's title to collapse or expand it):
    - **Agent prompt:** what a trajectory is and how the agent behaves. Every endpoint sees it,
      and a persona pack goes at its end.
    - **Authoring prompt:** how to use the authoring tools. Assembly, review and the Assistant
      see it.
    - **Draft instructions** and **Assembly instructions:** the task for each stage.
+   - **Assistant instructions:** the task that opens each Send to agent message, before the
+     comments table.
 3. **Load Default Prompts** restores the packaged prompts, after you confirm.
 4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 
