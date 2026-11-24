@@ -274,7 +274,7 @@ export class StudioUI {
     $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
     setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
     const size = this.record.size; $('size-tag').textContent = size?.label ? 'Size ' + size.label : '';
-    setAttr($('size-tag'), 'data-tip', size ? `Saved source: ${size.total_characters.toLocaleString()} characters (about ${size.total_tokens_estimate.toLocaleString()} tokens), ${size.agent_characters.toLocaleString()} agent-generated.` : null);
+    setAttr($('size-tag'), 'data-tip', size ? `Saved source: about ${size.total_tokens_estimate.toLocaleString()} tokens total, about ${size.agent_tokens_estimate.toLocaleString()} agent-generated.` : null);
     $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
     setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
     $('source-json').value = json(this.draft);
