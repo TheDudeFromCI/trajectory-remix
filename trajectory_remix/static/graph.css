@@ -385,3 +385,18 @@ td.faint { color: var(--ink-faint); }
 .working-dots span:nth-child(2) { animation-delay: 0.2s; }
 .working-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes working-dot { 0%, 20% { opacity: 0; } 40%, 100% { opacity: 1; } }
+
+/* Editor › Metrics tab */
+.metrics-editor-head { display: flex; flex-direction: column; gap: var(--space-1); padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.metrics-editor-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.metrics-group p { margin: 0 0 var(--space-1); }
+.metric-row { display: flex; flex-direction: column; gap: 4px; padding: var(--space-1) 0; border-bottom: 1px solid var(--border); }
+.metric-row:last-child { border-bottom: 0; }
+.metric-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.metric-name { flex: 1; min-width: 0; font-size: 13px; text-transform: capitalize; }
+.metric-head .ghost.sm { height: 22px; padding: 0 6px; }
+.metric-row select, .metric-row input:not([type=checkbox]) { width: 100%; }
+.metric-labels summary { cursor: pointer; font-size: 12px; color: var(--ink-muted); }
+.metric-label-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px var(--space-2); padding: var(--space-1) 0; max-height: 220px; overflow: auto; }
+.metric-label-grid label { display: flex; align-items: center; gap: 4px; }
+.metric-value { font-size: 13px; }

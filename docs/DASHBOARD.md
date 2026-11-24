@@ -28,7 +28,7 @@ tooltips rather than in extra text on screen.
 | **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, comment state or size (type `@size:m` or `@size:<=xs` in the search box; see [Metrics](METRICS.md#character-counts-and-trajectory-sizes)). Each row shows a short ID, its stage and split, a speech bubble with the number of unresolved comments (amber when some await your review), and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows** and **JSON**, and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
+| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (set the trajectory's categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -336,6 +336,8 @@ Bulk edits skip locked trajectories and can be undone with **Undo** once they fi
 2. Open **Metrics**. Pick a dimension in **Targets vs observed** to compare what the
    sampler aimed for with what accepted trajectories contain.
 3. Click **Calculate missing metrics** to measure what can be measured. It runs as a job.
+4. To fill values that can't be measured, such as categories and outcomes, open a trajectory in the
+   Editor and use its **Metrics** tab.
 
 ## Watch and recover work
 

@@ -17,6 +17,26 @@ guessing at anything it can't measure.
 
 Filter the population with the same search you use in the sidebar. Unsaved drafts are excluded.
 
+## Set a trajectory's metrics
+
+Categories, labels and outcomes can't be calculated, so you set them by hand in the Editor:
+
+1. Select a trajectory and save any unsaved edits.
+2. Open the **Metrics** tab in the event panel (after **JSON**).
+3. Pick a value, tick labels or type an outcome. Each change saves at once.
+
+| Group | What it holds | How you set it |
+| --- | --- | --- |
+| **Categories** | One choice per sampler dimension, such as `lifecycle` or `domain` | A dropdown |
+| **Labels** | Event tags and secondary competencies or behaviors | Checkboxes (click the summary to open them) |
+| **Outcomes and notes** | Free values such as `actual_outcome` or `accepted` | Text, a number, `true`/`false` or JSON |
+| **Measured** | Values calculated from the source or an export | Read-only; use **Calculate missing metrics** |
+
+**Clear** removes a value so it reads as unavailable again. A **Stale** value was recorded against an older
+source or definition; **Confirm** records it again for the current source. Tick **Only show unset** to
+list just the values still missing. The tab is read-only while the trajectory has unsaved edits or a job
+holds it, and metric changes are not part of Undo.
+
 ## Calculate what's missing
 
 **Calculate Missing Metrics** starts an explicit bulk job. It fills only values that are absent, using

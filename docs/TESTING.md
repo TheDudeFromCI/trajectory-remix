@@ -22,6 +22,7 @@ node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
+node tests/metrics_editor_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 node tests/job_names_tabs_frontend.mjs

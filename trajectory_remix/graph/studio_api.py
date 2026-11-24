@@ -257,6 +257,10 @@ def create_studio_app(
     def annotate_metric(ident: str, key: str, body: MetricAnnotation):
         return metrics.annotate(ident, key=key, **body.model_dump())
 
+    @router.delete("/metrics/trajectories/{ident}/{key}")
+    def clear_metric(ident: str, key: str, body: Delete):
+        return metrics.clear(ident, body.expected_revision, key)
+
     @router.post("/metrics/population")
     def population(body: MetricQuery):
         return metrics.population(body.query, body.population)

@@ -101,6 +101,7 @@ All authenticated under `/api/v1`.
 | `POST /metrics/population` | `{query:{text?, stage?, split?, tool?}, population:"all"\|"accepted"}`. Streaming aggregation, with proposal coverage and [derived labels](#derived-labels). |
 | `GET /metrics/trajectories/{id}` | Definitions, observations, status, drift and original targets. |
 | `PUT /metrics/trajectories/{id}/{key}` | `{expected_revision, value, origin, profile_fingerprint?, compiler_version?}`. An explicit annotation. |
+| `DELETE /metrics/trajectories/{id}/{key}` | `{expected_revision}`. Removes a recorded observation so the metric reads as unavailable again. |
 | `POST /metrics/calculate-missing` | `{query:{…}}`. 202 with a bulk job. |
 
 ## Validation rules

@@ -188,6 +188,7 @@
         <button role="tab" id="tab-options" aria-controls="panel-options" aria-selected="false">Options</button>
         <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false">Windows</button>
         <button role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON</button>
+        <button role="tab" id="tab-metrics" aria-controls="panel-metrics" aria-selected="false" data-tip="Set this trajectory's metric categories, labels and outcomes">Metrics</button>
         <button role="tab" id="tab-problems" class="issue-tab" aria-controls="panel-problems" aria-selected="false" aria-label="Problems" data-tip="Problems: structural errors and warnings"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span id="problems-count" class="badge"></span></button>
         <button role="tab" id="tab-comments" class="issue-tab" aria-controls="panel-comments" aria-selected="false" aria-label="Comments" data-tip="Comments on this trajectory, its events and windows, for whoever fixes it next"><svg class="ico" aria-hidden="true"><use href="#i-comment"/></svg><span id="comments-count" class="badge accent"></span></button>
       </div>
@@ -253,6 +254,14 @@
 
       <div role="tabpanel" id="panel-problems" aria-labelledby="tab-problems" class="panel-body" hidden>
         <div id="diagnostics" class="diagnostic-list"></div>
+      </div>
+
+      <div role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" class="panel-body" data-lock-exempt hidden>
+        <div class="metrics-editor-head">
+          <span id="metrics-editor-note" class="small muted metrics-note"></span>
+          <label class="small inline-label"><input type="checkbox" id="metrics-only-unset"> Only show unset</label>
+        </div>
+        <div id="metrics-editor-list" class="metrics-editor-list"></div>
       </div>
 
       <div role="tabpanel" id="panel-comments" aria-labelledby="tab-comments" class="panel-body" data-lock-exempt hidden>

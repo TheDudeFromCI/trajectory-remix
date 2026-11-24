@@ -121,6 +121,19 @@ class MetricService:
         self.store.replace(ident, source, expected_revision)
         return self.view(self.store.read(ident), defs)
 
+    def clear(self, ident, expected_revision, key):
+        """Forget a recorded observation so the metric reads as unavailable again."""
+        record = self.store.read(ident)
+        defs = self.sampler.editor()["configuration"]["definitions"]
+        if key not in defs:
+            raise ValueError("Unknown metric definition")
+        source = record.source.to_dict()
+        saved = source.get("metadata", {}).get("metrics", {})
+        if key in saved:
+            del saved[key]
+            self.store.replace(ident, source, expected_revision)
+        return self.view(self.store.read(ident), defs)
+
     def population(self, query=None, population="all"):
         if population not in ("all", "accepted"):
             raise ValueError("population must be all or accepted")

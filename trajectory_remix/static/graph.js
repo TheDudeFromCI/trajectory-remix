@@ -4,6 +4,7 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
+import {MetricsEditor} from './metrics-editor.js';
 import {AssistantStatus, isAssistantOwner} from './assistant-indicator.js';
 import {AssistantQueue} from './assistant-queue.js';
 import {AutoSave} from './auto-save.js';
@@ -171,6 +172,7 @@ export class StudioUI {
     setText(indicator, !this.record ? '' : locked ? 'Locked' : dirty ? 'Unsaved draft' : `Saved · rev ${this.record.revision}`);
     indicator.className = `tag tone-${locked ? 'warning' : dirty ? 'accent' : 'muted'}`;
     indicator.hidden = !this.record;
+    this.metricsEditor?.sync({id: this.record ? this.id : null, revision: this.record?.revision, locked, dirty});
     setText($('trajectory-title'), this.id || 'No trajectory selected'); setAttr($('trajectory-title'), 'data-tip', null);
     this.autoSave.schedule();
   }
@@ -866,6 +868,9 @@ export class StudioUI {
         const unresolved = items.filter(c => c.status !== 'resolved').length, review = items.filter(c => c.status === 'addressed').length;
         if (row && (row.comments !== unresolved || row.review !== review)) this.listing().catch(message);
       }});
+    this.metricsEditor = new MetricsEditor({api, report: message, onSaved: () => this.refreshSelected(),
+      els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset')}});
+    $('tab-metrics').addEventListener('click', () => this.metricsEditor.load().catch(message));
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
