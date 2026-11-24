@@ -50,7 +50,19 @@ assert.equal(text(), 'Running patch... (1m 43s)', 'no new calls: still holding')
 pending();
 assert.equal(text(), 'Working... (1m 43s)', 'falls back after two seconds');
 
+const toggle = host.querySelector('.working-toggle'), items = () => [...host.querySelectorAll('.working-tools li')].map(li => li.textContent);
+assert.deepEqual(items(), [], 'collapsed by default');
+toggle.click();
+assert.deepEqual(items(), ['old', 'view', 'patch'], 'expanding lists every tool run so far, including earlier ones');
+logs.push({sequence: 5, text: 'Assistant tool: grep'});
+await status.update('job');
+assert.deepEqual(items(), ['old', 'view', 'patch', 'grep']);
+assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+
 await status.update(null);
 assert.equal(host.hidden, true);
+await status.update('job2', 0);
+assert.deepEqual(items(), [], 'the list is discarded when the job ends');
+await status.update(null);
 assert.equal(tick, null, 'the ticker stops with the job');
 console.log('assistant indicator ok');
