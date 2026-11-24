@@ -59,14 +59,6 @@ Next steps are in [Getting started](docs/GETTING-STARTED.md).
 5. **Export.** Ready trajectories are written as source JSONL or compiled KTREMIX
    shards with a tokenizer profile ([Export](docs/EXPORT.md)).
 
-## Kidra midtraining data flow
-
-The [native corpus converter](native/ktremix-python/README.md#convert-raw-corpus-text)
-splits documents at meaningful boundaries, interleaves sections across windows,
-and writes KTREMIX training shards.
-
-![Kidra midtraining data flow showing how sections from three corpus documents are interleaved across training windows](docs/images/kidra_midtraining_data_flow.svg)
-
 ## Documentation
 
 | I want to… | Read |
@@ -85,7 +77,7 @@ and writes KTREMIX training shards.
 | Let an AI agent drive Remix | [MCP setup](docs/MCP.md), [Authoring with an agent](docs/MCP-AUTHORING.md) |
 | Check a local model | [Local-model validation](docs/GRAPH-LOCAL-LLM.md) |
 | Know where data lives | [Storage](docs/STORAGE.md) |
-| Compile trajectories or load training shards from another project | [KTREMIX native library](native/ktremix-python/README.md) |
+| Compile trajectories or load training shards from another project | [Rust crate](native/ktremix/README.md), [Python package](native/ktremix-python/README.md) |
 | Run or review the checks | [Testing](docs/TESTING.md), [Acceptance](docs/ACCEPTANCE.md), [Maintenance](docs/MAINTENANCE.md) |
 
 ## Good to know
