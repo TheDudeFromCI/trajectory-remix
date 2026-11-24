@@ -168,9 +168,11 @@ FAILURE_NOTES = {
 
 
 def fail(comments, session, reason):
-    """Reply, as the assistant, to every comment it never answered. They stay open."""
+    """Keep the replies the assistant did give, then add the failure note to every comment
+    of the job, so each thread shows both. Unanswered comments stay open."""
+    apply(comments, session["replies"])
     note = FAILURE_NOTES.get(reason, "Failed to execute task.")
-    for ident in remaining(session):
+    for ident in session["comment_ids"]:
         try:
             comments.reply(ident, NewReply(body=note), "agent")
         except KeyError:

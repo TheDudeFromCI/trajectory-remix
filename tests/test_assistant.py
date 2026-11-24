@@ -222,6 +222,24 @@ async def test_exchange_limit_ends_the_session_and_keeps_comments_open(tmp_path)
     assert assistant_memory.load(gen.store, record.source.id) is None
 
 
+@pytest.mark.asyncio
+async def test_exchange_limit_keeps_given_replies_and_adds_the_failure_note(tmp_path):
+    gen, fake = service(tmp_path)
+    record, (one, two) = flagged(gen, "First.", "Second.")
+    current = gen.store.settings()
+    data = current.settings.model_dump(mode="json")
+    data["generation"]["max_authoring_exchanges"] = 2
+    gen.store.update_settings(data, current.revision)
+    fake.responses = [turn(edit(), reply(one, True, "Rewrote x.")), turn(("view_graph", {}))]
+    await run(gen, record)
+    states = {c["id"]: c for c in gen.comments.for_trajectory(record.source.id)}
+    bodies = {ident: [r["body"] for r in c["replies"]] for ident, c in states.items()}
+    failure = "Failed to execute task. Exchange limit reached."
+    assert bodies[one][-2:] == ["Rewrote x.", failure]
+    assert bodies[two] == [failure]
+    assert states[one]["status"] == "addressed" and states[two]["status"] == "open"
+
+
 def test_send_requires_the_role_open_comments_and_current_revision(tmp_path):
     gen, _ = service(tmp_path, assistant=False)
     record, _ = flagged(gen, "x")
