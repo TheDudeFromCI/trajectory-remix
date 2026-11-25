@@ -196,6 +196,9 @@ and the model checker (its cost estimate uses Draft and Assembly token counts fr
 `scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
 `graph/usage.py` stores counts only, never prompts, responses or credentials.
 
+Responses API coverage in `tests/test_responses_api.py` exercises the endpoint toggle,
+stateless tool replay, incomplete replies, and usage with mocked HTTP.
+
 Plain-text Drafts: `python -m pytest -q tests/test_draft_reply.py tests/test_graph_provider.py`
 checks that no request sends `response_format` or a schema contract, that the Draft reply is
 read as plain text (a habitual `{"draft": ...}` wrapper is unwrapped, results saved before the

@@ -303,7 +303,8 @@ and `repair_rounds` options still load, and `repair_context_bytes` becomes
 `assistant_context_bytes`. Set `disabled_warnings` to warning codes to omit. Prompts are in
 `settings.prompts`.
 
-**Endpoints.** Remix sends non-streamed OpenAI-compatible `/chat/completions` requests.
+**Endpoints.** Remix sends non-streamed OpenAI-compatible `/chat/completions` requests
+by default. Enable **Use Responses API** on an endpoint card to send `/responses` requests.
 Draft replies in plain text (no `response_format`, JSON mode or grammar), and Remix stores the
 reply as the Draft; it must be at least 200 characters. Assembly, review and the Assistant
 require native function tools. Credentials come from `REMIX_API_KEY_<ENDPOINT>` in the environment.

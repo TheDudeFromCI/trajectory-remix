@@ -151,9 +151,10 @@ def endpoint_failure(error: BaseException, endpoint: str, config: dict | None = 
     if isinstance(error, httpx.TransportError):
         return connect_reason(error, where)
     if isinstance(error, (ValueError, UnicodeError)):
+        route = "Responses" if config.get("use_responses_api") else "Chat Completions"
         return (
             f"the reply from {where} was not valid JSON; the URL may not be an OpenAI-compatible "
-            "chat-completions endpoint"
+            f"{route} endpoint"
         )
     if isinstance(error, (KeyError, IndexError, TypeError)) and origin(error).startswith(
         "provider.py"
