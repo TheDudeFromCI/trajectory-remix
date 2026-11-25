@@ -555,6 +555,10 @@ export class StudioUI {
       if (tool && e.insert_tool_end || response && e.insert_response_end || chat) add({control: chat ? 'msg_end' : tool ? 'tool_end' : 'response_end'});
       if (e.close_window) { add({control: 'eos'}); w.closed = true; }
     }
+    // Windows touched by the step that led to this position get a faint glow.
+    this.changedWindows = new Set(ticks
+      ? [...(frames[this.position]?.inputs || []), ...(frames[this.position]?.outputs || [])].map(e => e.window)
+      : order.filter(id => depth[id] === this.position).map(id => this.draft.events[id].window));
     this.windowModels = windows;
     const cards = [...windows].map(([id, w]) => this.windowCard(id, w));
     $('window-grid').replaceChildren(...(cards.length ? cards : [node('div', order.length ? 'No window has content at this position. Move the timeline forward.' : 'This trajectory has no events yet.', 'empty')]));
@@ -568,7 +572,7 @@ export class StudioUI {
   }
   windowCard(id, w, popout = false) {
     this.rawWindows ||= new Set();
-    const raw = this.rawWindows.has(id), card = node('article', undefined, 'window-card' + (popout ? ' popout-card' : ''));
+    const raw = this.rawWindows.has(id), card = node('article', undefined, 'window-card' + (popout ? ' popout-card' : '') + (this.changedWindows?.has(id) ? ' changed' : ''));
     const head = node('header', undefined, 'window-card-head'), purpose = this.draft.windows[id]?.purpose || '';
     card.style.setProperty('--tone', `var(--pastel-${this.windowTone(id)})`);
     head.append(node('span', undefined, 'dot'), node(popout ? 'h2' : 'h3', id, 'truncate'), node('span', purpose, 'small muted truncate'));
