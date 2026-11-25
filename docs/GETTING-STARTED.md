@@ -11,11 +11,14 @@ is no frontend build step.
 Install a stable Rust toolchain to build the native compiler bindings from this checkout.
 
 ```bash
-python -m pip install ./native/ktremix-python -e '.[mcp,export]'
+./scripts/install.sh
+source .venv/bin/activate
 ```
 
-The `mcp` extra enables agent connections, and `export` provides NumPy and LZ4 for the Python
-training examples and the reference shard tools.
+The script creates or reuses `.venv`, builds the native compiler bindings, and installs the
+studio in editable mode with test, MCP, and export dependencies. Use
+`./scripts/install.sh --no-rust-compile` to let pip resolve `ktremix-native` from
+your configured package sources when it is not already installed.
 
 ## Create a project and open the studio
 
@@ -27,6 +30,10 @@ python -m trajectory_remix graph-studio --dataset project.sqlite
 `graph-init` creates the project database (it refuses to overwrite an existing file).
 `graph-studio` serves it at **http://127.0.0.1:8765**. Use `--port` to change the
 port. The studio only listens on loopback.
+
+For development, run `./dev.sh --dataset project.sqlite` to pull updates for the current
+branch, build and install the native bindings, and launch the studio. The script forwards
+CLI arguments such as `--port 8766` to the studio.
 
 A new project needs **no tokenizer and no model endpoint**. You only need those for
 specific features, listed below.
