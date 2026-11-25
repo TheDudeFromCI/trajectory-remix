@@ -23,21 +23,23 @@ export function tokenBudgetProblem(context, output) {
 /** Hover help for the endpoint token limits; -1 leaves a limit to the provider. */
 export const TOKEN_LIMIT_TIPS = {
   context_window_tokens: 'The model\'s context window. Before each request Remix estimates the prompt size (bytes ÷ bytes per token) and stops instead of sending a request that would not fit beside the max output tokens and a 512-token margin, so a server that silently cuts long prompts cannot drop part of a trajectory. -1 (the default) skips this check and leaves it to the provider.',
-  max_output_tokens: 'Sent as max_tokens. Caps each single response, including reasoning and tool calls, not the whole pass. With a context limit set, this many tokens are also held back from it on every request. A response that hits the cap is cut off and retried (Incomplete response retries). -1 (the default) sends no max_tokens and holds nothing back, so the provider\'s own limit applies.',
+  max_output_tokens: 'Sent as max_tokens for Chat Completions or max_output_tokens for Responses. Caps each response, including reasoning and tool calls. With a context limit set, this many tokens are held back on every request. A response that hits the cap is cut off and retried (Incomplete response retries). -1 (the default) uses the provider\'s limit.',
 };
 /** Request fields the transport sets itself; extra_body may not replace them. */
 export const RESERVED_BODY_FIELDS = ['model', 'messages', 'stream', 'max_tokens', 'max_completion_tokens', 'response_format', 'session_id', 'temperature', 'top_p', 'presence_penalty', 'reasoning_effort'];
+const RESPONSES_RESERVED_BODY_FIELDS = ['input', 'max_output_tokens', 'reasoning', 'tools', 'tool_choice', 'store', 'include', 'background', 'previous_response_id', 'conversation', 'truncation'];
 /** Mirrors the server's extra_body rules; returns [value, ''] or [undefined, error]. */
-export function parseExtraBody(text) {
+export function parseExtraBody(text, useResponses = false) {
   let value;
   try { value = text.trim() ? JSON.parse(text) : {}; } catch { return [undefined, 'Extra request fields must be a JSON object.']; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return [undefined, 'Extra request fields must be a JSON object.'];
-  const reserved = Object.keys(value).filter(key => RESERVED_BODY_FIELDS.includes(key));
+  const reserved = Object.keys(value).filter(key => RESERVED_BODY_FIELDS.includes(key)
+    || (useResponses && RESPONSES_RESERVED_BODY_FIELDS.includes(key)));
   if (reserved.length) return [undefined, `These are set by Remix and cannot be overridden: ${reserved.join(', ')}.`];
   return [value, ''];
 }
 /** Options for hosted routers such as OpenRouter: token estimate, sticky sessions, extra fields. */
-function providerOptions(id, endpoint, edit, input) {
+function providerOptions(id, endpoint, edit, input, responses) {
   const box = node('details', undefined, 'settings-subsection'); box.append(node('summary', 'Provider options'));
   box.open = (endpoint.bytes_per_token ?? 3) !== 3 || !!endpoint.sticky_sessions || Object.keys(endpoint.extra_body || {}).length > 0;
   const grid = node('div', undefined, 'settings-grid');
@@ -47,16 +49,26 @@ function providerOptions(id, endpoint, edit, input) {
   ratioField.append(node('span', 'Used only when a context limit is set. English and JSON average about 3.5; the default 3 keeps a margin. 1 never undercounts but rejects prompts that would fit.', 'settings-help'));
   const sticky = node('input'); sticky.type = 'checkbox'; sticky.checked = !!endpoint.sticky_sessions; sticky.setAttribute('aria-label', `Endpoint ${id} sticky sessions`);
   sticky.onchange = () => edit('sticky_sessions', sticky.checked);
-  const stickyField = node('label', undefined, 'checkbox'); stickyField.append(sticky, ' Sticky sessions (send the trajectory ID as session_id)');
+  const stickyField = node('label', undefined, 'checkbox'); stickyField.append(sticky, ' Sticky sessions (Chat Completions only)');
   grid.append(ratioField, stickyField);
   const extra = node('textarea'); extra.spellcheck = false; extra.setAttribute('aria-label', `Endpoint ${id} extra request fields`);
   extra.value = JSON.stringify(endpoint.extra_body || {}, null, 2);
   const problem = node('p', '', 'settings-help'); problem.setAttribute('role', 'alert');
-  extra.oninput = () => {
-    const [value, message] = parseExtraBody(extra.value);
+  const validateExtra = () => {
+    const [value, message] = parseExtraBody(extra.value, responses.checked);
     problem.textContent = message; problem.classList.toggle('error', !!message); extra.setAttribute('aria-invalid', message ? 'true' : 'false');
+    return value;
+  };
+  extra.oninput = () => {
+    const value = validateExtra();
     if (value !== undefined) edit('extra_body', value);
   };
+  const updateMode = () => {
+    sticky.disabled = responses.checked;
+    validateExtra();
+  };
+  responses.addEventListener('change', updateMode);
+  updateMode();
   const extraField = field('Extra request fields (JSON)', extra);
   box.append(node('p', 'For hosted routers such as OpenRouter. Sticky sessions keep each trajectory on one provider so its prompt stays cached. Extra fields are added to every request, for example {"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}.', 'settings-help'), grid, extraField, problem);
   return box;
@@ -99,6 +111,11 @@ export function renderProjectSettings(container, initial, options = {}) {
     const edit = (key, value) => write(d => { d.endpoints[id][key] = value; });
     grid.append(field('Base URL', input(`Endpoint ${id} URL`, endpoint.url, v => edit('url', v), 'url')),
       field('Model identifier', input(`Endpoint ${id} model`, endpoint.model, v => edit('model', v))));
+    const responses = node('input'); responses.type = 'checkbox'; responses.checked = endpoint.use_responses_api ?? false;
+    responses.setAttribute('aria-label', `Endpoint ${id} use Responses API`);
+    responses.onchange = () => edit('use_responses_api', responses.checked);
+    const responsesField = node('label', undefined, 'checkbox'); responsesField.append(responses, ' Use Responses API');
+    grid.append(responsesField);
     const budget = node('p', '', 'settings-help'); budget.setAttribute('role', 'alert');
     const checkBudget = () => {
       const {context_window_tokens: ctx = -1, max_output_tokens: out = -1} = current().endpoints[id], problem = tokenBudgetProblem(ctx, out);
@@ -121,11 +138,11 @@ export function renderProjectSettings(container, initial, options = {}) {
     reasoning.setAttribute('list', `reasoning-levels-${id}`); reasoning.placeholder = 'Model default';
     const suggestions = node('datalist'); suggestions.id = `reasoning-levels-${id}`;
     for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']) { const o = node('option'); o.value = level; suggestions.append(o); }
-    const reasoningField = field('Reasoning level', reasoning); reasoningField.append(suggestions, node('span', 'Sent as reasoning_effort. Type any value your model accepts; "none" disables reasoning. Blank uses the model default.', 'settings-help'));
+    const reasoningField = field('Reasoning level', reasoning); reasoningField.append(suggestions, node('span', 'Enter a level your model supports. Blank uses the model default.', 'settings-help'));
     grid.append(field('Request timeout (seconds)', timeout), reconnectField, reasoningField);
     grid.append(budget);
     card.append(grid);
-    card.append(providerOptions(id, endpoint, edit, input));
+    card.append(providerOptions(id, endpoint, edit, input, responses));
     const env = 'REMIX_API_KEY_' + id.toUpperCase().replaceAll('-', '_');
     card.append(node('p', `Authentication, if required: set ${env} in the server environment before launch. Keys are never stored in the project.`, 'settings-help'), button(`Remove endpoint ${id}`, () => {
       const cleared = Object.entries(current().endpoint_roles || {}).filter(([, assigned]) => assigned === id).map(([role]) => role);

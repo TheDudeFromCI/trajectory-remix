@@ -16,10 +16,28 @@ default until your first edit, and reading it never writes settings. Changing it
 Metric options set labels, units, optional numeric target keys and tolerance bands. Categories always derive
 from the matrix, and you can add custom annotation metrics. No tolerance is assumed.
 
+### Complexity and task length
+
+The supplied matrix has one `complexity` dimension that mixes difficulty with scale. The editor matrix splits it
+into two axes:
+
+| Axis | Choices | What it controls |
+| --- | --- | --- |
+| `complexity` | `trivial`, `easy`, `medium`, `hard`, `expert` | How hard the task is. Sampled independently and added to the generation directive. |
+| `task_length` | `XXS`, `XS`, `S`, `M`, `L`, `XL`, `XXL` (the size-label names) | How big the task is: task count, dependency depth, agents, window budget and tool calls, plus a 0-3 level for behavior eligibility. |
+
+Sizes double at each step, so task length is not weighted linearly. The default weights form a bell over that
+log scale (5, 12, 22, 26, 19, 11 and 5 percent), so most proposals are S to L. You can edit both axes in the
+Sampler workbench. Rules in the supplied matrix that named its scale choices now name task lengths
+(`large` becomes `XL`/`XXL`, `trivial` becomes `XXS`). Coverage compares both axes.
+
+The split lives in `graph/task_axes.py`; the supplied sampler files are unchanged. A matrix saved before the
+split, without `task_length`, still samples exactly as before.
+
 ### Pins
 
-You can pin `focus.family`, `lifecycle`, `complexity`, `domain`, `user_competence`, `user_patience`,
-`user_involvement` and `user_tone`. An invalid or incompatible pin returns 422, with no retry, relaxing or
+You can pin `focus.family`, `lifecycle`, `complexity`, `task_length`, `domain`, `user_competence`,
+`user_patience`, `user_involvement` and `user_tone`. An invalid or incompatible pin returns 422, with no retry, relaxing or
 resampling.
 
 ### Proposals
@@ -101,6 +119,7 @@ All authenticated under `/api/v1`.
 | `POST /metrics/population` | `{query:{text?, stage?, split?, tool?}, population:"all"\|"accepted"}`. Streaming aggregation, with proposal coverage and [derived labels](#derived-labels). |
 | `GET /metrics/trajectories/{id}` | Definitions, observations, status, drift and original targets. |
 | `PUT /metrics/trajectories/{id}/{key}` | `{expected_revision, value, origin, profile_fingerprint?, compiler_version?}`. An explicit annotation. |
+| `DELETE /metrics/trajectories/{id}/{key}` | `{expected_revision}`. Removes a recorded observation so the metric reads as unavailable again. |
 | `POST /metrics/calculate-missing` | `{query:{…}}`. 202 with a bulk job. |
 
 ## Validation rules

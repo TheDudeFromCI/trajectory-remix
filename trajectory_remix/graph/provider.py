@@ -7,28 +7,26 @@ import os
 
 import httpx
 
-from . import token_limits
+from . import responses_api, token_limits
 from .failure_reason import key_variable
 
 
 def context_budget(payload, messages):
+    wire_contract = {"tools": payload["tools"], "tool_choice": "auto"} if "tools" in payload else {}
+    return _context_budget(payload["endpoint_config"], dict(messages=messages, **wire_contract))
+
+
+def _context_budget(endpoint, context):
     """Conservative byte-token ceiling, independent of training tokenizers.
 
     UTF-8 bytes bound byte-backed BPE input tokens; reserve additional template
     overhead. This deliberately rejects some requests that a model tokenizer
     could fit. Never truncate evidence to make a request appear to fit.
     """
-    endpoint = payload["endpoint_config"]
     limit = endpoint.get("context_window_tokens", token_limits.DISABLED)
     output = endpoint.get("max_output_tokens", token_limits.DISABLED)
     ratio = endpoint.get("bytes_per_token", 3.0)
-    wire_contract = {"tools": payload["tools"], "tool_choice": "auto"} if "tools" in payload else {}
-    size = len(
-        json.dumps(
-            dict(messages=messages, **wire_contract),
-            ensure_ascii=False,
-        ).encode()
-    )
+    size = len(json.dumps(context, ensure_ascii=False).encode())
     return dict(
         input_bytes=size,
         bytes_per_token=ratio,
@@ -42,10 +40,16 @@ def context_budget(payload, messages):
 def request_body(payload, trajectory_id):
     """The exact HTTP body for a request (no credentials) and its context budget."""
     endpoint = payload["endpoint_config"]
+    if endpoint.get("use_responses_api"):
+        context = responses_api.request_context(payload)
+        return responses_api.request_body(endpoint, context), _context_budget(endpoint, context)
     native = "tools" in payload
     # Requests without tools (the Draft) ask for plain text: no response_format, so
     # servers without JSON mode or grammar support work unchanged.
-    messages = payload["messages"]
+    messages = [
+        {key: value for key, value in message.items() if key != responses_api.REPLAY_ITEMS}
+        for message in payload["messages"]
+    ]
     budget = context_budget(payload, messages)
     extras = endpoint.get("extra_body", {})
     if native:
@@ -75,7 +79,7 @@ def request_body(payload, trajectory_id):
     return body, budget
 
 
-def assistant_message(message):
+def assistant_message(message, *, keep_responses_output=True):
     """Keep only complete, replayable assistant messages and their native calls."""
     if (
         not isinstance(message, dict)
@@ -119,6 +123,8 @@ def assistant_message(message):
         clean["tool_calls"] = normalized
     elif clean["content"] is None:
         clean["content"] = ""
+    if keep_responses_output and isinstance(message.get(responses_api.REPLAY_ITEMS), list):
+        clean[responses_api.REPLAY_ITEMS] = message[responses_api.REPLAY_ITEMS]
     return clean
 
 
@@ -126,6 +132,8 @@ class OpenAITransport:
     async def __call__(self, ticket):
         payload = ticket.payload
         endpoint = payload["endpoint_config"]
+        use_responses = endpoint.get("use_responses_api", False)
+        route = "/responses" if use_responses else "/chat/completions"
         # Credentials are process configuration; never put them in jobs/source.
         key = os.environ.get(key_variable(ticket.endpoint))
         headers = {"Authorization": "Bearer " + key} if key else {}
@@ -138,7 +146,7 @@ class OpenAITransport:
         async with asyncio.timeout(timeout):
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
                 response = await client.post(
-                    endpoint["url"].rstrip("/") + "/chat/completions",
+                    endpoint["url"].rstrip("/") + route,
                     headers=headers,
                     json=body,
                 )
@@ -149,6 +157,8 @@ class OpenAITransport:
             return {"context_limit": True, "model": endpoint["model"]}
         response.raise_for_status()
         data = response.json()
+        if use_responses:
+            return responses_api.result(data, native="tools" in payload)
         choice = data["choices"][0]
         # Usage is kept even for unusable replies: their tokens were still billed.
         meta = dict(model=data.get("model"), usage=data.get("usage"))
@@ -156,7 +166,7 @@ class OpenAITransport:
             finish = choice.get("finish_reason")
             if finish in {"stop", "tool_calls"}:
                 try:
-                    message = assistant_message(choice["message"])
+                    message = assistant_message(choice["message"], keep_responses_output=False)
                     if finish != "tool_calls" or message.get("tool_calls"):
                         return dict(meta, message=message)
                 except (KeyError, ValueError):

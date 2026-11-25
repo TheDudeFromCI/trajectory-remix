@@ -8,11 +8,18 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from trajectory_remix.graph import task_axes
 from trajectory_remix.graph.export import resolve_splits
 from trajectory_remix.graph.jobs import JobService
 from trajectory_remix.graph.metrics import MetricService
 from trajectory_remix.graph.models import GraphSource, ProjectSettings, digest
-from trajectory_remix.graph.sampling import ROOT, SamplerService, default_matrix, original
+from trajectory_remix.graph.sampling import (
+    ROOT,
+    SamplerService,
+    default_matrix,
+    editor_default_matrix,
+    original,
+)
 from trajectory_remix.graph.storage import GraphStore, RevisionConflict
 from trajectory_remix.graph.studio_api import create_studio_app
 
@@ -66,12 +73,13 @@ def test_identity_pins_and_immutable_snapshots(services):
         {"unknown": "x"},
         {"complexity": "impossible"},
         {"user_tone": 2},
-        {"focus.family": "strategic_planning", "lifecycle": "closure", "complexity": "trivial"},
+        {"focus.family": "strategic_planning", "lifecycle": "closure", "task_length": "XXS"},
     ):
         with pytest.raises(ValueError):
             s.propose(seed=1, overrides=overrides)
-    for pins in ({"complexity": "medium"}, {"user_patience": "impatient"}):
-        expected = original.sample_one(default_matrix(), 137, "fixed", pins)
+    split = editor_default_matrix()
+    for pins in ({"task_length": "M"}, {"complexity": "hard"}, {"user_patience": "impatient"}):
+        expected = task_axes.sample(original.sample_one, split, 137, "fixed", pins)
         assert s.propose(seed=137, world_group_id="fixed", overrides=pins)["proposal"] == expected
     assert s.propose(seed=1)["family_id"] is None
     with store.connect() as db, pytest.raises(Exception, match="immutable"):

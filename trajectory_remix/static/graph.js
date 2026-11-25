@@ -4,6 +4,9 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
+import {MetricsEditor} from './metrics-editor.js';
+import {renderComplexity} from './complexity-select.js';
+import {studioWarnings} from './studio-warnings.js';
 import {AssistantStatus, isAssistantOwner} from './assistant-indicator.js';
 import {AssistantQueue} from './assistant-queue.js';
 import {AutoSave} from './auto-save.js';
@@ -12,9 +15,10 @@ import {duplicateTrajectory} from './duplicate.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
+import {byId} from './panel-popout.js';
 import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
-const $ = id => document.getElementById(id);
+const $ = byId; // Also finds elements in a popped-out panel.
 const copy = value => structuredClone(value);
 const json = value => JSON.stringify(value, null, 2);
 const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, stable(value[k])])) : value;
@@ -35,6 +39,11 @@ const on = (id, event, handler) => $(id).addEventListener(event, async e => {
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const options = (id, entries, selected) => { const el = $(id); el.replaceChildren(...entries.map(([value, label]) => { const n = node('option', label); n.value = value; return n; })); el.value = selected ?? entries[0]?.[0] ?? ''; };
 const button = (text, action, cls) => { const n = node('button', text, cls); n.onclick = async e => { try { await action(e); } catch (error) { message(error); } }; return n; };
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** Refresh a raw JSON box unless the user is editing it. */
+const keepTyping = (id, text) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = text; };
+const isTyping = el => el?.tagName === 'TEXTAREA' || (el?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'file'].includes(el.type));
 
 export async function api(path, method = 'GET', body) {
   const response = await fetch(path.startsWith('/api/') ? path : '/api/v1' + path, {
@@ -88,8 +97,11 @@ async function intrinsicHash(source) {
 export class StudioUI {
   constructor() {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('graph-preferences') || '{}'); } catch {}
-    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, autoSendComments: false, autoSave: true, ...saved};
-    this.autoSave = new AutoSave({enabled: () => this.prefs.autoSave !== false, pending: () => !!this.record && !this.record.owner && this.isDirty(), save: () => this.save(), report: message});
+    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, autoSendComments: false, ...saved};
+    // A draft that failed to save is not retried until it changes again.
+    this.autoSave = new AutoSave({pending: () => !this.restoring && this.hasUnsavedChanges() && this.draftKey() !== this.failedKey,
+      save: () => this.save(), typing: () => isTyping(document.activeElement),
+      report: error => { this.failedKey = this.sentKey; message('Not saved: ' + error.message); this.renderDirty(); }});
     if (!Number.isFinite(this.prefs.zoom)) this.prefs.zoom = 1;
     this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
@@ -167,10 +179,13 @@ export class StudioUI {
     for (const row of $('sample-list').children) { toggleClass(row, 'selected', row.dataset.key === this.id); if (row.dataset.key) setAttr(row, 'aria-selected', String(row.dataset.key === this.id)); }
   }
   renderDirty() {
-    const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.isDirty();
-    setText(indicator, !this.record ? '' : locked ? 'Locked' : dirty ? 'Unsaved draft' : `Saved · rev ${this.record.revision}`);
-    indicator.className = `tag tone-${locked ? 'warning' : dirty ? 'accent' : 'muted'}`;
+    const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.hasUnsavedChanges();
+    const failed = dirty && !!this.autoSave.error && this.failedKey === this.draftKey();
+    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Not saved' : dirty ? 'Saving…' : `Saved · rev ${this.record.revision}`);
+    setAttr(indicator, 'data-tip', failed ? 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.' : null);
+    indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}`;
     indicator.hidden = !this.record;
+    this.metricsEditor?.sync({id: this.record ? this.id : null, revision: this.record?.revision, locked});
     setText($('trajectory-title'), this.id || 'No trajectory selected'); setAttr($('trajectory-title'), 'data-tip', null);
     this.autoSave.schedule();
   }
@@ -179,6 +194,13 @@ export class StudioUI {
     const flags = ['chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat'];
     return Object.fromEntries([...ids.map(id => [id, $(id).value]), ...flags.map(id => [id, $(id).checked])]);
   }
+  /** Changes the auto-saver should store: the draft and applied event edits, not raw JSON being typed. */
+  hasUnsavedChanges() {
+    if (!this.record || !this.draft || this.record.owner) return false;
+    return JSON.stringify(this.draft) !== JSON.stringify(this.record.source) || this.editors.size > 0 ||
+      !!(this.event && this.editorBaseline && JSON.stringify(this.editorState()) !== JSON.stringify(this.editorBaseline));
+  }
+  draftKey() { return JSON.stringify([this.id, this.draft, this.event && this.editorState()]); }
   isDirty() {
     if (!this.record || !this.draft) return false;
     return JSON.stringify(this.draft) !== JSON.stringify(this.record.source) || this.editors.size > 0 ||
@@ -192,6 +214,7 @@ export class StudioUI {
     else this.editors.delete(this.event);
   }
   async select(id, force = false) {
+    if (this.id !== id) await this.autoSave.flush();
     const generation = ++this.selectionGeneration;
     this.followPreviewEnd = false;
     this.preview.invalidate(); this.frames = null; clearTimeout(this.validationTimer); this.validationGeneration = (this.validationGeneration || 0) + 1;
@@ -243,7 +266,7 @@ export class StudioUI {
   }
   applyLock() {
     const locked = !!this.record?.owner;
-    for (const id of ['save-source', 'delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
+    for (const id of ['delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
     for (const root of ['graph-editor-fields', 'metadata-panel']) {
       const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) if (!input.closest('[data-lock-exempt]')) input.disabled = locked;
     }
@@ -271,26 +294,26 @@ export class StudioUI {
     options('event-window', Object.keys(this.draft.windows).map(id => [id, id]), $('event-window').value || this.draft.events[this.event]?.window);
     $('window-options').replaceChildren(...Object.keys(this.draft.windows).map(id => { const n = node('option'); n.value = id; return n; }));
     this.renderWindow();
-    $('metadata-json').value = json(this.draft.metadata || {});
+    keepTyping('metadata-json', json(this.draft.metadata || {}));
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
-    const stale = this.record.review_status?.stale;
-    $('review-stale').textContent = stale ? (this.record.review_status.reviewed ? 'Review stale' : 'Signoff stale') : '';
-    setAttr($('review-stale'), 'data-tip', stale ? this.record.review_status.reasons.join(', ').replaceAll('_', ' ') : null);
-    const size = this.record.size; $('size-tag').textContent = size?.label ? 'Size ' + size.label : '';
+    const size = this.record.size; $('size-tag').textContent = size?.label || '';
     setAttr($('size-tag'), 'data-tip', size ? `Saved source: about ${size.total_tokens_estimate.toLocaleString()} tokens total, about ${size.agent_tokens_estimate.toLocaleString()} agent-generated.` : null);
-    $('split-warning').textContent = this.draft.metadata?.split ? '' : 'Missing split';
-    setAttr($('split-warning'), 'data-tip', this.draft.metadata?.split ? null : 'Missing split: export assigns one automatically and warns. Choose Auto to opt in without a warning.');
-    $('source-json').value = json(this.draft);
+    keepTyping('source-json', json(this.draft));
     this.renderDiagnostics();
     this.applyLock();
     this.renderTimeline();
   }
   renderDiagnostics() {
-    const list = this.diagnostics || [], errors = list.filter(d => d.severity === 'error').length, warnings = list.length - errors;
+    const studio = studioWarnings({draft: this.draft, record: this.record, metrics: this.metricsView});
+    const list = [...(this.diagnostics || []), ...studio], errors = list.filter(d => d.severity === 'error').length, warnings = list.length - errors;
     $('diagnostics').replaceChildren(...list.map(d => {
       const n = node('div', undefined, 'diagnostic ' + d.severity), head = node('div', undefined, 'row');
-      head.append(tag(d.severity === 'error' ? 'Error' : 'Warning', d.severity === 'error' ? 'danger' : 'warning'), node('code', d.code, 'small grow truncate'));
+      const origin = tag(d.source === 'studio' ? 'Studio' : 'Compiler', 'muted', 'diagnostic-source');
+      setAttr(origin, 'data-tip', d.source === 'studio' ? 'Editor check: never blocks export and is not shown to agents' : 'Structural check from the compiler');
+      head.append(tag(d.severity === 'error' ? 'Error' : 'Warning', d.severity === 'error' ? 'danger' : 'warning'), origin, node('code', d.code, 'small grow truncate'));
       if (d.event_id) head.append(button('Inspect event', () => { this.selectEvent(d.event_id); $('tab-content')?.click(); }, 'sm ghost'));
+      if (d.action === 'split') head.append(button('Set split', () => { $('tab-metrics').click(); $('split').focus(); }, 'sm ghost'));
+      if (d.action === 'metrics') head.append(button('Show metrics', () => $('tab-metrics').click(), 'sm ghost'));
       n.append(head, node('p', d.message)); return n;
     }));
     if (!list.length) $('diagnostics').append(node('div', 'No problems. Errors block compiled export; warnings do not.', 'empty'));
@@ -576,7 +599,13 @@ export class StudioUI {
   history(deltas) { if (!deltas.length) return; this.undo.push(deltas); if (this.undo.length > 50) this.undo.shift(); this.redo = []; this.historyButtons(); }
   historyButtons() { $('undo-edit').disabled = !this.undo.length; $('redo-edit').disabled = !this.redo.length; }
   async restore(undo) {
-    if (this.isDirty()) throw new Error('Save or reload your draft before Undo/Redo.');
+    // Save what was just typed first, so Undo steps back from the latest state.
+    await this.autoSave.flush();
+    if (this.hasUnsavedChanges()) throw new Error('The latest change could not be saved yet, so Undo/Redo is paused. Fix it or reload the saved source.');
+    this.restoring = true;
+    try { await this.restoreSteps(undo); } finally { this.restoring = false; }
+  }
+  async restoreSteps(undo) {
     const stack = undo ? this.undo : this.redo, inverse = undo ? this.redo : this.undo;
     if (!stack.length) return;
     const deltas = stack.at(-1), restored = [];
@@ -603,10 +632,18 @@ export class StudioUI {
   }
   async save() {
     if (!this.draft) return;
-    this.applyEvent(); const before = copy(this.record.source);
-    const value = await api(`/trajectories/${this.id}`, 'PUT', {expected_revision: this.record.revision, source: this.draft});
-    this.history([{id: this.id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
-    this.record = value; this.diagnostics = value.diagnostics; this.draft = copy(value.source); this.editors.clear(); this.renderDraft(); this.renderEvent(); this.schedulePreview(); await this.listing();
+    this.applyEvent(); const before = copy(this.record.source), sent = copy(this.draft), id = this.id, generation = this.selectionGeneration;
+    this.sentKey = this.draftKey(); // A failure is charged to this draft, not to later edits.
+    const value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: this.record.revision, source: sent});
+    this.history([{id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
+    // A reload (switching trajectory, Undo/Redo) during the save already shows newer state.
+    if (id !== this.id || generation !== this.selectionGeneration) return;
+    this.record = value; this.diagnostics = value.diagnostics;
+    // Edits made while the save was in flight stay in the draft and are saved next.
+    const unchanged = same(this.draft, sent), normalized = !same(value.source, sent);
+    if (unchanged) this.draft = copy(value.source);
+    if (unchanged && normalized) { this.editors.clear(); this.renderDraft(); this.renderEvent(); } else this.renderDraft();
+    this.schedulePreview(); await this.listing();
   }
   async duplicate() {
     if (!this.record) return message('Select a trajectory to duplicate.');
@@ -866,15 +903,25 @@ export class StudioUI {
         const unresolved = items.filter(c => c.status !== 'resolved').length, review = items.filter(c => c.status === 'addressed').length;
         if (row && (row.comments !== unresolved || row.review !== review)) this.listing().catch(message);
       }});
+    this.metricsEditor = new MetricsEditor({api, report: message, beforeSave: () => this.autoSave.flush(),
+      onSaved: view => { if (view.delta) this.history([view.delta]); return this.refreshSelected(); },
+      onView: (view, state) => {
+        renderComplexity($('complexity'), view, state.locked);
+        if (view !== this.metricsView) { this.metricsView = view; this.renderDiagnostics(); }
+      },
+      shownElsewhere: ['complexity'],
+      els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset')}});
+    on('complexity', 'change', () => this.metricsEditor.save('complexity', $('complexity').value || undefined));
+    $('tab-metrics').addEventListener('click', () => this.metricsEditor.load().catch(message));
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
       if (e.detail === 'review-view') this.openReview().catch(message);
     });
-    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools; $('auto-send-comments').checked = this.prefs.autoSendComments === true; $('auto-save').checked = this.prefs.autoSave !== false;
+    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools; $('auto-send-comments').checked = this.prefs.autoSendComments === true;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('duplicate-sample', 'click', () => this.duplicate());
-    on('save-source', 'click', () => this.save()); on('reload-source', 'click', () => this.id && this.select(this.id, true));
+    on('reload-source', 'click', () => this.id && this.select(this.id, true));
     on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
     on('event-apply', 'click', () => this.applyEvent());
@@ -899,7 +946,7 @@ export class StudioUI {
     for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool', 'search-comments']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
-    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.prefs.autoSave = $('auto-save').checked; this.autoSave.schedule(); this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
+    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
     on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };

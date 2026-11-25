@@ -28,7 +28,7 @@ tooltips rather than in extra text on screen.
 | **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, comment state or size (type `@size:m` or `@size:<=xs` in the search box; see [Metrics](METRICS.md#character-counts-and-trajectory-sizes)). Each row shows a short ID, its stage and split, a speech bubble with the number of unresolved comments (amber when some await your review), and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows** and **JSON**, and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
+| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state and problem count. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -112,14 +112,16 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
 5. Want the agent to see its tools? Add an event of kind **Tool schema** in a `tools`
    window and tick the tools. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
    Randomly added tools are grayed out; hide them under **Preferences**.
-6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
-   **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
-   By default the dashboard also saves for you about a second and a half after your last
-   edit. Turn off **Automatically save the trajectory** under **Preferences** (stored in
-   this browser) to save only with the button.
+6. Set the trajectory's **Stage**, **Split** and **Complexity** at the top of the **Metrics** tab.
 
-You can switch to another trajectory without saving. Your draft is kept and comes back
-when you return.
+Every change saves as soon as you make it; there is no Save button. Choices, checkboxes and
+buttons save at once. Typing saves when you pause, so a sentence is one save. The badge reads
+*Saving…* and then *Saved · rev N*. Each save is one step for **Undo** and **Redo**, including
+metric values.
+
+Some in-between states can't be stored yet, such as a tool call with no call ID. The badge
+then reads *Not saved* (hover it for the reason), your draft is kept, and it saves with your
+next change.
 
 ### Link events in order
 
@@ -142,6 +144,17 @@ Broken drafts always save. Problems show up as you edit:
 - Each problem has a code, a message and, where it applies, **Inspect event** to jump to
   the event.
 - Errors block compiled export; warnings don't.
+
+Problems come from two places, labelled on each row:
+
+| Label | What it checks | Examples |
+| --- | --- | --- |
+| **Compiler** | The trajectory's structure, on the server | Missing dependencies, windows left open |
+| **Studio** | Editor housekeeping, worked out in your browser | `missing_split` (**Set split**), `review_stale` or `signoff_stale`, `stale_metrics` (**Show metrics**) |
+
+Studio warnings update as you edit, never block export, and aren't shown to the review or
+assembly agents. Choosing **Auto** as the split clears `missing_split` without a warning
+at export.
 
 ![A missing dependency on the Problems tab](images/dashboard/problems.png)
 
@@ -198,7 +211,7 @@ work through a trajectory's open comments.
 1. In **Settings**, assign an endpoint to the **Assistant** role (see
    [Project settings](PROJECT-SETTINGS.md)). It's separate from the generation and review
    roles.
-2. Save the trajectory, then click **Send open comments to agent** on the Comments tab.
+2. Click **Send open comments to agent** on the Comments tab.
 
 The job takes the open comments as they are at that moment, with their replies. The model
 edits the trajectory with the same authoring tools Assembly uses, then answers every comment
@@ -212,7 +225,7 @@ room, it stops with its edits so far kept and the comments still open.
 To skip the button, turn on **Automatically send new comments to the assistant** in
 **Preferences** (off by default, stored in this browser). Adding a comment, replying to a comment that is still open, or requesting
 changes on an agent's fix, then sends the trajectory's open comments at once. The same
-checks apply, so save your draft first. If a job is already working on the trajectory (for
+checks apply. If a job is already working on the trajectory (for
 example the assistant's previous run), the comment is saved and queued instead. When the job
 settles, the open comments, however many you added, go out together as one more job. A queued
 send waits while you have unsaved edits, and is dropped if nothing is left open. **Send open comments to agent** stays enabled in this mode, so you can resend by hand
@@ -245,9 +258,34 @@ send waits while you have unsaved edits, and is dropped if nothing is left open.
 Open the **View** menu and choose **Hide dataset panel**, **Hide timeline panel** or
 **Hide event panel**; the same items read **Show …** to bring a panel back, and
 **Show all panels** restores everything. The windows grow into the freed space. Hiding the
-event panel also hides the trajectory bar, so show it again to save. When you hide the timeline,
+event panel also hides the trajectory bar and its save state. When you hide the timeline,
 its step and **Play** controls move to the status bar so you can still scrub the windows.
 Your layout is remembered in this browser.
+
+### Move the timeline to another monitor
+
+Have a second screen? Click the **pop-out** button at the right end of the timeline's header
+(or choose **View → Pop out timeline panel**). The timeline opens in its own browser window,
+which you can drag to the other monitor and resize. Everything still works from there:
+clicking an event opens it in the event panel, **Shift**-click adds a dependency, and the
+scrubber, **Play**, zoom and view picker drive the windows in the main editor. The windows
+grow into the space the timeline left.
+
+To bring it back, close the popup window, click the pop-out button again, or choose
+**View → Return timeline panel**. The popup remembers its size and position for next time,
+though some browsers keep new windows on the screen that opened them.
+
+| If you… | What happens |
+| --- | --- |
+| Close the timeline window | The timeline returns to the editor. Pop it out again any time. |
+| Reload the timeline window | It reconnects and keeps showing the timeline. |
+| Reload the editor | The timeline window waits a moment, then reconnects to the reloaded editor. |
+| Close the editor | The timeline window closes too. |
+| Open the editor in two tabs | Each tab gets its own timeline window, and each only controls its own tab. |
+
+If nothing opens, your browser blocked the popup: allow popups for the studio's address
+and try again. Hover tooltips don't show in the popup window; hover an event for its
+dependencies instead.
 
 ### Resize panels
 
@@ -257,12 +295,6 @@ works from the keyboard: focus it and press the arrow keys (hold **Shift** for b
 steps). **Double-click** a handle or press **Home** to restore its default size. Sizes are
 remembered in this browser, and panels can't shrink below a usable minimum or squeeze the
 windows out.
-
-### Collapse the trajectory bar
-
-Click the chevron at the left of the trajectory bar to hide its **Stage** and **Split**
-row and keep just the title, save state and **Save**. Click it again to expand. The choice is
-remembered in this browser.
 
 ### Choose how trajectories are built
 
@@ -336,6 +368,8 @@ Bulk edits skip locked trajectories and can be undone with **Undo** once they fi
 2. Open **Metrics**. Pick a dimension in **Targets vs observed** to compare what the
    sampler aimed for with what accepted trajectories contain.
 3. Click **Calculate missing metrics** to measure what can be measured. It runs as a job.
+4. To fill values that can't be measured, such as categories and outcomes, open a trajectory in the
+   Editor and use its **Metrics** tab.
 
 ## Watch and recover work
 
@@ -370,9 +404,9 @@ deliberately. See [Jobs](GRAPH-JOBS.md) for the full recovery model.
 While a pipeline works on a trajectory, the clean copy you have selected refreshes as
 events arrive, and unlocks when the work ends.
 
-- **Locked** trajectories can't be edited. Ownership is exclusive, and Save is hidden
+- **Locked** trajectories can't be edited. Ownership is exclusive, and nothing saves
   until the lock clears.
-- If you have **unsaved edits**, they are never overwritten. A conflicting save reports
+- Edits that haven't saved yet are never overwritten. A conflicting save reports
   a revision conflict and leaves your text intact. Reloading the saved version is an
   explicit step (**More → Reload saved source**).
 - **Detaching** a trajectory from its pipeline is permanent. That pipeline stops
@@ -389,7 +423,7 @@ events arrive, and unlocks when the work ends.
 | **Ready (3)** | Approved by you. This is what export includes by default. |
 
 Changing a source or checklist can make an old review **stale**. Stale reviews keep
-their stage and show a *Review stale* tag in the trajectory bar. Nothing is re-reviewed
+their stage and show a `review_stale` warning on the Problems tab. Nothing is re-reviewed
 unless you ask. See [Event generation](GRAPH-GENERATION.md#reviews-and-repair).
 
 ## Good to know
@@ -413,7 +447,7 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.css` | Layout of the shell, Editor, Jobs and Metrics views and the status bar. |
 | `sampler.css`, `project-settings.css` | The Sampler view and the settings forms. |
 | `shell.js` | View tabs, disclosure menus, keyboard-navigable tab panels and the `[data-tip]` tooltip. |
-| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), the collapsible trajectory bar, and moving the timeline controls into the status bar while the timeline is hidden. |
+| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), and moving the timeline controls into the status bar while the timeline is hidden. |
 | `views.js` | `showView()` / `currentView()`; dispatches a `studio-view` event that loads Jobs, Metrics and the Sampler on demand. |
 | `ui-kit.js` | DOM helpers: keyed `reconcile()`, idempotent `setText`/`setAttr`/`toggleClass`, `progressBar()`, `makeTabs()`, stage and job tone maps. |
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |

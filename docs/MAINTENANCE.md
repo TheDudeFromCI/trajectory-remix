@@ -19,9 +19,9 @@ Paths below are relative to `trajectory_remix/`.
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js`, `static/checklist-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `markdown-view.js`, `markdown-inline.js`, `window-markdown.css`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `metrics-editor.js`, `complexity-select.js`, `studio-warnings.js`, `auto-save.js`, `window-render.js`, `markdown-view.js`, `markdown-inline.js`, `window-markdown.css`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `panel-popout.js`, `panel-popout-window.js`, `panel-popout.html`, `panel-popout.css`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `graph/assistant_memory.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; only a person resolves (agents mark comments addressed); Send to agent freezes open comments, needs the Assistant role, answers through the native `reply` tool, continues the last finished conversation and never changes the stage |
-| Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
+| Sampler/metrics | `graph/sampling.py`, `graph/task_axes.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
 
@@ -69,6 +69,10 @@ screenshots at desktop and compact viewports; DOM assertions alone do not verify
 layout or the `hidden` attribute. Check keyboard focus, labels, Escape, menus,
 dialogs, overflow and meaningful progress/error messages.
 
+The timeline can be popped out into a second window (`panel-popout.js`), which moves its
+elements out of `document`. Look up timeline elements with `byId` (graph.js's `$`), not
+`document.getElementById`, or they go missing while the timeline is popped out.
+
 ## Validation and completion
 
 Use [TESTING](TESTING.md) for the current commands. Start with the defect's focused
@@ -86,6 +90,9 @@ node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
+node tests/metrics_editor_frontend.mjs
+node tests/complexity_select_frontend.mjs
+node tests/studio_warnings_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs
@@ -188,6 +195,9 @@ non-JSON replies, per-job usage totals (missing values stay missing), the exampl
 and the model checker (its cost estimate uses Draft and Assembly token counts from pilots). All HTTP is mocked;
 `scripts/openrouter_models.py` is the only part that reads OpenRouter's public model list.
 `graph/usage.py` stores counts only, never prompts, responses or credentials.
+
+Responses API coverage in `tests/test_responses_api.py` exercises the endpoint toggle,
+stateless tool replay, incomplete replies, and usage with mocked HTTP.
 
 Plain-text Drafts: `python -m pytest -q tests/test_draft_reply.py tests/test_graph_provider.py`
 checks that no request sends `response_format` or a schema contract, that the Draft reply is

@@ -18,9 +18,10 @@ models.
 
 1. Start your server.
 2. In **Settings → Models & defaults**, enter a unique endpoint ID and click **Add endpoint**.
-3. Fill in the **base URL** (for example `http://127.0.0.1:8000/v1`; Remix adds
-   `/chat/completions`), the exact **model** name, a **concurrent-request limit** and a
-   **retry count** for transport errors.
+3. Fill in the **base URL** (for example `https://api.openai.com/v1`), the exact
+   **model** name, a **concurrent-request limit** and a **retry count** for transport
+   errors. Remix adds `/chat/completions` by default. Check **Use Responses API** on
+   an endpoint card to use `/responses` for that endpoint.
 4. Assign the roles from the dropdowns. One endpoint can fill all of them. Leave a review
    role empty to skip that review.
 
@@ -36,6 +37,10 @@ models.
 Removing an endpoint also clears the roles that pointed at it. Saving that affects only
 future work.
 
+**Reasoning level** sends `reasoning_effort` for Chat Completions and
+`reasoning.effort` for Responses. Leave it blank to use the model's default.
+Responses conversations are replayed from the job's local history with `store: false`.
+
 ### Token limits
 
 Each endpoint card also has two optional limits. Hover over either field for a summary.
@@ -43,7 +48,7 @@ Both default to **-1**, which means no limit: the provider decides.
 
 | Field | What it does when set |
 | --- | --- |
-| **Max output tokens** | Caps each single response (sent as `max_tokens`). Reasoning and tool calls count toward it. It does not cap the whole pass. |
+| **Max output tokens** | Caps each response, including reasoning and tool calls. Chat Completions uses `max_tokens` and Responses uses `max_output_tokens`. |
 | **Context limit (tokens)** | Remix checks every request against it before sending, and stops instead of sending one that will not fit. Max output tokens, when set, is held back from it on every request. |
 
 Set the context limit if your server silently cuts long prompts instead of returning an
@@ -58,8 +63,8 @@ hosted routers such as OpenRouter. For a full walk-through, see [OpenRouter](OPE
 | Option | What it does |
 | --- | --- |
 | **Bytes per token** | How the context check estimates tokens: request bytes ÷ this number. Used only when a **Context limit** is set. English and JSON average about 3.5 bytes per token, so the default, **3**, keeps a margin while letting you use the model's real window. 1 can never undercount but rejects prompts that would fit. |
-| **Sticky sessions** | Sends the trajectory ID as `session_id`, so a router keeps each trajectory on one provider and its prompt stays cached. |
-| **Extra request fields** | A JSON object added to every request, for example `{"reasoning": {"effort": "none"}, "provider": {"require_parameters": true}}`. Fields Remix sets itself (model, messages, response format, output limit, sampling and `session_id`) cannot be overridden. |
+| **Sticky sessions** | For Chat Completions routers such as OpenRouter. Sends the trajectory ID as `session_id` so the router can keep each trajectory on one provider. |
+| **Extra request fields** | A JSON object added to requests. For example, OpenRouter accepts `{"provider": {"require_parameters": true}}`. Remix reserves the fields it uses to build the request, including `reasoning` in Responses mode. |
 
 ### Credentials
 

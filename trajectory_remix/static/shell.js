@@ -1,5 +1,6 @@
 /* Application shell: view tabs, disclosure menus, tab panels and tooltips. */
 import {bindViewTabs} from './views.js';
+import {byId} from './panel-popout.js';
 
 bindViewTabs();
 
@@ -65,7 +66,7 @@ applyLayout();
 
 // Expanded window: step controls drive the main timeline; Escape shrinks it.
 for (const step of document.querySelectorAll('#window-popout [data-step]')) {
-  step.addEventListener('click', () => document.getElementById(step.dataset.step)?.click());
+  step.addEventListener('click', () => byId(step.dataset.step)?.click());
 }
 document.addEventListener('keydown', event => {
   const popout = document.getElementById('window-popout');
