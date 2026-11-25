@@ -34,6 +34,60 @@ Browse the full API with `cargo doc --no-deps --open -p ktremix`.
 - `shard::Shard` reads individual samples. `dataset::Dataset` adds weighted
   batching and optional sampling without replacement across shards.
 
+## Compiler warnings and errors
+
+`Compiler::structural_report` checks graph structure without a tokenizer.
+`Compiler::report` also checks tokenization and scheduling. Warnings allow
+compilation and appear in `Compilation::report` on success. Errors block
+compilation. Each diagnostic includes a code, a message, and a source path
+where applicable. Tool catalog, tool schema, configured response window, and
+reasoning level checks use the optional settings supplied by the caller.
+
+| Severity | Code | When it is emitted |
+| --- | --- | --- |
+| Warning | `duplicate_dependency` | An event lists the same dependency more than once. |
+| Warning | `low_agent_share` | Agent text and tool calls account for less than 6.25% of the source text characters. |
+| Warning | `open_window` | A used reasoning or tool window has no closing event and lacks the `intentionally_left_open` flag. |
+| Warning | `tool_input_schema` | A submitted call's arguments fail JSON or schema validation, the configured schema is invalid, or window references defer validation. |
+| Warning | `unknown_tool` | A call names a tool ID missing from the supplied catalog. This check runs when settings are supplied. |
+| Error | `call_already_finished` | A request adds a fragment after submission or cancellation. |
+| Error | `chat_echo_disabled` | A linked chat message echoes a call whose fragments disable echo. |
+| Error | `chat_echo_mismatch` | A linked chat message differs from the submitted `chat` call's content. |
+| Error | `compile_error` | Tokenizer-backed compilation fails, for example because of invalid literal encoding, an incompatible window-reference alphabet, or an exceeded window or row limit. The message gives the cause. |
+| Error | `dependency_cycle` | An event belongs to a dependency cycle. |
+| Error | `empty_replacement` | A body replacement contains neither text nor a window reference. |
+| Error | `inconsistent_call` | Request fragments with the same call ID disagree on the tool ID or window. |
+| Error | `inconsistent_response` | Response fragments with the same call ID use different windows. |
+| Error | `interleaved_framing` | Another request or response, or nonempty standalone content, interrupts an open request or response in the same window. |
+| Error | `invalid_chat_window` | A chat message targets a window whose purpose differs from `chatroom`. |
+| Error | `invalid_response_begin` | The first response fragment lacks a begin marker, or a later fragment inserts one. |
+| Error | `invalid_source` | The source cannot be decoded as graph JSON, uses an unsupported graph format, or contains invalid identifiers, window definitions, event fields, or loss weights. |
+| Error | `invalid_tool_begin` | The first request fragment lacks a begin marker, or a later fragment inserts one. |
+| Error | `missing_dependency` | An event depends on an event ID absent from the graph. |
+| Error | `missing_window` | An event targets a window ID absent from the graph. |
+| Error | `missing_window_reference` | An inline window reference names a window ID absent from the graph. |
+| Error | `output_after_close` | An event writes to a logical window after a causal predecessor closes it. |
+| Error | `response_already_finished` | A response adds a fragment after its end marker. |
+| Error | `response_window` | A response targets a different window from the one configured for the tool. |
+| Error | `unknown_reasoning_level` | A window uses a reasoning level absent from the supplied settings. |
+| Error | `unopened_window_reference` | An inline reference names a defined window that has no events to open it. |
+| Error | `unordered_window_writers` | Two events write to the same window without a dependency path ordering them. |
+| Error | `unsubmitted_call` | A tool response or linked chat echo lacks a causally preceding submitted request for its call ID. |
+| Error | `window_not_writable` | Agent output targets a read-only window. |
+
+### Errors returned by the Rust API
+
+Methods that return `Result` can also return these `ktremix::Error` variants.
+Use the report methods for structured diagnostic codes. A failed
+`Compiler::compile` returns a summary of its blocking diagnostics.
+
+| Variant | When it is returned |
+| --- | --- |
+| `Invalid` | The library rejects input, options, a tokenizer profile, or a shard. The message gives the reason, including any blocking compilation diagnostics. |
+| `Cancelled` | A cancellation callback stops the operation. |
+| `Json` | JSON parsing or serialization fails outside the structured graph diagnostic report. |
+| `Io` | A file operation fails. |
+
 ## What a compiled trajectory looks like
 
 A **row** is one token occurrence in one window. A text token, a beginning-of-window
