@@ -34,12 +34,12 @@ def _int(value):
 def counts(usage):
     """Normalized counts from an OpenAI-compatible usage object; unknown stays None."""
     usage = usage if isinstance(usage, dict) else {}
-    prompt = usage.get("prompt_tokens_details") or {}
-    completion = usage.get("completion_tokens_details") or {}
+    prompt = usage.get("prompt_tokens_details", usage.get("input_tokens_details"))
+    completion = usage.get("completion_tokens_details", usage.get("output_tokens_details"))
     cost = usage.get("cost")
     return dict(
-        prompt_tokens=_int(usage.get("prompt_tokens")),
-        completion_tokens=_int(usage.get("completion_tokens")),
+        prompt_tokens=_int(usage.get("prompt_tokens", usage.get("input_tokens"))),
+        completion_tokens=_int(usage.get("completion_tokens", usage.get("output_tokens"))),
         cached_tokens=_int(prompt.get("cached_tokens")) if isinstance(prompt, dict) else None,
         reasoning_tokens=(
             _int(completion.get("reasoning_tokens")) if isinstance(completion, dict) else None
