@@ -5,6 +5,7 @@ from typing import Literal
 from ktremix_native import dry_run
 from pydantic import Field
 
+from .diagnostic_policy import disabled
 from .models import DTO, GraphSource, ProjectSettings
 
 
@@ -38,4 +39,9 @@ def diagnose(source: GraphSource, settings: ProjectSettings | None = None) -> li
     )
     # Metadata does not affect compilation, so leave it out of what the checker parses.
     report = dry_run(source.model_dump_json(exclude={"metadata"}), settings=snapshot)
-    return [Diagnostic.model_validate(item) for item in report["diagnostics"]]
+    suppressed = disabled(settings)
+    return [
+        Diagnostic.model_validate(item)
+        for item in report["diagnostics"]
+        if item["severity"] == "error" or item["code"] not in suppressed
+    ]

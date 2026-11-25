@@ -1,7 +1,7 @@
 """Tool schema listing: chosen tools plus a repeatable random selection of others."""
 
 import pytest
-from test_graph_generation import DRAFT, finish, service, spec
+from test_graph_generation import finish, service
 
 from trajectory_remix.graph import tool_listing
 
@@ -19,14 +19,13 @@ def test_random_additions_are_repeatable_and_keep_chosen_tools():
 @pytest.mark.asyncio
 async def test_assembly_writes_the_listing_before_the_opening(tmp_path):
     gen, fake = service(tmp_path, fast=False)
-    fake.responses = [{"draft": DRAFT}, spec()]
     job = gen.start([{"seed": 137}], {})
     await finish(gen, job)
     source = gen.store.read(gen.jobs.attempts(job)[0]["trajectory_id"]).source
     listing = source.events["tools"]
     assert listing.kind == "tool_schema" and source.windows[listing.window].purpose == "tools"
     assert source.events["ask"].after == ["tools"]
-    assert {"chat", "read"} <= set(source.metadata["shown_tools"])
+    assert tool_listing.presented_ids(listing.content) == {"chat", "read"}
 
 
 def test_manual_listing_endpoint_matches_assembly(tmp_path):

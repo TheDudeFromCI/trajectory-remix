@@ -23,8 +23,33 @@ from trajectory_remix.graph.studio_api import create_studio_app
 from trajectory_remix.graph.user_validation import require_user_machine
 
 
+def _viewed_graph(messages):
+    """The latest view_graph result in a native conversation, or None before one."""
+    names, graph = {}, None
+    for message in messages:
+        for call in message.get("tool_calls") or []:
+            names[call["id"]] = call["function"]["name"]
+        if message["role"] == "tool" and names.get(message["tool_call_id"]) == "view_graph":
+            graph = json.loads(message["content"])
+    return graph
+
+
+def _signoff(payload, graph):
+    tool = next(t for t in payload["tools"] if t["function"]["name"] == "signoff")
+    criteria = tool["function"]["parameters"]["properties"]["items"]["properties"]
+    cited = list(graph.get("events", {}))[:1]
+    items = {
+        key: dict(status="pass", evidence="Synthetic workload evidence", event_ids=cited)
+        for key in criteria
+    }
+    if "causal_claims" in criteria.get("core.causal_evidence", {}).get("properties", {}):
+        items["core.causal_evidence"]["causal_claims"] = []
+    summary = "Synthetic fixture verdict; no quality certification"
+    return dict(status="complete", summary=summary, items=items)
+
+
 class FakeProvider:
-    """Schema-shaped fixed observations/verdicts, never a quality assessment."""
+    """Schema-shaped fixed notes and native signoffs, never a quality assessment."""
 
     def __init__(self):
         self.calls = 0
@@ -33,44 +58,42 @@ class FakeProvider:
         self.calls += 1
         await asyncio.sleep(0.05)  # Simulated I/O, not a claimed provider latency.
         payload = ticket.payload
-        if payload["operation"] == "event":
-            props = payload["schema"]["properties"]
-            output = (
-                {"arguments": {"content": "Synthetic workload reply"}}
-                if "arguments" in props
-                else {"content": "Synthetic workload observation"}
-            )
-        else:
-            schema = payload["schema"]
-            if payload["operation"] == "repair":
-                schema = schema["oneOf"][2]["properties"]["review"]
-            review = dict(
-                summary="Synthetic fixture verdict; no quality certification",
-                items={
-                    key: dict(status="pass", evidence="Synthetic workload evidence", event_ids=[])
-                    for key in schema["properties"]["items"]["properties"]
-                },
-            )
-            output = (
-                dict(action="verdict", review=review)
-                if payload["operation"] == "repair"
-                else review
-            )
-        return dict(output=output, model="offline-workload-fixture")
+        if "tools" not in payload:
+            notes = "Synthetic workload notes for a fixture episode. " * 5
+            return dict(output={"draft": notes}, model="offline-workload-fixture")
+        graph = _viewed_graph(payload["messages"])
+        name, args = ("view_graph", {}) if graph is None else ("signoff", _signoff(payload, graph))
+        call = dict(
+            id=f"workload-{self.calls}",
+            type="function",
+            function=dict(name=name, arguments=json.dumps(args)),
+        )
+        message = dict(role="assistant", content=None, tool_calls=[call])
+        return dict(message=message, model="offline-workload-fixture")
 
 
 def fixture(index):
     return dict(
         format="kidra-trajectory-graph/1",
         id=str(uuid5(NAMESPACE_URL, f"remix-workload/{index}")),
-        windows={"doc": dict(purpose="document", agent_writable=False)},
+        windows={
+            "doc": dict(purpose="document", agent_writable=False),
+            "work": dict(purpose="reasoning", agent_writable=True),
+        },
         events={
             "input": dict(
                 kind="external_text",
                 window="doc",
                 content=f"Stored fixture {index}",
                 close_window=True,
-            )
+            ),
+            "note": dict(
+                kind="agent_text",
+                window="work",
+                content="Noted the stored fixture.",
+                after=["input"],
+                close_window=True,
+            ),
         },
         metadata=dict(stage=0, split="Auto", workload_fixture=True),
     )

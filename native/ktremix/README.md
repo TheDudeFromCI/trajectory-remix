@@ -42,26 +42,37 @@ compilation and appear in `Compilation::report` on success. Errors block
 compilation. Each diagnostic includes a code, a message, and a source path
 where applicable. Tool catalog, tool schema, configured response window, and
 reasoning level checks use the optional settings supplied by the caller.
+The library returns every warning. Trajectory Remix applies project warning
+preferences when it presents diagnostics.
 
 | Severity | Code | When it is emitted |
 | --- | --- | --- |
 | Warning | `call_already_finished` | A request adds a fragment after submission or cancellation. |
 | Warning | `chat_echo_disabled` | A linked chat message echoes a call whose fragments disable echo. |
 | Warning | `chat_echo_mismatch` | A linked chat message differs from the submitted `chat` call's content. |
+| Warning | `direct_chatroom_output` | An agent text event writes directly into a chatroom. |
 | Warning | `duplicate_dependency` | An event lists the same dependency more than once. |
 | Warning | `inconsistent_call` | Request fragments with the same call ID disagree on the tool ID or window. |
 | Warning | `inconsistent_response` | Response fragments with the same call ID use different windows. |
 | Warning | `interleaved_framing` | Another request or response, or nonempty standalone content, interrupts an open request or response in the same window. |
+| Warning | `invalid_chat_echo_source` | A chat echo links to a submitted tool other than `chat`. |
 | Warning | `invalid_chat_window` | A chat message targets a window whose purpose differs from `chatroom`. |
 | Warning | `invalid_response_begin` | The first response fragment lacks a begin marker, or a later fragment inserts one. |
 | Warning | `invalid_tool_begin` | The first request fragment lacks a begin marker, or a later fragment inserts one. |
 | Warning | `low_agent_share` | Agent text and tool calls account for less than 6.25% of the source text characters. |
+| Warning | `missing_chat_echo` | A submitted chat call with echo enabled has no causally linked delivery. |
+| Warning | `missing_tool_listing` | A tool call has no schema listing visible through its dependencies. |
+| Warning | `multiple_tool_calls_in_window` | A window holds fragments from more than one tool call ID. |
+| Warning | `no_agent_activity` | The graph lacks meaningful model text or a framed tool call. |
 | Warning | `open_window` | A used reasoning or tool window has no closing event and lacks the `intentionally_left_open` flag. |
+| Warning | `reasoning_in_tool_window` | Agent text shares a window with tool requests or responses, or targets a window with purpose `tool`. |
 | Warning | `response_already_finished` | A response adds a fragment after its end marker. |
 | Warning | `response_window` | A response targets a different window from the one configured for the tool. |
 | Warning | `tool_input_schema` | A submitted call's arguments fail JSON or schema validation, the configured schema is invalid, or window references defer validation. |
+| Warning | `tool_result_unavailable` | A direct tool response dependency closes or is replaced before the model can read its body. |
+| Warning | `tools_window_has_dependencies` | The event that opens an ordered tools window depends on other events. |
 | Warning | `unknown_reasoning_level` | A window uses a reasoning level absent from the supplied settings. |
-| Warning | `unknown_tool` | A call names a tool ID missing from the supplied catalog. This check runs when settings are supplied. |
+| Warning | `unknown_tool` | A tool ID is absent from the supplied catalog or omitted from a visible tool listing. |
 | Warning | `unsubmitted_call` | A tool response or linked chat echo lacks a causally preceding submitted request for its call ID. |
 | Warning | `window_not_writable` | Agent output targets a declared read-only window. The compiled window is treated as writable so it can contain model rows. |
 | Error | `dependency_cycle` | An event belongs to a dependency cycle. |

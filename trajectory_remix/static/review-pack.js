@@ -1,7 +1,9 @@
-/* Review Settings → export/import a shareable pack: the three prompts plus every checklist item. */
+/* Review Settings → export/import a shareable pack: the prompts plus every checklist item. */
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const FORMAT = 'trajectory-remix-review-pack', VERSION = 1;
-const PROMPT_KEYS = ['actor', 'draft', 'assembly'], GROUPS = ['core', 'critical'];
+const PROMPT_KEYS = ['actor', 'authoring', 'draft', 'assembly', 'assistant'], GROUPS = ['core', 'critical'];
+// Packs exported before the authoring or Assistant prompt existed import without them.
+const OPTIONAL_PROMPTS = new Set(['authoring', 'assistant']);
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
 const isObject = v => v && typeof v === 'object' && !Array.isArray(v);
 
@@ -25,6 +27,7 @@ export function parsePack(text) {
   if (!isObject(data.prompts)) throw new Error('The pack has no prompts.');
   const prompts = {};
   for (const key of PROMPT_KEYS) {
+    if (data.prompts[key] === undefined && OPTIONAL_PROMPTS.has(key)) continue;
     if (typeof data.prompts[key] !== 'string') throw new Error(`Prompt "${key}" must be text.`);
     prompts[key] = data.prompts[key];
   }
@@ -59,12 +62,12 @@ export function renderReviewPack(target, {current, write, error, render}) {
     let pack;
     try { pack = parsePack(await chosen.text()); } catch (cause) { file.value = ''; return error('Could not import the pack: ' + cause.message); }
     file.value = '';
-    if (!confirm('Replace the agent prompt, Draft and Assembly instructions, and all Core and Critical criteria with this pack? Your edits in this draft will be lost. Nothing is saved until you choose Save settings.')) return;
+    if (!confirm('Replace the agent and authoring prompts, the Draft and Assembly instructions, and all Core and Critical criteria with this pack? Your edits in this draft will be lost. Nothing is saved until you choose Save settings.')) return;
     write(d => { d.prompts = {...(d.prompts || {}), ...pack.prompts}; d.review_checklists = structuredClone(pack.review_checklists); });
     render('Review pack imported. Choose Save settings to keep it.');
   };
   const importButton = node('button', 'Import pack'); importButton.type = 'button'; importButton.onclick = () => file.click();
   const row = node('div', undefined, 'settings-add-row'); row.append(exportButton, importButton, file);
-  box.append(row, node('p', 'A pack is a JSON file with the agent prompt, the Draft and Assembly instructions and every checklist item. Share it and import it into another project.', 'settings-help'));
+  box.append(row, node('p', 'A pack is a JSON file with the agent and authoring prompts, the Draft and Assembly instructions and every checklist item. Share it and import it into another project.', 'settings-help'));
   target.append(box);
 }

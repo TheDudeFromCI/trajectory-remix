@@ -1,5 +1,6 @@
 /* Application shell: view tabs, disclosure menus, tab panels and tooltips. */
 import {bindViewTabs} from './views.js';
+import {byId} from './panel-popout.js';
 
 bindViewTabs();
 
@@ -65,7 +66,7 @@ applyLayout();
 
 // Expanded window: step controls drive the main timeline; Escape shrinks it.
 for (const step of document.querySelectorAll('#window-popout [data-step]')) {
-  step.addEventListener('click', () => document.getElementById(step.dataset.step)?.click());
+  step.addEventListener('click', () => byId(step.dataset.step)?.click());
 }
 document.addEventListener('keydown', event => {
   const popout = document.getElementById('window-popout');
@@ -86,6 +87,9 @@ function show(target) {
   clearTimeout(timer); owner = target;
   timer = setTimeout(() => {
     if (owner !== target || !target.isConnected) return;
+    // A modal dialog draws above the page, so the bubble must live inside it to be seen.
+    const host = target.closest('dialog[open]') || document.body;
+    if (bubble.parentElement !== host) host.append(bubble);
     bubble.textContent = target.dataset.tip; bubble.classList.add('show'); place(target);
     target.setAttribute('aria-describedby', 'tooltip');
   }, 250);

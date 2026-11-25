@@ -12,7 +12,7 @@ certify tool coherence, objective coverage or truthful reasoning, so record what
 1. Install the project and start your own OpenAI-compatible server with structured JSON-schema output.
 2. Copy [`examples/graph_local_llm.json`](../examples/graph_local_llm.json) to a local config and set each base URL
    and model. The three roles (draft, fast, critical) may share one server, and the example uses concurrency 1.
-   Project toggles let you opt out of review and repair. No cloud account is needed.
+   Project toggles let you opt out of either review. No cloud account is needed.
 3. If your server needs a key, set `REMIX_API_KEY_LOCAL_DRAFT`, `REMIX_API_KEY_LOCAL_FAST` and
    `REMIX_API_KEY_LOCAL_CRITICAL` in the environment.
 
@@ -43,7 +43,7 @@ Look at outcomes, not just final stages. For each trajectory, check that:
 
 - the draft (in `metadata.draft`) reads like a real episode and covers the proposal;
 - the assembled graph keeps the draft's facts, closes its reasoning windows and has at most
-  a few assembly fix turns (`metadata.assembly_fix`);
+  a native Assembly signoff (`metadata.authoring_signoffs`);
 - chat calls have exactly one linked, masked delivery (`:echo`) in the chatroom;
 - review verdicts cite real evidence, and nothing is claimed before it is shown.
 
@@ -55,17 +55,15 @@ of reports. The request table keeps source and prompt identities for debugging.
 
 Work on a **copy** of a smoke project:
 
-- **Stage rules.** Pending + Standard + repair off runs Fast only. Candidate + Standard runs Critical. Validated or
-  Ready + Standard skips. A forced Fast pass keeps a higher stage, and a forced failure follows its tier's failure
+- **Stage rules.** Pending + Standard runs Fast. Candidate + Standard runs Critical. Unsuccessful and Rejected +
+  Standard rerun their own tier. Validated or Ready + Standard skips. A forced Fast pass keeps a higher stage, and a forced failure follows its tier's failure
   transition. Locked sources are skipped.
-- **A planted flaw.** Introduce a small, concrete inconsistency in a detached sample, set it to Unsuccessful or
-  Rejected by hand, and run Standard with repair on. Watch the continuing event patches and the single combined
-  verdict. There should be no extra same-model validation after a successful repair. Whether the flaw is noticed
-  depends on the model, so record misses.
-- **Repair limits.** Use an impossible criterion to elicit a negative verdict: the session should keep
-  going until the model gives up. Set a small `repair_context_bytes` and `repair_rounds: 1` to see the round
-  cap end the repair detached as Unfinished, keeping completed edits. Test a provider-reported context limit
-  separately if your server supports it.
+- **A planted flaw.** Introduce a small, concrete inconsistency in a detached sample and run a Standard review.
+  Watch the reviewer find it, edit the events in the same conversation and sign off once. Whether the flaw is
+  noticed depends on the model, so record misses.
+- **Review limits.** Use an impossible criterion: failing signoffs are refused, so the session should keep going
+  until the model signs off as unfeasible (a failed review) or reaches **Maximum exchanges per pass** (no verdict,
+  stage kept, edits kept). Test a provider-reported context limit separately if your server supports it.
 - **Stale indicators.** Change a checklist and edit a reviewed source. Stale markers appear, stages don't move and
   nothing re-reviews until you ask.
 - **Failures.** Stop the endpoint mid-call. After its retries run out, the queue pauses with no quality verdict and
@@ -96,7 +94,7 @@ so check them with a one-trajectory run (see below) before a larger one:
 
 | Not documented | What to set in Remix |
 | --- | --- |
-| JSON-schema output (`response_format`) | Start with **Structured output: Auto**. If replies come back in the wrong shape or the request is refused, switch to **JSON object**, then **Prompt only**. Both put the schema in the prompt. |
+| Native tool calls (`tools`) | Assembly, review and the Assistant need them. The Draft is plain text, so no JSON-schema output or grammar support is needed. |
 | The request field for reasoning effort | The README names reasoning levels off, low, medium and high. Try `{"reasoning_effort": "none"}` in **Extra request fields**, or `"low"` if `none` is refused, and check the **Reasoning** column in **Usage**. |
 | Parallel requests | Only models configured with `"parallel"` in their `strata-<model>.json` answer more than one request at a time. Otherwise set **Concurrent requests** to 1. |
 
@@ -125,9 +123,8 @@ Qwen3-family hybrid models, `{"chat_template_kwargs": {"enable_thinking": false}
    | Model identifier | The model's name, for example its GGUF file name; it is recorded with each response |
    | Concurrent requests | What the server can answer at once (see above) |
    | Context limit (tokens) | The server's context per request |
-   | Max output tokens | `8192` (reasoning models need room to think before the JSON) |
+   | Max output tokens | `8192` (reasoning models need room to think before they answer) |
    | Provider options → Bytes per token | `3` |
-   | Provider options → Structured output | **Auto** to start (see above) |
    | Provider options → Sticky sessions | Off (a single local server needs no routing) |
    | Provider options → Extra request fields | The server's setting that turns thinking off (see above) |
 

@@ -28,7 +28,7 @@ tooltips rather than in extra text on screen.
 | **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, comment state or size (type `@size:m` or `@size:<=xs` in the search box; see [Metrics](METRICS.md#character-counts-and-trajectory-sizes)). Each row shows a short ID, its stage and split, a speech bubble with the number of unresolved comments (amber when some await your review), and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: the selected trajectory's ID, save state and problem count, its **Stage** and **Split**, and **Save**. **More** holds Reload and Delete. The chevron on the left collapses the bar to its title row. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows** and **JSON**, and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
+| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state and problem count. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -42,6 +42,7 @@ are untouched, and **Raw** on any card switches back to the exact token stream.
 | --- | --- |
 | **Chat bubbles** | Messages in a `chatroom` window. The agent's messages sit on the right; each other speaker keeps one colour. |
 | **Formatted JSON** | Tool calls, tool results and other JSON, indented and colour-coded even while it is still streaming. |
+| **Markdown** | Message and text content: headings, **bold**, *italic*, `code`, code blocks, lists, quotes, tables and links. Plain text looks exactly as before. HTML is shown as text, and only `http(s)` and `mailto` links are clickable. |
 | **Context** line | The window's header, such as its purpose and reasoning effort. |
 | **Streaming** tag, dashed border | A message, call or result whose end marker hasn't arrived at this position. |
 | **NOOP ×N** | In Tick history, an open window the agent can write to predicts NOOP on every tick it has nothing to say. NOOP is a training label ("wait"), not window content: it never enters the context. A run of them is shown as one chip with a count. |
@@ -81,7 +82,7 @@ own guide: [Sampler Matrix](SAMPLER-WORKBENCH.md).
 2. **Save settings.** New projects include a default `chat` tool input schema, so the
    agent can reply in the chatroom. Removing it is your choice.
 3. **Set up review (optional).** Open the **Review Settings** tab to choose automatic
-   review and repair options, edit the Core and Critical checklists, and edit the
+   review options, edit the Core and Critical checklists, and edit the
    generation prompts. Click **Save review settings** if you change them.
 4. **Open Generate.** It shows which endpoint fills each role and any pins from the
    Sampler.
@@ -111,11 +112,16 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
 5. Want the agent to see its tools? Add an event of kind **Tool schema** in a `tools`
    window and tick the tools. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
    Randomly added tools are grayed out; hide them under **Preferences**.
-6. Set the trajectory's **Stage** and **Split** in the trajectory bar, then click
-   **Save**. The badge changes from *Unsaved draft* to *Saved · rev N*.
+6. Set the trajectory's **Stage**, **Split** and **Complexity** at the top of the **Metrics** tab.
 
-You can switch to another trajectory without saving. Your draft is kept and comes back
-when you return.
+Every change saves as soon as you make it; there is no Save button. Choices, checkboxes and
+buttons save at once. Typing saves when you pause, so a sentence is one save. The badge reads
+*Saving…* and then *Saved · rev N*. Each save is one step for **Undo** and **Redo**, including
+metric values.
+
+Some in-between states can't be stored yet, such as a tool call with no call ID. The badge
+then reads *Not saved* (hover it for the reason), your draft is kept, and it saves with your
+next change.
 
 ### Link events in order
 
@@ -138,6 +144,17 @@ Broken drafts always save. Problems show up as you edit:
 - Each problem has a code, a message and, where it applies, **Inspect event** to jump to
   the event.
 - Errors block compiled export; warnings don't.
+
+Problems come from two places, labelled on each row:
+
+| Label | What it checks | Examples |
+| --- | --- | --- |
+| **Compiler** | The trajectory's structure, on the server | Missing dependencies, windows left open |
+| **Studio** | Editor housekeeping, worked out in your browser | `missing_split` (**Set split**), `review_stale` or `signoff_stale`, `stale_metrics` (**Show metrics**) |
+
+Studio warnings update as you edit, never block export, and aren't shown to the review or
+assembly agents. Choosing **Auto** as the split clears `missing_split` without a warning
+at export.
 
 ![A missing dependency on the Problems tab](images/dashboard/problems.png)
 
@@ -194,20 +211,25 @@ work through a trajectory's open comments.
 1. In **Settings**, assign an endpoint to the **Assistant** role (see
    [Project settings](PROJECT-SETTINGS.md)). It's separate from the generation and review
    roles.
-2. Save the trajectory, then click **Send open comments to agent** on the Comments tab.
+2. Click **Send open comments to agent** on the Comments tab.
 
 The job takes the open comments as they are at that moment, with their replies. The model
-edits the trajectory with the same spot edits that repair uses, then answers every comment:
-it marks the ones it fixed **Awaiting review**, with a note on what changed, and replies to
-the rest with a reason or a question, leaving them open. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
+edits the trajectory with the same authoring tools Assembly uses, then answers every comment
+with its `reply` tool: it marks the ones it fixed **Awaiting review**, with a note on what
+changed, and replies to the rest with a reason or a question, leaving them open. The next time
+you send comments on the same trajectory, the agent continues the same conversation, so it
+remembers what it already did. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
 revert its edits, and read the answers in the Comments tab. If the session runs out of
 room, it stops with its edits so far kept and the comments still open.
 
 To skip the button, turn on **Automatically send new comments to the assistant** in
-**Preferences** (off by default, stored in this browser). Adding a comment, or requesting
+**Preferences** (off by default, stored in this browser). Adding a comment, replying to a comment that is still open, or requesting
 changes on an agent's fix, then sends the trajectory's open comments at once. The same
-checks apply, so save your draft first. While it's on, **Send open comments to agent** is
-greyed out and its tooltip says auto-send is enabled.
+checks apply. If a job is already working on the trajectory (for
+example the assistant's previous run), the comment is saved and queued instead. When the job
+settles, the open comments, however many you added, go out together as one more job. A queued
+send waits while you have unsaved edits, and is dropped if nothing is left open. **Send open comments to agent** stays enabled in this mode, so you can resend by hand
+(for example after the assistant hits its context limit).
 
 ### Preview the tokens
 
@@ -236,9 +258,34 @@ greyed out and its tooltip says auto-send is enabled.
 Open the **View** menu and choose **Hide dataset panel**, **Hide timeline panel** or
 **Hide event panel**; the same items read **Show …** to bring a panel back, and
 **Show all panels** restores everything. The windows grow into the freed space. Hiding the
-event panel also hides the trajectory bar, so show it again to save. When you hide the timeline,
+event panel also hides the trajectory bar and its save state. When you hide the timeline,
 its step and **Play** controls move to the status bar so you can still scrub the windows.
 Your layout is remembered in this browser.
+
+### Move the timeline to another monitor
+
+Have a second screen? Click the **pop-out** button at the right end of the timeline's header
+(or choose **View → Pop out timeline panel**). The timeline opens in its own browser window,
+which you can drag to the other monitor and resize. Everything still works from there:
+clicking an event opens it in the event panel, **Shift**-click adds a dependency, and the
+scrubber, **Play**, zoom and view picker drive the windows in the main editor. The windows
+grow into the space the timeline left.
+
+To bring it back, close the popup window, click the pop-out button again, or choose
+**View → Return timeline panel**. The popup remembers its size and position for next time,
+though some browsers keep new windows on the screen that opened them.
+
+| If you… | What happens |
+| --- | --- |
+| Close the timeline window | The timeline returns to the editor. Pop it out again any time. |
+| Reload the timeline window | It reconnects and keeps showing the timeline. |
+| Reload the editor | The timeline window waits a moment, then reconnects to the reloaded editor. |
+| Close the editor | The timeline window closes too. |
+| Open the editor in two tabs | Each tab gets its own timeline window, and each only controls its own tab. |
+
+If nothing opens, your browser blocked the popup: allow popups for the studio's address
+and try again. Hover tooltips don't show in the popup window; hover an event for its
+dependencies instead.
 
 ### Resize panels
 
@@ -249,12 +296,6 @@ steps). **Double-click** a handle or press **Home** to restore its default size.
 remembered in this browser, and panels can't shrink below a usable minimum or squeeze the
 windows out.
 
-### Collapse the trajectory bar
-
-Click the chevron at the left of the trajectory bar to hide its **Stage** and **Split**
-row and keep just the title, save state and **Save**. Click it again to expand. The choice is
-remembered in this browser.
-
 ### Choose how trajectories are built
 
 Every run builds trajectories in four stages: **Draft → Assembly → Fast Review → Critical
@@ -262,8 +303,14 @@ Review** (see [Event generation](GRAPH-GENERATION.md#draft-and-assembly)). What 
 the prompts and the models:
 
 1. Open **Review Settings** and find **Generation prompts**.
-2. Edit the **Agent prompt** (how the agent behaves, and where a persona pack goes), the
-   **Draft instructions** or the **Assembly instructions**.
+2. Edit the prompts (click a prompt's title to collapse or expand it):
+   - **Agent prompt:** what a trajectory is and how the agent behaves. Every endpoint sees it,
+     and a persona pack goes at its end.
+   - **Authoring prompt:** how to use the authoring tools. Assembly, review and the Assistant
+     see it.
+   - **Draft instructions** and **Assembly instructions:** the task for each stage.
+   - **Assistant instructions:** the task that opens each Send to agent message, before the
+     comments table.
 3. **Load Default Prompts** restores the packaged prompts, after you confirm.
 4. **Save review settings.** The next run uses the new prompts; runs already started keep theirs.
 
@@ -285,23 +332,24 @@ endpoint in **Settings → Models & defaults**.
 
 1. Save the trajectory you want reviewed, or set up a search that matches the ones you
    want.
-2. For one trajectory, open **More** in the trajectory header and choose **Review** or
-   **Review & Repair**. For every search match, open **Bulk edit all matches**, pick
-   **Review** or **Review & Repair** as the action, and click **Apply**.
+2. For one trajectory, open **More** in the trajectory header and choose **Review**. For
+   every search match, open **Bulk edit all matches**, pick **Review** as the action, and
+   click **Apply**.
 3. Follow the job in Jobs. A message appears when it finishes.
 
-**Review** only records a verdict. **Review & Repair** also attempts a repair after a
-failure. Both use standard mode: Pending trajectories get the Fast review and Candidate
-trajectories get the Critical review.
+A review checks the trajectory against the checklist, fixes anything that fails, and signs
+off. If the reviewer decides a trajectory can't be fixed, it signs off as unfeasible with a
+reason, and the review fails. Manual reviews use standard mode: Pending trajectories get the
+Fast review, Candidate trajectories get the Critical review, and Unsuccessful or Rejected
+trajectories are reviewed again at their own tier.
 
-The **Review Settings** tab holds the automatic review and repair settings and the review
-checklists.
+The **Review Settings** tab holds the automatic review settings and the review checklists.
 
 ### Change many trajectories at once
 
 1. Filter the dataset to the trajectories you want.
 2. Open **Bulk edit all matches** at the bottom of the Dataset panel.
-3. Choose **Set stage**, **Set split**, **Review**, **Review & Repair** or **Delete**, enter the value (a stage number such
+3. Choose **Set stage**, **Set split**, **Review** or **Delete**, enter the value (a stage number such
    as `3` for Ready, or a split name; review and delete need none), and click **Apply**.
 
 Bulk edits skip locked trajectories and can be undone with **Undo** once they finish.
@@ -320,6 +368,8 @@ Bulk edits skip locked trajectories and can be undone with **Undo** once they fi
 2. Open **Metrics**. Pick a dimension in **Targets vs observed** to compare what the
    sampler aimed for with what accepted trajectories contain.
 3. Click **Calculate missing metrics** to measure what can be measured. It runs as a job.
+4. To fill values that can't be measured, such as categories and outcomes, open a trajectory in the
+   Editor and use its **Metrics** tab.
 
 ## Watch and recover work
 
@@ -354,9 +404,9 @@ deliberately. See [Jobs](GRAPH-JOBS.md) for the full recovery model.
 While a pipeline works on a trajectory, the clean copy you have selected refreshes as
 events arrive, and unlocks when the work ends.
 
-- **Locked** trajectories can't be edited. Ownership is exclusive, and Save is hidden
+- **Locked** trajectories can't be edited. Ownership is exclusive, and nothing saves
   until the lock clears.
-- If you have **unsaved edits**, they are never overwritten. A conflicting save reports
+- Edits that haven't saved yet are never overwritten. A conflicting save reports
   a revision conflict and leaves your text intact. Reloading the saved version is an
   explicit step (**More → Reload saved source**).
 - **Detaching** a trajectory from its pipeline is permanent. That pipeline stops
@@ -373,7 +423,7 @@ events arrive, and unlocks when the work ends.
 | **Ready (3)** | Approved by you. This is what export includes by default. |
 
 Changing a source or checklist can make an old review **stale**. Stale reviews keep
-their stage and show a *Review stale* tag in the trajectory bar. Nothing is re-reviewed
+their stage and show a `review_stale` warning on the Problems tab. Nothing is re-reviewed
 unless you ask. See [Event generation](GRAPH-GENERATION.md#reviews-and-repair).
 
 ## Good to know
@@ -397,13 +447,14 @@ step. Element IDs used by the tests are stable; keep them when you rearrange mar
 | `graph.css` | Layout of the shell, Editor, Jobs and Metrics views and the status bar. |
 | `sampler.css`, `project-settings.css` | The Sampler view and the settings forms. |
 | `shell.js` | View tabs, disclosure menus, keyboard-navigable tab panels and the `[data-tip]` tooltip. |
-| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), the collapsible trajectory bar, and moving the timeline controls into the status bar while the timeline is hidden. |
+| `layout.js` | Draggable splitters (sizes are CSS variables on the view, kept in `localStorage`), and moving the timeline controls into the status bar while the timeline is hidden. |
 | `views.js` | `showView()` / `currentView()`; dispatches a `studio-view` event that loads Jobs, Metrics and the Sampler on demand. |
 | `ui-kit.js` | DOM helpers: keyed `reconcile()`, idempotent `setText`/`setAttr`/`toggleClass`, `progressBar()`, `makeTabs()`, stage and job tone maps. |
 | `graph.js` | `StudioUI`, the editor controller: drafts, saving, previews, polling, history and dialogs. |
 | `jobs-view.js` | `JobsView`: the job list and detail panel (`StudioUI.dialogs` maps job IDs to detail panels). |
 | `metrics-view.js` | Renders the population and per-trajectory metrics payloads. |
-| `window-render.js` | Readable window view: header fields, chat bubbles, tool name lists for `tools` windows (`tool-list-view.js`), tolerant JSON formatting, collapsed NOOP runs, and the Raw view. Visual only. |
+| `window-render.js` | Readable window view: header fields, chat bubbles, tool name lists for `tools` windows (`tool-list-view.js`), tolerant JSON formatting, Markdown text, collapsed NOOP runs, and the Raw view. Visual only. |
+| `markdown-view.js`, `markdown-inline.js`, `window-markdown.css` | Markdown for window text, built with DOM calls only (never `innerHTML`). Text with no Markdown syntax is returned as the plain text node. |
 | `sampler.js`, `project-settings.js` | The Sampler workbench and the settings form editors. |
 
 The poll loop runs every 1.5 s. Anything it renders must update in place: use

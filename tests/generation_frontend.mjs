@@ -40,9 +40,16 @@ try {
   assert.equal(reviewed.source.metadata.stage,1);
   assert.equal(reviewed.source.metadata.evaluations.length,1); // Standard Pending is Fast only.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
-  await page.locator('#trajectory-menu summary').click(); await page.locator('#review-repair-source').click();
+  await page.locator('#trajectory-menu summary').click(); await page.locator('#duplicate-sample').click();
+  await page.waitForFunction(id=>graphStudio.record && graphStudio.record.source.id !== id,record.source.id);
+  const duplicateId = await page.evaluate(()=>graphStudio.record.source.id);
+  assert.deepEqual((await get(`/trajectories/${duplicateId}`)).source, {...reviewed.source,id:duplicateId});
+  await page.locator('#trajectory-menu summary').click(); assert.equal(await page.locator('#review-repair-source').count(),0); await page.locator('#review-source').click();
   await page.waitForFunction(()=>[...graphStudio.jobs.values()].filter(j=>j.kind==='bulk'&&j.state==='completed').length>=2);
-  assert.equal((await get(`/trajectories/${record.source.id}`)).source.metadata.stage,2);
+  const duplicateReview = (await get(`/trajectories/${duplicateId}`)).source.metadata;
+  assert.equal(duplicateReview.stage,2);
+  assert.equal(duplicateReview.evaluations.at(-1).prompt_version,'native-review/3');
+  assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source,reviewed.source);
   // More → Export downloads the open trajectory's source as JSON.
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
   await page.locator('#trajectory-menu summary').click();
@@ -53,7 +60,9 @@ try {
   const [bulk]=await Promise.all([page.waitForEvent('download'),page.locator('#bulk-start').click()]);
   assert.equal(bulk.suggestedFilename(),'trajectories.jsonl');
   // Two distinct review jobs, independent logs and settled history records.
-  assert.equal((await get('/job-summaries')).filter(j=>j.kind==='bulk').length,2);
+  const summaries = await get('/job-summaries');
+  assert.deepEqual(summaries.filter(j=>j.kind==='bulk').map(j=>j.action), ['review_repair','review_repair']);
+  assert.deepEqual(summaries.find(j=>j.id===job).stage_progress, {completed:2,total:2});
   await page.locator('#trajectory-tab').click();
   await page.evaluate(async id=>await graphStudio.select(id,true),record.source.id);
   // The acknowledgment is usable at desktop and compact sizes, persists, and
@@ -70,11 +79,10 @@ try {
     assert.equal(await acknowledgment.isVisible(),true);
     assert.equal(await acknowledgment.evaluate(n=>getComputedStyle(n).visibility),'visible');
     await acknowledgment.check(); await page.locator('#window-save').click();
-    await page.locator('#save-source').click();
     await page.waitForFunction(id=>graphStudio.record.source.windows[id]?.intentionally_left_open===true && !graphStudio.isDirty(),openWindow);
     assert.deepEqual((await get(`/trajectories/${record.source.id}`)).source.events,reviewed.source.events);
     assert.equal(await page.evaluate(id=>graphStudio.diagnostics.some(d=>d.code==='open_window'&&graphStudio.draft.events[d.event_id].window===id),openWindow),false);
   }
   assert.deepEqual(errors,[]);
-  console.log('Generation pins, saved weights, frozen run and Review & Repair browser checks passed');
+  console.log('Generation pins, saved weights, frozen run and Review browser checks passed');
 } finally { await browser.close(); }

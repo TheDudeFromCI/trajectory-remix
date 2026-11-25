@@ -4,8 +4,10 @@
 <meta name="remix-token" content="__REMIX_TOKEN__"><title>Trajectory Remix</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/graph.css">
+<link rel="stylesheet" href="/static/window-markdown.css">
 <link rel="stylesheet" href="/static/sampler.css">
 <link rel="stylesheet" href="/static/project-settings.css">
+<link rel="stylesheet" href="/static/panel-popout.css">
 <script type="module" src="/static/shell.js"></script>
 <script type="module" src="/static/layout.js"></script>
 <script type="module" src="/static/graph.js"></script>
@@ -25,6 +27,7 @@
 <symbol id="i-next" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
 <symbol id="i-last" viewBox="0 0 16 16"><path d="M12 3.5v9M4 3.5 9 8l-5 4.5"/></symbol>
 <symbol id="i-expand" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></symbol>
+<symbol id="i-popout" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 8 8M11.5 9.5v4h-9v-9h4"/></symbol>
 <symbol id="i-shrink" viewBox="0 0 16 16"><path d="M13.5 6.5h-4v-4M9.5 6.5l4-4M2.5 9.5h4v4M6.5 9.5l-4 4"/></symbol>
 <symbol id="i-timeline" viewBox="0 0 16 16"><path d="M2.5 4.5h7M2.5 8h11M2.5 11.5h5"/></symbol>
 <symbol id="i-chevron" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></symbol>
@@ -60,6 +63,8 @@
       <button id="toggle-timeline-panel" data-panel="timeline"><svg class="ico"><use href="#i-timeline"/></svg><span>Hide timeline panel</span></button>
       <button id="toggle-editor-panel" data-panel="editor"><svg class="ico"><use href="#i-panel-right"/></svg><span>Hide event panel</span></button>
       <hr>
+      <button id="popout-timeline-menu" data-popout="timeline"><svg class="ico"><use href="#i-popout"/></svg><span>Pop out timeline panel</span></button>
+      <hr>
       <button id="show-all-panels">Show all panels</button>
     </div></details>
     <button id="generation-settings-button" class="primary">Generate</button>
@@ -93,7 +98,7 @@
     </div>
     <details class="bulk-edit"><summary>Bulk edit all matches <span class="info" tabindex="0" data-tip="Applies to every trajectory matching the current search and filters, across all pages. Runs as an undoable job; locked trajectories are skipped."></span></summary>
       <div class="inline-form">
-        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="review_repair">Review &amp; Repair</option><option value="export">Export</option><option value="delete">Delete</option></select></label>
+        <label>Action<select id="bulk-action"><option value="stage">Set stage</option><option value="split">Set split</option><option value="review">Review</option><option value="export">Export</option><option value="delete">Delete</option></select></label>
         <label id="bulk-value-label">Value<input id="bulk-value" value="3" aria-label="Bulk value"></label>
         <button id="bulk-start" class="sm">Apply</button>
       </div>
@@ -124,6 +129,7 @@
         <span id="preview-status" class="grow small muted truncate"></span>
         <label class="small muted inline-label timeline-zoom">Zoom <input id="timeline-zoom" type="range" min="0.25" max="3" step="0.05" value="1" aria-label="Timeline zoom"></label>
         <select id="view-mode" aria-label="Timeline view"><option value="graph">Dependency graph</option><option value="ticks">Tick history</option></select>
+        <button id="popout-timeline" class="ghost icon sm" data-popout="timeline" data-tip="Pop out timeline into a new window" aria-label="Pop out timeline into a new window"><svg class="ico"><use href="#i-popout"/></svg></button>
       </div>
       <div class="timeline-body">
         <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Scrub timeline">
@@ -149,15 +155,12 @@
   <aside class="widget event-panel editor-panel" id="event-editor-panel" aria-label="Event editor">
     <section class="trajectory-bar" id="metadata-panel" aria-label="Trajectory">
       <div class="bar-row">
-        <button id="header-toggle" class="ghost icon sm" type="button" aria-expanded="true" aria-controls="trajectory-meta" aria-label="Collapse trajectory details" data-tip="Collapse trajectory details"><svg class="ico"><use href="#i-chevron"/></svg></button>
         <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
         <span id="dirty-indicator" class="tag"></span>
         <button id="diagnostics-summary" class="sm ghost" hidden></button>
         <span class="grow"></span>
-        <button class="primary sm" id="save-source">Save</button>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
-          <button id="review-source">Review</button>
-          <button id="review-repair-source">Review &amp; Repair</button>
+          <button id="review-source" data-tip="Review against the checklist, repair what fails, then sign off">Review</button>
           <button id="export-source">Export</button>
           <button id="duplicate-sample">Duplicate trajectory</button>
           <hr>
@@ -166,13 +169,7 @@
           <button id="delete-sample" class="danger">Delete trajectory</button>
         </div></details>
       </div>
-      <div class="bar-row meta-row" id="trajectory-meta">
-        <label class="inline-label">Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
-        <label class="inline-label">Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
-        <small id="size-tag" class="tag tone-muted"></small>
-        <small id="split-warning" class="tag tone-warning"></small><small id="review-stale" class="tag tone-warning"></small>
-        <span id="lock-slot" class="row"></span>
-      </div>
+      <div class="bar-row lock-row row" id="lock-slot" hidden></div>
     </section>
     <div class="widget-head">
       <h2 class="event-heading">Event</h2>
@@ -188,7 +185,8 @@
         <button role="tab" id="tab-options" aria-controls="panel-options" aria-selected="false">Options</button>
         <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false">Windows</button>
         <button role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON</button>
-        <button role="tab" id="tab-problems" class="issue-tab" aria-controls="panel-problems" aria-selected="false" aria-label="Problems" data-tip="Problems: structural errors and warnings"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span id="problems-count" class="badge"></span></button>
+        <button role="tab" id="tab-metrics" aria-controls="panel-metrics" aria-selected="false" data-tip="Set this trajectory's metric categories, labels and outcomes">Metrics</button>
+        <button role="tab" id="tab-problems" class="issue-tab" aria-controls="panel-problems" aria-selected="false" aria-label="Problems" data-tip="Problems: compiler errors and warnings, plus studio warnings such as a missing split"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span id="problems-count" class="badge"></span></button>
         <button role="tab" id="tab-comments" class="issue-tab" aria-controls="panel-comments" aria-selected="false" aria-label="Comments" data-tip="Comments on this trajectory, its events and windows, for whoever fixes it next"><svg class="ico" aria-hidden="true"><use href="#i-comment"/></svg><span id="comments-count" class="badge accent"></span></button>
       </div>
 
@@ -255,6 +253,23 @@
         <div id="diagnostics" class="diagnostic-list"></div>
       </div>
 
+      <div role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" class="panel-body" data-lock-exempt hidden>
+        <section class="option-group trajectory-fields" aria-label="Trajectory">
+          <h3>Trajectory</h3>
+          <div class="form-grid two">
+            <label>Stage <select id="stage"><option value="-3">Unfinished</option><option value="-2">Rejected</option><option value="-1">Unsuccessful</option><option value="0">Pending</option><option value="1">Candidate</option><option value="2">Validated</option><option value="3">Ready</option></select></label>
+            <label>Split <select id="split"><option value="">Missing</option><option>Auto</option><option>Train</option><option>Development</option><option>Test</option></select></label>
+            <label>Complexity <select id="complexity"><option value="">Not set</option></select></label>
+            <div class="field-tags"><span class="small muted">Size</span> <small id="size-tag" class="tag tone-muted"></small></div>
+          </div>
+        </section>
+        <div class="metrics-editor-head">
+          <span id="metrics-editor-note" class="small muted metrics-note"></span>
+          <label class="small inline-label"><input type="checkbox" id="metrics-only-unset"> Only show unset</label>
+        </div>
+        <div id="metrics-editor-list" class="metrics-editor-list"></div>
+      </div>
+
       <div role="tabpanel" id="panel-comments" aria-labelledby="tab-comments" class="panel-body" data-lock-exempt hidden>
         <div class="comment-composer">
           <label>Comment on <select id="comment-target"></select></label>
@@ -262,9 +277,10 @@
           <div class="panel-actions"><span class="small muted grow">Saved at once. Agents read open comments over MCP and fix them.</span><button id="comment-add" class="sm primary">Add comment</button></div>
         </div>
         <div class="comment-send">
-          <button id="comment-send" class="sm" disabled data-tip="The Assistant endpoint (Project Settings) fixes what the open comments describe, then resolves or replies to each">Send open comments to agent</button>
+          <button id="comment-send" class="sm" data-tip="The Assistant endpoint (Project Settings) fixes what the open comments describe, then resolves or replies to each">Send open comments to agent</button>
         </div>
         <div id="comment-list" class="comment-list"></div>
+        <div id="assistant-status" class="assistant-working" hidden></div>
       </div>
 
       <div role="tabpanel" id="panel-json" aria-labelledby="tab-json" class="panel-body" hidden>
@@ -353,11 +369,13 @@
     <div class="tab-list" role="tablist" aria-label="Settings sections">
       <button role="tab" id="settings-tab-models" aria-controls="settings-panel-models" aria-selected="true">Models &amp; defaults</button>
       <button role="tab" id="settings-tab-tools" aria-controls="settings-panel-tools" aria-selected="false">Tools</button>
+      <button role="tab" id="settings-tab-validation" aria-controls="settings-panel-validation" aria-selected="false">Validation</button>
       <button role="tab" id="settings-tab-storage" aria-controls="settings-panel-storage" aria-selected="false">Storage</button>
       <button role="tab" id="settings-tab-json" aria-controls="settings-panel-json" aria-selected="false">Advanced JSON</button>
     </div>
     <div role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models" class="dialog-body"><section id="endpoint-settings-editor"></section></div>
     <div role="tabpanel" id="settings-panel-tools" aria-labelledby="settings-tab-tools" class="dialog-body" hidden><section id="tool-schema-editor"></section></div>
+    <div role="tabpanel" id="settings-panel-validation" aria-labelledby="settings-tab-validation" class="dialog-body" hidden><section id="validation-settings-editor"></section></div>
     <div role="tabpanel" id="settings-panel-storage" aria-labelledby="settings-tab-storage" class="dialog-body" hidden>
       <h3>Log cache</h3>
       <div id="log-usage" class="stat-row"></div>

@@ -1,3 +1,5 @@
+mod authoring;
+
 use crate::model::{Content, Kind, Mode, Piece, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -52,7 +54,16 @@ impl Diagnostic {
                 | "unknown_reasoning_level"
                 | "unknown_tool"
                 | "unsubmitted_call"
-                | "window_not_writable" => Severity::Warning,
+                | "window_not_writable"
+                | "direct_chatroom_output"
+                | "invalid_chat_echo_source"
+                | "missing_chat_echo"
+                | "missing_tool_listing"
+                | "multiple_tool_calls_in_window"
+                | "no_agent_activity"
+                | "reasoning_in_tool_window"
+                | "tool_result_unavailable"
+                | "tools_window_has_dependencies" => Severity::Warning,
                 _ => Severity::Error,
             },
             code,
@@ -161,31 +172,44 @@ impl<'a> Graph<'a> {
     }
 
     fn cycles(&self) -> BTreeSet<usize> {
-        let mut color = vec![0; self.names.len()];
-        let mut position = vec![0; self.names.len()];
-        let mut cyclic = BTreeSet::new();
+        // Finishing order over dependency edges, followed by reverse-edge
+        // walks, identifies complete strongly connected components.
+        let mut visited = vec![false; self.names.len()];
+        let mut finished = Vec::new();
         for root in 0..self.names.len() {
-            if color[root] != 0 {
+            if std::mem::replace(&mut visited[root], true) {
                 continue;
             }
-            let mut stack = vec![(root, 0)];
-            color[root] = 1;
-            while let Some((node, edge)) = stack.last_mut() {
-                if let Some(&dep) = self.dependencies[*node].get(*edge) {
-                    *edge += 1;
-                    match color[dep] {
-                        0 => {
-                            color[dep] = 1;
-                            position[dep] = stack.len();
-                            stack.push((dep, 0));
-                        }
-                        1 => cyclic.extend(stack[position[dep]..].iter().map(|&(id, _)| id)),
-                        _ => {}
+            let mut stack = vec![(root, self.dependencies[root].iter())];
+            while let Some((node, edges)) = stack.last_mut() {
+                if let Some(&dep) = edges.next() {
+                    if !std::mem::replace(&mut visited[dep], true) {
+                        stack.push((dep, self.dependencies[dep].iter()));
                     }
                 } else {
-                    color[*node] = 2;
+                    finished.push(*node);
                     stack.pop();
                 }
+            }
+        }
+        visited.fill(false);
+        let mut cyclic = BTreeSet::new();
+        for root in finished.into_iter().rev() {
+            if std::mem::replace(&mut visited[root], true) {
+                continue;
+            }
+            let mut stack = vec![root];
+            let mut component = Vec::new();
+            while let Some(node) = stack.pop() {
+                component.push(node);
+                for &child in &self.children[node] {
+                    if !std::mem::replace(&mut visited[child], true) {
+                        stack.push(child);
+                    }
+                }
+            }
+            if component.len() > 1 || self.dependencies[root].contains(&root) {
+                cyclic.extend(component);
             }
         }
         cyclic
@@ -258,6 +282,18 @@ pub(crate) fn analyze<'a>(
                 )
             }
             _ => {}
+        }
+        if event.kind == Kind::AgentText
+            && source
+                .windows
+                .get(&event.window)
+                .is_some_and(|w| w.purpose == "chatroom")
+        {
+            emit(
+                "direct_chatroom_output",
+                "Agent text writes directly into the chatroom".into(),
+                "window",
+            );
         }
         if (matches!(event.kind, Kind::ToolCall | Kind::ToolResponse)
             && event.call_id.as_ref().is_none_or(String::is_empty))
@@ -376,6 +412,32 @@ pub(crate) fn analyze<'a>(
         }
     }
 
+    if !source.events.values().any(|event| {
+        event.model()
+            && (authoring::has_content(&event.content)
+                || (event.kind == Kind::ToolCall
+                    && (event.insert_tool_begin || event.insert_tool_end)))
+    }) {
+        let mut diagnostic = Diagnostic::general(
+            "no_agent_activity",
+            "Add meaningful agent reasoning or a tool call",
+        );
+        diagnostic.path = vec![json!("events")];
+        diagnostics.push(diagnostic);
+    }
+
+    if total > 0 && agent <= (total - 1) / 16 {
+        let message = format!(
+            "Only {} of {} characters ({:.1}%) are agent-generated, below the 6.25% minimum (1/16)",
+            grouped(agent),
+            grouped(total),
+            100.0 * agent as f64 / total as f64
+        );
+        let mut diagnostic = Diagnostic::general("low_agent_share", message);
+        diagnostic.path = vec![json!("events")];
+        diagnostics.push(diagnostic);
+    }
+
     let mut degrees: Vec<_> = graph.dependencies.iter().map(Vec::len).collect();
     let mut ready: VecDeque<_> = (0..degrees.len()).filter(|&id| degrees[id] == 0).collect();
     let mut ordered = Vec::with_capacity(graph.names.len());
@@ -401,6 +463,8 @@ pub(crate) fn analyze<'a>(
         return (graph, sort(diagnostics));
     }
 
+    authoring::check_evidence(source, &graph, &ordered, &mut diagnostics);
+
     let mut windows: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     let mut calls: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     let mut responses: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
@@ -417,6 +481,14 @@ pub(crate) fn analyze<'a>(
     }
     for (window, ids) in windows {
         let window_ordered = graph.compare(&ids, &mut diagnostics);
+        authoring::check_window(
+            source,
+            &graph,
+            window,
+            &ids,
+            window_ordered,
+            &mut diagnostics,
+        );
         let mut open = None;
         let mut closes = Vec::new();
         for &id in &ids {
@@ -485,17 +557,6 @@ pub(crate) fn analyze<'a>(
             ));
         }
     }
-    if total > 0 && agent <= (total - 1) / 16 {
-        let message = format!(
-            "Only {} of {} characters ({:.1}%) are agent-generated, below the 6.25% minimum (1/16)",
-            grouped(agent),
-            grouped(total),
-            100.0 * agent as f64 / total as f64
-        );
-        let mut diagnostic = Diagnostic::general("low_agent_share", message);
-        diagnostic.path = vec![json!("events")];
-        diagnostics.push(diagnostic);
-    }
     tool_diagnostics(
         source,
         settings,
@@ -542,6 +603,7 @@ fn tool_diagnostics(
 ) {
     let event = |id: usize| &source.events[graph.names[id]];
     let mut submitted = BTreeMap::new();
+    let listings = authoring::presentations(source, graph, ordered);
     for (&call, ids) in calls {
         let ordered_call = ids.windows(2).all(|pair| graph.ancestor(pair[0], pair[1]));
         let first = event(ids[0]);
@@ -573,22 +635,24 @@ fn tool_diagnostics(
                     "call_id",
                 );
             }
-            if let (Some(settings), Some(tool)) = (settings, current.tool.as_deref()) {
-                if !settings.tools.contains_key(tool) {
-                    diagnostics.push(Diagnostic::event(
-                        "unknown_tool",
-                        format!("Unknown tool: {tool}"),
-                        name,
-                        "tool",
-                    ));
-                }
+            if let Some(tool) = current.tool.as_deref() {
+                authoring::check_tool_visibility(
+                    tool,
+                    id,
+                    graph,
+                    &listings,
+                    settings.is_some_and(|settings| !settings.tools.contains_key(tool)),
+                    diagnostics,
+                );
             }
             if current.insert_tool_end && !finished && !cancelled {
                 finished = true;
                 if ordered_call {
                     submitted.insert(call, id);
                 }
-                if let (Some(settings), Some(tool)) = (settings, current.tool.as_deref()) {
+                if let (true, Some(settings), Some(tool)) =
+                    (ordered_call, settings, current.tool.as_deref())
+                {
                     if let Some(definition) = settings.tools.get(tool) {
                         let fragments = ids[..=position]
                             .iter()
@@ -664,6 +728,7 @@ fn tool_diagnostics(
             }
         }
     }
+    let mut delivered = HashSet::new();
     for &id in ordered {
         let current = event(id);
         if current.kind != Kind::ChatMessage {
@@ -672,46 +737,71 @@ fn tool_diagnostics(
         let Some(call) = current.call_id.as_deref() else {
             continue;
         };
-        let mut emit = |code, message, field| {
-            diagnostics.push(Diagnostic::event(code, message, graph.names[id], field))
-        };
-        if !submitted
+        let Some(&submission) = submitted
             .get(call)
-            .is_some_and(|&submission| graph.ancestor(submission, id))
-        {
-            emit(
+            .filter(|&&submission| graph.ancestor(submission, id))
+        else {
+            diagnostics.push(Diagnostic::event(
                 "unsubmitted_call",
                 "Chat echo requires an ancestor submitted request",
+                graph.names[id],
                 "call_id",
+            ));
+            continue;
+        };
+        if event(submission).tool.as_deref() != Some("chat") {
+            diagnostics.push(
+                Diagnostic::event(
+                    "invalid_chat_echo_source",
+                    "Chat echo links to a tool other than chat",
+                    graph.names[id],
+                    "call_id",
+                )
+                .related(graph.names[submission]),
             );
-        } else if !calls[call].iter().all(|&id| event(id).echo_chat) {
-            emit(
+            continue;
+        }
+        if !calls[call].iter().all(|&id| event(id).echo_chat) {
+            diagnostics.push(Diagnostic::event(
                 "chat_echo_disabled",
                 "Linked chat echo is disabled for this call",
+                graph.names[id],
                 "call_id",
-            );
-        } else if event(*calls[call].last().unwrap()).tool.as_deref() == Some("chat") {
-            let fragments = calls[call]
-                .iter()
-                .map(|&id| match &event(id).content {
-                    Content::String(text) => Some(text.as_str()),
-                    Content::Pieces(_) => None,
-                })
-                .collect::<Option<String>>();
-            if let Some(arguments) =
-                fragments.and_then(|body| serde_json::from_str::<Value>(&body).ok())
+            ));
+            continue;
+        }
+        delivered.insert(call);
+        let fragments = calls[call]
+            .iter()
+            .map(|&id| event(id).content.text())
+            .collect::<Option<String>>();
+        if let Some(arguments) =
+            fragments.and_then(|body| serde_json::from_str::<Value>(&body).ok())
+        {
+            if arguments.is_object()
+                && !matches!(&current.content, Content::String(text)
+                if arguments.get("content").and_then(Value::as_str) == Some(text))
             {
-                if arguments.is_object()
-                    && !matches!(&current.content, Content::String(text)
-                    if arguments.get("content").and_then(Value::as_str) == Some(text))
-                {
-                    emit(
-                        "chat_echo_mismatch",
-                        "Chat echo differs from submitted content",
-                        "content",
-                    );
-                }
+                diagnostics.push(Diagnostic::event(
+                    "chat_echo_mismatch",
+                    "Chat echo differs from submitted content",
+                    graph.names[id],
+                    "content",
+                ));
             }
+        }
+    }
+    for (call, id) in submitted {
+        if event(id).tool.as_deref() == Some("chat")
+            && calls[call].iter().all(|&id| event(id).echo_chat)
+            && !delivered.contains(call)
+        {
+            diagnostics.push(Diagnostic::event(
+                "missing_chat_echo",
+                "Add a linked chat delivery after submission or disable echo",
+                graph.names[id],
+                "echo_chat",
+            ));
         }
     }
 }
@@ -731,7 +821,7 @@ fn schema_warning(fragments: Option<String>, schema: &Value) -> Option<String> {
     })();
     result.err().map(|error| {
         format!(
-            "Submitted arguments could not be validated: {}",
+            "Submitted arguments do not match the configured JSON schema: {}",
             error.chars().take(1000).collect::<String>()
         )
     })

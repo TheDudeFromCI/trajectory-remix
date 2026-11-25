@@ -43,7 +43,7 @@ specific features, listed below.
 3. **Scrub the timeline.** In the default *Dependency graph* mode, scrubbing steps through the
    dependency order. It is not authored time.
 4. **Edit.** Change an event's text, window or dependencies. Add a dependency with the
-   picker, or Shift-click a predecessor in the timeline. Save the trajectory.
+   picker, or Shift-click a predecessor in the timeline. Changes save as you make them.
 5. **Create your own.** Click **+** in the Dataset panel, add windows on the event
    editor's **Windows** tab, then add events and link them under **Runs after** on the **Options** tab. The
    [Dashboard tutorials](DASHBOARD.md#tutorials) walk through this step by step.
@@ -57,7 +57,7 @@ only block compiled export.
 | I want to… | You need | Where |
 | --- | --- | --- |
 | Author and review sources by hand | Nothing | |
-| Generate or run Review & Repair | An OpenAI-compatible model endpoint with the draft and reviewer roles | [Project settings](PROJECT-SETTINGS.md#configure-a-model-endpoint) |
+| Generate or run a review | An OpenAI-compatible model endpoint with the draft and reviewer roles | [Project settings](PROJECT-SETTINGS.md#configure-a-model-endpoint) |
 | Use **Tick history** preview | A tokenizer profile (opt-in) | [Project settings](PROJECT-SETTINGS.md#tokenizer-profiles) |
 | Export compiled KTREMIX | A tokenizer profile | [Export](EXPORT.md) |
 | Connect an AI agent | The `mcp` extra and a running studio | [MCP setup](MCP.md) |

@@ -49,22 +49,33 @@ def source():
     }
 
 
-def codes(raw, settings=None, *, severity="error"):
+def codes(raw, settings=None):
+    return {
+        d.code for d in diagnose(GraphSource.model_validate(raw), settings) if d.severity == "error"
+    }
+
+
+def warnings(raw, settings=None):
     return {
         d.code
         for d in diagnose(GraphSource.model_validate(raw), settings)
-        if d.severity == severity
+        if d.severity == "warning"
     }
 
 
 def tool_source():
     raw = source()
+    raw["windows"]["tools"] = {"purpose": "tools", "agent_writable": False}
     raw["events"] = {
+        "tools": dict(
+            kind="tool_schema", window="tools", content='{"name":"read","parameters":{}}'
+        ),
         "start": {
             "kind": "tool_call",
             "window": "thought",
             "call_id": "call",
             "tool": "read",
+            "after": ["tools"],
             "content": '{"path":',
             "insert_tool_end": False,
         },
@@ -257,7 +268,7 @@ def test_abandoned_prefix_is_valid_but_cannot_receive_a_response():
         "content": "future",
         "close_window": True,
     }
-    assert codes(raw, settings(), severity="warning") == {"unsubmitted_call"}
+    assert warnings(raw, settings()) == {"unsubmitted_call"}
 
 
 @pytest.mark.parametrize("purpose", ["reasoning", "tool"])
@@ -324,15 +335,19 @@ def test_tool_schema_warning_only_after_submission_and_no_contamination():
 def test_invalid_framing_and_submission(event, field, value, expected):
     raw = tool_source()
     raw["events"][event][field] = value
-    severity = "error" if expected == "unordered_window_writers" else "warning"
-    assert expected in codes(raw, settings(), severity=severity)
+    findings = (
+        codes(raw, settings())
+        if expected == "unordered_window_writers"
+        else warnings(raw, settings())
+    )
+    assert expected in findings
 
 
 def test_output_after_closure_and_resubmission():
     raw = tool_source()
     raw["events"]["again"] = {**raw["events"]["submit"], "after": ["submit"]}
     assert "output_after_close" in codes(raw)
-    assert "call_already_finished" in codes(raw, severity="warning")
+    assert "call_already_finished" in warnings(raw)
 
 
 def test_external_delivery_replacement_and_chat_echo():
@@ -342,6 +357,11 @@ def test_external_delivery_replacement_and_chat_echo():
     raw["events"]["reply"]["content"] = [{"kind": "text", "text": ""}]
     assert "empty_replacement" in codes(raw)
     raw["events"]["reply"]["content"] = "new"
+    for ident in ("start", "submit"):
+        raw["events"][ident]["tool"] = "chat"
+    raw["events"]["start"]["content"] = '{"content":'
+    raw["events"]["submit"]["content"] = '"echo"}'
+    raw["events"]["tools"]["content"] = '{"name":"chat","parameters":{}}'
     raw["events"]["echo"] = {
         "kind": "chat_message",
         "window": "chat",
@@ -352,7 +372,7 @@ def test_external_delivery_replacement_and_chat_echo():
     }
     assert not codes(raw)
     raw["events"]["submit"]["echo_chat"] = False
-    assert codes(raw, severity="warning") == {"chat_echo_disabled"}
+    assert "chat_echo_disabled" in warnings(raw)
 
 
 def test_settings_profiles_references_and_defaults():
@@ -392,10 +412,12 @@ def test_structural_project_references():
     raw = source()
     raw["windows"]["thought"]["reasoning_effort"] = "Impossible"
     raw["events"]["think"]["window"] = "chat"
-    assert codes(raw, settings(), severity="warning") == {
+    assert warnings(raw, settings()) == {
+        "direct_chatroom_output",
         "unknown_reasoning_level",
         "window_not_writable",
     }
+    assert not codes(raw, settings())
     raw["events"]["input"]["window"] = "missing"
     assert "missing_window" in codes(raw)
 
@@ -575,7 +597,7 @@ def test_atomic_chat_delivery_and_partial_controls():
         GraphSource.model_validate(raw)
 
 
-def test_interleaved_call_framing_warns():
+def test_interleaved_call_framing_is_a_warning():
     raw = tool_source()
     raw["events"]["other-call"] = {
         "kind": "tool_call",
@@ -586,14 +608,14 @@ def test_interleaved_call_framing_warns():
         "after": ["start"],
     }
     raw["events"]["submit"]["after"] = ["other-call"]
-    assert "interleaved_framing" in codes(raw, severity="warning")
+    assert "interleaved_framing" in warnings(raw)
     raw["events"]["other-call"] = {
         "kind": "agent_text",
         "window": "thought",
         "content": "unframed",
         "after": ["start"],
     }
-    assert "interleaved_framing" in codes(raw, severity="warning")
+    assert "interleaved_framing" in warnings(raw)
 
 
 def test_schema_resolution_is_offline_and_advisory(monkeypatch):
@@ -678,6 +700,11 @@ def test_public_examples_and_generated_schemas(tmp_path):
 def test_chat_echo_opt_out_on_first_fragment_applies_to_whole_call():
     raw = tool_source()
     raw["events"]["start"]["echo_chat"] = False
+    for ident in ("start", "submit"):
+        raw["events"][ident]["tool"] = "chat"
+    raw["events"]["start"]["content"] = '{"content":'
+    raw["events"]["submit"]["content"] = '"echo"}'
+    raw["events"]["tools"]["content"] = '{"name":"chat","parameters":{}}'
     raw["events"]["echo"] = {
         "kind": "chat_message",
         "window": "chat",
@@ -686,4 +713,4 @@ def test_chat_echo_opt_out_on_first_fragment_applies_to_whole_call():
         "content": "echo",
         "call_id": "call",
     }
-    assert codes(raw, severity="warning") == {"chat_echo_disabled"}
+    assert "chat_echo_disabled" in warnings(raw)

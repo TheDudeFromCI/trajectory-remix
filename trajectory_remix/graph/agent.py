@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, create_model
 
 from . import comment_tasks
+from .authoring_tools import READ_ONLY, TOOLS
 from .flow import SamplerRun
 from .models import DTO, GraphSource, JsonValue
 from .reviews import ReviewInput
@@ -85,7 +86,7 @@ TASKS = {
     ),
     "review_graphs": (
         ReviewInput,
-        "Queue a selected revision or frozen search-wide Review & Repair job. Uses configured review models.",
+        "Queue a review of a selected revision or of every frozen search match. Each review repairs what fails, then signs off. Uses configured review models.",
     ),
     "inspect_graph_job": (
         Read,
@@ -107,6 +108,20 @@ TASKS = {
     ),
     **comment_tasks.TASKS,
 }
+
+AUTHORING_TASKS = {
+    name: (
+        create_model(
+            model.__name__ + "Request",
+            __base__=model,
+            id=(str, ...),
+            **({} if name in READ_ONLY else {"expected_revision": (int, Field(ge=1))}),
+        ),
+        description,
+    )
+    for name, (model, description) in TOOLS.items()
+}
+TASKS.update(AUTHORING_TASKS)
 
 
 class GraphAgent:
@@ -163,6 +178,15 @@ class GraphAgent:
             return s.read(args.id) | dict(open_comments=s.comments.for_trajectory(args.id, "open"))
         if name in comment_tasks.TASKS:
             return comment_tasks.call(s.comments, name, args)
+        if name in AUTHORING_TASKS:
+            return s.commands.author(
+                args.id,
+                name,
+                args.model_dump(
+                    mode="json", exclude_unset=True, exclude={"id", "expected_revision"}
+                ),
+                expected_revision=getattr(args, "expected_revision", None),
+            )
         if name == "create_graph":
             return result(s.commands.create(args.to_dict()))
         if name == "patch_graph":

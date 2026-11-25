@@ -1,7 +1,8 @@
-/* Readable window rendering: chat bubbles, formatted JSON and collapsed NOOP runs.
+/* Readable window rendering: chat bubbles, formatted JSON, Markdown text and collapsed NOOP runs.
    Purely visual. The token stream is never changed; "Raw" mode shows it as is. */
 import {node, tag} from './ui-kit.js';
 import {toolListBlock} from './tool-list-view.js';
+import {markdownBlock} from './markdown-view.js';
 
 const SPEAKER_TONES = ['sky', 'peach', 'lilac', 'butter', 'rose', 'mint'];
 const PAIRS = {msg_begin: 'msg_end', tool_begin: 'tool_end', response_begin: 'response_end'};
@@ -150,18 +151,21 @@ function formattedBody(tokens, {purpose, isAgent, toolExtras = () => [], hideExt
       const {speaker, text} = splitSpeaker(part.text), agent = isAgent(part.event, speaker);
       const bubble = node('div', undefined, 'wt-bubble' + (agent ? ' agent' : '') + (part.open ? ' open' : ''));
       bubble.style.setProperty('--tone', `var(--pastel-${agent ? 'mint' : tone(speaker)})`);
-      bubble.append(node('span', speaker || 'Message', 'wt-speaker'), node('span', text, 'wt-text'));
+      bubble.append(node('span', speaker || 'Message', 'wt-speaker'), markdownBlock(text, 'wt-text', 'span'));
       body.append(bubble);
     } else if (['msg', 'tool', 'response'].includes(part.type)) {
       const block = node('div', undefined, `wt-block ${part.type}` + (part.open ? ' open' : ''));
       const label = node('div', undefined, 'wt-block-head');
       label.append(node('span', LABELS[part.type + '_begin'], 'wt-label'));
+      // A call's text is `"tool_id":arguments`; show the tool in the label, arguments below.
+      const call = part.type === 'tool' && part.text.trimStart().startsWith('"') ? splitSpeaker(part.text) : {speaker: '', text: part.text};
+      if (call.speaker) label.append(node('span', call.speaker, 'wt-tool-id mono'));
       if (part.open) label.append(tag('Streaming', 'accent'));
       if (part.noops) label.append(noopChip(part.noops));
-      block.append(label, jsonBlock(part.text) || node('div', part.text, 'wt-text'));
+      block.append(label, jsonBlock(call.text) || markdownBlock(call.text));
       body.append(block);
     } else if (part.type === 'text') {
-      body.append((purpose === 'tools' && toolListBlock(part.text, {extras: toolExtras(part.event), hideExtras})) || jsonBlock(part.text) || node('div', part.text, 'wt-text'));
+      body.append((purpose === 'tools' && toolListBlock(part.text, {extras: toolExtras(part.event), hideExtras})) || jsonBlock(part.text) || markdownBlock(part.text));
     } else if (part.type === 'control') {
       body.append(part.control === 'noop' ? noopChip(part.count) : node('span', controlLabel(part.control), 'token-block'));
     }

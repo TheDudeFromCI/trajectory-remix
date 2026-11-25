@@ -9,6 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
+from . import task_axes
 from .models import canonical, digest
 from .sampler_originals import kidra_sampler as original
 from .size_labels import agent_characters, total_characters
@@ -18,6 +19,7 @@ OVERRIDES = (
     "focus.family",
     "lifecycle",
     "complexity",
+    "task_length",
     "domain",
     "user_competence",
     "user_patience",
@@ -37,6 +39,11 @@ CALCULATORS = {
 
 def default_matrix():
     return original.load_matrix(ROOT / "kidra_sampling_matrix.v1.json")
+
+
+def editor_default_matrix():
+    """The supplied matrix with complexity and task length as separate axes."""
+    return task_axes.split(default_matrix())
 
 
 def options(matrix):
@@ -119,7 +126,7 @@ def validate_editor_matrix(matrix):
 
 def definitions(matrix, custom=None):
     """Derive definitions from the matrix; customizations cannot fork categories."""
-    original.validate_matrix(matrix)
+    original.validate_matrix(task_axes.to_supplied(matrix))
     if matrix.get("schema_version") != "1.0.0":
         raise ValueError("Expected matrix schema_version 1.0.0")
     validate_editor_matrix(matrix)
@@ -176,7 +183,7 @@ def definitions(matrix, custom=None):
 
 
 def configuration(matrix=None, metric_options=None):
-    matrix = deepcopy(default_matrix() if matrix is None else matrix)
+    matrix = deepcopy(editor_default_matrix() if matrix is None else matrix)
     try:
         defs = definitions(matrix, metric_options)
     except (KeyError, TypeError, IndexError) as error:
@@ -212,7 +219,12 @@ class SamplerService:
             configuration=deepcopy(c),
             settings_revision=r.revision,
             settings_commit=r.commit_id,
-            overrides={k: [x["id"] for x in options(c["matrix"])[k]] for k in OVERRIDES},
+            overrides={
+                k: [x["id"] for x in choices[k]]
+                for choices in [options(c["matrix"])]
+                for k in OVERRIDES
+                if k in choices
+            },
         )
 
     def update(self, matrix, metric_options, expected_revision):
@@ -230,7 +242,9 @@ class SamplerService:
             raise ValueError("seed must be an integer")
         # Default provisional seed groups are provenance, never dataset families.
         try:
-            proposal = original.sample_one(c["matrix"], seed, world_group_id, overrides)
+            proposal = task_axes.sample(
+                original.sample_one, c["matrix"], seed, world_group_id, overrides
+            )
         except (TypeError, KeyError, AssertionError) as e:
             raise ValueError(f"Invalid sampler configuration or pins: {e}") from e
         ident = str(uuid4())

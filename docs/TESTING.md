@@ -11,13 +11,20 @@ python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
+node tests/window_markdown_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs
 node tests/comments_auto_send_frontend.mjs
+node tests/auto_save_frontend.mjs
+node tests/assistant_indicator_frontend.mjs
+node tests/assistant_queue_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs
 node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
+node tests/metrics_editor_frontend.mjs
+node tests/complexity_select_frontend.mjs
+node tests/studio_warnings_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 node tests/job_names_tabs_frontend.mjs
@@ -42,10 +49,10 @@ structure, not prompt quality.
 Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations
 when nothing changed, which is what keeps the dashboard from flickering. `window_render_frontend.mjs`
-covers the readable window view (NOOP folding, chat bubbles, JSON formatting).
-`project_settings_frontend.mjs` also covers the **Generation prompts** section. `tool_picker_frontend.mjs` covers the tool checkboxes that replace the text box for `tool_schema` events: chosen versus random tools, relisting, hidden extras, tools missing from the project, failed requests and the locked state. `comments_view_frontend.mjs` covers the reviewer comments panel: choosing a target, composing from a window card, adding, resolve/reopen, accept/request changes on an agent's fix, replies, removed targets and polling without DOM changes; `python -m pytest -q tests/test_comments.py` covers the REST routes, replies, the comment filters, the open → addressed → resolved lifecycle (agents can't resolve), upgrading older comment tables and MCP tasks, and that comments never touch the source revision. `python -m pytest -q tests/test_assistant.py` drives Send to agent with a scripted fake model: spot edits, addressing and replying, frozen comments, incomplete finishes, the context budget and the missing-role error. `job_log_levels_frontend.mjs` covers
-the coloured job log lines. `run_layout_frontend.py` drives a real browser through the splitters, the collapsible trajectory bar
-and the timeline controls that move to the status bar, and checks real layout rather than DOM state. Layout, sampler, dashboard and
+covers the readable window view (NOOP folding, chat bubbles, JSON formatting). `window_markdown_frontend.mjs` covers its Markdown rendering: inline and block syntax, escaped HTML and unsafe links, plain text passing through unchanged, unterminated (streaming) syntax and Raw mode.
+`project_settings_frontend.mjs` also covers the **Generation prompts** section. `tool_picker_frontend.mjs` covers the tool checkboxes that replace the text box for `tool_schema` events: chosen versus random tools, relisting, hidden extras, tools missing from the project, failed requests and the locked state. `comments_view_frontend.mjs` covers the reviewer comments panel: choosing a target, composing from a window card, adding, resolve/reopen, accept/request changes on an agent's fix, replies, removed targets and polling without DOM changes; `python -m pytest -q tests/test_comments.py` covers the REST routes, replies, the comment filters, the open → addressed → resolved lifecycle (agents can't resolve), upgrading older comment tables and MCP tasks, and that comments never touch the source revision. `python -m pytest -q tests/test_assistant.py` drives Send to agent with a scripted fake model over native tool calls: edits, the `reply` tool, reminders until every comment has one reply, frozen comments and prompts, continuing the kept conversation on the next send, the exchange limit, the context budget and the missing-role error. `python -m pytest -q tests/test_endpoint_prompts.py` covers the message layout of every endpoint, the comment table and the upgrade of earlier shipped prompts. `job_log_levels_frontend.mjs` covers
+the coloured job log lines. `run_layout_frontend.py` drives a real browser through the splitters, the fixed trajectory bar and its fields in the Metrics tab
+and the timeline controls that move to the status bar, and checks real layout rather than DOM state. It also runs `panel_popout_frontend.mjs`, which pops the timeline out into a second window, drives the editor from there (selecting events, stepping) and docks it back. It also reloads the popup and the editor (both reconnect), checks that two editors keep separate popups, and that closing an editor closes its popup. Layout, sampler, dashboard and
 generation browser checks use optional Node `playwright` and Chromium (`CHROMIUM_PATH`, default `/usr/bin/chromium`).
 Browser screenshots are opt-in with `UPDATE_SCREENSHOTS=1`; ordinary verification
 does not rewrite documentation images. No frontend runtime packages are required.
@@ -66,7 +73,7 @@ Coverage includes strict source grammar/diagnostics, metadata/profile independen
 framing/EOS/NOOP/replacement, causal frontiers, split families, CRC/bounds, source
 CAS, locks/fencing, frozen runs, endpoint FIFO/retries/manual recovery, bulk deltas,
 log/artifact lifecycle, REST/MCP (legacy and 2026-07-28 protocols), both timeline modes, trailing debounce and stale
-responses, Workbench B structure/pins, and fake-provider generation/reviews/repair.
+responses, Workbench B structure/pins, and fake-provider generation and reviews.
 The old phase visibility predicate remains only as a test oracle. Native schema
 projection regressions remain independently of the retired replay runtime.
 

@@ -1,8 +1,10 @@
 """Generation prompts live in project settings; the retired Flow leaves nothing behind."""
 
+import json
+
 import pytest
 import yaml
-from test_graph_generation import DRAFT, finish, service, spec
+from test_graph_generation import finish, service
 
 from trajectory_remix.graph import prompt_defaults, prompt_migration
 from trajectory_remix.graph.models import GenerationPrompts, ProjectSettings
@@ -19,12 +21,12 @@ def edit_prompts(gen, **prompts):
 async def test_runs_use_and_freeze_the_project_prompts(tmp_path):
     gen, fake = service(tmp_path, fast=False)
     edit_prompts(gen, actor="Be Kidra, the persona.", draft="Write the notes.")
-    fake.responses = [{"draft": DRAFT}, spec()]
     job = gen.start([{"seed": 137}], {})
     edit_prompts(gen, actor="Edited after the run started.")
     await finish(gen, job)
-    system = fake.calls[0].payload["messages"][0]["content"]
-    assert system.startswith("Write the notes.") and "Be Kidra, the persona." in system
+    system, task = fake.calls[0].payload["messages"]
+    assert system["content"] == "Be Kidra, the persona."
+    assert task["content"].startswith("Write the notes.\n\nSampled proposal:\n```json\n")
     version = fake.calls[0].payload["prompt_version"]
     assert version.startswith(prompt_defaults.packaged()["version"] + "+")
 
@@ -33,6 +35,44 @@ def test_defaults_come_from_the_packaged_file():
     prompts = GenerationPrompts()
     assert prompts.actor == prompt_defaults.actor()
     assert prompts.assembly == prompt_defaults.assembly()
+
+
+@pytest.mark.asyncio
+async def test_every_system_prompt_opens_with_the_agent_prompt(tmp_path):
+    gen, fake = service(tmp_path)
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+    prompts = gen.store.settings().settings.prompts
+    assert "# Ticks" in prompts.actor and "Parallel subagents" in prompts.actor
+    by_operation = {ticket.payload["operation"]: ticket.payload for ticket in fake.calls}
+    assert by_operation["draft"]["messages"][0]["content"] == prompts.actor
+    for payload in (ticket.payload for ticket in fake.calls if "tools" in ticket.payload):
+        assert payload["messages"][0]["content"] == prompts.actor + "\n\n" + prompts.authoring
+
+
+@pytest.mark.asyncio
+async def test_review_tiers_get_the_checklist_and_trajectory_id(tmp_path):
+    gen, fake = service(tmp_path)
+    job = gen.start([{"seed": 137}], {})
+    await finish(gen, job)
+    ident = gen.jobs.attempts(job)[0]["trajectory_id"]
+
+    payloads = [ticket.payload for ticket in fake.calls if ticket.payload["operation"] == "review"]
+    assert [payload["tier"] for payload in payloads] == ["fast", "critical"]
+    defaults = prompt_defaults.packaged()
+    for payload in payloads:
+        _, task = payload["messages"]
+        assert task["content"].startswith("Please review the trajectory")
+        assert "Review Checklist:\n- `completeness`:" in task["content"]
+        assert "- `core.causal_evidence`:" in task["content"]
+        assert task["content"].endswith(f"Trajectory Id: `{ident}`")
+        assert "Draft:" not in task["content"]
+        assert payload["prompt_version"] == defaults["review_version"]
+    assert "critical.training_value" in payloads[1]["messages"][1]["content"]
+    assert "critical.training_value" not in payloads[0]["messages"][1]["content"]
+
+    evaluations = gen.store.read(ident).source.metadata["evaluations"]
+    assert [item["prompt_version"] for item in evaluations] == [defaults["review_version"]] * 2
 
 
 def test_settings_saved_with_the_retired_method_still_load():
@@ -112,8 +152,6 @@ def test_retired_instructions_reserve_no_attempts(tmp_path):
 
 
 def test_new_matrix_dimensions_reach_draft_and_assembly(tmp_path):
-    import json
-
     from trajectory_remix.graph import draft_assembly
 
     gen, _ = service(tmp_path)
@@ -122,12 +160,13 @@ def test_new_matrix_dimensions_reach_draft_and_assembly(tmp_path):
     proposal["future_dimension"] = {"quantum_potatoes": {"required": True}}
     plan = draft_assembly.plan(proposal, settings)
     assert plan["proposal"] == proposal
-    payload = draft_assembly.payload(dict(errors=0), plan, settings)
+    payload = draft_assembly.payload(dict(errors=0), plan)
     assert "quantum_potatoes" in json.dumps(payload["messages"])
 
 
-def test_endpoints_default_to_a_65k_context_and_8k_output():
+def test_endpoints_default_to_provider_token_limits():
     from trajectory_remix.graph.models import Endpoint
 
     endpoint = Endpoint.model_validate(dict(url="http://127.0.0.1:8000/v1", model="m"))
-    assert endpoint.context_window_tokens == 65536 and endpoint.max_output_tokens == 8192
+    assert endpoint.context_window_tokens == -1 and endpoint.max_output_tokens == -1
+    assert endpoint.bytes_per_token == 3.0

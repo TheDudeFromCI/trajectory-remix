@@ -68,14 +68,28 @@ def test_dry_run_uses_same_warnings_and_blocks_only_errors():
 def test_unknown_tool_warns_without_blocking_compilation():
     value = trajectory(
         1,
-        call=event("tool_call", "w", "{}", call_id="request", tool="lookup", close_window=True),
+        call=event(
+            "tool_call",
+            "w",
+            '{"query":"sample"}',
+            call_id="request",
+            tool="lookup",
+            close_window=True,
+        ),
     )
+    value["windows"]["tools"] = {"purpose": "tools", "agent_writable": False}
+    value["events"]["tools"] = event("tool_schema", "tools", '{"name":"lookup","parameters":{}}')
+    value["events"]["call"]["after"] = ["tools"]
     settings = {"tools": {}}
     diagnostics = dry_run(value, settings=settings)["diagnostics"]
     assert [(d["severity"], d["code"], d["event_id"]) for d in diagnostics] == [
         ("warning", "unknown_tool", "call")
     ]
     assert native(settings=settings).compile(value)["report"]["diagnostics"] == diagnostics
+    assert (
+        dry_run(value, settings={**settings, "disabled_warnings": ["unknown_tool"]})["diagnostics"]
+        == diagnostics
+    )
     assert dry_run(value, settings={"tools": {"lookup": {}}})["diagnostics"] == []
     assert dry_run(value)["diagnostics"] == []
 

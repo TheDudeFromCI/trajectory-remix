@@ -69,13 +69,12 @@ export class CommentsView {
   async autoSendOpened() {
     if (this.autoSend()) await this.onOpened();
   }
-  /** Refresh the send button: greyed out in auto mode, otherwise enabled while comments are open. */
-  updateSendButton(hasOpen) {
+  /** Refresh the send button. It stays enabled in auto mode too, for a manual resend (after hitting the context limit, say). */
+  updateSendButton() {
     const send = this.els.send;
     if (!send) return;
-    const auto = this.autoSend();
-    send.disabled = auto || !hasOpen;
-    send.dataset.tip = auto ? 'Auto-send is enabled in Preferences: new comments go to the assistant automatically' : this.sendTip;
+    send.disabled = false;
+    send.dataset.tip = this.sendTip;
   }
   async act(comment, method, body, path = '') {
     await this.api(`/comments/${comment.id}${path}`, method, body);
@@ -91,7 +90,9 @@ export class CommentsView {
     if (!body) throw new Error(draft.reopen ? 'Say what still needs to change.' : 'Write the reply first.');
     await this.act(comment, 'POST', {body, reopen: !!draft.reopen}, '/replies');
     this.replies.delete(comment.id); this.render();
-    if (draft.reopen) await this.autoSendOpened();
+    // A reply on a comment that is still open (an agent's question, say) needs a new job too.
+    const now = this.items.find(c => c.id === comment.id);
+    if (draft.reopen || now?.status === 'open') await this.autoSendOpened();
   }
   render() {
     this.counts = unresolvedCounts(this.items);
@@ -99,7 +100,7 @@ export class CommentsView {
     const open = by('open'), addressed = by('addressed'), resolved = by('resolved');
     const unresolved = open.length + addressed.length;
     setText(this.els.count, unresolved ? String(unresolved) : '');
-    this.updateSendButton(open.length > 0);
+    this.updateSendButton();
     const list = this.els.list, wasOpen = list.querySelector('details')?.open ?? false;
     const focused = document.activeElement?.closest?.('.comment-reply-form') && document.activeElement.dataset.comment;
     if (!this.trajectory) { list.replaceChildren(); return; }

@@ -16,6 +16,7 @@ from ktremix_native import CONTRACT, DEFAULT_MAX_ROWS, VERSION, Cancelled, Compi
 from tokenizers import Tokenizer
 
 from .models import GraphSource, ProjectSettings, TokenizerProfile, digest
+from .validation import diagnose
 
 __all__ = ["CONTRACT", "VERSION", "Cancelled", "CompileError", "GraphCompiler"]
 
@@ -98,6 +99,8 @@ class GraphCompiler:
     reasoning-level contracts for validation. Raises :class:`CompileError` if the
     native compiler rejects the profile or options.
     """
+
+    dry_run = staticmethod(diagnose)
 
     def __init__(
         self,
