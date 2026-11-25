@@ -29,7 +29,8 @@ install.
 # Install the project and build the native compiler
 git clone https://github.com/TheDudeFromCI/trajectory-remix.git
 cd trajectory-remix
-python -m pip install ./native/ktremix-python -e '.[mcp,export]'
+./scripts/install.sh
+source .venv/bin/activate
 
 # Create the project file
 python -m trajectory_remix graph-init --dataset project.sqlite
