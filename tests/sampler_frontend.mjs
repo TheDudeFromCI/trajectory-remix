@@ -98,7 +98,7 @@ try {
   assert.equal(first.payload_digest,second.payload_digest); assert.equal(second.proposal.metrics.sampling.domain,'software_engineering');
   assert.equal((await state()).matrix.dimensions.user_tone[0].weight,3.5);
   await page.getByLabel('Pin focus.family',{exact:true}).selectOption('strategic_planning');
-  await page.getByLabel('Pin lifecycle',{exact:true}).selectOption('closure'); await page.getByLabel('Pin complexity',{exact:true}).selectOption('trivial');
+  await page.getByLabel('Pin lifecycle',{exact:true}).selectOption('closure'); await page.getByLabel('Pin task_length',{exact:true}).selectOption('XXS');
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>document.getElementById('sampler-message').textContent.includes('Preview rejected'));
   // Revision conflicts retain the browser draft.
   const current=await page.evaluate(async()=>await (await fetch('/api/v1/sampler',{headers:{'X-Remix-Token':document.querySelector('meta[name=remix-token]').content}})).json());
@@ -120,11 +120,11 @@ try {
   assert.equal(await page.locator('.sw-pin[aria-pressed=true]').count(),0);
   await pin('medium').click(); assert.equal(await pin('medium').getAttribute('aria-pressed'),'true');
   assert.equal(await page.getByLabel('Pin complexity',{exact:true}).inputValue(),'medium');
-  await pin('small').click(); assert.equal(await pin('medium').getAttribute('aria-pressed'),'false');
+  await pin('easy').click(); assert.equal(await pin('medium').getAttribute('aria-pressed'),'false');
   assert.equal(await page.locator('.sw-pin[aria-pressed=true]').count(),1);
-  await pin('small').click(); assert.equal(await page.locator('.sw-pin[aria-pressed=true]').count(),0);
+  await pin('easy').click(); assert.equal(await page.locator('.sw-pin[aria-pressed=true]').count(),0);
   await pin('medium').focus(); await pin('medium').press('Space');
-  await page.getByLabel('Filter choices in group',{exact:true}).fill('small');
+  await page.getByLabel('Filter choices in group',{exact:true}).fill('easy');
   await page.getByLabel('Filter choices in group',{exact:true}).fill('');
   assert.equal(await pin('medium').getAttribute('aria-pressed'),'true');
   await page.locator('.sw-nav-row').filter({hasText:'Competency families'}).click();
@@ -135,14 +135,14 @@ try {
   assert.equal(paths.filter(p=>p.includes('/sampler')).length,requestsBeforePins);
   assert.deepEqual(await state(),savedBeforePins); assert.equal(await page.locator('#sampler-save').isDisabled(),true);
   await page.locator('.sw-preview > summary').click();
-  await page.getByLabel('Pin complexity',{exact:true}).selectOption('large');
-  assert.equal(await pin('large').getAttribute('aria-pressed'),'true');
+  await page.getByLabel('Pin complexity',{exact:true}).selectOption('expert');
+  assert.equal(await pin('expert').getAttribute('aria-pressed'),'true');
   assert.equal(await pin('medium').getAttribute('aria-pressed'),'false');
   const previewRequest = page.waitForRequest(r=>r.url().endsWith('/sampler/proposals')&&r.method()==='POST');
   await page.locator('#sampler-preview').click();
-  assert.deepEqual((await previewRequest).postDataJSON().overrides,{complexity:'large'});
+  assert.deepEqual((await previewRequest).postDataJSON().overrides,{complexity:'expert'});
   await page.waitForFunction(()=>document.getElementById('sampler-proposal').textContent.length>10);
-  assert.equal(JSON.parse(await page.locator('#sampler-proposal').textContent()).proposal.metrics.sampling.complexity,'large');
+  assert.equal(JSON.parse(await page.locator('#sampler-proposal').textContent()).proposal.metrics.sampling.complexity,'expert');
   await pin('medium').click(); await page.locator('.sw-preview > summary').click();
   if (process.env.UPDATE_SCREENSHOTS) await fs.mkdir(new URL('../docs/images/sampler-workbench/',import.meta.url),{recursive:true});
   await page.locator('#sampler-workbench').evaluate(n=>n.scrollTop=0); await page.locator('#sampler-nav').evaluate(n=>n.scrollTop=0);
