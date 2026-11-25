@@ -125,9 +125,12 @@ async def test_assistant_replays_reasoning_and_tool_results_with_responses(monke
     record, (comment_id,) = flagged(gen, "Change x.")
     current = gen.store.settings()
     config = current.settings.model_dump(mode="json")
-    config["endpoints"]["a"].update(use_responses_api=True, reasoning="low")
+    config["endpoints"]["a"].update(
+        use_responses_api=True, reasoning="low", context_window_tokens=-1
+    )
     gen.store.update_settings(config, current.revision)
-    reasoning = dict(id="rs_1", type="reasoning", summary=[], encrypted_content="opaque-reasoning")
+    # A large replay item must not trigger the Assistant's local history cap at -1.
+    reasoning = dict(id="rs_1", type="reasoning", summary=[], encrypted_content="x" * 70_000)
     edit = function_call("call_edit", "update_event", {"event_id": "x", "content": "updated"})
     reply = function_call(
         "call_reply", "reply", {"comment_id": comment_id, "done": True, "note": "Updated x."}
