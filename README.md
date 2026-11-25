@@ -29,7 +29,7 @@ install.
 # Install the project and build the native compiler
 git clone https://github.com/TheDudeFromCI/trajectory-remix.git
 cd trajectory-remix
-./dev.sh
+./scripts/install.sh
 source .venv/bin/activate
 
 # Create the project file

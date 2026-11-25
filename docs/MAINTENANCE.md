@@ -75,7 +75,7 @@ elements out of `document`. Look up timeline elements with `byId` (graph.js's `$
 
 ## Validation and completion
 
-The Python test jobs run `./dev.sh` to build the native compiler and install the project
+The Python test jobs run `./scripts/install.sh` to build the native compiler and install the project
 into `.venv`, then `./scripts/test.sh` to test that installation.
 
 Use [TESTING](TESTING.md) for the current commands. Start with the defect's focused

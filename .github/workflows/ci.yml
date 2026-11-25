@@ -77,7 +77,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: ./dev.sh
+      - run: ./scripts/install.sh
       - run: ./scripts/test.sh
 
   frontend:
