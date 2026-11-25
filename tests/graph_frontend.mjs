@@ -108,6 +108,10 @@ $('first-tick').click(); assert.equal(ui.position,0);
  assert.equal(shown(),Object.values(level).filter(l=>l===0).length);
  $('next-tick').click(); assert.equal(ui.position,Math.min(1,top));
  assert.equal(shown(),Object.values(level).filter(l=>l<=ui.position).length);
+ // Windows written by the step into the current position glow faintly.
+ assert.ok(ui.changedWindows.size>0);
+ assert.equal($('window-grid').querySelectorAll('.window-card.changed').length,[...ui.windowModels.keys()].filter(w=>ui.changedWindows.has(w)).length);
+ assert.deepEqual(new Set(Object.keys(events).filter(i=>level[i]===ui.position).map(i=>events[i].window)),ui.changedWindows);
  assert.equal($('scrubber'),null); assert.ok($('timeline').querySelector('.timeline-cursor'));
  assert.equal(ui.positionAt(ui.cursorX(top)),top); assert.equal(ui.positionAt(-500),0);
  $('first-tick').click();
