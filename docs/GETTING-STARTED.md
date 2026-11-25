@@ -11,11 +11,12 @@ is no frontend build step.
 Install a stable Rust toolchain to build the native compiler bindings from this checkout.
 
 ```bash
-python -m pip install ./native/ktremix-python -e '.[mcp,export]'
+./dev.sh
+source .venv/bin/activate
 ```
 
-The `mcp` extra enables agent connections, and `export` provides NumPy and LZ4 for the Python
-training examples and the reference shard tools.
+The script creates or reuses `.venv`, builds the native compiler bindings, and installs the
+studio in editable mode with test, MCP, and export dependencies.
 
 ## Create a project and open the studio
 
