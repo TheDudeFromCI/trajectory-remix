@@ -335,7 +335,12 @@ def test_tool_schema_warning_only_after_submission_and_no_contamination():
 def test_invalid_framing_and_submission(event, field, value, expected):
     raw = tool_source()
     raw["events"][event][field] = value
-    assert expected in {d.code for d in diagnose(GraphSource.model_validate(raw), settings())}
+    findings = (
+        codes(raw, settings())
+        if expected == "unordered_window_writers"
+        else warnings(raw, settings())
+    )
+    assert expected in findings
 
 
 def test_output_after_closure_and_resubmission():
@@ -407,8 +412,12 @@ def test_structural_project_references():
     raw = source()
     raw["windows"]["thought"]["reasoning_effort"] = "Impossible"
     raw["events"]["think"]["window"] = "chat"
-    assert warnings(raw, settings()) == {"direct_chatroom_output", "unknown_reasoning_level"}
-    assert codes(raw, settings()) == {"read_only_window_write"}
+    assert warnings(raw, settings()) == {
+        "direct_chatroom_output",
+        "unknown_reasoning_level",
+        "window_not_writable",
+    }
+    assert not codes(raw, settings())
     raw["events"]["input"]["window"] = "missing"
     assert "missing_window" in codes(raw)
 
