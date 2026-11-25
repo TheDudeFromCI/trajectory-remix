@@ -56,11 +56,11 @@ try {
  // No manual reload: the original blank attached snapshot must grow on server changes.
  await page.waitForFunction(()=>Object.keys(graphStudio.draft.events).length>0,{},{timeout:10000});
  await page.waitForFunction(()=>graphStudio.record.owner===null,{},{timeout:10000});
- assert.equal(await page.evaluate(()=>graphStudio.position),Number(await page.locator('#scrubber').getAttribute('max')));
+ assert.equal(await page.evaluate(()=>graphStudio.position),await page.evaluate(()=>graphStudio.maxPosition));
  assert.ok(await page.locator('#window-grid').textContent());assert.equal(await page.locator('#event-content').isDisabled(),false);
  assert.equal((await api('/jobs/'+job)).state,'completed');
  assert.equal(await page.evaluate(()=>graphStudio.isDirty()),false);
- await page.locator('#scrubber').evaluate(n=>{n.value='2';n.dispatchEvent(new Event('input'));});await screenshot('desktop');
+ await page.evaluate(()=>{graphStudio.position=2;graphStudio.renderTimeline();});await screenshot('desktop');
  // View menu hides and restores editor panels.
  await page.locator('#view-menu summary').click();await page.locator('#toggle-timeline-panel').click();
  assert.equal(await page.locator('.timeline-widget').isVisible(),false);
@@ -75,7 +75,7 @@ try {
  const last=await page.evaluate(()=>Object.keys(graphStudio.draft.events).find(id=>id.endsWith(':echo')) || 'decision');
  await api('/trajectories/'+id,'PATCH',{expected_revision:live.revision,patch:{windows:{live_doc:{purpose:'document',agent_writable:false}},events:{live_one:{kind:'external_text',window:'live_doc',after:[last],content:'Live appended observation'}}}});
  await page.waitForFunction(()=>Boolean(graphStudio.draft.events.live_one));
- assert.equal(await page.evaluate(()=>graphStudio.position),Number(await page.locator('#scrubber').getAttribute('max')));
+ assert.equal(await page.evaluate(()=>graphStudio.position),await page.evaluate(()=>graphStudio.maxPosition));
  assert.ok((await page.locator('#window-grid').textContent()).includes('Live appended observation'));
  await page.locator('#first-tick').click();
  live=await api('/trajectories/'+id);
