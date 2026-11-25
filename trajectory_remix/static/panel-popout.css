@@ -1,0 +1,8 @@
+/* Pop-out panels: the main editor without the panel, and the popup window that holds it. */
+.editor-view.timeline-popped-out .timeline-widget, .editor-view.timeline-popped-out #split-timeline { display: none; }
+.editor-view.timeline-popped-out .editor-center { grid-template-rows: minmax(0, 1fr); }
+
+body.panel-popout-window { display: flex; height: 100vh; margin: 0; padding: var(--space-2, 8px); box-sizing: border-box; overflow: hidden; }
+body.panel-popout-window > .widget { flex: 1; min-width: 0; min-height: 0; }
+[data-popout][aria-pressed="true"] .ico { transform: rotate(180deg); }
+.panel-popout-waiting { margin: auto; max-width: 420px; text-align: center; color: var(--ink-muted); }
