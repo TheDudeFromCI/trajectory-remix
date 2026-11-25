@@ -1,4 +1,4 @@
-use crate::{invalid, slots::Slots, Emission, Result, Token};
+use crate::{slots::Slots, Emission, Error, Result, Token};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -116,9 +116,7 @@ impl Runtime {
     fn new_window(&mut self, logical: Option<&str>, writable: bool) -> Result<usize> {
         let free = self.limit + 1 - self.used.len();
         if free == 0 {
-            return Err(invalid(
-                "Active window capacity exceeded (Available is excluded)",
-            ));
+            return Err(Error::WindowLimitExceeded { limit: self.limit });
         }
         let mut slot = self.rng.choose(free as u32) as u32;
         // Select the same rank among the free slots without allocating one
@@ -159,9 +157,7 @@ impl Runtime {
             return Ok(self.windows[index].slot);
         }
         if self.active >= self.limit {
-            return Err(invalid(
-                "Active window capacity exceeded (Available is excluded)",
-            ));
+            return Err(Error::WindowLimitExceeded { limit: self.limit });
         }
         let index = if model {
             self.windows[self.available].logical = Some(logical.to_owned());
@@ -191,7 +187,9 @@ impl Runtime {
         let w = &mut self.windows[index];
         let row = a.token_ids.len();
         if row >= self.max_rows {
-            return Err(invalid("Compilation row bound exceeded"));
+            return Err(Error::RowLimitExceeded {
+                limit: self.max_rows,
+            });
         }
         let previous = previous.unwrap_or_else(|| {
             w.rows
@@ -348,9 +346,9 @@ impl Runtime {
             .filter_map(|window| Some((window.logical.as_deref()?, window.slot)))
             .collect();
         for (row, logical, digit) in &self.references {
-            let slot = slots
-                .get(logical.as_str())
-                .ok_or_else(|| invalid(format!("Referenced window never opens: {logical}")))?;
+            let slot = slots.get(logical.as_str()).ok_or_else(|| {
+                Error::Encoding(format!("Referenced window never opens: {logical}"))
+            })?;
             self.columns.token_ids[*row] = alphabet[((slot >> (4 * (7 - digit))) & 15) as usize];
         }
         Ok(())

@@ -7,7 +7,7 @@
 use ktremix::corpus::{CorpusOptions, Document, Documents, Input};
 use ktremix::dataset::{Dataset, SamplingOptions};
 use ktremix::shard::{CompileWriter, Sample};
-use ktremix::{Compiler, Error, Options, TokenizerProfile, CONTRACT, VERSION};
+use ktremix::{Compiler, Error, Options, TokenizerProfile, CONTRACT, DEFAULT_MAX_ROWS, VERSION};
 use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::{
@@ -476,6 +476,7 @@ impl SampleBinding {
 #[pymodule]
 fn _native(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("VERSION", VERSION)?;
+    module.add("DEFAULT_MAX_ROWS", DEFAULT_MAX_ROWS)?;
     module.add("CONTRACT", CONTRACT)?;
     module.add("Cancelled", py.get_type::<Cancelled>())?;
     module.add_class::<CompilerBinding>()?;

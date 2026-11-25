@@ -16,6 +16,8 @@ use uuid::Uuid;
 pub const VERSION: &str = "kidra.graph-compiler/1";
 /// Execution contract that readers of the compiled arrays are expected to follow.
 pub const CONTRACT: &str = "kidra.progressive-sleep/1";
+/// Default compiled row budget per sample, including framing and NOOPs.
+pub const DEFAULT_MAX_ROWS: usize = 8_000_000;
 const CONTROL_NAMES: [&str; 12] = [
     "bos",
     "eos",
@@ -65,7 +67,7 @@ impl Default for Options {
         Self {
             active_limit: 32,
             seed: 0.into(),
-            max_rows: 1_000_000,
+            max_rows: DEFAULT_MAX_ROWS,
         }
     }
 }
@@ -167,29 +169,35 @@ impl Compiler {
             return Err(invalid("seed must be an integer"));
         }
         if profile.name.is_empty() {
-            return Err(invalid("Tokenizer profile name must be nonempty"));
+            return Err(Error::Tokenizer(
+                "Tokenizer profile name must be nonempty".into(),
+            ));
         }
         if CONTROL_NAMES
             .iter()
             .any(|key| !profile.special_tokens.contains_key(*key))
         {
-            return Err(invalid("Missing required controls"));
+            return Err(Error::Tokenizer("Missing required controls".into()));
         }
         let control_ids: HashSet<_> = profile.special_tokens.values().copied().collect();
         if control_ids.len() != profile.special_tokens.len() {
-            return Err(invalid("Controls require distinct dedicated token IDs"));
+            return Err(Error::Tokenizer(
+                "Controls require distinct dedicated token IDs".into(),
+            ));
         }
         let encoder = Tokenizer::from_bytes(profile.definition.to_string())
-            .map_err(|error| invalid(format!("Invalid tokenizer profile: {error}")))?;
+            .map_err(|error| Error::Tokenizer(format!("Invalid tokenizer profile: {error}")))?;
         let mut literal = profile.definition.clone();
         literal["added_tokens"] = json!([]);
         literal["post_processor"] = Value::Null;
         // Parallelism is at the document/sample level.
         let literal = Tokenizer::from_bytes(literal.to_string())
-            .map_err(|error| invalid(format!("Invalid tokenizer profile: {error}")))?;
+            .map_err(|error| Error::Tokenizer(format!("Invalid tokenizer profile: {error}")))?;
         let dedicated = profile.definition["added_tokens"]
             .as_array()
-            .ok_or_else(|| invalid("Tokenizer definition requires an added_tokens array"))?;
+            .ok_or_else(|| {
+                Error::Tokenizer("Tokenizer definition requires an added_tokens array".into())
+            })?;
         for (name, &id) in &profile.special_tokens {
             let spelling = dedicated.iter().find_map(|token| {
                 (token["id"].as_u64() == Some(id as u64) && token["special"] == true)
@@ -203,12 +211,14 @@ impl Compiler {
                         .encode(text, false)
                         .is_ok_and(|encoded| encoded.get_ids() == [id])
             }) {
-                return Err(invalid(format!("Incompatible dedicated control: {name}")));
+                return Err(Error::Tokenizer(format!(
+                    "Incompatible dedicated control: {name}"
+                )));
             }
         }
         let tokenizer = encoder
             .to_string(false)
-            .map_err(|error| invalid(error.to_string()))?;
+            .map_err(|error| Error::Tokenizer(error.to_string()))?;
         Ok(Self {
             encoder,
             literal,
@@ -255,7 +265,7 @@ impl Compiler {
     pub fn tokenizer_json(&self) -> Result<String> {
         self.encoder
             .to_string(false)
-            .map_err(|error| invalid(error.to_string()))
+            .map_err(|error| Error::Tokenizer(error.to_string()))
     }
 
     /// Structural dry run. No tokenizer is needed to validate graph shape,
@@ -287,7 +297,7 @@ impl Compiler {
         match self.process(source, || false) {
             Ok((report, _)) => report,
             Err(error) => Report {
-                diagnostics: vec![Diagnostic::general("compile_error", error.to_string())],
+                diagnostics: vec![compilation_diagnostic(error)],
                 metrics: None,
             },
         }
@@ -355,9 +365,7 @@ impl Compiler {
             Ok(()) => {}
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(error) => {
-                report
-                    .diagnostics
-                    .push(Diagnostic::general("compile_error", error.to_string()));
+                report.diagnostics.push(compilation_diagnostic(error));
                 return Ok((report, None));
             }
         }
@@ -455,18 +463,19 @@ impl Compiler {
     }
 
     pub(crate) fn encode_literal(&self, text: &str) -> Result<tokenizers::Encoding> {
-        let encoded = self
-            .literal
-            .encode(text, false)
-            .map_err(|error| invalid(format!("Literal text cannot be encoded: {error}")))?;
+        let encoded = self.literal.encode(text, false).map_err(|error| {
+            Error::Tokenizer(format!("Literal text cannot be encoded: {error}"))
+        })?;
         let ids = encoded.get_ids();
         if ids.iter().any(|id| self.control_ids.contains(id)) {
-            return Err(invalid(
-                "Literal text encodes as a control; use a tokenizer with literal coverage",
+            return Err(Error::Encoding(
+                "Literal text encodes as a control; use a tokenizer with literal coverage".into(),
             ));
         }
         if !text.is_empty() && ids.is_empty() {
-            return Err(invalid("Tokenizer discards nonempty literal content"));
+            return Err(Error::Encoding(
+                "Tokenizer discards nonempty literal content".into(),
+            ));
         }
         Ok(encoded)
     }
@@ -514,8 +523,8 @@ impl Compiler {
         for (index, ch) in "0123456789abcdef".chars().enumerate() {
             let tokens = self.text(&ch.to_string())?;
             if tokens.len() != 1 {
-                return Err(invalid(
-                    "Window references require one ordinary token per hex digit",
+                return Err(Error::Encoding(
+                    "Window references require one ordinary token per hex digit".into(),
                 ));
             }
             alphabet[index] = tokens[0].id.unwrap();
@@ -696,6 +705,16 @@ fn parse_settings(settings: Option<&str>) -> Result<Option<Settings>> {
         .map_err(Error::from)
 }
 
+fn compilation_diagnostic(error: Error) -> Diagnostic {
+    let code = match &error {
+        Error::Tokenizer(_) => "tokenizer_error",
+        Error::WindowLimitExceeded { .. } => "window_limit_exceeded",
+        Error::RowLimitExceeded { .. } => "row_limit_exceeded",
+        _ => "encoding_error",
+    };
+    Diagnostic::general(code, error.to_string())
+}
+
 fn diagnostic_error(diagnostics: &[Diagnostic]) -> Error {
     invalid(
         diagnostics
@@ -735,6 +754,7 @@ struct Schedule<'a> {
     source: &'a Source,
     graph: &'a Graph<'a>,
     events: Vec<&'a Event>,
+    agent_windows: HashSet<&'a str>,
     remaining: usize,
     degrees: Vec<usize>,
     external_ready: BTreeSet<usize>,
@@ -753,6 +773,14 @@ impl<'a> Schedule<'a> {
                 .names
                 .iter()
                 .map(|&name| &source.events[name])
+                .collect(),
+            // An authored model write overrides a read-only declaration so
+            // emitted model rows and the window flags agree.
+            agent_windows: source
+                .events
+                .values()
+                .filter(|event| event.model())
+                .map(|event| event.window.as_str())
                 .collect(),
             remaining: graph.names.len(),
             degrees: graph.dependencies.iter().map(Vec::len).collect(),
@@ -797,19 +825,25 @@ impl<'a> Schedule<'a> {
         }
     }
 
+    fn writable(&self, window: &str) -> bool {
+        self.source.windows[window].agent_writable || self.agent_windows.contains(window)
+    }
+
     fn begin(&mut self, id: usize, runtime: &mut Runtime) -> Result<()> {
         let event = self.events[id];
         let window = &self.source.windows[&event.window];
         let opening = !runtime.live.contains_key(&event.window);
         let mut header = if opening {
-            let slot = runtime.open(&event.window, event.model(), window.agent_writable)?;
+            let slot = runtime.open(&event.window, event.model(), self.writable(&event.window))?;
             self.compiler.header(window, slot)?
         } else {
             Vec::new()
         };
         let body = self.compiler.event_tokens(event)?;
         if event.replace_body && body.iter().all(|token| token.control == Some("eos")) {
-            return Err(invalid("Replacement must encode nonempty content"));
+            return Err(Error::Encoding(
+                "Replacement must encode nonempty content".into(),
+            ));
         }
         let tokens = if event.model() {
             let mut tokens = std::mem::take(&mut header);
@@ -851,6 +885,7 @@ impl<'a> Schedule<'a> {
                 if !self.running.contains_key(&id) {
                     self.begin(id, runtime)?;
                 }
+                let writable = self.writable(&event.window);
                 let state = self.running.get_mut(&id).unwrap();
                 let mut tokens = std::mem::take(&mut state.header);
                 match event.delivery.mode {
@@ -866,7 +901,7 @@ impl<'a> Schedule<'a> {
                     replace: event.replace_body && !state.started,
                     opening: std::mem::take(&mut state.opening),
                 };
-                runtime.input(&emission, self.source.windows[&event.window].agent_writable)?;
+                runtime.input(&emission, writable)?;
                 inputs.push(emission);
                 state.started = true;
                 if state.tokens.is_empty() {

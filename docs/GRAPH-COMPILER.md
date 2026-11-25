@@ -28,7 +28,7 @@ preview = compiler.preview(source, max_frames=500)
 - `compile` returns the arrays [KTREMIX](KTREMIX.md) stores, plus a small identity/debug map.
 - `preview` returns a bounded list of frames (`tick`, `inputs`, `outputs`), a `truncated` flag
   and a cache key covering compiler version, source hash, profile fingerprint, capacity and seed.
-- Both accept a `cancelled()` callback. Compilation has a `max_rows` guard (default one million)
+- Both accept a `cancelled()` callback. Compilation has a `max_rows` guard (default eight million compiled rows)
   and preview also limits frames. Cancellation raises `Cancelled`, and failures raise
   `CompileError`.
 - Only the intrinsic source matters, so sources that differ only in metadata compile identically

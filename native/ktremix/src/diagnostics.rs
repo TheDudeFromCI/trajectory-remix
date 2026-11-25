@@ -18,7 +18,7 @@ pub enum Severity {
 pub struct Diagnostic {
     /// Whether the finding blocks compilation.
     pub severity: Severity,
-    /// Stable machine-readable code such as `compile_error`.
+    /// Stable machine-readable code such as `row_limit_exceeded`.
     pub code: &'static str,
     /// JSON path to the offending value in the source graph.
     pub path: Vec<Value>,
@@ -33,7 +33,28 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub(crate) fn general(code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            severity: Severity::Error,
+            severity: match code {
+                "call_already_finished"
+                | "chat_echo_disabled"
+                | "chat_echo_mismatch"
+                | "duplicate_dependency"
+                | "inconsistent_call"
+                | "inconsistent_response"
+                | "interleaved_framing"
+                | "invalid_chat_window"
+                | "invalid_response_begin"
+                | "invalid_tool_begin"
+                | "low_agent_share"
+                | "open_window"
+                | "response_already_finished"
+                | "response_window"
+                | "tool_input_schema"
+                | "unknown_reasoning_level"
+                | "unknown_tool"
+                | "unsubmitted_call"
+                | "window_not_writable" => Severity::Warning,
+                _ => Severity::Error,
+            },
             code,
             path: Vec::new(),
             event_id: None,
@@ -47,11 +68,6 @@ impl Diagnostic {
         value.event_id = Some(id.to_owned());
         value.path = vec![json!("events"), json!(id), json!(field)];
         value
-    }
-
-    fn warning(mut self) -> Self {
-        self.severity = Severity::Warning;
-        self
     }
 
     fn related(mut self, id: &str) -> Self {
@@ -231,7 +247,7 @@ pub(crate) fn analyze<'a>(
             ),
             Some(window) if event.model() && !window.agent_writable => emit(
                 "window_not_writable",
-                "Agent output requires an agent-writable window".into(),
+                "Agent output targets a read-only window, which will compile as writable".into(),
                 "window",
             ),
             Some(window) if event.kind == Kind::ChatMessage && window.purpose != "chatroom" => {
@@ -264,15 +280,12 @@ pub(crate) fn analyze<'a>(
             emit("invalid_source", "Invalid event fields".into(), "kind");
         }
         if event.after.iter().collect::<HashSet<_>>().len() != event.after.len() {
-            diagnostics.push(
-                Diagnostic::event(
-                    "duplicate_dependency",
-                    "Dependencies must be unique",
-                    id,
-                    "after",
-                )
-                .warning(),
-            );
+            diagnostics.push(Diagnostic::event(
+                "duplicate_dependency",
+                "Dependencies must be unique",
+                id,
+                "after",
+            ));
         }
         for (ordinal, dep) in event.after.iter().enumerate() {
             if let Some(&parent) = indices.get(dep.as_str()) {
@@ -464,15 +477,12 @@ pub(crate) fn analyze<'a>(
                     && !window.intentionally_left_open
             })
         {
-            diagnostics.push(
-                Diagnostic::event(
-                    "open_window",
-                    "Reasoning/tool window remains open",
-                    graph.names[*ids.last().unwrap()],
-                    "close_window",
-                )
-                .warning(),
-            );
+            diagnostics.push(Diagnostic::event(
+                "open_window",
+                "Reasoning/tool window remains open",
+                graph.names[*ids.last().unwrap()],
+                "close_window",
+            ));
         }
     }
     if total > 0 && agent <= (total - 1) / 16 {
@@ -482,7 +492,7 @@ pub(crate) fn analyze<'a>(
             grouped(total),
             100.0 * agent as f64 / total as f64
         );
-        let mut diagnostic = Diagnostic::general("low_agent_share", message).warning();
+        let mut diagnostic = Diagnostic::general("low_agent_share", message);
         diagnostic.path = vec![json!("events")];
         diagnostics.push(diagnostic);
     }
@@ -565,15 +575,12 @@ fn tool_diagnostics(
             }
             if let (Some(settings), Some(tool)) = (settings, current.tool.as_deref()) {
                 if !settings.tools.contains_key(tool) {
-                    diagnostics.push(
-                        Diagnostic::event(
-                            "unknown_tool",
-                            format!("Unknown tool: {tool}"),
-                            name,
-                            "tool",
-                        )
-                        .warning(),
-                    );
+                    diagnostics.push(Diagnostic::event(
+                        "unknown_tool",
+                        format!("Unknown tool: {tool}"),
+                        name,
+                        "tool",
+                    ));
                 }
             }
             if current.insert_tool_end && !finished && !cancelled {
@@ -588,10 +595,12 @@ fn tool_diagnostics(
                             .map(|&id| event(id).content.text())
                             .collect::<Option<String>>();
                         if let Some(message) = schema_warning(fragments, &definition.input_schema) {
-                            diagnostics.push(
-                                Diagnostic::event("tool_input_schema", message, name, "content")
-                                    .warning(),
-                            );
+                            diagnostics.push(Diagnostic::event(
+                                "tool_input_schema",
+                                message,
+                                name,
+                                "content",
+                            ));
                         }
                     }
                 }

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 
-from ktremix_native import CONTRACT, VERSION, Cancelled, Compiler
+from ktremix_native import CONTRACT, DEFAULT_MAX_ROWS, VERSION, Cancelled, Compiler
 from tokenizers import Tokenizer
 
 from .models import GraphSource, ProjectSettings, TokenizerProfile, digest
@@ -106,7 +106,7 @@ class GraphCompiler:
         active_limit=32,
         seed=0,
         settings: ProjectSettings | None = None,
-        max_rows=1_000_000,
+        max_rows=DEFAULT_MAX_ROWS,
     ):
         self.profile = TokenizerProfile.model_validate(profile.model_dump())
         self.controls = self.profile.special_tokens

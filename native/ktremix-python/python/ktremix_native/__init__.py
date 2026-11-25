@@ -24,9 +24,11 @@ Cancelled = _native.Cancelled
 # Execution contract and compiler version recorded in every shard manifest.
 CONTRACT = _native.CONTRACT
 VERSION = _native.VERSION
+DEFAULT_MAX_ROWS = _native.DEFAULT_MAX_ROWS
 
 __all__ = [
     "CONTRACT",
+    "DEFAULT_MAX_ROWS",
     "VERSION",
     "Cancelled",
     "Compiler",

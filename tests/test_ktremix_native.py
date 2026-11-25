@@ -5,10 +5,11 @@ from uuid import UUID
 
 import numpy as np
 import pytest
-from ktremix_native import Compiler, Dataset, dry_run, dry_runs
+from ktremix_native import DEFAULT_MAX_ROWS, Compiler, Dataset, dry_run, dry_runs
 from test_graph_compiler import event, profile, source
 
 from trajectory_remix.graph import ktremix as reference
+from trajectory_remix.graph.compiler import GraphCompiler
 from trajectory_remix.graph.validation import diagnose
 
 
@@ -77,6 +78,64 @@ def test_unknown_tool_warns_without_blocking_compilation():
     assert native(settings=settings).compile(value)["report"]["diagnostics"] == diagnostics
     assert dry_run(value, settings={"tools": {"lookup": {}}})["diagnostics"] == []
     assert dry_run(value)["diagnostics"] == []
+
+
+def test_model_write_in_declared_read_only_window_produces_valid_shard(tmp_path):
+    value = source(
+        {
+            "read": event("external_text", "window", "input"),
+            "write": event("agent_text", "window", "output", ["read"], close_window=True),
+        },
+        windows={"window": {"purpose": "document", "agent_writable": False}},
+    ).to_dict()
+    compiler = native()
+    compiled = compiler.compile(value)
+    assert [(d["severity"], d["code"]) for d in compiled["report"]["diagnostics"]] == [
+        ("warning", "window_not_writable"),
+    ]
+    target = tmp_path / "advisory.ktremix"
+    compiler.write_trajectories(target, [value], sample_count=1)
+    shard = reference.Shard(target)
+    sample = shard.read(0).validate().numpy()
+    model_rows = (sample["row_flags"] & reference.MODEL) != 0
+    assert not (
+        sample["window_flags"][sample["window_ids"][model_rows]] & reference.READ_ONLY
+    ).any()
+    shard.close()
+
+
+def test_compile_limits_have_distinct_diagnostics():
+    assert GraphCompiler(profile()).max_rows == DEFAULT_MAX_ROWS == 8_000_000
+    value = trajectory(
+        1,
+        a=event("external_text", "first", "a"),
+        b=event("external_text", "second", "b"),
+    )
+    for options, code in [
+        ({"active_limit": 1}, "window_limit_exceeded"),
+        ({"max_rows": 1}, "row_limit_exceeded"),
+    ]:
+        compiler = native(**options)
+        report = compiler.dry_run(value)
+        assert [d["code"] for d in report["diagnostics"] if d["severity"] == "error"] == [code]
+        with pytest.raises(ValueError, match=code):
+            compiler.compile(value)
+
+
+@pytest.mark.parametrize(
+    ("unknown_token", "code"),
+    [(None, "encoding_error"), ("<missing>", "tokenizer_error")],
+)
+def test_tokenizer_and_encoding_failures_have_distinct_diagnostics(unknown_token, code):
+    definition = profile().model_dump(mode="json")
+    model = definition["definition"]["model"]
+    del model["vocab"]["x"]
+    model["unk_token"] = unknown_token
+    compiler = Compiler(definition)
+    value = trajectory(1, write=event("agent_text", "w", "x"))
+    assert [d["code"] for d in compiler.dry_run(value)["diagnostics"]] == [code]
+    with pytest.raises(ValueError, match=code):
+        compiler.compile(value)
 
 
 @pytest.mark.parametrize("codec", ["none", "lz4", "zlib"])

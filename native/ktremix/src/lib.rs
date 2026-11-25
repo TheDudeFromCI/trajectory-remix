@@ -49,7 +49,8 @@ pub mod shard;
 mod slots;
 
 pub use compiler::{
-    Compilation, Compiler, Metrics, Options, Report, TokenizerProfile, CONTRACT, VERSION,
+    Compilation, Compiler, Metrics, Options, Report, TokenizerProfile, CONTRACT, DEFAULT_MAX_ROWS,
+    VERSION,
 };
 pub use diagnostics::{Diagnostic, Severity};
 pub use model::{Emission, Frame, Token};
@@ -65,6 +66,18 @@ pub enum Error {
     /// The input, options or shard contents were rejected. The message says why.
     #[error("{0}")]
     Invalid(String),
+    /// A tokenizer profile or the tokenizer itself failed.
+    #[error("{0}")]
+    Tokenizer(String),
+    /// Trajectory content could not be represented in the compiled format.
+    #[error("{0}")]
+    Encoding(String),
+    /// The scheduler ran out of active window capacity.
+    #[error("Active window capacity exceeded (limit {limit}, excluding Available)")]
+    WindowLimitExceeded { limit: usize },
+    /// The trajectory exceeded the configured compiled row budget.
+    #[error("Compilation row bound exceeded (limit {limit})")]
+    RowLimitExceeded { limit: usize },
     /// A cancellation callback asked compilation to stop before it finished.
     #[error("Compilation cancelled")]
     Cancelled,
