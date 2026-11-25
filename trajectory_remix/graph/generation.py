@@ -17,7 +17,7 @@ from . import (
 from .draft_reply import draft_text
 from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
-from .models import GraphSource, ProjectSettings, canonical
+from .models import GraphSource, ProjectSettings
 from .progress import label
 from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
@@ -159,8 +159,7 @@ class GenerationService:
         options = job["config"]["options"]
         prior = options.get("conversation")
         session = assistant.begin(source, settings, options["comments"], prior)
-        budget = settings.generation.assistant_context_bytes
-        if prior and len(canonical(session["messages"]).encode()) >= budget:
+        if prior and assistant.over_context_budget(settings, session["messages"]):
             session = assistant.begin(source, settings, options["comments"])
         return session
 
@@ -412,10 +411,7 @@ class GenerationService:
             if "authoring_session" not in cp:
                 cp["authoring_session"] = self._assist_session(j, source, settings)
             payload = assistant.payload(cp["authoring_session"])
-            if (
-                len(canonical(payload["messages"]).encode())
-                >= settings.generation.assistant_context_bytes
-            ):
+            if assistant.over_context_budget(settings, payload["messages"]):
                 self._assist_end(job, source, cp, "context_limit")
                 return
         else:

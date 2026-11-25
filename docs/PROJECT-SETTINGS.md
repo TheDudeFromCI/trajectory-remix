@@ -49,7 +49,7 @@ Both default to **-1**, which means no limit: the provider decides.
 | Field | What it does when set |
 | --- | --- |
 | **Max output tokens** | Caps each response, including reasoning and tool calls. Chat Completions uses `max_tokens` and Responses uses `max_output_tokens`. |
-| **Context limit (tokens)** | Remix checks every request against it before sending, and stops instead of sending one that will not fit. Max output tokens, when set, is held back from it on every request. |
+| **Context limit (tokens)** | Remix checks every request against it before sending, and stops instead of sending one that will not fit. Max output tokens, when set, is held back from it on every request. This setting also enables the [Assistant history budget](GRAPH-GENERATION.md#assistant-sessions). |
 
 Set the context limit if your server silently cuts long prompts instead of returning an
 error. See [Context scope and local-model budgets](GRAPH-GENERATION.md#context-scope-and-local-model-budgets)
