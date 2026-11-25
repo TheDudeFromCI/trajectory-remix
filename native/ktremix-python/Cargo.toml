@@ -1,0 +1,19 @@
+[package]
+name = "ktremix-python"
+description = "Python bindings for the KTREMIX library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "ktremix_native"
+crate-type = ["cdylib"]
+test = false
+
+[dependencies]
+ktremix = { path = "../ktremix" }
+pyo3 = { version = "0.26", features = ["abi3-py311"] }
+serde_json = "1"
+serde = "1"

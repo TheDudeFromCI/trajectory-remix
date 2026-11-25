@@ -8,12 +8,14 @@ next thing you will probably want to do.
 You need Python 3.11+. Node is only needed if you work on the frontend tests; there
 is no frontend build step.
 
+Install a stable Rust toolchain to build the native compiler bindings from this checkout.
+
 ```bash
-python -m pip install -e '.[mcp,export]'
+python -m pip install ./native/ktremix-python -e '.[mcp,export]'
 ```
 
-The `mcp` extra enables agent connections, and `export` provides the compiler and
-tokenizer dependencies for compiled export.
+The `mcp` extra enables agent connections, and `export` provides NumPy and LZ4 for the Python
+training examples and the reference shard tools.
 
 ## Create a project and open the studio
 
