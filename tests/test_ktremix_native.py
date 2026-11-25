@@ -64,6 +64,21 @@ def test_dry_run_uses_same_warnings_and_blocks_only_errors():
         compiler.compile(broken)
 
 
+def test_unknown_tool_warns_without_blocking_compilation():
+    value = trajectory(
+        1,
+        call=event("tool_call", "w", "{}", call_id="request", tool="lookup", close_window=True),
+    )
+    settings = {"tools": {}}
+    diagnostics = dry_run(value, settings=settings)["diagnostics"]
+    assert [(d["severity"], d["code"], d["event_id"]) for d in diagnostics] == [
+        ("warning", "unknown_tool", "call")
+    ]
+    assert native(settings=settings).compile(value)["report"]["diagnostics"] == diagnostics
+    assert dry_run(value, settings={"tools": {"lookup": {}}})["diagnostics"] == []
+    assert dry_run(value)["diagnostics"] == []
+
+
 @pytest.mark.parametrize("codec", ["none", "lz4", "zlib"])
 def test_native_and_reference_shards_cross_read(tmp_path, codec):
     compiler = native()

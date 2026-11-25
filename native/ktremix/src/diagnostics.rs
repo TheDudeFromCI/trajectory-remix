@@ -565,12 +565,15 @@ fn tool_diagnostics(
             }
             if let (Some(settings), Some(tool)) = (settings, current.tool.as_deref()) {
                 if !settings.tools.contains_key(tool) {
-                    diagnostics.push(Diagnostic::event(
-                        "unknown_tool",
-                        format!("Unknown tool: {tool}"),
-                        name,
-                        "tool",
-                    ));
+                    diagnostics.push(
+                        Diagnostic::event(
+                            "unknown_tool",
+                            format!("Unknown tool: {tool}"),
+                            name,
+                            "tool",
+                        )
+                        .warning(),
+                    );
                 }
             }
             if current.insert_tool_end && !finished && !cancelled {
