@@ -262,6 +262,31 @@ event panel also hides the trajectory bar and its save state. When you hide the 
 its step and **Play** controls move to the status bar so you can still scrub the windows.
 Your layout is remembered in this browser.
 
+### Move the timeline to another monitor
+
+Have a second screen? Click the **pop-out** button at the right end of the timeline's header
+(or choose **View → Pop out timeline panel**). The timeline opens in its own browser window,
+which you can drag to the other monitor and resize. Everything still works from there:
+clicking an event opens it in the event panel, **Shift**-click adds a dependency, and the
+scrubber, **Play**, zoom and view picker drive the windows in the main editor. The windows
+grow into the space the timeline left.
+
+To bring it back, close the popup window, click the pop-out button again, or choose
+**View → Return timeline panel**. The popup remembers its size and position for next time,
+though some browsers keep new windows on the screen that opened them.
+
+| If you… | What happens |
+| --- | --- |
+| Close the timeline window | The timeline returns to the editor. Pop it out again any time. |
+| Reload the timeline window | It reconnects and keeps showing the timeline. |
+| Reload the editor | The timeline window waits a moment, then reconnects to the reloaded editor. |
+| Close the editor | The timeline window closes too. |
+| Open the editor in two tabs | Each tab gets its own timeline window, and each only controls its own tab. |
+
+If nothing opens, your browser blocked the popup: allow popups for the studio's address
+and try again. Hover tooltips don't show in the popup window; hover an event for its
+dependencies instead.
+
 ### Resize panels
 
 Drag the thin gap between two panels to resize them: the dataset and event panels

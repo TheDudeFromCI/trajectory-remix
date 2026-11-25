@@ -1,4 +1,4 @@
-"""Real-browser layout checks (splitters, collapsible header, status-bar transport); no model calls."""
+"""Real-browser layout checks (splitters, header, status-bar transport, pop-out panels); no model calls."""
 
 import socket
 import subprocess
@@ -30,14 +30,15 @@ def main():
                 time.sleep(0.01)
             if not server.started:
                 raise RuntimeError("Studio did not start")
-            subprocess.run(
-                [
-                    "node",
-                    str(Path(__file__).with_name("layout_frontend.mjs")),
-                    f"http://127.0.0.1:{sock.getsockname()[1]}",
-                ],
-                check=True,
-            )
+            for script in ("layout_frontend.mjs", "panel_popout_frontend.mjs"):
+                subprocess.run(
+                    [
+                        "node",
+                        str(Path(__file__).with_name(script)),
+                        f"http://127.0.0.1:{sock.getsockname()[1]}",
+                    ],
+                    check=True,
+                )
         finally:
             server.should_exit = True
             thread.join(timeout=5)
