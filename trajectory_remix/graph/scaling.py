@@ -8,13 +8,16 @@ from copy import deepcopy
 from pydantic import Field
 
 from . import endpoint_prompts
-from .agent_share import MIN_AGENT_SHARE
 from .compiler_schedule import is_model_event
 from .models import DTO, GraphSource, WindowReference, canonical
 
 VERSION = 1
 CHARS_PER_TOKEN = 3.5
 TARGETS = {"small": (32500, 2000), "standard": (65000, 4000), "large": (130000, 8000)}
+TASK_LENGTH_SIZES = dict(
+    XXS="small", XS="small", S="small", M="standard", L="large", XL="large", XXL="large"
+)
+LEGACY_COMPLEXITY_SIZES = dict(trivial="small", small="small", large="large")
 
 
 def is_scaled(source):
@@ -28,9 +31,12 @@ def is_scaled(source):
 
 
 def plan(proposal, settings):
-    # Reuse the already sampled complexity. This makes no additional draw.
-    complexity = proposal.get("scenario", {}).get("project_state", {}).get("complexity")
-    size = {"trivial": "small", "small": "small", "large": "large"}.get(complexity, "standard")
+    # Reuse the sampled length. Older custom matrices still combine length and difficulty.
+    state = proposal.get("scenario", {}).get("project_state", {})
+    if "task_length" in state:
+        size = TASK_LENGTH_SIZES.get(state["task_length"], "standard")
+    else:
+        size = LEGACY_COMPLEXITY_SIZES.get(state.get("complexity"), "standard")
     total, agent = TARGETS[size]
     draft_endpoint = settings.endpoints[settings.endpoint_roles["draft"]]
     output = budget(draft_endpoint.model_dump(mode="json"))["max_output_tokens"]
@@ -303,7 +309,7 @@ def begin_pass(source, cp, session, settings):
     )
     if "low_agent_share" not in settings.disabled_warnings:
         task += (
-            f" Keep at least {MIN_AGENT_SHARE:.2%} of the complete graph's characters as "
+            " Keep at least 1/16 of the complete graph's characters as "
             "agent-generated characters. Plan room for substantive agent decisions, tool "
             "arguments, and messages as you add external evidence."
         )

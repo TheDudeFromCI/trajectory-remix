@@ -14,7 +14,7 @@ run's observations, not guarantees.
 Training is explicit and refuses to run in CI. It needs no endpoints or pretrained weights.
 
 ```bash
-python -m pip install -e '.[export]'
+python -m pip install ./native/ktremix-python -e '.[export]'
 python -m pip install 'torch>=2.5,<3' --index-url https://download.pytorch.org/whl/cpu
 python examples/train_ktremix.py run /tmp/ktremix-graph-addition --user-machine --check
 ```

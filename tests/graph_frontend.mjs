@@ -98,6 +98,20 @@ assert.ok($('window-grid').querySelector('.window-tokens'));
 $('window-grid').querySelector('.window-raw').click();
 const tickNode=$('timeline').querySelector('button'); assert.ok(tickNode.title.includes('Depends on:'));
 $('first-tick').click(); assert.equal(ui.position,0);
+// Graph mode steps one dependency level at a time and the scrub line is draggable.
+{
+ ui.prefs.mode='graph'; ui.position=0; ui.renderTimeline();
+ const events=ui.draft.events, level={};
+ for (const id of Object.keys(events)) { const walk=i=>Math.max(0,...events[i].after.map(d=>walk(d)+1)); level[id]=walk(id); }
+ const top=Math.max(...Object.values(level)); assert.equal(ui.maxPosition,top);
+ const shown=()=>$('timeline').querySelectorAll('.event-node:not(.future)').length;
+ assert.equal(shown(),Object.values(level).filter(l=>l===0).length);
+ $('next-tick').click(); assert.equal(ui.position,Math.min(1,top));
+ assert.equal(shown(),Object.values(level).filter(l=>l<=ui.position).length);
+ assert.equal($('scrubber'),null); assert.ok($('timeline').querySelector('.timeline-cursor'));
+ assert.equal(ui.positionAt(ui.cursorX(top)),top); assert.equal(ui.positionAt(-500),0);
+ $('first-tick').click();
+}
 // Zoom slider rescales the timeline horizontally and persists.
 const zoomWidth=()=>parseFloat($('timeline').querySelector('.timeline-lanes').style.width);
 const baseWidth=zoomWidth(); $('timeline-zoom').value='2'; $('timeline-zoom').dispatchEvent(new Event('input'));
@@ -164,7 +178,7 @@ $('delete-sample').click(); await until(()=>ui.id===null);
 assert.equal($('event-content').value,''); assert.equal($('event-picker').value,'');
 assert.ok($('event-editor-panel').classList.contains('no-event'));
 // Playback does not loop: it pauses on the last tick, and Play at the end restarts from 0.
-$('scrubber').max=1; ui.position=0; $('play').click();
+ui.maxPosition=1; ui.position=0; $('play').click();
 await until(()=>!ui.playing); assert.equal(ui.position,1); assert.equal($('play').textContent,'Play');
 $('play').click(); assert.equal(ui.position,0); assert.equal($('play').textContent,'Pause'); $('play').click();
 ui.stopped=true;clearTimeout(ui.pollTimer);clearTimeout(ui.validationTimer);ui.preview.invalidate();if(ui.playing)clearInterval(ui.playing);

@@ -39,7 +39,7 @@ with `SendUserFile`). If a screenshot isn't possible, say so and explain why.
   as `compiler.py`, `authoring.py`, `validation.py` or `server.py`. Keep new
   functions short and single-purpose. Existing code is not to be refactored or
   split as part of unrelated work; only extract when a change genuinely needs it.
-- **Lint must pass.** Run `ruff check .` before committing (`pip install -e ".[lint]"`).
+- **Lint must pass.** Run `ruff check .` before committing (`pip install ./native/ktremix-python -e ".[lint]"`).
   Rules are configured in `pyproject.toml`. Fix findings rather than adding
   ignores; if an ignore is unavoidable, scope it to the line or file and explain why.
 - **Formatting.** The codebase is formatted with `ruff format` (100 columns) and

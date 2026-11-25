@@ -93,10 +93,11 @@ message; start a new run or review instead.
 ## Long-trajectory experiment
 
 Turn on **Enable long-trajectory experiment** in **Review Settings** and save before
-starting a generation job. The experiment uses the complexity already selected by the
-sampler. Trivial and small proposals aim for about 32,500 content tokens and 2,000
-supervised agent tokens. Medium proposals aim for about 65,000 and 4,000. Large
-proposals aim for about 130,000 and 8,000. These guide the models. Actual lengths can vary.
+starting a generation job. The experiment uses the task length already selected by the
+sampler. XXS through S aim for about 32,500 content tokens and 2,000 supervised agent
+tokens. M aims for about 65,000 and 4,000. L through XXL aim for about 130,000 and 8,000.
+Projects using older matrices derive the same three bands from the combined complexity
+axis. These guide the models. Actual lengths can vary.
 
 Draft creates a small outline from the endpoint's text reply, then writes one prose
 section per call with a short handoff for the next section. Assembly checkpoints
@@ -291,8 +292,8 @@ review, and it needs the saved revision you're looking at.
 | Session | A native tool conversation. The model gets the comments table and the trajectory ID, reads and edits the graph with the authoring tools, and answers with `reply`. Each accepted edit is saved. |
 | Replies | `reply` answers one comment, once. `done: true` adds the note as an agent reply and marks the comment addressed, for the user to accept or send back; `false` adds the note as a reply and leaves it open. The model never resolves a comment. |
 | Finish | The session ends when every frozen comment has a reply; the replies are posted then. A reply without tool calls while comments remain gets a reminder listing them. |
-| Next send | The finished conversation is kept. The next send appends the new comments to it as a user message, unless it no longer fits the Assistant context budget (`assistant_context_bytes`); then it starts afresh. |
-| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or the Assistant context budget ends the job with edits kept and comments open; a context-budget end also drops the kept conversation. |
+| Next send | The finished conversation is kept. The next send appends the new comments to it as a user message. When the local context check is enabled and the conversation exceeds the Assistant history budget (`assistant_context_bytes`), the new job starts afresh. |
+| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or a context limit ends the job with edits kept and unanswered comments open. A context-limit stop also drops the kept conversation. Set the endpoint's **Context limit** to `-1` to leave context enforcement to the provider, including for Assistant history. |
 
 The stage and review history aren't touched; edits make an earlier review stale as usual. The job's Undo reverts its
 edits but not its comment answers.

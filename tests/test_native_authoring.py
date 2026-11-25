@@ -16,7 +16,7 @@ from test_graph_generation import (
 
 from trajectory_remix.graph import authoring, authoring_session, reviews
 from trajectory_remix.graph.bulk import BulkService
-from trajectory_remix.graph.compiler import CompileError, GraphCompiler
+from trajectory_remix.graph.compiler import GraphCompiler
 from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import JobService
 from trajectory_remix.graph.models import GraphSource, ProjectSettings, ToolDefinition
@@ -209,7 +209,7 @@ def test_schema_warning_uses_actual_arguments_and_causal_presentation(arguments,
     assert all(d.code != "unknown_tool" for d in diagnostics)
 
 
-def test_read_only_write_error_cannot_be_disabled_and_agent_opening_warns():
+def test_read_only_write_warns_and_can_be_hidden_in_the_studio():
     windows = {"w": dict(purpose="document", agent_writable=False)}
     opened_by_input = source(
         {
@@ -218,10 +218,12 @@ def test_read_only_write_error_cannot_be_disabled_and_agent_opening_warns():
         },
         windows,
     )
-    settings = ProjectSettings(disabled_warnings=["read_only_window_write", "window_not_writable"])
-    assert [d.code for d in diagnose(opened_by_input, settings)] == ["read_only_window_write"]
-    with pytest.raises(CompileError, match="read_only_window_write"):
-        GraphCompiler(profile(), settings=settings).compile(opened_by_input)
+    assert [(d.code, d.severity) for d in diagnose(opened_by_input)] == [
+        ("window_not_writable", "warning")
+    ]
+    settings = ProjectSettings(disabled_warnings=["window_not_writable"])
+    assert diagnose(opened_by_input, settings) == []
+    GraphCompiler(profile(), settings=settings).compile(opened_by_input)
     model_opening = source({"model": event("agent_text", "w")}, windows)
     assert [(d.code, d.severity) for d in diagnose(model_opening)] == [
         ("window_not_writable", "warning")

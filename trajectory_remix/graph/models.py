@@ -479,8 +479,7 @@ class GenerationOptions(DTO):
     scaling_section_tokens: Annotated[int, Field(ge=2000, le=16000)] = 4000
     max_authoring_exchanges: Annotated[int, Field(ge=1)] = 10
     format_retries: Annotated[int, Field(ge=0, le=5)] = 2
-    # An explicit byte budget for an Assistant conversation, kept between sends; not a
-    # token estimate. The endpoint's context limit also ends a session.
+    # An explicit byte budget for Assistant history when the endpoint has a local context limit.
     assistant_context_bytes: Annotated[int, Field(ge=256)] = 65536
 
 

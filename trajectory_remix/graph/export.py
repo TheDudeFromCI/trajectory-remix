@@ -265,9 +265,8 @@ class ArtifactService:
             if options.compiled:
                 _publish_json(directory / "profile.json", compiler.profile.model_dump())
                 # Exact serialization whose hash is embedded in every shard.
-                (directory / "tokenizer.json").write_text(
-                    compiler.tokenizer.to_str(), encoding="utf-8"
-                )
+                tokenizer_json = compiler.tokenizer_json()
+                (directory / "tokenizer.json").write_bytes(tokenizer_json.encode())
                 assets = ["profile.json", "tokenizer.json"]
             for split in SPLITS:
                 members = sorted(
@@ -293,33 +292,45 @@ class ArtifactService:
                             profile_sha256=compiler.profile.fingerprint,
                             export={"split": split, **asdict(options)},
                             tokenizer={
-                                "sha256": hashlib.sha256(
-                                    compiler.tokenizer.to_str().encode()
-                                ).hexdigest(),
+                                "sha256": hashlib.sha256(tokenizer_json.encode()).hexdigest(),
                                 "special_token_ids": compiler.controls,
                             },
                         )
 
-                        def samples():
-                            for source in chunk:
-                                check()
-                                started = time.perf_counter()
-                                columns, metrics = compiler.compile(source, cancelled=cancelled)
-                                if scaling.is_scaled(source):
-                                    compile_seconds = round(time.perf_counter() - started, 3)
-                                    scale_metrics[source.id] = scaling.compiled_counts(
-                                        source, compiler, columns
-                                    ) | dict(
-                                        peak_active_windows=metrics["peak_active_windows"],
-                                        compile_seconds=compile_seconds,
+                        if any(scaling.is_scaled(source) for source in chunk):
+                            # Keep per-source measurements for experimental samples.
+                            def samples():
+                                for source in chunk:
+                                    check()
+                                    started = time.perf_counter()
+                                    columns, metrics = compiler.compile(source, cancelled=cancelled)
+                                    if scaling.is_scaled(source):
+                                        compile_seconds = round(time.perf_counter() - started, 3)
+                                        scale_metrics[source.id] = scaling.compiled_counts(
+                                            source, compiler, columns
+                                        ) | dict(
+                                            peak_active_windows=metrics["peak_active_windows"],
+                                            compile_seconds=compile_seconds,
+                                        )
+                                    yield (
+                                        source.id,
+                                        columns,
+                                        project(source, options.metadata).get("metadata"),
                                     )
-                                yield (
-                                    source.id,
-                                    columns,
-                                    project(source, options.metadata).get("metadata"),
-                                )
 
-                        k.write_shard(path, samples(), manifest, sample_count=len(chunk))
+                            k.write_shard(path, samples(), manifest, sample_count=len(chunk))
+                        else:
+                            # Compile on native threads, capped so large machines do not
+                            # oversubscribe while the studio keeps serving requests.
+                            workers = min(len(chunk), os.cpu_count() or 1, 8)
+                            compiler.write_shard(
+                                path,
+                                (project(source, options.metadata) for source in chunk),
+                                sample_count=len(chunk),
+                                manifest=manifest,
+                                cancelled=cancelled,
+                                workers=workers,
+                            )
                     else:
                         partial = path.with_suffix(".partial")
                         with partial.open("x", encoding="utf-8") as stream:

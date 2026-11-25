@@ -10,6 +10,8 @@ from test_graph_generation import finish, native_report, service, tool_message
 
 from trajectory_remix.graph import ktremix, scaling, scaling_reads, token_limits
 from trajectory_remix.graph.compiler import GraphCompiler
+from trajectory_remix.graph.export import ArtifactService, ExportOptions
+from trajectory_remix.graph.models import ProjectSettings
 from trajectory_remix.graph.provider import request_body
 
 
@@ -139,11 +141,11 @@ class Provider:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("complexity", "size", "section_tokens", "sections"),
-    [("small", "small", 16000, 3), ("medium", "standard", 4000, 17)],
+    ("task_length", "size", "section_tokens", "sections"),
+    [("S", "small", 16000, 3), ("M", "standard", 4000, 17)],
 )
 async def test_scaled_run_rolls_over_and_repairs_cross_section_evidence(
-    tmp_path, complexity, size, section_tokens, sections
+    tmp_path, task_length, size, section_tokens, sections
 ):
     provider = Provider()
     gen, _ = service(
@@ -155,7 +157,9 @@ async def test_scaled_run_rolls_over_and_repairs_cross_section_evidence(
         scaling_experiment=True,
         scaling_section_tokens=section_tokens,
     )
-    job = gen.start([{"seed": 137, "overrides": {"complexity": complexity}}], {})
+    job = gen.start(
+        [{"seed": 137, "overrides": {"complexity": "expert", "task_length": task_length}}], {}
+    )
     await finish(gen, job)
     attempt = gen.jobs.attempts(job)[0]
     assert attempt["outcome"] == "pass"
@@ -179,7 +183,7 @@ async def test_scaled_run_rolls_over_and_repairs_cross_section_evidence(
     }
 
 
-def test_paged_reads_and_training_token_measurement():
+def test_paged_reads_and_training_token_measurement(tmp_path):
     graph = source(
         {
             "doc": event("external_text", "doc", "x" * 13000),
@@ -192,7 +196,12 @@ def test_paged_reads_and_training_token_measurement():
                 close_window=True,
                 supervision={"masked": True},
             ),
-        }
+        },
+        metadata={
+            "stage": 3,
+            "split": "Train",
+            "scaling": {"version": scaling.VERSION, "outline": [{}]},
+        },
     )
     first = scaling_reads.read(graph, None, {}, "view_event", {"event_id": "doc"})["event"][
         "content"
@@ -216,3 +225,11 @@ def test_paged_reads_and_training_token_measurement():
     assert measurement["rows"] > measurement["episode_tokens"]
     raw, index = ktremix.encode_sample(graph.id, columns)
     ktremix.Sample(raw, index).validate()
+    exports = ArtifactService(tmp_path / "exports")
+    artifact, manifest = exports.build(
+        [graph], ProjectSettings(), options=ExportOptions(), compiler=compiler
+    )
+    observed = manifest["scaling"]["samples"][graph.id]
+    assert all(observed[key] == value for key, value in measurement.items())
+    with ktremix.Dataset([exports.root / artifact / manifest["files"][0]["name"]]) as dataset:
+        dataset[0].validate()

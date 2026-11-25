@@ -14,7 +14,7 @@ Paths below are relative to `trajectory_remix/`.
 | Area | Entry points | Review focus |
 | --- | --- | --- |
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
-| Compiler/export | `graph/compiler.py`, `graph/export.py`, `graph/ktremix.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
+| Compiler/export | `native/ktremix`, `graph/compiler.py`, `graph/export.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
 | Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/authoring_session.py`, `graph/endpoint_prompts.py`, `graph/reviews.py`, `graph/signoffs.py`, `graph/provider.py` | Frozen inputs and prompts, Draft and native Assembly/review sessions, checklist evidence and stage transitions; every review can edit and repairs what fails before signing off |
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js`, `static/checklist-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
@@ -79,7 +79,11 @@ Use [TESTING](TESTING.md) for the current commands. Start with the defect's focu
 regression, then run relevant shared suites. A typical bounded check is:
 
 ```bash
-python -m pytest -q tests/test_graph*.py tests/test_ktremix_format.py
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p ktremix
+python -m pytest -q tests/test_graph*.py tests/test_ktremix*.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs

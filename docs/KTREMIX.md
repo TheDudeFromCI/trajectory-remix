@@ -14,10 +14,11 @@ specification for people writing readers, writers or trainers.
   a trainer builds whatever sparse masks its model needs.
 - The default compression is LZ4, falling back to uncompressed when it doesn't help.
 
-**Make and read one.** Export from the studio ([Export](EXPORT.md)), or try the demo tools:
+**Make and read one.** Export from the studio ([Export](EXPORT.md)), use the
+[standalone Rust crate or Python bindings](../native/ktremix-python/README.md), or try
+the reference demo tools from a [Remix installation](GETTING-STARTED.md):
 
 ```bash
-python -m pip install numpy lz4
 python examples/ktremix_dataset.py demo /tmp/ktremix-demo
 python examples/ktremix_dataset.py verify '/tmp/ktremix-demo/*.ktremix'
 python examples/ktremix_dataset.py sample '/tmp/ktremix-demo/*.ktremix' --seed 42 --count 5
@@ -356,7 +357,6 @@ visibility, positions and slot state; never allow cross-sample attention.
 ## 7. Sampling all shards
 
 ```bash
-python -m pip install numpy lz4
 python examples/ktremix_dataset.py demo /tmp/ktremix-demo
 python examples/ktremix_dataset.py verify '/tmp/ktremix-demo/*.ktremix'
 python examples/ktremix_dataset.py sample '/tmp/ktremix-demo/*.ktremix' --seed 42 --count 5
