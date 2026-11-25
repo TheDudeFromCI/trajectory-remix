@@ -71,7 +71,8 @@ Source calculators count three different things, which are never treated as equi
 authored windows, and unique logical tool-call IDs. None of them measure semantic coordination behavior, task
 count, peak Active capacity or token exposure.
 
-- **Semantic** categories and outcomes need explicit manual annotation. Nothing tags them automatically.
+- **Semantic** categories and outcomes need explicit annotation: by hand, or by the Assistant when you send it
+  comments (origin `assistant_annotation`). Nothing tags them automatically.
 - **Peak Active and token** measures need explicit export observations carrying a profile fingerprint and compiler
   version. The app doesn't publish compiler measurements back to sources.
 - Each observation records its origin, the source revision and hash, and the definition revision. A changed
@@ -118,7 +119,7 @@ All authenticated under `/api/v1`.
 | `POST /sampler/runs` | `{requests:[…], instructions:{…}}`. 202 with a durable run job. |
 | `POST /metrics/population` | `{query:{text?, stage?, split?, tool?}, population:"all"\|"accepted"}`. Streaming aggregation, with proposal coverage and [derived labels](#derived-labels). |
 | `GET /metrics/trajectories/{id}` | Definitions, observations, status, drift and original targets. |
-| `PUT /metrics/trajectories/{id}/{key}` | `{expected_revision, value, origin, profile_fingerprint?, compiler_version?}`. An explicit annotation. |
+| `PUT /metrics/trajectories/{id}/{key}` | `{expected_revision, value, origin, profile_fingerprint?, compiler_version?}`. An explicit annotation. `origin` is `manual_annotation` or `export`; `assistant_annotation` is written only by an Assistant session. |
 | `DELETE /metrics/trajectories/{id}/{key}` | `{expected_revision}`. Removes a recorded observation so the metric reads as unavailable again. |
 | `POST /metrics/calculate-missing` | `{query:{…}}`. 202 with a bulk job. |
 

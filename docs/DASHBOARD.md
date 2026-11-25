@@ -218,7 +218,9 @@ edits the trajectory with the same authoring tools Assembly uses, then answers e
 with its `reply` tool: it marks the ones it fixed **Awaiting review**, with a note on what
 changed, and replies to the rest with a reason or a question, leaving them open. The next time
 you send comments on the same trajectory, the agent continues the same conversation, so it
-remembers what it already did. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
+remembers what it already did. It can also review the trajectory's metrics and set or clear
+categories, labels and outcomes, for example when a comment says the complexity is wrong;
+measured values stay read-only. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
 revert its edits, and read the answers in the Comments tab. If the session runs out of
 room, it stops with its edits so far kept and the comments still open.
 
