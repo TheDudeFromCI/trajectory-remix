@@ -19,6 +19,11 @@ try {
   }, example);
   await page.locator('.event-node').first().waitFor();
 
+  const popOut = async from => {
+    const [win] = await Promise.all([context.waitForEvent('page'), from.locator('#popout-timeline').click()]);
+    await win.locator('#timeline .event-node').first().waitFor(); return win;
+  };
+
   // Popping out moves the live timeline into a new window and gives its room to the Windows panel.
   const windows = await page.locator('.windows-widget').boundingBox();
   const [popup] = await Promise.all([context.waitForEvent('page'), page.locator('#popout-timeline').click()]);
@@ -58,8 +63,44 @@ try {
   await page.locator('#view-menu summary').click(); await page.locator('#popout-timeline-menu').click();
   await page.locator('.timeline-widget #timeline').waitFor();
   assert.equal(again.isClosed(), true);
+
+  // Reloading the popup keeps the timeline in it, and it still drives the editor.
+  let popout = await popOut(page);
+  await popout.reload();
+  await popout.locator('#timeline .event-node').first().waitFor();
+  assert.equal(await page.locator('.timeline-widget').count(), 0, 'the reloaded popup reconnects');
+  await popout.locator('.event-node', {hasText: 'input'}).click();
+  assert.equal(await page.evaluate(() => graphStudio.event), 'input');
+
+  // Reloading the editor: the popup waits, then reconnects to the new page.
+  await page.reload(); await page.waitForFunction(() => globalThis.graphStudio?.settingsRecord);
+  await page.evaluate(id => graphStudio.select(id), example.id);
+  await popout.locator('#timeline .event-node').first().waitFor();
+  assert.equal(popout.isClosed(), false);
+  assert.equal(await page.locator('.timeline-widget').count(), 0, 'the popup reconnects to the reloaded editor');
+  await popout.locator('.event-node', {hasText: 'think'}).click();
+  assert.equal(await page.evaluate(() => graphStudio.event), 'think');
+
+  // Two editors, the second opened from the first: each keeps its own popup.
+  const [other] = await Promise.all([context.waitForEvent('page'), page.evaluate(url => window.open(url), page.url())]);
+  await other.waitForFunction(() => globalThis.graphStudio?.settingsRecord);
+  await other.evaluate(id => graphStudio.select(id), example.id); await other.locator('.event-node').first().waitFor();
+  const otherPopout = await popOut(other);
+  assert.notEqual(otherPopout, popout);
+  assert.equal(await popout.locator('#timeline .event-node').count(), 2, "the first editor's popup is untouched");
+  await otherPopout.locator('.event-node', {hasText: 'input'}).click();
+  assert.equal(await other.evaluate(() => graphStudio.event), 'input');
+  assert.equal(await page.evaluate(() => graphStudio.event), 'think', 'clicks reach only their own editor');
+
+  // Closing an editor closes its popup and leaves the other pair alone.
+  await other.close();
+  await otherPopout.waitForEvent('close', {timeout: 5000});
+  assert.equal(popout.isClosed(), false);
+  await page.close();
+  await popout.waitForEvent('close', {timeout: 5000});
+
   assert.deepEqual(errors, []);
-  console.log('Pop-out panels: timeline pops out, drives the editor and docks back passed.');
+  console.log('Pop-out panels: pop out, drive the editor, dock back, reload either window, two editors and closing passed.');
 } finally {
   await browser.close();
 }

@@ -1,12 +1,15 @@
 /* Pop-out panels: move a live editor panel into a second browser window (for a second monitor).
-   The panel's elements move as they are, so their listeners and the studio state keep working;
-   closing the popup puts the panel back. Lookups by id go through `byId`, which also searches
-   the popup. */
+   The panel's elements move as they are, so their listeners and the studio state keep working.
+   The popup (panel-popout.html) asks for the panel through `panelPopout.attach`, so it
+   reconnects after either window reloads. Closing the popup puts the panel back. Lookups by id
+   go through `byId`, which also searches the popup. */
 
 const PANELS = {
   timeline: {selector: '.timeline-widget', title: 'Timeline', className: 'timeline-popped-out'}
 };
 const GEOMETRY_KEY = 'studio-popout-geometry';
+// Each editor gets its own window names, so two editors never take over each other's popups.
+const INSTANCE = Math.random().toString(36).slice(2);
 const open = new Map(); // panel name -> {win, section, placeholder}
 
 /** Find an element by id in the main page or in any popped-out panel. */
@@ -32,47 +35,60 @@ function saveGeometry(name, win) {
 }
 
 function features(name) {
-  const g = readGeometry(name);
-  const box = g ? g : {width: Math.min(1400, screen.availWidth), height: 480};
+  const box = readGeometry(name) || {width: Math.min(1400, screen.availWidth), height: 480};
   return 'popup,' + Object.entries(box).filter(([, v]) => Number.isFinite(v)).map(([k, v]) => `${k}=${Math.round(v)}`).join(',');
 }
 
-/** Give the empty popup the studio's stylesheets, icons and theme. */
+/** Give the popup the studio's stylesheets and icons (once). */
 function prepare(doc, spec) {
-  doc.head.replaceChildren(); doc.title = `${spec.title} · Trajectory Remix`;
+  doc.title = `${spec.title} · Trajectory Remix`;
+  const have = new Set([...doc.querySelectorAll('link[rel=stylesheet]')].map(link => link.href));
   for (const link of document.querySelectorAll('link[rel=stylesheet]')) {
+    if (have.has(link.href)) continue;
     const copy = doc.createElement('link'); copy.rel = 'stylesheet'; copy.href = link.href; doc.head.append(copy);
   }
   const sprite = document.querySelector('body > svg');
-  doc.body.className = 'panel-popout-window';
-  doc.body.replaceChildren(...(sprite ? [doc.importNode(sprite, true)] : []));
+  if (sprite && !doc.querySelector('body > svg')) doc.body.prepend(doc.importNode(sprite, true));
+  doc.getElementById('panel-popout-waiting')?.setAttribute('hidden', '');
 }
 
-function dock(name) {
+/** Put the panel back in the editor. The popup stays open unless `closeWindow` is set. */
+function dock(name, closeWindow) {
   const entry = open.get(name); if (!entry) return;
   open.delete(name);
   entry.placeholder.replaceWith(entry.section);
   document.getElementById('workspace')?.classList.remove(PANELS[name].className);
   sync(name);
-  if (!entry.win.closed) { saveGeometry(name, entry.win); entry.win.close(); }
+  if (entry.win.closed) return;
+  saveGeometry(name, entry.win);
+  if (closeWindow) entry.win.close();
+  else entry.win.document.getElementById('panel-popout-waiting')?.removeAttribute('hidden');
 }
 
-function undock(name) {
-  const spec = PANELS[name], section = document.querySelector(spec.selector);
-  if (!section) return;
-  const win = window.open('', `trajectory-remix-${name}`, features(name));
-  if (!win) { alert('The browser blocked the popup window. Allow popups for this page and try again.'); return; }
+/** Called by the popup: move the panel into `win` if it is ours and the panel is free. */
+function attach(name, win) {
+  const spec = PANELS[name]; if (!spec || win.opener !== window) return 'busy';
+  if (open.has(name)) return open.get(name).win === win ? 'attached' : 'busy';
+  const section = document.querySelector(spec.selector);
+  if (!section) return 'wait';
   prepare(win.document, spec);
   const placeholder = document.createComment(`${name} panel is in a popup window`);
   section.replaceWith(placeholder); win.document.body.append(section);
   open.set(name, {win, section, placeholder});
   document.getElementById('workspace')?.classList.add(spec.className);
-  win.addEventListener('pagehide', () => dock(name));
-  win.addEventListener('beforeunload', () => saveGeometry(name, win));
-  sync(name); win.focus();
+  // Fires when the popup closes or reloads; after a reload it asks for the panel again.
+  win.addEventListener('pagehide', () => dock(name, false));
+  sync(name);
+  return 'attached';
 }
 
-export function togglePopout(name) { if (open.has(name)) dock(name); else undock(name); }
+function undock(name) {
+  const win = window.open(`/static/panel-popout.html?panel=${name}`, `trajectory-remix-${name}-${INSTANCE}`, features(name));
+  if (!win) { alert('The browser blocked the popup window. Allow popups for this page and try again.'); return; }
+  win.focus();
+}
+
+export function togglePopout(name) { if (open.has(name)) dock(name, true); else undock(name); }
 
 function sync(name) {
   const out = open.has(name), title = PANELS[name].title.toLowerCase();
@@ -86,8 +102,11 @@ function sync(name) {
   }
 }
 
+window.panelPopout = {attach};
 for (const button of document.querySelectorAll('[data-popout]')) {
   button.addEventListener('click', () => togglePopout(button.dataset.popout));
 }
 for (const name of Object.keys(PANELS)) sync(name);
-window.addEventListener('pagehide', () => { for (const name of [...open.keys()]) dock(name); });
+// The editor is reloading or closing: take the panel back so the popup is left empty. After a
+// reload the popup asks the new page for it; if the editor closed, the popup closes itself.
+window.addEventListener('pagehide', () => { for (const name of [...open.keys()]) dock(name, false); });

@@ -259,9 +259,16 @@ scrubber, **Play**, zoom and view picker drive the windows in the main editor. T
 grow into the space the timeline left.
 
 To bring it back, close the popup window, click the pop-out button again, or choose
-**View → Return timeline panel**. Reloading the editor also brings it back. The popup
-remembers its size and position for next time, though some browsers keep new windows on
-the screen that opened them.
+**View → Return timeline panel**. The popup remembers its size and position for next time,
+though some browsers keep new windows on the screen that opened them.
+
+| If you… | What happens |
+| --- | --- |
+| Close the timeline window | The timeline returns to the editor. Pop it out again any time. |
+| Reload the timeline window | It reconnects and keeps showing the timeline. |
+| Reload the editor | The timeline window waits a moment, then reconnects to the reloaded editor. |
+| Close the editor | The timeline window closes too. |
+| Open the editor in two tabs | Each tab gets its own timeline window, and each only controls its own tab. |
 
 If nothing opens, your browser blocked the popup: allow popups for the studio's address
 and try again. Hover tooltips don't show in the popup window; hover an event for its
