@@ -12,9 +12,10 @@ import {duplicateTrajectory} from './duplicate.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
+import {byId} from './panel-popout.js';
 import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
-const $ = id => document.getElementById(id);
+const $ = byId; // Also finds elements in a popped-out panel.
 const copy = value => structuredClone(value);
 const json = value => JSON.stringify(value, null, 2);
 const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, stable(value[k])])) : value;

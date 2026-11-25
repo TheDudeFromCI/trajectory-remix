@@ -19,7 +19,7 @@ Paths below are relative to `trajectory_remix/`.
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js`, `static/checklist-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
-| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `markdown-view.js`, `markdown-inline.js`, `window-markdown.css`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
+| Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `window-render.js`, `markdown-view.js`, `markdown-inline.js`, `window-markdown.css`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `panel-popout.js`, `panel-popout.css`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
 | Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `graph/assistant_memory.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; only a person resolves (agents mark comments addressed); Send to agent freezes open comments, needs the Assistant role, answers through the native `reply` tool, continues the last finished conversation and never changes the stage |
 | Sampler/metrics | `graph/sampling.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
@@ -68,6 +68,10 @@ tool cannot discard endpoint or generation changes. Inspect computed CSS and
 screenshots at desktop and compact viewports; DOM assertions alone do not verify
 layout or the `hidden` attribute. Check keyboard focus, labels, Escape, menus,
 dialogs, overflow and meaningful progress/error messages.
+
+The timeline can be popped out into a second window (`panel-popout.js`), which moves its
+elements out of `document`. Look up timeline elements with `byId` (graph.js's `$`), not
+`document.getElementById`, or they go missing while the timeline is popped out.
 
 ## Validation and completion
 

@@ -89,11 +89,12 @@ toggle?.addEventListener('click', () => setCollapsed(!bar.classList.contains('co
 setCollapsed(read(HEADER_KEY, false) === true, false);
 
 // Timeline controls: with the timeline panel hidden they live in the status bar, and only while the Editor is showing.
+// A popped-out timeline keeps its own controls.
 const workspace = $('workspace'), slot = $('status-transport'), transport = document.querySelector('.timeline-controls .transport');
 const home = transport?.parentElement, anchor = $('preview-status');
 function syncTransport() {
   if (!workspace || !slot || !transport || !home) return;
-  const inStatusBar = workspace.classList.contains('timeline-panel-hidden');
+  const inStatusBar = workspace.classList.contains('timeline-panel-hidden') && !workspace.classList.contains('timeline-popped-out');
   if (inStatusBar && transport.parentElement !== slot) slot.append(transport);
   if (!inStatusBar && transport.parentElement !== home) home.insertBefore(transport, anchor);
   slot.hidden = !(inStatusBar && !workspace.hidden);
