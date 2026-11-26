@@ -149,6 +149,7 @@ assert.equal(ui.dialogs.size,2); assert.equal(ui.id,selected); assert.equal(ui.e
 $('metrics-button').click(); await until(()=>!$('metrics-view').hidden && $('metrics-values').textContent);
 assert.ok($('metrics-values').textContent.includes('proposal_coverage'));
 assert.ok($('metrics-values').textContent.includes('unavailable'));
+for (const name of ['Total characters','Agent-generated characters']) { const tile=[...document.querySelectorAll('#metrics-content .stat-tile')].find(n=>n.querySelector('.stat-label').textContent.includes(name)); assert.match(tile.querySelector('.stat-value').textContent, /^[\d,]+ \(~[\d,]+ tokens\)$/); }
 $('metrics-calculate').click(); await until(()=>ui.dialogs.size===3);
 await until(async ()=>(await module.api('/job-summaries')).some(j=>j.kind==='bulk'&&j.state==='completed'));
 assert.equal($('event-content').value,'unsaved'); assert.equal(ui.id,selected);

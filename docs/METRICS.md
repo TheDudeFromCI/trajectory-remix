@@ -69,7 +69,8 @@ published back to the source automatically.
 ## Character counts and trajectory sizes
 
 The Metrics tab also shows **Total characters** and **Agent-generated characters** for the saved
-records in your search. Agent-generated text means agent text and tool call events. Both are source-only
+records in your search, each followed by an estimated token count such as `(~1,000 tokens)`
+(characters / 3.5). Agent-generated text means agent text and tool call events. Both are source-only
 calculators, so **Calculate Missing Metrics** can save them per trajectory.
 
 Each trajectory also gets a **size label**. Tokens are estimated at about 3.5 characters per token (nothing is
