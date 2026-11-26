@@ -6,7 +6,8 @@ edit the graph, and `reply` answers each listed comment exactly once. It finishe
 every comment has a reply. Then fixed comments become addressed, with the note in the
 thread, for a person to accept or send back; the rest get the note as a reply and stay
 open. The model never resolves a comment. No stage, review or checklist changes; edits
-simply make an earlier review stale.
+simply make an earlier review stale. The metric tools (assistant_metrics) let it review the
+trajectory's metrics and record annotation values alongside its edits.
 
 A finished conversation is kept (assistant_memory), and the next send appends the new
 comments to it, so the model keeps what it learned.
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import json
 
-from . import endpoint_prompts, scaling, scaling_reads, token_limits
+from . import assistant_metrics, endpoint_prompts, scaling, scaling_reads, token_limits
 from .authoring_session import apply_tool, tool_reply
 from .authoring_tools import TOOLS, editing_tools
 from .comments import NewReply
@@ -26,7 +27,7 @@ from .schema_errors import explain
 PHASE = "assist"
 ROLE = "assistant"
 ACTION = "assistant"
-VERSION = "graph-assistant/3"
+VERSION = "graph-assistant/4"
 NOTE_LIMIT = 10_000
 
 
@@ -121,7 +122,11 @@ def payload(session):
         tier=ROLE,
         prompt_version=session["prompt_version"],
         messages=session["messages"],
-        tools=[*tools, reply_tool(session["comment_ids"])],
+        tools=[
+            *tools,
+            *assistant_metrics.provider_tools(),
+            reply_tool(session["comment_ids"]),
+        ],
     )
 
 
@@ -147,6 +152,8 @@ def _call(source, settings, session, call):
             reply = _record(session, args)
         elif session.get("scaling") and name in scaling_reads.READS:
             reply = scaling_reads.read(source, settings, session, name, args)
+        elif name in assistant_metrics.TOOLS:
+            source, reply = assistant_metrics.apply(source, settings, name, args)
         elif name in TOOLS and name != "signoff":
             source, reply = apply_tool(source, settings, name, args)
             if session.get("scaling") and "diagnostics" in reply:

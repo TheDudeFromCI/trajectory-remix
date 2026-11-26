@@ -46,6 +46,11 @@ A value you set is recorded against the trajectory's current content. If the con
 the value is marked **Stale** until you **Confirm** it again, and the **Problems** tab lists it under
 `stale_metrics`.
 
+You can also ask the Assistant to do it: leave a comment such as "complexity should be hard" and
+[send the comments to the agent](DASHBOARD.md#send-comments-to-an-agent). It can read every metric and set
+categories, labels and outcomes, but not measured values. Its values are recorded with the origin
+`assistant_annotation` (visible through the API), and you can change or clear them here like any other value.
+
 ## Calculate what's missing
 
 **Calculate Missing Metrics** starts an explicit bulk job. It fills only values that are absent, using

@@ -290,6 +290,7 @@ review, and it needs the saved revision you're looking at.
 | --- | --- |
 | Admission | The open comments and their replies are frozen into the job. Comments added later wait for the next send. |
 | Session | A native tool conversation. The model gets the comments table and the trajectory ID, reads and edits the graph with the authoring tools, and answers with `reply`. Each accepted edit is saved. |
+| Metrics | `view_metrics` returns every metric definition with its value, origin and status (available, stale or unavailable). `set_metric` records an annotation-scope value, or clears it with `null`, on the working source; it's checked like a manual annotation and saved with the session's edits, with origin `assistant_annotation`. Calculated (`source`) and `export` metrics are read-only. A later graph edit makes the value stale. |
 | Replies | `reply` answers one comment, once. `done: true` adds the note as an agent reply and marks the comment addressed, for the user to accept or send back; `false` adds the note as a reply and leaves it open. The model never resolves a comment. |
 | Finish | The session ends when every frozen comment has a reply; the replies are posted then. A reply without tool calls while comments remain gets a reminder listing them. |
 | Next send | The finished conversation is kept. The next send appends the new comments to it as a user message. When the local context check is enabled and the conversation exceeds the Assistant history budget (`assistant_context_bytes`), the new job starts afresh. |

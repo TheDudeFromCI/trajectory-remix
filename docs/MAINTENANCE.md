@@ -20,7 +20,7 @@ Paths below are relative to `trajectory_remix/`.
 | Durable work | `graph/jobs.py`, `graph/bulk.py`, `graph/job_api.py` | Ownership, FIFO, retry slots, fencing, settlement and changed-only Undo |
 | REST/MCP | `graph/studio_api.py`, `graph/studio.py`, `graph/agent.py`, `mcp_server.py` | Shared services, loopback authentication, bounded outputs and lifecycle parity |
 | Dashboard | `graph.js`, `jobs-view.js`, `metrics-view.js`, `metrics-editor.js`, `complexity-select.js`, `studio-warnings.js`, `auto-save.js`, `window-render.js`, `markdown-view.js`, `markdown-inline.js`, `window-markdown.css`, `ui-kit.js`, `views.js`, `shell.js`, `layout.js`, `panel-popout.js`, `panel-popout-window.js`, `panel-popout.html`, `panel-popout.css`, `graph.html`, `style.css`, `graph.css`, `project-settings.js`, `sampler.js`, `usage-view.js` within `static/` | Discoverability, real layout, dirty drafts, clean live updates, flicker-free polling, conflicts and accessible controls |
-| Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `graph/assistant_memory.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; only a person resolves (agents mark comments addressed); Send to agent freezes open comments, needs the Assistant role, answers through the native `reply` tool, continues the last finished conversation and never changes the stage |
+| Comments | `graph/comments.py`, `graph/comments_api.py`, `graph/comment_tasks.py`, `graph/assistant.py`, `graph/assistant_memory.py`, `graph/assistant_metrics.py`, `static/comments-view.js` | Kept outside the source (no revision, review or export effect), writable while locked, targets checked on write and flagged when removed; only a person resolves (agents mark comments addressed); Send to agent freezes open comments, needs the Assistant role, answers through the native `reply` tool, continues the last finished conversation and never changes the stage; its metric tools write only annotation-scope values (origin `assistant_annotation`) and never calculated or export measures |
 | Sampler/metrics | `graph/sampling.py`, `graph/task_axes.py`, `graph/metrics.py` | Supplied sampler fidelity, immutable proposals, unknown/stale observations and provenance |
 
 ## Invariants
@@ -74,6 +74,9 @@ elements out of `document`. Look up timeline elements with `byId` (graph.js's `$
 `document.getElementById`, or they go missing while the timeline is popped out.
 
 ## Validation and completion
+
+The Python test jobs run `./scripts/install.sh` to build the native compiler and install the project
+into `.venv`, then `./scripts/test.sh` to test that installation.
 
 Use [TESTING](TESTING.md) for the current commands. Start with the defect's focused
 regression, then run relevant shared suites. A typical bounded check is:

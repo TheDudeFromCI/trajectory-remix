@@ -46,6 +46,8 @@ annotations. Changing stage or split doesn't change a trajectory's identity.
 
 - **Dependency graph** mode (default) needs no tokenizer or scheduler. Scrubbing walks a stable
   dependency order. It is **not authored time**.
+- In both modes, windows changed by the step into the current position get a faint
+  outer glow. It is purely visual and updates as you scrub.
 - **Tick history** is opt-in. It runs the real compiler scheduler with the tokenizer
   profile you choose in Preferences, after a trailing debounce (default 500 ms,
   configurable from 0 to 10,000 ms).

@@ -95,6 +95,7 @@ body.resizing * { cursor: inherit !important; }
 .window-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); grid-auto-rows: min-content; gap: var(--space-3); align-content: start; }
 .window-grid > .empty { grid-column: 1 / -1; }
 .window-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-top: 2px solid var(--tone); border-radius: var(--radius-md); background: var(--surface-0); }
+.window-card.changed { box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 55%, transparent), 0 0 12px 2px color-mix(in srgb, var(--tone) 45%, transparent); }
 .window-card-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); }
 .window-card-head.clickable { cursor: pointer; }
 .window-card-head h3 { font-family: var(--font-mono); font-weight: 500; font-size: 13px; }
