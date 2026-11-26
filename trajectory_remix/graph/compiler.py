@@ -16,6 +16,7 @@ from ktremix_native import CONTRACT, DEFAULT_MAX_ROWS, VERSION, Cancelled, Compi
 from tokenizers import Tokenizer
 
 from .models import GraphSource, ProjectSettings, TokenizerProfile, digest
+from .tool_extras import expand as expand_tool_extras
 from .validation import diagnose
 
 __all__ = ["CONTRACT", "VERSION", "Cancelled", "CompileError", "GraphCompiler"]
@@ -147,6 +148,10 @@ class GraphCompiler:
         except ValueError as error:
             raise CompileError(str(error)) from error
 
+    def _expanded(self, source):
+        """The source as a dict with random extra tools listed, and which tools they are."""
+        return expand_tool_extras(source.to_dict(), self.settings)
+
     def frames(self, source, *, cancelled=None):
         """Yield every scheduled frame of ``source`` (up to ``max_rows``)."""
         yield from self.preview(source, max_frames=self.max_rows, cancelled=cancelled)["frames"]
@@ -160,7 +165,7 @@ class GraphCompiler:
         """
         source = _source(source)
         try:
-            result = self._native.compile(source.to_dict(), cancelled=cancelled)
+            result = self._native.compile(self._expanded(source)[0], cancelled=cancelled)
         except ValueError as error:
             raise CompileError(str(error)) from error
         columns = result["columns"]
@@ -186,8 +191,9 @@ class GraphCompiler:
             raise ValueError("max_frames must be positive")
         source = _source(source)
         try:
+            expanded, extras = self._expanded(source)
             frames, truncated = self._native.preview(
-                source.to_dict(), max_frames=max_frames, cancelled=cancelled
+                expanded, max_frames=max_frames, cancelled=cancelled
             )
         except ValueError as error:
             raise CompileError(str(error)) from error
@@ -204,6 +210,7 @@ class GraphCompiler:
             "source_hash": source.intrinsic_hash,
             "frames": _frames(frames),
             "truncated": truncated,
+            "tool_extras": extras,
         }
 
     def write_shard(self, path, sources, *, sample_count, manifest, cancelled=None, workers=1):
@@ -215,7 +222,7 @@ class GraphCompiler:
         try:
             return self._native.write_trajectories(
                 path,
-                sources,
+                (expand_tool_extras(source, self.settings)[0] for source in sources),
                 sample_count=sample_count,
                 manifest=manifest,
                 cancelled=cancelled,

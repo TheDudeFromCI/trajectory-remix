@@ -16,6 +16,7 @@ import {renameEvent, renameProblem} from './event-rename.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {parseArguments, renderArgumentForm} from './argument-form.js';
+import {markInvalid} from './field-invalid.js';
 import {ContentModes} from './content-mode.js';
 import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -119,7 +120,7 @@ export class StudioUI {
     this.dialogs = this.jobsView.panels; // One retained detail panel per inspected job.
     this.preview = new PreviewController(async p => api(`/trajectories/${p.id}/preview`, 'POST', {
       expected_revision: p.revision, profile: p.profile, source: p.source, client_key: p.sourceHash
-    }), value => { this.frames = value.frames; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
+    }), value => { this.frames = value.frames; this.previewToolExtras = value.tool_extras || {}; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
   }
   query() {
     const q = {}, size = $('sample-search').value.match(/(?:^|\s)@size:(\S+)/i); // `@size:m` or `@size:<=xs`
@@ -376,12 +377,11 @@ export class StudioUI {
     const isSchema = $('event-kind').value === 'tool_schema' && $('content-mode').value === 'text';
     this.toolPickerShown = isSchema; holder.hidden = !isSchema; $('event-content').hidden = isSchema || !!this.argumentForm; if (head) head.hidden = isSchema;
     if (!isSchema) { holder.replaceChildren(); return; }
-    const saved = this.draft.events[this.event], extras = saved?.kind === 'tool_schema' ? saved.extra_tools || [] : [];
-    renderToolPicker(holder, {text: $('event-content').value, extras, tools: this.settings?.tools || {}, hideExtras: !this.prefs.showRandomTools, disabled: !!this.record?.owner, report: message,
+    renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
       relist: async chosen => {
         const listing = await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: chosen});
-        $('event-content').value = listing.content; this.toolExtras = {event: this.event, names: listing.added};
-        this.stashEditor(); this.applyEvent(); this.toolExtras = null; this.renderToolPicker();
+        $('event-content').value = listing.content;
+        this.stashEditor(); this.applyEvent(); this.renderToolPicker();
       }});
   }
   kindControls() {
@@ -411,7 +411,6 @@ export class StudioUI {
       close_window: $('close-window').checked, supervision: {masked: $('masked').checked, weight: Number($('weight').value)}};
     if (external) e.delivery = {mode: kind === 'chat_message' ? 'instant' : $('delivery').value, chain_immediately: $('chain').checked};
     if (kind === 'external_text' || kind === 'tool_schema' || kind === 'tool_response') e.replace_body = $('replace-body').checked;
-    if (kind === 'tool_schema') { const saved = this.draft.events[this.event]; e.extra_tools = this.toolExtras?.event === this.event ? this.toolExtras.names : saved?.kind === 'tool_schema' ? saved.extra_tools || [] : []; }
     if (kind === 'tool_call' || kind === 'tool_response') e.call_id = $('call-id').value;
     if (kind === 'tool_call') Object.assign(e, {tool: $('tool-id').value, insert_tool_begin: $('begin').checked, insert_tool_end: $('end').checked, echo_chat: $('echo-chat').checked});
     if (kind === 'tool_response') Object.assign(e, {insert_response_begin: $('begin').checked, insert_response_end: $('end').checked});
@@ -613,7 +612,7 @@ export class StudioUI {
     head.append(comment, toggle, size);
     head.classList.add('clickable'); head.title = 'Jump to the latest event that edits this window';
     head.addEventListener('click', click => { if (!click.target.closest('button')) this.selectLatestWindowEvent(w); });
-    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.draft.events[event]?.extra_tools || [], hideExtras: !this.prefs.showRandomTools}));
+    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.previewToolExtras?.[event] || [], hideExtras: !this.prefs.showRandomTools}));
     return card;
   }
   /** Select the last event (at or before the current position) that wrote tokens into this window. */
@@ -1004,7 +1003,7 @@ export class StudioUI {
     for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool', 'search-comments']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
-    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.prefs.hideClosedWindows = $('hide-closed-windows').checked; this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
+    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (markInvalid($('preview-debounce'), $('preview-debounce').value === '' || !Number.isFinite(delay) || delay < 0 || delay > 10000)) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.prefs.hideClosedWindows = $('hide-closed-windows').checked; this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
     on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
