@@ -260,15 +260,27 @@ review, and it needs the saved revision you're looking at.
 | Step | What happens |
 | --- | --- |
 | Admission | The open comments and their replies are frozen into the job. Comments added later wait for the next send. |
-| Session | A native tool conversation. The model gets the comments table and the trajectory ID, reads and edits the graph with the authoring tools, and answers with `reply`. Each accepted edit is saved. |
-| Metrics | `view_metrics` returns every metric definition with its value, origin and status (available, stale or unavailable). `set_metric` records an annotation-scope value, or clears it with `null`, on the working source; it's checked like a manual annotation and saved with the session's edits, with origin `assistant_annotation`. Calculated (`source`) and `export` metrics are read-only. A later graph edit makes the value stale. |
+| Session | A native tool conversation. The model gets the comments table and the trajectory ID, reads and edits the graph with the authoring tools, and answers with `reply`. Tools act on a copy-on-write working copy: the pending proposal if there is one, otherwise the trajectory as it was at admission. The trajectory itself is never edited. |
+| Metrics | `view_metrics` returns every metric definition with its value, origin and status (available, stale or unavailable). `set_metric` records an annotation-scope value, or clears it with `null`, on the working copy; it's checked like a manual annotation and proposed with the session's edits, with origin `assistant_annotation`. Calculated (`source`) and `export` metrics are read-only. A later graph edit makes the value stale. |
 | Replies | `reply` answers one comment, once. `done: true` adds the note as an agent reply and marks the comment addressed, for the user to accept or send back; `false` adds the note as a reply and leaves it open. The model never resolves a comment. |
-| Finish | The session ends when every frozen comment has a reply; the replies are posted then. A reply without tool calls while comments remain gets a reminder listing them. |
+| Finish | The session ends when every frozen comment has a reply; the replies are posted then. A reply without tool calls while comments remain gets a reminder listing them. If the working copy differs from its base, it is kept as the trajectory's proposal; otherwise any proposal is dropped. |
 | Next send | The finished conversation is kept. The next send appends the new comments to it as a user message. When the local context check is enabled and the conversation exceeds the Assistant history budget (`assistant_context_bytes`), the new job starts afresh. |
-| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or a context limit ends the job with edits kept and unanswered comments open. A context-limit stop also drops the kept conversation. Set the endpoint's **Context limit** to `-1` to leave context enforcement to the provider, including for Assistant history. |
+| Limits | Invalid replies get the usual bounded corrections. Reaching **Maximum exchanges per pass** or a context limit ends the job with its edits kept as the proposal and unanswered comments open. A context-limit stop also drops the kept conversation. Set the endpoint's **Context limit** to `-1` to leave context enforcement to the provider, including for Assistant history. |
 
-The stage and review history aren't touched; edits make an earlier review stale as usual. The job's Undo reverts its
-edits but not its comment answers.
+The stage and review history aren't touched; applied edits make an earlier review stale as usual.
+
+#### Proposals
+
+A proposal is stored outside the source, with the revision it was built from (its base) and the comments it addressed.
+Admission rebases a pending proposal onto the current revision first, so a follow-up session sees edits made since;
+both sides changing the same entity refuses the send with `proposal_conflict` (409). Entities are the defaults, each
+window, each event and each metadata key.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/trajectories/{id}/assistant/proposal` | `{proposal: null}`, or the base revision, the comment IDs, `changes` (each `{kind, id, change, before, after}`, `change` being `added`, `removed` or `changed`) and `conflicts` with the current source. |
+| `POST /api/v1/trajectories/{id}/assistant/proposal/apply` | Body `{expected_revision}`. Three-way merges the proposal onto the current source and saves it as one edit with provenance `assistant_proposal`, then resolves the comments it addressed that still await review. Returns the saved trajectory with an Undo `delta` and the `resolved` count. A conflict returns 409 `proposal_conflict` and changes nothing. |
+| `DELETE /api/v1/trajectories/{id}/assistant/proposal` | Drops the proposal, reopens the comments it addressed with a note, and forgets the kept conversation. |
 
 ### Stale reviews
 

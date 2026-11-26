@@ -4,6 +4,7 @@ import {JobsView} from './jobs-view.js';
 import {renderMetrics} from './metrics-view.js';
 import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
+import {ProposalView} from './assistant-proposal.js';
 import {MetricsEditor} from './metrics-editor.js';
 import {renderComplexity} from './complexity-select.js';
 import {studioWarnings} from './studio-warnings.js';
@@ -242,7 +243,7 @@ export class StudioUI {
     this.renderDraft(); this.renderEvent(); this.markSelectedRow();
     if (cached) { $('source-json').value = cached.sourceText; $('metadata-json').value = cached.metadataText;
       if (latest.revision !== cached.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.'); }
-    this.listing(); this.schedulePreview(); this.comments?.load(id).catch(message);
+    this.listing(); this.schedulePreview(); this.comments?.load(id).catch(message); this.proposal?.load(id).catch(message);
   }
   async refreshSelected() {
     if (!this.id) return;
@@ -762,7 +763,23 @@ export class StudioUI {
     this.assistantQueue.clear(this.id); // Before the call, so a failed send isn't retried on every poll.
     const r = await api(`/trajectories/${this.id}/assistant`, 'POST', {expected_revision: this.record.revision});
     this.ownedBulk.add(r.job_id);
-    message(`Sent to ${this.settings.endpoint_roles.assistant}. Follow it in Jobs; answers appear here.`);
+    message(`Sent to ${this.settings.endpoint_roles.assistant}. Follow it in Jobs; its answers and proposed changes appear here.`);
+  }
+  /** Apply builds on the saved trajectory, so save what was just typed first. */
+  async saveBeforeProposal() {
+    await this.autoSave.flush();
+    if (this.hasUnsavedChanges()) throw new Error('Your latest edit could not be saved yet. Fix it or reload the saved source, then apply.');
+  }
+  async proposalApplied(result) {
+    this.history([result.delta]);
+    await this.refreshSelected(); await this.comments.load(this.id); await this.listing();
+    message(`Applied the proposed changes${result.resolved ? ` and resolved ${result.resolved} comment${result.resolved === 1 ? '' : 's'}` : ''}. Undo reverts them.`);
+  }
+  /** "Request changes" on a proposal: a trajectory comment, sent to the assistant at once. */
+  async requestProposalChanges(text) {
+    await api(`/trajectories/${this.id}/comments`, 'POST', {target: {kind: 'trajectory'}, body: text});
+    await this.comments.load(this.id);
+    await this.sendToAssistant();
   }
   /** Auto-send: while a job owns the trajectory, queue the send instead of refusing it. */
   async autoSendToAssistant() {
@@ -955,6 +972,7 @@ export class StudioUI {
       onChange: removed => this.windowsChanged(removed)});
     this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
       autoSend: () => this.prefs.autoSendComments === true, onOpened: () => this.autoSendToAssistant(),
+      proposed: () => this.proposal?.pending || new Set(),
       els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
       onChange: () => {
         if (this.draft) this.renderTimeline();
@@ -962,6 +980,10 @@ export class StudioUI {
         const unresolved = items.filter(c => c.status !== 'resolved').length, review = items.filter(c => c.status === 'addressed').length;
         if (row && (row.comments !== unresolved || row.review !== review)) this.listing().catch(message);
       }});
+    this.proposal = new ProposalView({api, report: message, host: $('assistant-proposal'),
+      revision: () => this.record.revision, locked: () => !!this.record?.owner,
+      ready: () => this.saveBeforeProposal(), onChange: () => this.comments.render(),
+      onApplied: result => this.proposalApplied(result), requestChanges: text => this.requestProposalChanges(text)});
     this.metricsEditor = new MetricsEditor({api, report: message, beforeSave: () => this.autoSave.flush(),
       onSaved: view => { if (view.delta) this.history([view.delta]); return this.refreshSelected(); },
       onView: (view, state) => {
@@ -981,7 +1003,7 @@ export class StudioUI {
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('duplicate-sample', 'click', () => this.duplicate());
     on('reload-source', 'click', () => this.id && this.select(this.id, true));
-    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.windowsPanel.render(); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
+    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.proposal.load(null); this.windowsPanel.render(); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
     on('event-apply', 'click', () => this.applyEvent());
     on('event-name', 'change', () => this.renameCurrentEvent());
@@ -1060,6 +1082,7 @@ export class StudioUI {
     await this.refreshSelected();
     await this.updateAssistantStatus();
     if (this.id) await this.comments.load(this.id);
+    if (this.id) await this.proposal.load(this.id);
     await this.flushAssistantQueue();
     if (currentView() === 'jobs-view') await this.jobsView.renderList();
   }

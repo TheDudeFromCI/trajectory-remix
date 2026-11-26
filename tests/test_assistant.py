@@ -7,8 +7,16 @@ import pytest
 from test_graph_generation import Fake, finish, plan, settings, tool_message
 from test_graph_studio import client, create  # noqa: F401  (pytest fixture)
 
-from trajectory_remix.graph import assistant, assistant_memory, endpoint_prompts, prompt_defaults
+from trajectory_remix.graph import (
+    assistant,
+    assistant_memory,
+    assistant_proposals,
+    endpoint_prompts,
+    prompt_defaults,
+    proposal_review,
+)
 from trajectory_remix.graph.bulk import BulkService
+from trajectory_remix.graph.commands import GraphCommands
 from trajectory_remix.graph.comments import CommentService, NewComment, NewReply
 from trajectory_remix.graph.generation import GenerationService
 from trajectory_remix.graph.jobs import JobService
@@ -74,6 +82,21 @@ async def run(gen, record):
     return job
 
 
+def proposed(gen, record):
+    """The pending proposal's source; the trajectory itself is untouched until applied."""
+    proposal = assistant_proposals.load(gen.store, record.source.id)
+    return proposal and proposal["source"]
+
+
+def applied(gen, record):
+    """Apply the pending proposal as the person would; returns the saved source."""
+    current = gen.store.read(record.source.id)
+    saved, _, _ = proposal_review.apply(
+        GraphCommands(gen.store), gen.comments, record.source.id, current.revision
+    )
+    return saved.record.source
+
+
 @pytest.mark.asyncio
 async def test_assistant_edits_then_replies_with_native_tools(tmp_path):
     gen, fake = service(tmp_path)
@@ -83,9 +106,9 @@ async def test_assistant_edits_then_replies_with_native_tools(tmp_path):
         turn(edit(), reply(fixed, True, "Rewrote x."), reply(unclear, False, "Which window?"))
     ]
     job = await run(gen, record)
-    source = gen.store.read(record.source.id).source
-    assert source.events["x"].content == "after"
-    assert source.metadata["stage"] == 1, "the assistant never changes the stage"
+    live = gen.store.read(record.source.id).source
+    assert live.events["x"].content == "before", "edits wait as a proposal"
+    assert proposed(gen, record)["events"]["x"]["content"] == "after"
     (first,) = fake.calls
     assert first.endpoint == "a" and first.payload["operation"] == "assist"
     names = [tool["function"]["name"] for tool in first.payload["tools"]]
@@ -103,6 +126,9 @@ async def test_assistant_edits_then_replies_with_native_tools(tmp_path):
     assert states[unclear]["replies"][-1]["author"] == "agent"
     assert states[unclear]["replies"][-1]["body"] == "Which window?"
     assert gen.jobs.inspect(job)["state"] == "completed"
+    source = applied(gen, record)
+    assert source.events["x"].content == "after"
+    assert source.metadata["stage"] == 1, "the assistant never changes the stage"
 
 
 @pytest.mark.asyncio
@@ -188,7 +214,8 @@ async def test_a_later_send_continues_the_conversation(tmp_path):
     assert follow_up["role"] == "user"
     assert follow_up["content"].startswith(endpoint_prompts.FOLLOW_UP)
     assert "Now shorten it." in follow_up["content"] and "First pass." not in follow_up["content"]
-    assert gen.store.read(record.source.id).source.events["x"].content == "short"
+    assert proposed(gen, record)["events"]["x"]["content"] == "short"
+    assert applied(gen, record).events["x"].content == "short"
 
 
 @pytest.mark.asyncio
@@ -222,7 +249,8 @@ async def test_exchange_limit_ends_the_session_and_keeps_comments_open(tmp_path)
     fake.responses = [turn(edit()), turn(("view_graph", {}))]
     job = await run(gen, record)
     assert len(fake.calls) == 2 and gen.jobs.inspect(job)["state"] == "completed"
-    assert gen.store.read(record.source.id).source.events["x"].content == "after"
+    assert gen.store.read(record.source.id).source.events["x"].content == "before"
+    assert proposed(gen, record)["events"]["x"]["content"] == "after", "kept as a proposal"
     comment = gen.comments.for_trajectory(record.source.id)[0]
     assert comment["status"] == "open"
     assert comment["replies"][-1]["author"] == "agent"

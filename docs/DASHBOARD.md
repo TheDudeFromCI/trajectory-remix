@@ -209,7 +209,7 @@ complete by mistake.
 | State | Meaning | What you can do |
 | --- | --- | --- |
 | **Open** | Work to do. Agents pick these up. | **Reply**, **Resolve** (if you fixed it yourself), **Delete** |
-| **Awaiting review** | An agent says it's fixed. Its note on what changed is the latest reply. | **Accept** to resolve it, or **Request changes** to reply and reopen it in one step |
+| **Awaiting review** | An agent says it's fixed. Its note on what changed is the latest reply. | **Accept** to resolve it, or **Request changes** to reply and reopen it in one step. When the fix is in the Assistant's [proposed changes](#review-the-assistants-proposed-changes), applying them resolves it instead. |
 | **Resolved** | Done. | **Reopen**, **Delete** |
 
 Click a comment's target to jump to it. **Reply** adds to the thread without changing the
@@ -232,15 +232,42 @@ work through a trajectory's open comments.
 2. Click **Send open comments to agent** on the Comments tab.
 
 The job takes the open comments as they are at that moment, with their replies. The model
-edits the trajectory with the same authoring tools Assembly uses, then answers every comment
-with its `reply` tool: it marks the ones it fixed **Awaiting review**, with a note on what
-changed, and replies to the rest with a reason or a question, leaving them open. The next time
-you send comments on the same trajectory, the agent continues the same conversation, so it
-remembers what it already did. It can also review the trajectory's metrics and set or clear
-categories, labels and outcomes, for example when a comment says the complexity is wrong;
-measured values stay read-only. Review its fixes as above. The trajectory's stage doesn't change. Follow it in **Jobs**, where Undo can
-revert its edits, and read the answers in the Comments tab. If the session runs out of
-room, it stops with its edits so far kept and the comments still open.
+works with the same authoring tools Assembly uses, then answers every comment with its `reply`
+tool: it marks the ones it fixed **Awaiting review**, with a note on what changed, and replies
+to the rest with a reason or a question, leaving them open. The next time you send comments on
+the same trajectory, the agent continues the same conversation, so it remembers what it already
+did. It can also review the trajectory's metrics and set or clear categories, labels and
+outcomes, for example when a comment says the complexity is wrong; measured values stay
+read-only. The trajectory's stage doesn't change. Follow it in **Jobs**, and read the answers
+in the Comments tab.
+
+The Assistant never edits the trajectory directly. It works on a copy, and its edits wait as
+**proposed changes** for you to inspect, like a pull request (see below). If the session runs
+out of room, it stops with its edits so far proposed and the comments still open.
+
+#### Review the Assistant's proposed changes
+
+When an Assistant job finishes with edits, a **Proposed changes** panel appears at the top of
+the Comments tab. The trajectory itself, and everything you see in the editor, stays as it was
+until you apply them.
+
+1. Read the list: one entry for each event, window, metadata value or the defaults that the
+   Assistant added, removed or changed. Expand an entry to see its lines, with removed lines
+   in red (`-`) and added lines in green (`+`).
+2. Decide:
+
+| Button | What happens |
+| --- | --- |
+| **Apply changes** | The changes are saved to the trajectory as one edit, so **Undo** reverts them. The comments they fixed are resolved. |
+| **Request changes** | Write what should be different. It's added as a comment on the whole trajectory and sent to the Assistant straight away. The agent keeps working on the same proposal, and the panel then shows all its changes together. |
+| **Discard** | The changes are dropped and the comments they fixed reopen with a note. The Assistant's conversation is forgotten, so the next send starts from the trajectory as it is. |
+
+You can keep editing the trajectory while a proposal waits. Applying it only replays what the
+Assistant changed, so your edits to other events, windows or values are kept. If you changed
+the same thing the Assistant did, the entry is marked **Conflict** and **Apply changes** is
+unavailable: undo your edit there, or discard the proposal. A new send can't build on a
+conflicting proposal either. To fix one of the Assistant's comments individually, use
+**Request changes** on that comment; the next run updates the same proposal.
 
 To skip the button, turn on **Automatically send new comments to the assistant** in
 **Preferences** (off by default, stored in this browser). Adding a comment, replying to a comment that is still open, or requesting
