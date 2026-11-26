@@ -31,9 +31,10 @@ python -m trajectory_remix graph-studio --dataset project.sqlite
 `graph-studio` serves it at **http://127.0.0.1:8765**. Use `--port` to change the
 port. The studio only listens on loopback.
 
-For development, run `./dev.sh --dataset project.sqlite` to pull updates for the current
+For development, run `./scripts/dev.sh --dataset project.sqlite` to pull updates for the current
 branch, build and install the native bindings, and launch the studio. The script forwards
-CLI arguments such as `--port 8766` to the studio.
+CLI arguments such as `--port 8766` to the studio. If the project root contains a `.env`
+file, the script loads it as shell syntax and exports its variables to child processes.
 
 A new project needs **no tokenizer and no model endpoint**. You only need those for
 specific features, listed below.
