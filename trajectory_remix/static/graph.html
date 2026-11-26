@@ -155,7 +155,6 @@
     <section class="trajectory-bar" id="metadata-panel" aria-label="Trajectory">
       <div class="bar-row">
         <span id="trajectory-title" class="mono truncate">No trajectory selected</span>
-        <span id="dirty-indicator" class="tag"></span>
         <button id="diagnostics-summary" class="sm ghost" hidden></button>
         <span class="grow"></span>
         <details class="menu" id="trajectory-menu"><summary aria-label="More trajectory actions">More</summary><div class="menu-list end">
@@ -357,6 +356,7 @@
 
 <footer class="status-bar">
   <div id="status" role="status" aria-live="polite"></div>
+  <span id="dirty-indicator" class="tag" role="status" hidden></span>
   <div id="status-transport" class="status-transport" aria-label="Timeline controls" hidden></div>
   <div id="job-status-bar" aria-label="Active jobs"></div>
 </footer>
