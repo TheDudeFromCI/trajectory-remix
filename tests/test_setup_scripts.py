@@ -18,7 +18,7 @@ def executable(path, body):
 @pytest.fixture
 def checkout(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"
-    for name in ("dev.sh", "scripts/install.sh", "scripts/run.sh"):
+    for name in ("scripts/dev.sh", "scripts/install.sh", "scripts/run.sh"):
         target = checkout / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, target)
@@ -64,7 +64,7 @@ def test_dev_pulls_installs_and_passes_arguments(checkout, pull_code, install_co
     args = ["--dataset", "project with spaces.sqlite", "--port", "8766"]
 
     result = subprocess.run(
-        [repo / "dev.sh", *args], cwd=repo.parent, capture_output=True, text=True
+        [repo / "scripts/dev.sh", *args], cwd=repo.parent, capture_output=True, text=True
     )
 
     assert result.returncode == (pull_code or install_code), result.stderr
@@ -74,3 +74,25 @@ def test_dev_pulls_installs_and_passes_arguments(checkout, pull_code, install_co
         if not install_code:
             expected += ["-m", "trajectory_remix", *args]
     assert result.stdout.splitlines() == expected
+
+
+@pytest.mark.parametrize("with_env", [False, True])
+def test_dev_loads_optional_root_env_for_child_processes(checkout, monkeypatch, with_env):
+    repo, tools = checkout
+    monkeypatch.delenv("DEV_TEST_VALUE", raising=False)
+    if with_env:
+        (repo / ".env").write_text('# Local settings\nDEV_TEST_VALUE="value with spaces"\n')
+    # An unrelated working directory's .env must not be loaded.
+    (repo.parent / ".env").write_text('DEV_TEST_VALUE="wrong directory"\n')
+    report = 'printf "%s\\n" "$PWD" "${DEV_TEST_VALUE-unset}"'
+    executable(tools / "git", report)
+    executable(repo / "scripts/install.sh", report)
+    executable(repo / "scripts/run.sh", report)
+
+    result = subprocess.run(
+        [repo / "scripts/dev.sh"], cwd=repo.parent, capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    expected_value = "value with spaces" if with_env else "unset"
+    assert result.stdout.splitlines() == [str(repo), expected_value] * 3
