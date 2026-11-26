@@ -255,7 +255,7 @@ export class StudioUI {
       if (latest.revision !== this.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.');
       return;
     }
-    const followEnd = this.position >= Number($('scrubber').max);
+    const followEnd = this.position >= (this.maxPosition || 0);
     this.followPreviewEnd = this.prefs.mode === 'ticks' && followEnd;
     this.preview.invalidate(); this.frames = null;
     this.record = latest; this.draft = copy(latest.source); this.diagnostics = latest.diagnostics;
@@ -444,6 +444,27 @@ export class StudioUI {
     const ids = Object.keys(this.draft?.windows || {}), index = ids.indexOf(id);
     return pastel(index < 0 ? ids.length + [...String(id)].reduce((n, c) => n + c.charCodeAt(0), 0) : index);
   }
+  // Horizontal pixel position of the scrub line for a timeline position (and its inverse).
+  cursorX(position) {
+    const zoom = this.prefs.zoom;
+    return this.prefs.mode === 'ticks' ? GUTTER + 12 + position * 7 * zoom : GUTTER + 12 + position * 185 * zoom + 175 * zoom;
+  }
+  positionAt(x) {
+    const zoom = this.prefs.zoom, ticks = this.prefs.mode === 'ticks';
+    const raw = ticks ? (x - GUTTER - 12) / (7 * zoom) : (x - GUTTER - 12 - 175 * zoom) / (185 * zoom);
+    return Math.min(this.maxPosition || 0, Math.max(0, Math.round(raw)));
+  }
+  startScrub(down) {
+    down.preventDefault();
+    const move = e => {
+      const chart = $('timeline').querySelector('.timeline-lanes'); if (!chart) return;
+      const position = this.positionAt(e.clientX - chart.getBoundingClientRect().left);
+      if (position !== this.position) { this.followPreviewEnd = false; this.position = position; this.renderTimeline(); }
+    };
+    const stop = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', stop); removeEventListener('pointercancel', stop); };
+    addEventListener('pointermove', move); addEventListener('pointerup', stop); addEventListener('pointercancel', stop);
+    move(down);
+  }
   renderTimeline() {
     if (!this.draft) {
       $('timeline').replaceChildren(node('div', 'Select a trajectory to see its timeline.', 'empty'));
@@ -453,17 +474,21 @@ export class StudioUI {
     this.comments?.setContext(this.draft, this.event);
     const order = graphOrder(this.draft), ticks = this.prefs.mode === 'ticks', zoom = this.prefs.zoom;
     const frames = this.frames || [];
-    const max = Math.max(0, (ticks ? frames.length : order.length) - 1);
+    const depth = {};
+    for (const id of order) depth[id] = Math.max(0, ...this.draft.events[id].after.map(dep => (depth[dep] ?? -1) + 1));
+    // Graph mode steps one dependency level at a time, so parallel events appear together.
+    const max = ticks ? Math.max(0, frames.length - 1) : Math.max(0, ...order.map(id => depth[id]));
+    this.maxPosition = max;
     this.position = Math.min(max, Math.max(0, this.position));
-    $('scrubber').max = max; $('scrubber').value = this.position; $('tick-number').value = this.position; $('tick-number').max = max; $('max-tick').textContent = '/ ' + max;
-    const visible = ticks ? new Set(frames.slice(0, this.position + 1).flatMap(f => [...f.inputs, ...f.outputs].map(e => e.event))) : new Set(order.slice(0, this.position + 1));
-    const lanes = [...new Set(order.map(id => this.draft.events[id].window))], depth = {}, positions = new Map();
+    $('tick-number').value = this.position; $('tick-number').max = max; $('max-tick').textContent = '/ ' + max;
+    const visible = ticks ? new Set(frames.slice(0, this.position + 1).flatMap(f => [...f.inputs, ...f.outputs].map(e => e.event))) : new Set(order.filter(id => depth[id] <= this.position));
+    const lanes = [...new Set(order.map(id => this.draft.events[id].window))], positions = new Map();
     const spans = new Map();
     if (ticks) frames.forEach((f, index) => [...f.inputs, ...f.outputs].forEach(e => {
       if (!e.event) return; const span = spans.get(e.event) || [index, index]; span[1] = index; spans.set(e.event, span);
     }));
     for (const id of order) {
-      const event = this.draft.events[id]; depth[id] = Math.max(0, ...event.after.map(dep => (depth[dep] ?? -1) + 1));
+      const event = this.draft.events[id];
       const span = spans.get(id);
       positions.set(id, {x: GUTTER + (ticks ? 12 + (span?.[0] || 0) * 7 * zoom : 12 + depth[id] * 185 * zoom),
         y: 10 + lanes.indexOf(event.window) * 44, width: ticks ? Math.max(28, ((span?.[1] || 0) - (span?.[0] || 0) + 1) * 7 * zoom) : Math.max(60, 165 * zoom)});
@@ -499,7 +524,11 @@ export class StudioUI {
       n.style.setProperty('--tone', `var(--pastel-${this.windowTone(e.window)})`);
       Object.assign(n.style, {left: p.x + 'px', top: p.y + 'px', width: p.width + 'px'}); chart.append(n);
     }
-    if (ticks) { const line = node('div', undefined, 'timeline-cursor'); line.style.left = (GUTTER + 12 + this.position * 7 * zoom) + 'px'; chart.append(line); }
+    if (order.length) {
+      const line = node('div', undefined, 'timeline-cursor'); line.title = 'Drag to scrub the timeline';
+      line.style.left = this.cursorX(this.position) + 'px'; chart.append(line);
+      chart.addEventListener('pointerdown', e => { if (!e.target.closest('.event-node')) this.startScrub(e); });
+    }
     if (!order.length) chart.append(node('div', 'No events yet. Add one with + in the event editor.', 'timeline-empty'));
     $('timeline').replaceChildren(chart);
     const windows = new Map();
@@ -526,6 +555,10 @@ export class StudioUI {
       if (tool && e.insert_tool_end || response && e.insert_response_end || chat) add({control: chat ? 'msg_end' : tool ? 'tool_end' : 'response_end'});
       if (e.close_window) { add({control: 'eos'}); w.closed = true; }
     }
+    // Windows touched by the step that led to this position get a faint glow.
+    this.changedWindows = new Set(ticks
+      ? [...(frames[this.position]?.inputs || []), ...(frames[this.position]?.outputs || [])].map(e => e.window)
+      : order.filter(id => depth[id] === this.position).map(id => this.draft.events[id].window));
     this.windowModels = windows;
     const cards = [...windows].map(([id, w]) => this.windowCard(id, w));
     $('window-grid').replaceChildren(...(cards.length ? cards : [node('div', order.length ? 'No window has content at this position. Move the timeline forward.' : 'This trajectory has no events yet.', 'empty')]));
@@ -539,7 +572,7 @@ export class StudioUI {
   }
   windowCard(id, w, popout = false) {
     this.rawWindows ||= new Set();
-    const raw = this.rawWindows.has(id), card = node('article', undefined, 'window-card' + (popout ? ' popout-card' : ''));
+    const raw = this.rawWindows.has(id), card = node('article', undefined, 'window-card' + (popout ? ' popout-card' : '') + (this.changedWindows?.has(id) ? ' changed' : ''));
     const head = node('header', undefined, 'window-card-head'), purpose = this.draft.windows[id]?.purpose || '';
     card.style.setProperty('--tone', `var(--pastel-${this.windowTone(id)})`);
     head.append(node('span', undefined, 'dot'), node(popout ? 'h2' : 'h3', id, 'truncate'), node('span', purpose, 'small muted truncate'));
@@ -593,7 +626,7 @@ export class StudioUI {
     const body = $('window-popout-body'), scroll = body.querySelector('.window-formatted, .window-tokens')?.scrollTop;
     body.replaceChildren(this.windowCard(this.popoutWindow, w, true));
     const inner = body.querySelector('.window-formatted, .window-tokens'); if (inner && scroll) inner.scrollTop = scroll;
-    setText($('popout-position'), `${this.position} / ${$('scrubber').max}`);
+    setText($('popout-position'), `${this.position} / ${this.maxPosition || 0}`);
     if (!w.tokens.length) body.querySelector('.window-card').append(node('div', 'This window has no content at this position.', 'empty'));
   }
   history(deltas) { if (!deltas.length) return; this.undo.push(deltas); if (this.undo.length > 50) this.undo.shift(); this.redo = []; this.historyButtons(); }
@@ -950,9 +983,9 @@ export class StudioUI {
     on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
-    on('scrubber', 'input', e => scrub(e.target.value)); on('tick-number', 'change', e => scrub(e.target.value));
-    on('first-tick', 'click', () => scrub(0)); on('prev-tick', 'click', () => scrub(this.position - 1)); on('next-tick', 'click', () => scrub(this.position + 1)); on('last-tick', 'click', () => scrub($('scrubber').max));
-    const lastTick = () => Number($('scrubber').max);
+    on('tick-number', 'change', e => scrub(e.target.value));
+    on('first-tick', 'click', () => scrub(0)); on('prev-tick', 'click', () => scrub(this.position - 1)); on('next-tick', 'click', () => scrub(this.position + 1)); on('last-tick', 'click', () => scrub(this.maxPosition));
+    const lastTick = () => this.maxPosition || 0;
     const pausePlayback = () => { clearInterval(this.playing); this.playing = null; $('play').textContent = 'Play'; };
     on('play', 'click', () => {
       if (this.playing) return pausePlayback();

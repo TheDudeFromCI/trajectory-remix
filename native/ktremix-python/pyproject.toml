@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ktremix-native"
+dynamic = ["version"]
+readme = "README.md"
+description = "Native compiler and training shard I/O for KTREMIX"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+numpy = ["numpy>=2,<3"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "ktremix_native._native"

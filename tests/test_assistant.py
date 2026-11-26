@@ -192,15 +192,23 @@ async def test_a_later_send_continues_the_conversation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_an_oversized_kept_conversation_starts_afresh(tmp_path):
+@pytest.mark.parametrize("context_window", [131_072, -1])
+async def test_oversized_kept_conversation_respects_endpoint_limit(tmp_path, context_window):
     gen, fake = service(tmp_path)
     record, (only,) = flagged(gen, "Fix x.")
     huge = [dict(role="system", content="old"), dict(role="user", content="x" * 300_000)]
     assistant_memory.save(gen.store, record.source.id, huge)
+    current = gen.store.settings()
+    config = current.settings.model_dump(mode="json")
+    config["endpoints"]["a"]["context_window_tokens"] = context_window
+    gen.store.update_settings(config, current.revision)
     fake.responses = [turn(reply(only, True, "Done."))]
     await run(gen, record)
     messages = fake.calls[0].payload["messages"]
-    assert len(messages) == 2 and messages[0]["content"] != "old"
+    if context_window == -1:
+        assert messages[:-1] == huge
+    else:
+        assert len(messages) == 2 and messages[0]["content"] != "old"
 
 
 @pytest.mark.asyncio
@@ -263,6 +271,7 @@ async def test_context_limit_ends_the_session_and_keeps_comments_open(tmp_path):
     fake.responses = [turn(("view_graph", {}))] * 400
     current = gen.store.settings()
     tight = current.settings.model_dump(mode="json")
+    tight["endpoints"]["a"]["context_window_tokens"] = 131_072
     tight["generation"]["assistant_context_bytes"] = 256
     gen.store.update_settings(tight, current.revision)
     job = await run(gen, record)

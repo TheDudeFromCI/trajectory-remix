@@ -10,3 +10,5 @@ work/
 /experiments/
 build/
 .ruff_cache/
+
+/target/

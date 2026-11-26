@@ -12,7 +12,11 @@ ERRORS = frozenset(
         "output_after_close",
         "unordered_window_writers",
         "unopened_window_reference",
-        "read_only_window_write",
+        "invalid_source",
+        "tokenizer_error",
+        "encoding_error",
+        "window_limit_exceeded",
+        "row_limit_exceeded",
     }
 )
 

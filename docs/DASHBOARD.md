@@ -270,7 +270,7 @@ Have a second screen? Click the **pop-out** button at the right end of the timel
 (or choose **View → Pop out timeline panel**). The timeline opens in its own browser window,
 which you can drag to the other monitor and resize. Everything still works from there:
 clicking an event opens it in the event panel, **Shift**-click adds a dependency, and the
-scrubber, **Play**, zoom and view picker drive the windows in the main editor. The windows
+scrub line, **Play**, zoom and view picker drive the windows in the main editor. The windows
 grow into the space the timeline left.
 
 To bring it back, close the popup window, click the pop-out button again, or choose

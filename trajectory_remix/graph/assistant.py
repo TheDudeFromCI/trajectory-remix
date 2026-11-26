@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import json
 
-from . import assistant_metrics, endpoint_prompts
+from . import assistant_metrics, endpoint_prompts, token_limits
 from .authoring_session import apply_tool, tool_reply
 from .authoring_tools import TOOLS, editing_tools
 from .comments import NewReply
+from .models import canonical
 from .schema_errors import explain
 
 PHASE = "assist"
@@ -28,6 +29,15 @@ ROLE = "assistant"
 ACTION = "assistant"
 VERSION = "graph-assistant/4"
 NOTE_LIMIT = 10_000
+
+
+def over_context_budget(settings, messages):
+    """Apply the Assistant history cap only when local context checks are enabled."""
+    endpoint = settings.endpoints[settings.endpoint_roles[ROLE]]
+    return (
+        endpoint.context_window_tokens != token_limits.DISABLED
+        and len(canonical(messages).encode()) >= settings.generation.assistant_context_bytes
+    )
 
 
 def frozen(comments):
