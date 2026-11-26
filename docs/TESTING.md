@@ -26,6 +26,7 @@ node tests/metrics_editor_frontend.mjs
 node tests/complexity_select_frontend.mjs
 node tests/choice_field_frontend.mjs
 node tests/argument_form_frontend.mjs
+node tests/content_mode_frontend.mjs
 node tests/windows_panel_frontend.mjs
 node tests/studio_warnings_frontend.mjs
 node tests/tool_import_frontend.mjs

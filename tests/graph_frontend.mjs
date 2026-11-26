@@ -76,6 +76,9 @@ $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('chang
 assert.equal($('event-content').hidden,true); const textField=$('argument-form').querySelector('[data-argument="text"]');
 assert.equal(textField.value,'hi'); textField.value='bye'; textField.dispatchEvent(new Event('input'));
 assert.deepEqual(JSON.parse(ui.draft.events['chat-event'].content),{text:'bye'});
+// The chosen mode survives a save that re-renders the event and a trip to another event.
+await ui.autoSave.flush(); ui.renderEvent(); assert.equal($('content-mode').value,'form'); assert.equal($('event-content').hidden,true);
+ui.selectEvent('first'); assert.equal($('content-mode').value,'text'); ui.selectEvent('chat-event'); assert.equal($('content-mode').value,'form');
 $('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').hidden,false);
 // Return to the saved graph and distinguish missing split from intentional Auto.
 await ui.select(ui.id,true); $('split').value='Auto'; $('split').dispatchEvent(new Event('change'));
@@ -189,6 +192,13 @@ await ui.autoSave.flush(); assert.ok(!ui.record.source.windows.b && !ui.record.s
 await ui.restore(true); assert.ok(ui.record.source.windows.b && ui.record.source.events.b);
 await ui.restore(true); assert.equal(ui.record.source.windows.a.intentionally_left_open ?? false,false);
 await ui.restore(false); assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
+// A poll response fetched before a save but delivered after it must not roll the save back.
+let releaseStale; const held = new Promise(r => { releaseStale = r; }), fetchBefore = globalThis.fetch;
+globalThis.fetch = (path, init) => { const sent = fetchBefore(path, init); if ((init?.method || 'GET') === 'GET' && /\/trajectories\/[^/?]+$/.test(String(path))) { globalThis.fetch = fetchBefore; return sent.then(async r => { await held; return r; }); } return sent; };
+const staleRefresh = ui.refreshSelected();
+ui.selectEvent('a'); $('content-mode').value='text'; $('event-content').value='kept'; $('event-content').dispatchEvent(new Event('input')); await ui.autoSave.flush(); const savedRevision = ui.record.revision;
+releaseStale(); await staleRefresh;
+assert.equal(ui.record.revision, savedRevision); assert.equal(ui.draft.events.a.content, 'kept'); assert.equal(ui.record.source.events.a.content, 'kept');
 // Clicking a window header jumps the event panel to the latest event that edited it (buttons excluded).
 const headModel={tokens:[{control:'ctx_begin'},{text:'x',event:'a'},{text:'y',event:'b'}],closed:false};
 let head=ui.windowCard('a',headModel).querySelector('.window-card-head'); head.click(); assert.equal(ui.event,'b');
