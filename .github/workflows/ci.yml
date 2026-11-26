@@ -121,6 +121,7 @@ jobs:
       - run: node tests/job_log_levels_frontend.mjs
       - run: node tests/job_names_tabs_frontend.mjs
       - run: node tests/duplicate_frontend.mjs
+      - run: node tests/event_rename_frontend.mjs
 
   browser:
     name: Browser workflow tests

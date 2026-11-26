@@ -47,7 +47,13 @@ assert.equal($('dependencies').textContent,'first ×');
 ui.draft.events.second.after=[]; ui.renderTimeline();
 const firstNode=[...$('timeline').querySelectorAll('button')].find(n=>n.textContent.startsWith('first →'));
 firstNode.dispatchEvent(new MouseEvent('click',{shiftKey:true})); assert.deepEqual(ui.draft.events.second.after,['first']);
-$('delete-event').click(); await until(()=>!ui.draft.events.second);
+// Renaming an event updates the dependencies that point at it.
+$('dependency-picker').value='first'; $('dependency-add').click(); await until(()=>ui.draft.events.second.after.length===1);
+$('event-name').value='renamed'; $('event-name').dispatchEvent(new Event('change'));
+assert.equal(ui.event,'renamed'); assert.ok(!ui.draft.events.second); assert.deepEqual(ui.draft.events.renamed.after,['first']);
+$('event-name').value='first'; $('event-name').dispatchEvent(new Event('change'));
+assert.equal(ui.event,'renamed'); assert.equal($('event-name').value,'renamed');
+$('delete-event').click(); await until(()=>!ui.draft.events.renamed);
 // Chat uses a structured handler; no authored MSG string.
 $('window-new').click(); $('window-id').value='chat'; $('window-purpose').value='chatroom'; $('window-writable').checked=false; $('window-form').dispatchEvent(new Event('submit',{cancelable:true}));
 assert.deepEqual(ui.draft.windows.chat,{purpose:'chatroom',agent_writable:false,reasoning_effort:null,intentionally_left_open:false});
