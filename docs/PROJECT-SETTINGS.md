@@ -38,7 +38,8 @@ Removing an endpoint also clears the roles that pointed at it. Saving that affec
 future work.
 
 **Reasoning level** sends `reasoning_effort` for Chat Completions and
-`reasoning.effort` for Responses. Leave it blank to use the model's default.
+`reasoning.effort` for Responses. Pick a level from the list, or **Custom…** to type
+another one your model supports. **Model default** sends nothing.
 Responses conversations are replayed from the job's local history with `store: false`.
 
 ### Token limits

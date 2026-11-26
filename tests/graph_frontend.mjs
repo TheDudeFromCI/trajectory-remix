@@ -49,7 +49,8 @@ const firstNode=[...$('timeline').querySelectorAll('button')].find(n=>n.textCont
 firstNode.dispatchEvent(new MouseEvent('click',{shiftKey:true})); assert.deepEqual(ui.draft.events.second.after,['first']);
 $('delete-event').click(); await until(()=>!ui.draft.events.second);
 // Chat uses a structured handler; no authored MSG string.
-$('window-id').value='chat'; $('window-purpose').value='chatroom'; $('window-writable').checked=false; $('window-save').click();
+$('window-new').click(); $('window-id').value='chat'; $('window-purpose').value='chatroom'; $('window-writable').checked=false; $('window-form').dispatchEvent(new Event('submit',{cancelable:true}));
+assert.deepEqual(ui.draft.windows.chat,{purpose:'chatroom',agent_writable:false,reasoning_effort:null,intentionally_left_open:false});
 $('new-event-id').value='chat-event'; $('new-event').click(); await until(()=>ui.event==='chat-event');
 $('event-kind').value='chat_message'; $('event-kind').dispatchEvent(new Event('change'));
 $('event-window').value='chat'; $('event-window').dispatchEvent(new Event('change'));
@@ -159,15 +160,20 @@ await ui.select(ack.source.id);
 // Switching to a source with other windows must not leave a stale dirty badge.
 assert.equal(ui.isDirty(),false); assert.match($('dirty-indicator').textContent,/^Saved/);
 assert.equal(ui.diagnostics.filter(d=>d.code==='open_window').length,2);
-$('window-id').value='a'; $('window-id').dispatchEvent(new Event('change'));
+assert.equal(ui.windowsPanel.selected,'a'); $('window-edit').click();
 assert.equal($('window-left-open').checked,false);
-$('window-left-open').checked=true; $('window-save').click(); await ui.autoSave.flush();
+$('window-left-open').checked=true; $('window-form').dispatchEvent(new Event('submit',{cancelable:true})); await ui.autoSave.flush();
 assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
 assert.deepEqual(ui.diagnostics.filter(d=>d.code==='open_window').map(d=>d.event_id),['b']);
 assert.equal(ui.record.source.events.a.close_window,false);
-await ui.select(ack.source.id,true); assert.equal($('window-left-open').checked,true);
-$('window-id').value='b'; $('window-id').dispatchEvent(new Event('change'));
-assert.equal($('window-left-open').checked,false);
+await ui.select(ack.source.id,true); $('window-edit').click(); assert.equal($('window-left-open').checked,true);
+ui.windowsPanel.select('b'); assert.equal($('window-form').hidden,true,'choosing another window closes the form');
+$('window-edit').click(); assert.equal($('window-left-open').checked,false); $('window-cancel').click();
+// Deleting a window deletes its events (after a warning listing them) and saves.
+$('window-delete').click(); assert.deepEqual([...$('window-delete-events').querySelectorAll('code')].map(n=>n.textContent),['b']);
+$('window-delete-confirm').click(); assert.deepEqual(Object.keys(ui.draft.events),['a']); assert.ok(!ui.draft.windows.b);
+await ui.autoSave.flush(); assert.ok(!ui.record.source.windows.b && !ui.record.source.events.b);
+await ui.restore(true); assert.ok(ui.record.source.windows.b && ui.record.source.events.b);
 await ui.restore(true); assert.equal(ui.record.source.windows.a.intentionally_left_open ?? false,false);
 await ui.restore(false); assert.equal(ui.record.source.windows.a.intentionally_left_open,true);
 // Clicking a window header jumps the event panel to the latest event that edited it (buttons excluded).
