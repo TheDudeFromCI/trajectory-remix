@@ -7,6 +7,7 @@ from copy import deepcopy
 from . import (
     assistant,
     assistant_memory,
+    assistant_proposals,
     authoring_session,
     draft_assembly,
     phase_barrier,
@@ -131,6 +132,9 @@ class GenerationService:
             comments=frozen,
             conversation=assistant_memory.load(self.store, trajectory),
         )
+        record = self.store.read(trajectory)
+        self.store._check_revision(trajectory, expected_revision, record)
+        assistant_proposals.rebase(self.store, record)  # Before taking the lock: own connection.
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             record = self.store._read(db, trajectory)
@@ -153,14 +157,18 @@ class GenerationService:
             source.metadata.get("stage", -3), config["options"]["mode"], settings
         )
 
-    @staticmethod
-    def _assist_session(job, source, settings):
-        """Continue the kept conversation when it fits the budget, else start afresh."""
-        options = job["config"]["options"]
+    def _assist_session(self, job, record, settings):
+        """Continue the kept conversation when it fits the budget, else start afresh. The
+        session edits a copy: the pending proposal, else the trajectory as it is."""
+        source, options = record.source, job["config"]["options"]
         prior = options.get("conversation")
         session = assistant.begin(source, settings, options["comments"], prior)
         if prior and assistant.over_context_budget(settings, session["messages"]):
             session = assistant.begin(source, settings, options["comments"])
+        session.update(
+            working=assistant_proposals.working(self.store, source.id, source),
+            base_revision=record.revision,
+        )
         return session
 
     def _owners(self, job):
@@ -409,7 +417,7 @@ class GenerationService:
         elif phase == assistant.PHASE:
             tier = cp["tier"]
             if "authoring_session" not in cp:
-                cp["authoring_session"] = self._assist_session(j, source, settings)
+                cp["authoring_session"] = self._assist_session(j, record, settings)
             payload = assistant.payload(cp["authoring_session"])
             if assistant.over_context_budget(settings, payload["messages"]):
                 self._assist_end(job, source, cp, "context_limit")
@@ -765,7 +773,12 @@ class GenerationService:
         else:
             cp["errors"] = 0
             self._log_assist_tools(ticket.job_id, message)
-            source, finished = assistant.step(source, settings, session, message)
+            # A session queued before proposals existed starts its copy here.
+            session.setdefault("working", source.to_dict())
+            session.setdefault("base_revision", ticket.payload["source_revision"])
+            working = GraphSource.model_validate(session["working"])
+            working, finished = assistant.step(working, settings, session, message)
+            session["working"] = working.to_dict()
         if finished:
             self._assist_finish(ticket, source, cp)
         elif session["exchanges"] >= settings.generation.max_authoring_exchanges:
@@ -780,6 +793,7 @@ class GenerationService:
 
     def _assist_finish(self, ticket, source, cp):
         session = cp.pop("authoring_session")
+        proposed = self._keep_proposal(source, session)
         addressed = assistant.apply(self.comments, session["replies"])
         assistant_memory.save(self.store, source.id, session["messages"])
         cp["phase"] = "done"
@@ -788,23 +802,38 @@ class GenerationService:
         self.jobs.progress(
             ticket.job_id,
             f"Assistant finished: trajectory={label(source.id)} addressed={addressed}"
-            f" replied={answered - addressed}; addressed comments await your review",
+            f" replied={answered - addressed}; "
+            + (
+                "proposed changes await your review in Comments"
+                if proposed
+                else "addressed comments await your review"
+            ),
             "success",
         )
 
+    def _keep_proposal(self, source, session):
+        """Keep the session's working copy as the trajectory's proposal (never the source)."""
+        if "working" not in session:  # A session started before proposals edited the source.
+            return False
+        addressed = [ident for ident, answer in session["replies"].items() if answer["done"]]
+        return assistant_proposals.keep(
+            self.store, source.id, session["base_revision"], session["working"], addressed
+        )
+
     def _assist_end(self, job, source, cp, reason, ticket=None):
-        """End an assistant session without answering; edits so far are kept."""
+        """End an assistant session without answering; edits so far stay proposed."""
         if reason == "context_limit":  # Too long to continue: the next send starts afresh.
             assistant_memory.forget(self.store, source.id)
         session = cp.pop("authoring_session", None)
         if session:
+            self._keep_proposal(source, session)
             assistant.fail(self.comments, session, reason)
         cp["phase"] = "done"
         self._save(job, source, cp, ticket=ticket, outcome="fail")
         self.jobs.progress(
             job,
             f"Assistant stopped ({label(reason)}): trajectory={label(source.id)};"
-            " edits so far are kept and the comments stay open.",
+            " edits so far are kept as proposed changes and the comments stay open.",
             "warning",
         )
 

@@ -290,8 +290,9 @@
           <div class="panel-actions"><span class="small muted grow">Saved at once. Agents read open comments over MCP and fix them.</span><button id="comment-add" class="sm primary">Add comment</button></div>
         </div>
         <div class="comment-send">
-          <button id="comment-send" class="sm" data-tip="The Assistant endpoint (Project Settings) fixes what the open comments describe, then resolves or replies to each">Send open comments to agent</button>
+          <button id="comment-send" class="sm" data-tip="The Assistant endpoint (Project Settings) proposes fixes for the open comments and replies to each. You review its changes before they apply.">Send open comments to agent</button>
         </div>
+        <section id="assistant-proposal" class="proposal" aria-label="Proposed changes" hidden></section>
         <div id="comment-list" class="comment-list"></div>
         <div id="assistant-status" class="assistant-working" hidden></div>
       </div>
