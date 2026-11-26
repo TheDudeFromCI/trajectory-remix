@@ -101,6 +101,12 @@ function selectedWidget(selected) {
   return widget('Selected trajectory', wrap, title);
 }
 
+/** Format a character count followed by an estimated token count (characters / 3.5). */
+function withTokens(chars) {
+  const n = chars ?? 0;
+  return `${n.toLocaleString()} (~${Math.round(n / 3.5).toLocaleString()} tokens)`;
+}
+
 /** Render population metrics and, if given, the selected trajectory's values. */
 export function renderMetrics(population, selected, scopeText) {
   const coverage = population.proposal_coverage || {};
@@ -112,8 +118,8 @@ export function renderMetrics(population, selected, scopeText) {
     tile(coverage.included_records ?? 0, 'Accepted for coverage', population.acceptance ? 'Coverage counts records with ' + population.acceptance + '.' : undefined),
     tile(unavailableTotal, 'Unavailable values', 'Metric values not yet measured or annotated. Use “Calculate missing metrics” to fill measurable ones.'),
     tile(staleTotal, 'Stale values', 'Values recorded against an older source or metric definition.'),
-    tile((population.total_characters ?? 0).toLocaleString(), 'Total characters', 'Characters of text in every event of the saved records in this search.'),
-    tile((population.agent_characters ?? 0).toLocaleString(), 'Agent-generated characters', 'Characters in agent text and tool call events.'));
+    tile(withTokens(population.total_characters), 'Total characters', 'Characters of text in every event of the saved records in this search.'),
+    tile(withTokens(population.agent_characters), 'Agent-generated characters', 'Characters in agent text and tool call events.'));
   const grid = node('div', undefined, 'metrics-grid');
   grid.append(targetsWidget(coverage), availabilityWidget(population), sizeWidget(population), selectedWidget(selected));
   $('metrics-content').replaceChildren(tiles, grid);
