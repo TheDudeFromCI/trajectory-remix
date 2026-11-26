@@ -107,8 +107,8 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    window.
 3. On the **Content** tab, choose a **Kind** and **Window**, then type the content. The
    windows and timeline update as you type.
-4. Need another window? Open the **Windows** tab, type a new window ID and purpose, and
-   click **Add / update window**.
+4. Need another window? Open the **Windows** tab and click **New window**. Give it an ID,
+   pick a purpose, and click **Create window**. See [Manage windows](#manage-windows).
 5. Want the agent to see its tools? Add an event of kind **Tool schema** in a `tools`
    window and tick the tools. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
    Randomly added tools are grayed out; hide them under **Preferences**.
@@ -122,6 +122,24 @@ metric values.
 Some in-between states can't be stored yet, such as a tool call with no call ID. The badge
 then reads *Not saved* (hover it for the reason), your draft is kept, and it saves with your
 next change.
+
+### Manage windows
+
+The **Windows** tab lists every window in the trajectory, with its purpose, flags and
+event count. Click a window (or use the arrow keys) to select it, then use the buttons
+under the list.
+
+| Button | What it does |
+| --- | --- |
+| **New window** | Opens a form for the new window's ID, purpose, reasoning effort and flags. |
+| **Modify** | Edits the selected window's purpose, reasoning effort, **Agent writable** and **Intentionally left open**. Double-click or press Enter on a window for the same form. |
+| **Rename** | Changes the window's ID. Every event in the window, and every reference to it, follows the new name. |
+| **Delete** | Asks first and lists the events that use the window. Those events are deleted with it, and other events stop depending on them. **Undo** brings everything back. |
+
+**Purpose** and **Reasoning effort** are dropdowns. To use a value that is not listed,
+choose **Custom…** and type it in the box that appears below.
+
+Comments on a renamed or deleted window stay, marked **Removed**.
 
 ### Link events in order
 

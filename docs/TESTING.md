@@ -24,11 +24,14 @@ node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/metrics_editor_frontend.mjs
 node tests/complexity_select_frontend.mjs
+node tests/choice_field_frontend.mjs
+node tests/windows_panel_frontend.mjs
 node tests/studio_warnings_frontend.mjs
 node tests/tool_import_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 node tests/job_names_tabs_frontend.mjs
 node tests/duplicate_frontend.mjs
+node tests/event_rename_frontend.mjs
 python tests/run_layout_frontend.py
 python tests/run_sampler_frontend.py
 python tests/run_generation_frontend.py

@@ -38,6 +38,16 @@ out('1.5');assert.match(alertText(),/whole numbers/);
 out('0');assert.match(alertText(),/at least 1\./);
 out('2048');assert.equal(alertText(),'');
 assert.deepEqual([draft.endpoints['local-model'].context_window_tokens,draft.endpoints['local-model'].max_output_tokens],[8705,2048]);
+// Reasoning level: a dropdown that keeps every level listed, with Custom for any other.
+const reasoning = byLabel(root,'Endpoint local-model reasoning'), customReasoning = byLabel(root,'Endpoint local-model custom reasoning');
+assert.deepEqual([...reasoning.options].map(o=>o.textContent),['Model default','none','minimal','low','medium','high','xhigh','Custom…']);
+assert.equal(customReasoning.hidden,true);
+change(reasoning,'high'); assert.equal(draft.endpoints['local-model'].reasoning,'high');
+change(reasoning,reasoning.options[reasoning.options.length-1].value); assert.equal(customReasoning.hidden,false);
+enter(customReasoning,' turbo '); assert.equal(draft.endpoints['local-model'].reasoning,'turbo');
+assert.equal(reasoning.options.length,8,'a custom value keeps the list');
+change(reasoning,''); assert.equal(draft.endpoints['local-model'].reasoning,null); assert.equal(customReasoning.hidden,true);
+delete draft.endpoints['local-model'].reasoning;
 ctx('16384');
 assert.deepEqual(draft.endpoint_roles,{draft:'local-model',fast:'local-model'});
 change(byLabel(root,'Assembly endpoint'),'local-model');assert.equal(draft.endpoint_roles.assembly,'local-model');

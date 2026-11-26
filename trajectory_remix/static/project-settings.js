@@ -3,6 +3,7 @@ import {renderPromptSettings} from './prompt-settings.js';
 import {renderChecklistSettings} from './checklist-settings.js';
 import {renderReviewPack} from './review-pack.js';
 import {persistCollapse} from './collapse-state.js';
+import {ChoiceField} from './choice-field.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
@@ -10,6 +11,7 @@ const field = (text, control) => { const n = node('label', text); n.append(contr
 const heading = (box, title, help) => { box.append(node('h3', title)); if (help) box.append(node('p', help, 'settings-help')); };
 const tipHeading = (box, title, tip) => { const n = node('h3', title, 'has-tip'); n.tabIndex = 0; n.dataset.tip = tip; box.append(n); };
 const controls = ['bos', 'eos', 'noop', 'ctx_begin', 'ctx_end', 'tool_begin', 'tool_end', 'response_begin', 'response_end', 'msg_begin', 'msg_end', 'window_ref'];
+const REASONING_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 const validId = id => /^[a-z][a-z0-9_-]*$/.test(id);
 /** Mirrors the server's Endpoint rules; returns an error message or ''. */
 export function tokenBudgetProblem(context, output) {
@@ -134,11 +136,11 @@ export function renderProjectSettings(container, initial, options = {}) {
     const reconnect = input(`Endpoint ${id} reconnect_seconds`, endpoint.reconnect_seconds, v => edit('reconnect_seconds', v > 0 ? v : null), 'number'); reconnect.min = 0; reconnect.step = 1;
     const reconnectField = field('Auto-reconnect after (seconds)', reconnect);
     reconnectField.append(node('span', 'Blank keeps the endpoint paused after its retries fail until you press Resume. Set seconds to retry automatically.', 'settings-help'));
-    const reasoning = input(`Endpoint ${id} reasoning`, endpoint.reasoning || '', v => edit('reasoning', v.trim() || null));
-    reasoning.setAttribute('list', `reasoning-levels-${id}`); reasoning.placeholder = 'Model default';
-    const suggestions = node('datalist'); suggestions.id = `reasoning-levels-${id}`;
-    for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']) { const o = node('option'); o.value = level; suggestions.append(o); }
-    const reasoningField = field('Reasoning level', reasoning); reasoningField.append(suggestions, node('span', 'Enter a level your model supports. Blank uses the model default.', 'settings-help'));
+    const reasoning = node('select'); reasoning.setAttribute('aria-label', `Endpoint ${id} reasoning`);
+    const customReasoning = node('input'); customReasoning.setAttribute('aria-label', `Endpoint ${id} custom reasoning`); customReasoning.placeholder = 'Custom level';
+    const levels = new ChoiceField(reasoning, customReasoning, {empty: 'Model default', onChange: v => edit('reasoning', v || null)});
+    levels.setChoices(REASONING_LEVELS); levels.value = endpoint.reasoning || '';
+    const reasoningField = field('Reasoning level', reasoning); reasoningField.append(customReasoning, node('span', 'Pick a level your model supports, or Custom for another. Model default sends none.', 'settings-help'));
     grid.append(field('Request timeout (seconds)', timeout), reconnectField, reasoningField);
     grid.append(budget);
     card.append(grid);

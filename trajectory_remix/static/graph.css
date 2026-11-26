@@ -149,6 +149,22 @@ body.resizing * { cursor: inherit !important; }
 .option-group { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
 .option-group:last-child { border-bottom: 0; }
 .option-group h3 { color: var(--ink-muted); font-size: 12px; font-weight: 500; letter-spacing: 0.02em; }
+/* Windows tab: selectable window list, actions and the New/Modify/Rename form. */
+.window-list { display: flex; flex-direction: column; gap: 2px; min-height: 72px; max-height: 260px; overflow-y: auto; padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-0); }
+.window-list:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.window-list .empty { margin: auto; }
+.window-row { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-sm); cursor: pointer; user-select: none; }
+.window-row:hover { background: var(--surface-300); }
+.window-row.selected { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); }
+.window-row-id { min-width: 0; color: var(--ink); font: 500 13px/18px var(--font-mono); }
+.window-row-count { margin-left: auto; flex: none; }
+.window-actions { display: flex; align-items: center; gap: var(--space-2); }
+.window-form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-200); }
+.window-form h3 { color: var(--ink); font-size: 13px; font-weight: 600; }
+.window-props { display: flex; flex-direction: column; gap: var(--space-2); }
+.window-props .form-grid { align-items: start; }
+.choice-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.window-delete-events { display: flex; flex-direction: column; gap: var(--space-1); max-height: 240px; margin: 0; padding: var(--space-2) var(--space-3); overflow-y: auto; border: 1px solid var(--border); border-left: 3px solid var(--danger); border-radius: var(--radius-sm); background: var(--surface-200); list-style: none; }
 .chip-list { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .chip { height: 26px; padding: 0 var(--space-2); border-color: var(--border-strong); font: 400 12px/16px var(--font-mono); }
 .chip:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
