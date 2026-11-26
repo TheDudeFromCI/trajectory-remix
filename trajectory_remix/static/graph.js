@@ -45,7 +45,8 @@ const node = (tag, text, cls) => { const n = document.createElement(tag); if (te
 const options = (id, entries, selected) => { const el = $(id); el.replaceChildren(...entries.map(([value, label]) => { const n = node('option', label); n.value = value; return n; })); el.value = selected ?? entries[0]?.[0] ?? ''; };
 const button = (text, action, cls) => { const n = node('button', text, cls); n.onclick = async e => { try { await action(e); } catch (error) { message(error); } }; return n; };
 
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** Deep equality that ignores key order: the server may echo a source with its keys reordered. */
+const same = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
 /** Refresh a raw JSON box unless the user is editing it. */
 const keepTyping = (id, text) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = text; };
 const isTyping = el => el?.tagName === 'TEXTAREA' || (el?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'file'].includes(el.type));
@@ -186,7 +187,7 @@ export class StudioUI {
   renderDirty() {
     const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.hasUnsavedChanges();
     const failed = dirty && !!this.autoSave.error && this.failedKey === this.draftKey();
-    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Not saved' : dirty ? 'Saving…' : `Saved · rev ${this.record.revision}`);
+    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Failed to Save' : dirty ? 'Saving...' : 'Saved');
     setAttr(indicator, 'data-tip', failed ? 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.' : null);
     indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}`;
     indicator.hidden = !this.record;
@@ -691,7 +692,8 @@ export class StudioUI {
     this.history([{id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
     // A reload (switching trajectory, Undo/Redo) during the save already shows newer state.
     if (id !== this.id || generation !== this.selectionGeneration) return;
-    this.record = value; this.diagnostics = value.diagnostics;
+    // A save response has no `owner`; keep the known one so the next poll doesn't see a change and reload.
+    this.record = {...value, owner: this.record.owner}; this.diagnostics = value.diagnostics;
     // Edits made while the save was in flight stay in the draft and are saved next.
     const unchanged = same(this.draft, sent), normalized = !same(value.source, sent);
     if (unchanged) this.draft = copy(value.source);

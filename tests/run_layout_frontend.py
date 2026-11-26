@@ -30,7 +30,11 @@ def main():
                 time.sleep(0.01)
             if not server.started:
                 raise RuntimeError("Studio did not start")
-            for script in ("layout_frontend.mjs", "panel_popout_frontend.mjs"):
+            for script in (
+                "layout_frontend.mjs",
+                "panel_popout_frontend.mjs",
+                "edit_focus_frontend.mjs",
+            ):
                 subprocess.run(
                     [
                         "node",
