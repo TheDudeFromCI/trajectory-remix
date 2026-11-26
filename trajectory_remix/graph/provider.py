@@ -141,6 +141,8 @@ class OpenAITransport:
         if token_limits.exceeds(budget):
             return {"context_limit": True, "local_budget": budget, "model": endpoint["model"]}
         timeout = endpoint.get("timeout_seconds", 120.0)
+        if timeout == -1:
+            timeout = None  # disabled: wait as long as the endpoint takes
         # Bound the whole attempt as well as individual network operations.
         # Queue-owned retries each get their own deadline.
         async with asyncio.timeout(timeout):
