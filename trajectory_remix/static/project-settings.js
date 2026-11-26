@@ -132,7 +132,9 @@ export function renderProjectSettings(container, initial, options = {}) {
       if (key.endsWith('_tokens')) { tokenFields.push(n); label.dataset.tip = TOKEN_LIMIT_TIPS[key]; }
     }
     budget.fields = tokenFields; checkBudget();
-    const timeout = input(`Endpoint ${id} timeout_seconds`, endpoint.timeout_seconds ?? 120, v => { if (v > 0) edit('timeout_seconds', v); }, 'number'); timeout.min = 0; timeout.step = 1;
+    const timeout = input(`Endpoint ${id} timeout_seconds`, endpoint.timeout_seconds ?? 120, v => { if (v > 0 || v === -1) edit('timeout_seconds', v); }, 'number'); timeout.min = -1; timeout.step = 1;
+    const timeoutField = field('Request timeout (seconds)', timeout);
+    timeoutField.append(node('span', 'Use -1 for no timeout, for endpoints that can take hours.', 'settings-help'));
     const reconnect = input(`Endpoint ${id} reconnect_seconds`, endpoint.reconnect_seconds, v => edit('reconnect_seconds', v > 0 ? v : null), 'number'); reconnect.min = 0; reconnect.step = 1;
     const reconnectField = field('Auto-reconnect after (seconds)', reconnect);
     reconnectField.append(node('span', 'Blank keeps the endpoint paused after its retries fail until you press Resume. Set seconds to retry automatically.', 'settings-help'));
@@ -141,7 +143,7 @@ export function renderProjectSettings(container, initial, options = {}) {
     const levels = new ChoiceField(reasoning, customReasoning, {empty: 'Model default', onChange: v => edit('reasoning', v || null)});
     levels.setChoices(REASONING_LEVELS); levels.value = endpoint.reasoning || '';
     const reasoningField = field('Reasoning level', reasoning); reasoningField.append(customReasoning, node('span', 'Pick a level your model supports, or Custom for another. Model default sends none.', 'settings-help'));
-    grid.append(field('Request timeout (seconds)', timeout), reconnectField, reasoningField);
+    grid.append(timeoutField, reconnectField, reasoningField);
     grid.append(budget);
     card.append(grid);
     card.append(providerOptions(id, endpoint, edit, input, responses));

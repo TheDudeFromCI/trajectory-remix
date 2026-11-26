@@ -441,9 +441,13 @@ API. The settings JSON Schema exposes them at `GET /api/v1/schema/settings`.
 | `temperature` | `null` | Number from 0 to 2, or `null` |
 | `top_p` | `null` | Number from 0 to 1, or `null` |
 | `presence_penalty` | `null` | Number from -2 to 2, or `null` |
-| `timeout_seconds` | `120` | Finite number greater than zero; the limit for each request |
+| `timeout_seconds` | `120` | Finite number greater than zero, or `-1` for no limit; the limit for each request |
 | `reasoning` | `null` | Any non-empty text, or `null` (common values: `none`, `low`, `medium`, `high`) |
 | `reconnect_seconds` | `null` | Number of seconds greater than zero, or `null` |
+
+Set `timeout_seconds` to `-1` for endpoints that are very slow and can take hours to
+answer. Remix then waits for the reply without any time limit, so a hung connection is
+never cut off on its own; cancel the job if you need to stop it.
 
 `reasoning` is sent as the standard `reasoning_effort` request field. `none` asks the
 model not to reason; `null` omits the field so the model uses its own default. Because

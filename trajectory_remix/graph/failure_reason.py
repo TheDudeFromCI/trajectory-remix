@@ -141,7 +141,8 @@ def endpoint_failure(error: BaseException, endpoint: str, config: dict | None = 
         return status_reason(error, endpoint)
     if isinstance(error, (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException)):
         limit = config.get("timeout_seconds")
-        within = f" within {limit:g}s" if isinstance(limit, (int, float)) else ""
+        timed = isinstance(limit, (int, float)) and limit > 0
+        within = f" within {limit:g}s" if timed else ""
         return (
             f"no complete response from {where}{within}; the model may be overloaded or the "
             "endpoint's timeout setting too low"

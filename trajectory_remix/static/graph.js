@@ -869,6 +869,9 @@ export class StudioUI {
       }
       if (this.jobsView.isOpen(job.id)) await this.jobsView.refresh(job.id);
     }
+  }
+  /** Run after the selected record is refreshed, so its owner is current. */
+  async updateAssistantStatus() {
     this.assistantStatus ||= new AssistantStatus({host: $('assistant-status'), api});
     const owner = isAssistantOwner(this.record?.owner, this.jobs) ? this.record.owner : null;
     await this.assistantStatus.update(owner, owner ? this.jobs.get(owner).age : 0);
@@ -1037,7 +1040,7 @@ export class StudioUI {
     });
     document.querySelectorAll('[data-close]').forEach(n => n.onclick = () => n.closest('dialog').close());
     this.renderTimeline(); this.renderDirty(); $('lock-slot').hidden = true;
-    await this.listing(); if (this.lastItems?.length) await this.select(this.lastItems[0].id); await this.pollJobs();
+    await this.listing(); if (this.lastItems?.length) await this.select(this.lastItems[0].id); await this.pollJobs(); await this.updateAssistantStatus();
     const poll = async () => { if (this.stopped) return; try { await this.pollChanges(); } catch (e) { message(e); } if (!this.stopped) this.pollTimer = setTimeout(poll, 1500); }; this.pollTimer = setTimeout(poll, 1500);
   }
   async pollChanges() {
@@ -1053,6 +1056,7 @@ export class StudioUI {
       await this.listing();
     }
     await this.refreshSelected();
+    await this.updateAssistantStatus();
     if (this.id) await this.comments.load(this.id);
     await this.flushAssistantQueue();
     if (currentView() === 'jobs-view') await this.jobsView.renderList();
