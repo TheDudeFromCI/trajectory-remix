@@ -68,8 +68,15 @@ ui.settings.tools.echo={name:'Echo',input_schema:{type:'object',properties:{text
 const toolOption=document.createElement('option');toolOption.value='echo';toolOption.textContent='Echo';$('tool-id').append(toolOption);
 $('event-kind').value='tool_call'; $('event-kind').dispatchEvent(new Event('change'));
 $('event-content').value='{"text":'; $('content-mode').value='json'; $('event-content').dispatchEvent(new Event('input'));
-$('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":');
+$('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":'); assert.equal($('event-content').hidden,false);
 $('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":');
+// Complete arguments swap the text box for typed fields; editing one rewrites the content.
+$('tool-id').value='echo'; $('event-content').value='{"text":"hi"}'; $('event-content').dispatchEvent(new Event('input'));
+$('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change'));
+assert.equal($('event-content').hidden,true); const textField=$('argument-form').querySelector('[data-argument="text"]');
+assert.equal(textField.value,'hi'); textField.value='bye'; textField.dispatchEvent(new Event('input'));
+assert.deepEqual(JSON.parse(ui.draft.events['chat-event'].content),{text:'bye'});
+$('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').hidden,false);
 // Return to the saved graph and distinguish missing split from intentional Auto.
 await ui.select(ui.id,true); $('split').value='Auto'; $('split').dispatchEvent(new Event('change'));
 // Missing split is a studio warning in the Problems tab, gone as soon as a split (even Auto) is chosen.

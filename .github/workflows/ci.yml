@@ -109,6 +109,7 @@ jobs:
       - run: node tests/metrics_editor_frontend.mjs
       - run: node tests/complexity_select_frontend.mjs
       - run: node tests/choice_field_frontend.mjs
+      - run: node tests/argument_form_frontend.mjs
       - run: node tests/windows_panel_frontend.mjs
       - run: node tests/studio_warnings_frontend.mjs
       - run: node tests/tool_import_frontend.mjs
