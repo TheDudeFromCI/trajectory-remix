@@ -35,8 +35,14 @@ Select an event to edit:
 | Chat speaker | A speaker field. Message framing is derived. |
 
 Bordered uppercase labels in the UI are visual only, never text inserted into your
-content. Form mode edits a complete JSON object and keeps unknown argument fields, while
-text that doesn't parse stays untouched when you switch between raw and form modes.
+content.
+
+**Tool argument form** replaces the content box with one field per argument from the
+tool's input schema: a text box for strings, a number box for numbers, a dropdown for
+booleans and fixed choices, and a small JSON box for objects, arrays and arguments the
+schema doesn't list. Required arguments are marked, and clearing an optional field
+removes it. If the content isn't a complete JSON object yet, the text box stays and the
+text is left untouched when you switch between raw and form modes.
 
 **Metadata** is separate from the intrinsic source. A missing split warns, while an
 explicit **Auto** is intentional. The event editor's **JSON** tab keeps arbitrary nested
