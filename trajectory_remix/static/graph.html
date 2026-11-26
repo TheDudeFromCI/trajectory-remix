@@ -211,7 +211,7 @@
           <h3>Runs after <span id="links-count" class="badge"></span></h3>
           <div id="dependencies" class="chip-list"></div>
           <div class="inline-form">
-            <label>Add dependency <input id="dependency-picker" list="dependency-options" placeholder="Search event IDs"></label><datalist id="dependency-options"></datalist>
+            <label>Add dependency <select id="dependency-picker"></select></label>
             <button id="dependency-add" class="sm">Add</button>
           </div>
         </div>
@@ -239,14 +239,28 @@
       </div>
 
       <div role="tabpanel" id="panel-windows" aria-labelledby="tab-windows" class="panel-body" hidden>
-        <div class="form-grid two">
-          <label>Window ID <input id="window-id" list="window-options"></label><datalist id="window-options"></datalist>
-          <label>Purpose <input id="window-purpose" value="reasoning"></label>
-          <label>Reasoning effort <input id="window-effort" list="effort-options"></label><datalist id="effort-options"></datalist>
+        <div id="window-list" class="window-list" role="listbox" aria-label="Windows" tabindex="0"></div>
+        <div class="window-actions">
+          <button id="window-new" class="sm primary">New window</button>
+          <span class="grow"></span>
+          <button id="window-edit" class="sm">Modify</button>
+          <button id="window-rename" class="sm">Rename</button>
+          <button id="window-delete" class="sm danger">Delete</button>
         </div>
-        <label><input type="checkbox" id="window-writable" checked> Agent writable</label>
-        <label><input type="checkbox" id="window-left-open"> Intentionally left open (acknowledge warning)</label>
-        <div class="panel-actions"><button id="window-delete" class="sm danger">Delete window</button><button id="window-save" class="sm">Add / update window</button></div>
+        <form id="window-form" class="window-form" hidden novalidate>
+          <h3 id="window-form-title">Modify window</h3>
+          <label id="window-id-field">Window ID <input id="window-id" autocomplete="off" spellcheck="false"></label>
+          <div id="window-props" class="window-props">
+            <div class="form-grid two">
+              <div class="choice-field"><label>Purpose <select id="window-purpose"></select></label><input id="window-purpose-custom" aria-label="Custom purpose" placeholder="Custom purpose" hidden></div>
+              <div class="choice-field"><label>Reasoning effort <select id="window-effort"></select></label><input id="window-effort-custom" aria-label="Custom reasoning effort" placeholder="Custom effort" hidden></div>
+            </div>
+            <label><input type="checkbox" id="window-writable" checked> Agent writable</label>
+            <label><input type="checkbox" id="window-left-open"> Intentionally left open (acknowledge warning)</label>
+          </div>
+          <p id="window-form-problem" class="small error" role="alert" hidden></p>
+          <div class="panel-actions"><button type="button" id="window-cancel" class="sm ghost">Cancel</button><button type="submit" id="window-submit" class="sm primary">Save changes</button></div>
+        </form>
       </div>
 
       <div role="tabpanel" id="panel-problems" aria-labelledby="tab-problems" class="panel-body" hidden>
@@ -395,6 +409,16 @@
     <section id="generation-run-controls" class="generation-run"></section>
   </div>
   <div class="dialog-foot"><button id="generation-sampler-button" class="ghost">Open Sampler</button><button id="generation-endpoints-button" class="ghost">Configure Endpoints</button><span class="grow"></span></div>
+</dialog>
+
+<dialog id="window-delete-dialog" aria-labelledby="window-delete-title">
+  <div class="dialog-head"><h2 id="window-delete-title">Delete window “<span id="window-delete-name"></span>”?</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="dialog-body">
+    <p id="window-delete-summary"></p>
+    <ul id="window-delete-events" class="window-delete-events"></ul>
+    <p class="small muted">The change autosaves like any other edit. Undo can restore it.</p>
+  </div>
+  <div class="dialog-foot"><button class="ghost" data-close>Cancel</button><button id="window-delete-confirm" class="danger">Delete window</button></div>
 </dialog>
 
 <dialog id="export-dialog" aria-labelledby="export-title">

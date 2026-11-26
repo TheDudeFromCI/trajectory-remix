@@ -15,6 +15,7 @@ import {duplicateTrajectory} from './duplicate.js';
 import {renameEvent, renameProblem} from './event-rename.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
+import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {byId} from './panel-popout.js';
 import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
@@ -134,7 +135,7 @@ export class StudioUI {
     const exportSelection = $('export-profile').value;
     options('preview-profile', profiles, this.prefs.profile); options('export-profile', profiles, exportSelection);
     options('tool-id', Object.entries(this.settings.tools).map(([id, t]) => [id, t.name]), $('tool-id').value);
-    $('effort-options').replaceChildren(...this.settings.reasoning_levels.map(x => { const n = node('option'); n.value = x; return n; }));
+    this.windowsPanel?.setReasoningLevels(this.settings.reasoning_levels);
   }
   async listing() {
     const key = JSON.stringify([this.query(), this.offset]);
@@ -233,7 +234,7 @@ export class StudioUI {
     this.diagnostics = cached ? cached.record.diagnostics : latest.diagnostics;
     this.draft = cached?.draft || copy(latest.source); this.editors = cached?.editors || new Map();
     this.event = cached?.event || Object.keys(this.draft.events)[0]; this.position = 0;
-    $('window-id').value = this.draft.events[this.event]?.window || Object.keys(this.draft.windows)[0] || '';
+    this.windowsPanel.reset(this.draft.events[this.event]?.window);
     this.renderDraft(); this.renderEvent(); this.markSelectedRow();
     if (cached) { $('source-json').value = cached.sourceText; $('metadata-json').value = cached.metadataText;
       if (latest.revision !== cached.record.revision) message('Saved source changed. Your edits are retained; reload to reconcile.'); }
@@ -267,12 +268,12 @@ export class StudioUI {
   }
   applyLock() {
     const locked = !!this.record?.owner;
-    for (const id of ['delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'window-save', 'window-delete', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
+    for (const id of ['delete-sample', 'new-event', 'delete-event', 'event-apply', 'dependency-add', 'metadata-apply', 'source-apply']) $(id).disabled = locked || !this.draft;
     for (const root of ['graph-editor-fields', 'metadata-panel']) {
       const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) if (!input.closest('[data-lock-exempt]')) input.disabled = locked;
     }
     // Existing markup uses these stable controls even before the shell update.
-    for (const id of ['event-content','event-name','event-kind','event-window','call-id','tool-id','chat-speaker','delivery','weight','chain','replace-body','close-window','masked','begin','end','echo-chat','window-id','window-purpose','window-writable','window-effort','window-left-open','metadata-json','source-json','stage','split']) $(id).disabled = locked;
+    for (const id of ['event-content','event-name','event-kind','event-window','call-id','tool-id','chat-speaker','delivery','weight','chain','replace-body','close-window','masked','begin','end','echo-chat','metadata-json','source-json','stage','split']) $(id).disabled = locked;
     let ownerLink = $('open-selected-job');
     if (!ownerLink) {
       ownerLink = button('Inspect owning job', () => this.inspectJob(this.record.owner), 'sm'); ownerLink.id = 'open-selected-job';
@@ -282,6 +283,7 @@ export class StudioUI {
     $('lock-slot').hidden = !locked;
     if (locked) setAttr(ownerLink, 'data-tip', 'Job ' + this.record.owner);
     $('workspace').classList.toggle('is-locked', locked);
+    this.windowsPanel?.setLocked(locked);
     this.renderDirty();
   }
   changed() {
@@ -293,8 +295,7 @@ export class StudioUI {
     if (!this.draft) return;
     options('event-picker', Object.keys(this.draft.events).map(id => [id, id]), this.event);
     options('event-window', Object.keys(this.draft.windows).map(id => [id, id]), $('event-window').value || this.draft.events[this.event]?.window);
-    $('window-options').replaceChildren(...Object.keys(this.draft.windows).map(id => { const n = node('option'); n.value = id; return n; }));
-    this.renderWindow();
+    this.windowsPanel.render();
     keepTyping('metadata-json', json(this.draft.metadata || {}));
     $('stage').value = this.draft.metadata?.stage ?? -3; $('split').value = this.draft.metadata?.split ?? '';
     const size = this.record.size; $('size-tag').textContent = size?.label || '';
@@ -324,13 +325,12 @@ export class StudioUI {
     summary.replaceChildren(...(errors ? [tag(`${errors} error${errors === 1 ? '' : 's'}`, 'danger')] : []), ...(warnings ? [tag(`${warnings} warning${warnings === 1 ? '' : 's'}`, 'warning')] : []));
     summary.setAttribute('aria-label', `${errors} errors, ${warnings} warnings. Show problems`);
   }
-  renderWindow() {
-    const w = this.draft?.windows[$('window-id').value];
-    if (w) {
-      $('window-purpose').value = w.purpose; $('window-writable').checked = w.agent_writable;
-      $('window-effort').value = w.reasoning_effort || '';
-    }
-    $('window-left-open').checked = w?.intentionally_left_open ?? false;
+  /** After the Windows tab edits the draft; deleting a window also deletes its events. */
+  windowsChanged(removed = []) {
+    for (const id of removed) this.editors.delete(id);
+    if (!this.draft.events[this.event]) this.event = Object.keys(this.draft.events)[0];
+    this.renderDraft(); this.renderEvent(); this.changed();
+    if (removed.length) message(`Deleted ${removed.length} event${removed.length === 1 ? '' : 's'} with the window.`);
   }
   scheduleDiagnostics() {
     clearTimeout(this.validationTimer); const generation = this.validationGeneration = (this.validationGeneration || 0) + 1;
@@ -347,7 +347,8 @@ export class StudioUI {
   renderEvent() {
     const e = this.draft?.events[this.event];
     $('event-picker').value = this.event || '';
-    $('dependency-options').replaceChildren(...Object.keys(this.draft?.events || {}).filter(id => id !== this.event).map(id => { const n = node('option'); n.value = id; return n; }));
+    const candidates = Object.keys(this.draft?.events || {}).filter(id => id !== this.event);
+    options('dependency-picker', [['', candidates.length ? 'Choose an event' : 'No other events'], ...candidates.map(id => [id, id])], candidates.includes($('dependency-picker').value) ? $('dependency-picker').value : '');
     toggleClass($('event-editor-panel'), 'no-event', !e);
     if (!e) { $('event-content').value = ''; $('dependencies').replaceChildren(); setText($('links-count'), ''); this.editorBaseline = null; if (this.record) this.renderDirty(); return; }
     $('event-name').value = this.event; $('event-kind').value = e.kind; $('event-window').value = e.window; $('call-id').value = e.call_id || '';
@@ -622,7 +623,7 @@ export class StudioUI {
   inspectTarget(kind, id) {
     if (kind === 'event') { this.selectEvent(id); $('tab-content').click(); }
     if (kind === 'window') {
-      $('window-id').value = id; this.renderWindow(); $('tab-windows').click();
+      this.windowsPanel.select(id); $('tab-windows').click();
       [...$('window-grid').querySelectorAll('.window-comment')].find(b => b.getAttribute('aria-label').startsWith(`Comment on window ${id}`))?.closest('.window-card')?.scrollIntoView?.({block: 'nearest'});
     }
   }
@@ -939,6 +940,8 @@ export class StudioUI {
     document.addEventListener('graph-job-started', e => this.jobsView.select(e.detail).then(() => message('Job started. Follow it in Jobs or from the status bar.')).catch(message));
     bindViewTabs();
     this.assistantQueue = new AssistantQueue();
+    this.windowsPanel = new WindowsPanel({$, draft: () => this.draft, report: message,
+      onChange: removed => this.windowsChanged(removed)});
     this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
       autoSend: () => this.prefs.autoSendComments === true, onOpened: () => this.autoSendToAssistant(),
       els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},
@@ -967,7 +970,7 @@ export class StudioUI {
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('duplicate-sample', 'click', () => this.duplicate());
     on('reload-source', 'click', () => this.id && this.select(this.id, true));
-    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
+    on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.windowsPanel.render(); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
     on('event-apply', 'click', () => this.applyEvent());
     on('event-name', 'change', () => this.renameCurrentEvent());
@@ -983,9 +986,6 @@ export class StudioUI {
     for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
     on('tool-id', 'change', () => this.renderArguments());
     on('dependency-add', 'click', () => this.addDependency($('dependency-picker').value));
-    on('window-id', 'change', () => this.renderWindow());
-    on('window-save', 'click', () => { const id = $('window-id').value; if (!id) throw new Error('Supply a window ID'); const w = {...this.draft.windows[id], purpose: $('window-purpose').value, agent_writable: $('window-writable').checked, reasoning_effort: $('window-effort').value || null, intentionally_left_open: $('window-left-open').checked}; this.draft.windows[id] = w; this.renderDraft(); this.renderEvent(); this.changed(); });
-    on('window-delete', 'click', () => { delete this.draft.windows[$('window-id').value]; this.renderDraft(); this.renderEvent(); this.changed(); });
     on('metadata-apply', 'click', () => { const m = JSON.parse($('metadata-json').value); if (!m || Array.isArray(m) || typeof m !== 'object') throw new Error('Metadata must be an object'); this.draft.metadata = m; this.renderDraft(); this.changed(); });
     for (const id of ['stage', 'split']) on(id, 'change', () => { this.draft.metadata ||= {}; if (id === 'split' && !$(id).value) delete this.draft.metadata.split; else this.draft.metadata[id] = id === 'stage' ? Number($(id).value) : $(id).value; this.renderDraft(); this.changed(); });
     on('source-apply', 'click', async () => { const draft = JSON.parse($('source-json').value); if (draft.id !== this.id || !draft.events || !draft.windows) throw new Error('Keep source UUID and graph maps'); const validated = await api('/diagnostics', 'POST', draft); this.draft = validated.source; this.diagnostics = validated.diagnostics; this.editors.clear(); this.event = Object.keys(draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
