@@ -403,9 +403,12 @@ td.faint { color: var(--ink-faint); }
 .working-toggle { display: flex; align-items: center; gap: var(--space-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
 .working-toggle::after { content: "\25B8"; margin-left: auto; color: var(--ink-muted); }
 .working-toggle[aria-expanded="true"]::after { content: "\25BE"; }
-.working-tools { margin: var(--space-1) 0 0; padding-left: var(--space-4, 20px); max-height: 160px; overflow-y: auto; color: var(--ink-muted); font-family: var(--font-mono); font-size: 11px; font-weight: 400; }
+.working-tools { margin: var(--space-1) 0 0; padding: 0; list-style: none; max-height: 160px; overflow-y: auto; color: var(--ink-muted); font-family: var(--font-mono); font-size: 11px; font-weight: 400; }
 .working-tools[hidden] { display: none; }
-.working-tools-empty { list-style: none; margin-left: calc(-1 * var(--space-4, 20px)); font-family: inherit; }
+.working-tools li { display: flex; align-items: center; gap: var(--space-2); padding: 1px 0; }
+.working-tools li::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: 0.7; }
+.working-tools .working-tools-empty { font-family: inherit; }
+.working-tools .working-tools-empty::before { content: none; }
 .working-dots span { animation: working-dot 1.4s infinite both; }
 .working-dots span:nth-child(2) { animation-delay: 0.2s; }
 .working-dots span:nth-child(3) { animation-delay: 0.4s; }
