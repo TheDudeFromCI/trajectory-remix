@@ -76,6 +76,9 @@ $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('chang
 assert.equal($('event-content').hidden,true); const textField=$('argument-form').querySelector('[data-argument="text"]');
 assert.equal(textField.value,'hi'); textField.value='bye'; textField.dispatchEvent(new Event('input'));
 assert.deepEqual(JSON.parse(ui.draft.events['chat-event'].content),{text:'bye'});
+// The chosen mode survives a save that re-renders the event and a trip to another event.
+await ui.autoSave.flush(); ui.renderEvent(); assert.equal($('content-mode').value,'form'); assert.equal($('event-content').hidden,true);
+ui.selectEvent('first'); assert.equal($('content-mode').value,'text'); ui.selectEvent('chat-event'); assert.equal($('content-mode').value,'form');
 $('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').hidden,false);
 // Return to the saved graph and distinguish missing split from intentional Auto.
 await ui.select(ui.id,true); $('split').value='Auto'; $('split').dispatchEvent(new Event('change'));

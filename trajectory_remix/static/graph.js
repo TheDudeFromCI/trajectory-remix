@@ -16,6 +16,7 @@ import {renameEvent, renameProblem} from './event-rename.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {parseArguments, renderArgumentForm} from './argument-form.js';
+import {ContentModes} from './content-mode.js';
 import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {byId} from './panel-popout.js';
@@ -109,7 +110,7 @@ export class StudioUI {
     this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
     if (!Number.isFinite(this.prefs.debounce) || this.prefs.debounce < 0) this.prefs.debounce = 500;
-    this.offset = 0; this.position = 0; this.drafts = new Map(); this.jobs = new Map(); this.dialogs = new Map(); this.recorded = new Set(); this.ownedBulk = new Set();
+    this.offset = 0; this.position = 0; this.drafts = new Map(); this.contentModes = new ContentModes(); this.jobs = new Map(); this.dialogs = new Map(); this.recorded = new Set(); this.ownedBulk = new Set();
     this.undo = []; this.redo = []; this.selectionGeneration = 0;
     this.jobsView = new JobsView({api, report: message, download: (job, name) => this.download(job, name),
       openTrajectory: async id => { showView('workspace'); await this.select(id); },
@@ -358,7 +359,7 @@ export class StudioUI {
     $('close-window').checked = e.close_window; $('masked').checked = e.supervision.masked; $('weight').value = e.supervision.weight;
     $('begin').checked = e.insert_tool_begin ?? e.insert_response_begin ?? true; $('end').checked = e.insert_tool_end ?? e.insert_response_end ?? true;
     $('echo-chat').checked = e.echo_chat ?? true;
-    $('content-mode').value = typeof e.content === 'string' ? 'text' : 'json'; $('event-content').value = typeof e.content === 'string' ? e.content : json(e.content);
+    $('content-mode').value = this.contentModes.pick(this.id, this.event, e.content); $('event-content').value = typeof e.content === 'string' ? e.content : json(e.content);
     this.editorBaseline = this.editorState();
     const stashed = this.editors.get(this.event);
     if (stashed) for (const [id, value] of Object.entries(stashed)) { if (typeof value === 'boolean') $(id).checked = value; else $(id).value = value; }
@@ -423,6 +424,7 @@ export class StudioUI {
     this.stashEditor();
     renameEvent(this.draft, current, next);
     if (this.editors.has(current)) { this.editors.set(next, this.editors.get(current)); this.editors.delete(current); }
+    this.contentModes.rename(this.id, current, next);
     this.event = next; this.renderDraft(); this.renderEvent(); this.changed();
   }
   applyEvent() { if (!this.event || !this.draft.events[this.event]) return; this.draft.events[this.event] = this.composeEvent(); this.editors.delete(this.event); this.editorBaseline = this.editorState(); this.changed(); }
@@ -983,7 +985,7 @@ export class StudioUI {
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
     on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderArguments(); this.renderToolPicker(); });
-    on('content-mode', 'change', () => { this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
+    on('content-mode', 'change', () => { this.contentModes.remember(this.id, this.event, $('content-mode').value); this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
     on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
     for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
     on('tool-id', 'change', () => this.renderArguments());
