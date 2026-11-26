@@ -113,8 +113,8 @@ class ExternalText(Event):
 class ToolSchema(Event):
     """The tools the agent is shown: JSON lines of tool schemas, as masked external input.
 
-    extra_tools names the lines that were added at random rather than chosen; the
-    dashboard shows them grayed out. The compiler treats the event like external_text.
+    The lines are the chosen tools only; the compiler adds random extra tools when it
+    compiles (see tool_extras.py). extra_tools is a legacy field and is ignored.
     """
 
     kind: Literal["tool_schema"]

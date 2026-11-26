@@ -28,7 +28,7 @@ async def test_assembly_writes_the_listing_before_the_opening(tmp_path):
     assert tool_listing.presented_ids(listing.content) == {"chat", "read"}
 
 
-def test_manual_listing_endpoint_matches_assembly(tmp_path):
+def test_manual_listing_endpoint_lists_only_the_chosen_tools(tmp_path):
     from fastapi.testclient import TestClient
 
     from trajectory_remix.graph.studio_api import create_studio_app
@@ -36,14 +36,13 @@ def test_manual_listing_endpoint_matches_assembly(tmp_path):
     gen, _ = service(tmp_path)
     settings = gen.store.settings().settings
     tools = {k: v.model_dump(mode="json") for k, v in settings.tools.items()}
-    built = tool_listing.listing(tools, "traj-1", "tools", ["read"], 0.5)
+    assert settings.tool_schema_extra_chance > 0
     app = create_studio_app(gen.store.path, artifact_root=tmp_path / "exports")
     with TestClient(app) as client:
         client.headers["X-Remix-Token"] = app.state.csrf
-        body = dict(trajectory_id="traj-1", event_id="tools", tools=["read"], extra_tools=0.5)
+        body = dict(trajectory_id="traj-1", event_id="tools", tools=["read"])
         served = client.post("/api/v1/tools/listing", json=body).json()
-        assert served == built  # Same trajectory and event: the same listing.
-        none = client.post("/api/v1/tools/listing", json=dict(body, extra_tools=0)).json()
-        assert none["shown"] == ["read"] and none["added"] == []
+        assert served == tool_listing.listing(tools, "traj-1", "tools", ["read"], 0)
+        assert served["shown"] == ["read"] and served["added"] == []
         bad = client.post("/api/v1/tools/listing", json=dict(body, tools=["nope"]))
         assert bad.status_code == 422 and "Unknown tool IDs: nope" in bad.json()["message"]

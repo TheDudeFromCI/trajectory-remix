@@ -38,15 +38,18 @@ add an event, set its **Kind** to **Tool schema** and put it in a window whose p
 1. Tick the tools to list on the **Content** tab. The text box is replaced by one checkbox
    per project tool. Each tick writes that tool's description and parameters to the
    event.
-2. Some other tools are added at random, so the agent also learns to ignore tools it
-   doesn't need. They show grayed out and can't be ticked. Set the chance in
-   **Settings → Project defaults** (0 turns it off), or hide them in **Preferences**.
+2. Tools you don't tick can still be added at random when the trajectory is compiled, so
+   the agent also learns to ignore tools it doesn't need. The event stores only the tools
+   you ticked, and you can tick any tool as usual. The preview shows the random ones grayed
+   out. Set the chance in **Settings → Project defaults** (0 turns it off), or hide them in
+   **Preferences**.
 3. Make the first events of the trajectory follow the listing, so the agent sees it.
 
 A `tool_schema` event is masked external input with one JSON line per tool (name,
-description, parameters). It is what Assembly writes during generation, and the random
-additions repeat: the same trajectory ID and event ID always add the same tools. The
-`extra_tools` field names the lines that were added at random.
+description, parameters) for the chosen tools only. It is what Assembly writes during
+generation. The compiler (`graph/tool_extras.py`) adds the random extras, and they repeat:
+the same trajectory ID and event ID always add the same tools. The old `extra_tools` field
+is ignored.
 
 ### Partial and abandoned calls
 

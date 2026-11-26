@@ -16,6 +16,7 @@ import {renameEvent, renameProblem} from './event-rename.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {parseArguments, renderArgumentForm} from './argument-form.js';
+import {markInvalid} from './field-invalid.js';
 import {ContentModes} from './content-mode.js';
 import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -44,7 +45,8 @@ const node = (tag, text, cls) => { const n = document.createElement(tag); if (te
 const options = (id, entries, selected) => { const el = $(id); el.replaceChildren(...entries.map(([value, label]) => { const n = node('option', label); n.value = value; return n; })); el.value = selected ?? entries[0]?.[0] ?? ''; };
 const button = (text, action, cls) => { const n = node('button', text, cls); n.onclick = async e => { try { await action(e); } catch (error) { message(error); } }; return n; };
 
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** Deep equality that ignores key order: the server may echo a source with its keys reordered. */
+const same = (a, b) => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
 /** Refresh a raw JSON box unless the user is editing it. */
 const keepTyping = (id, text) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = text; };
 const isTyping = el => el?.tagName === 'TEXTAREA' || (el?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'file'].includes(el.type));
@@ -101,7 +103,7 @@ async function intrinsicHash(source) {
 export class StudioUI {
   constructor() {
     let saved = {}; try { saved = JSON.parse(localStorage.getItem('graph-preferences') || '{}'); } catch {}
-    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, autoSendComments: false, ...saved};
+    this.prefs = {mode: 'graph', profile: '', debounce: 500, zoom: 1, showRandomTools: true, autoSendComments: false, hideClosedWindows: false, ...saved};
     // A draft that failed to save is not retried until it changes again.
     this.autoSave = new AutoSave({pending: () => !this.restoring && this.hasUnsavedChanges() && this.draftKey() !== this.failedKey,
       save: () => this.save(), typing: () => isTyping(document.activeElement),
@@ -118,7 +120,7 @@ export class StudioUI {
     this.dialogs = this.jobsView.panels; // One retained detail panel per inspected job.
     this.preview = new PreviewController(async p => api(`/trajectories/${p.id}/preview`, 'POST', {
       expected_revision: p.revision, profile: p.profile, source: p.source, client_key: p.sourceHash
-    }), value => { this.frames = value.frames; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
+    }), value => { this.frames = value.frames; this.previewToolExtras = value.tool_extras || {}; if (this.followPreviewEnd) this.position = Math.max(0, value.frames.length - 1); this.followPreviewEnd = false; this.previewHash = value.source_hash; $('preview-status').textContent = value.truncated ? 'Showing first 1000 frames; preview truncated' : 'Tick history'; this.renderTimeline(); });
   }
   query() {
     const q = {}, size = $('sample-search').value.match(/(?:^|\s)@size:(\S+)/i); // `@size:m` or `@size:<=xs`
@@ -185,7 +187,7 @@ export class StudioUI {
   renderDirty() {
     const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.hasUnsavedChanges();
     const failed = dirty && !!this.autoSave.error && this.failedKey === this.draftKey();
-    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Not saved' : dirty ? 'Saving…' : `Saved · rev ${this.record.revision}`);
+    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Failed to Save' : dirty ? 'Saving...' : 'Saved');
     setAttr(indicator, 'data-tip', failed ? 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.' : null);
     indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}`;
     indicator.hidden = !this.record;
@@ -375,12 +377,11 @@ export class StudioUI {
     const isSchema = $('event-kind').value === 'tool_schema' && $('content-mode').value === 'text';
     this.toolPickerShown = isSchema; holder.hidden = !isSchema; $('event-content').hidden = isSchema || !!this.argumentForm; if (head) head.hidden = isSchema;
     if (!isSchema) { holder.replaceChildren(); return; }
-    const saved = this.draft.events[this.event], extras = saved?.kind === 'tool_schema' ? saved.extra_tools || [] : [];
-    renderToolPicker(holder, {text: $('event-content').value, extras, tools: this.settings?.tools || {}, hideExtras: !this.prefs.showRandomTools, disabled: !!this.record?.owner, report: message,
+    renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
       relist: async chosen => {
         const listing = await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: chosen});
-        $('event-content').value = listing.content; this.toolExtras = {event: this.event, names: listing.added};
-        this.stashEditor(); this.applyEvent(); this.toolExtras = null; this.renderToolPicker();
+        $('event-content').value = listing.content;
+        this.stashEditor(); this.applyEvent(); this.renderToolPicker();
       }});
   }
   kindControls() {
@@ -410,7 +411,6 @@ export class StudioUI {
       close_window: $('close-window').checked, supervision: {masked: $('masked').checked, weight: Number($('weight').value)}};
     if (external) e.delivery = {mode: kind === 'chat_message' ? 'instant' : $('delivery').value, chain_immediately: $('chain').checked};
     if (kind === 'external_text' || kind === 'tool_schema' || kind === 'tool_response') e.replace_body = $('replace-body').checked;
-    if (kind === 'tool_schema') { const saved = this.draft.events[this.event]; e.extra_tools = this.toolExtras?.event === this.event ? this.toolExtras.names : saved?.kind === 'tool_schema' ? saved.extra_tools || [] : []; }
     if (kind === 'tool_call' || kind === 'tool_response') e.call_id = $('call-id').value;
     if (kind === 'tool_call') Object.assign(e, {tool: $('tool-id').value, insert_tool_begin: $('begin').checked, insert_tool_end: $('end').checked, echo_chat: $('echo-chat').checked});
     if (kind === 'tool_response') Object.assign(e, {insert_response_begin: $('begin').checked, insert_response_end: $('end').checked});
@@ -579,8 +579,9 @@ export class StudioUI {
       ? [...(frames[this.position]?.inputs || []), ...(frames[this.position]?.outputs || [])].map(e => e.window)
       : order.filter(id => depth[id] === this.position).map(id => this.draft.events[id].window));
     this.windowModels = windows;
-    const cards = [...windows].map(([id, w]) => this.windowCard(id, w));
-    $('window-grid').replaceChildren(...(cards.length ? cards : [node('div', order.length ? 'No window has content at this position. Move the timeline forward.' : 'This trajectory has no events yet.', 'empty')]));
+    const hideClosed = this.prefs.hideClosedWindows === true;
+    const cards = [...windows].filter(([, w]) => !(hideClosed && w.closed)).map(([id, w]) => this.windowCard(id, w));
+    $('window-grid').replaceChildren(...(cards.length ? cards : [node('div', windows.size ? 'All windows at this position are closed (hidden in Preferences).' : order.length ? 'No window has content at this position. Move the timeline forward.' : 'This trajectory has no events yet.', 'empty')]));
     if (!ticks) $('preview-status').textContent = '';
     this.renderPopout();
   }
@@ -611,7 +612,7 @@ export class StudioUI {
     head.append(comment, toggle, size);
     head.classList.add('clickable'); head.title = 'Jump to the latest event that edits this window';
     head.addEventListener('click', click => { if (!click.target.closest('button')) this.selectLatestWindowEvent(w); });
-    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.draft.events[event]?.extra_tools || [], hideExtras: !this.prefs.showRandomTools}));
+    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.previewToolExtras?.[event] || [], hideExtras: !this.prefs.showRandomTools}));
     return card;
   }
   /** Select the last event (at or before the current position) that wrote tokens into this window. */
@@ -690,7 +691,8 @@ export class StudioUI {
     this.history([{id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
     // A reload (switching trajectory, Undo/Redo) during the save already shows newer state.
     if (id !== this.id || generation !== this.selectionGeneration) return;
-    this.record = value; this.diagnostics = value.diagnostics;
+    // A save response has no `owner`; keep the known one so the next poll doesn't see a change and reload.
+    this.record = {...value, owner: this.record.owner}; this.diagnostics = value.diagnostics;
     // Edits made while the save was in flight stay in the draft and are saved next.
     const unchanged = same(this.draft, sent), normalized = !same(value.source, sent);
     if (unchanged) this.draft = copy(value.source);
@@ -975,7 +977,7 @@ export class StudioUI {
       if (e.detail === 'metrics-view') this.loadMetrics().catch(message);
       if (e.detail === 'review-view') this.openReview().catch(message);
     });
-    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools; $('auto-send-comments').checked = this.prefs.autoSendComments === true;
+    await this.loadSettings(); $('view-mode').value = this.prefs.mode; $('timeline-zoom').value = this.prefs.zoom; $('preview-debounce').value = this.prefs.debounce; $('show-random-tools').checked = this.prefs.showRandomTools; $('auto-send-comments').checked = this.prefs.autoSendComments === true; $('hide-closed-windows').checked = this.prefs.hideClosedWindows === true;
     on('new-sample', 'click', async () => { const r = await api('/trajectories', 'POST', {format: 'kidra-trajectory-graph/1', id: crypto.randomUUID(), windows: {reasoning: {purpose: 'reasoning', agent_writable: true}}, events: {}, metadata: {stage: -3}}); await this.select(r.source.id); });
     on('duplicate-sample', 'click', () => this.duplicate());
     on('reload-source', 'click', () => this.id && this.select(this.id, true));
@@ -1001,7 +1003,7 @@ export class StudioUI {
     for (const id of ['sample-search', 'search-stage', 'search-split', 'search-tool', 'search-comments']) on(id, id === 'sample-search' || id === 'search-tool' ? 'input' : 'change', () => { this.offset = 0; return this.listing(); });
     on('sample-page-prev', 'click', () => { this.offset = Math.max(0, this.offset - 50); return this.listing(); }); on('sample-page-next', 'click', () => { this.offset += 50; return this.listing(); });
     on('preferences-button', 'click', () => $('preferences-dialog').showModal());
-    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (!Number.isFinite(delay) || delay < 0 || delay > 10000) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
+    on('preferences-save', 'click', () => { const delay = Number($('preview-debounce').value); if (markInvalid($('preview-debounce'), $('preview-debounce').value === '' || !Number.isFinite(delay) || delay < 0 || delay > 10000)) throw new Error('Debounce must be 0–10000 ms'); this.prefs.profile = $('preview-profile').value; this.prefs.debounce = delay; this.prefs.showRandomTools = $('show-random-tools').checked; this.prefs.autoSendComments = $('auto-send-comments').checked; this.prefs.hideClosedWindows = $('hide-closed-windows').checked; this.comments.render(); this.savePreferences(); this.renderEvent(); this.renderTimeline(); this.preview.invalidate(); this.frames = null; this.schedulePreview(); $('preferences-dialog').close(); });
     on('timeline-zoom', 'input', () => { this.prefs.zoom = Number($('timeline-zoom').value); this.savePreferences(); this.renderTimeline(); });
     on('view-mode', 'change', () => { this.prefs.mode = $('view-mode').value; this.savePreferences(); this.preview.invalidate(); this.frames = null; this.position = 0; this.renderTimeline(); this.schedulePreview(); });
     const scrub = value => { this.followPreviewEnd = false; this.position = Number(value); this.renderTimeline(); };
