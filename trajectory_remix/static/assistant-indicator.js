@@ -1,10 +1,10 @@
 /* Status shown at the foot of the Comments panel while the Assistant's job owns the selected
-   trajectory: "Working... (1m 13s)", or "Running `tool`... (43s)" for two seconds after each
+   trajectory: "Working... (1m 13s)", or "Running `tool`... (43s)" for ten seconds after each
    tool call. The counter is the job's total running time. Clicking the status opens a list of
    every tool the job has run so far; the list lives only as long as the job. */
 import {node} from './ui-kit.js';
 
-export const TOOL_HOLD_MS = 2000;
+export const TOOL_HOLD_MS = 10000;
 const TOOL_LINE = /Assistant tool: (\w+)/;
 
 /** True when the trajectory is owned by an assistant job (summaries carry `action`). */
@@ -37,7 +37,7 @@ export class AssistantStatus {
     this.toggle.type = 'button';
     this.toggle.addEventListener('click', () => { this.open = !this.open; this.render(); });
     this.toggle.append(node('span', undefined, 'spinner'), this.label);
-    this.list = node('ol', undefined, 'working-tools');
+    this.list = node('ul', undefined, 'working-tools');
     host.append(this.toggle, this.list);
     this.render();
   }
@@ -69,7 +69,7 @@ export class AssistantStatus {
       if (page.items.length < 100) return;
     }
   }
-  /** A newer call overwrites the text and restarts the two-second hold. */
+  /** A newer call overwrites the text and restarts the ten-second hold. */
   showTool(name) {
     this.tool = name; this.clearTimer(this.timer);
     this.timer = this.setTimer(() => { this.tool = null; this.render(); }, TOOL_HOLD_MS);
