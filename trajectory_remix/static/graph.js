@@ -12,6 +12,7 @@ import {AssistantQueue} from './assistant-queue.js';
 import {AutoSave} from './auto-save.js';
 import {loadBarriers, loadRunInputs, persistInput, resolveSeed, saveBarriers} from './run-inputs.js';
 import {duplicateTrajectory} from './duplicate.js';
+import {renameEvent, renameProblem} from './event-rename.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
 import {bindViewTabs, currentView, showView} from './views.js';
@@ -271,7 +272,7 @@ export class StudioUI {
       const region = $(root); if (region) for (const input of region.querySelectorAll('input,select,textarea')) if (!input.closest('[data-lock-exempt]')) input.disabled = locked;
     }
     // Existing markup uses these stable controls even before the shell update.
-    for (const id of ['event-content','event-kind','event-window','call-id','tool-id','chat-speaker','delivery','weight','chain','replace-body','close-window','masked','begin','end','echo-chat','window-id','window-purpose','window-writable','window-effort','window-left-open','metadata-json','source-json','stage','split']) $(id).disabled = locked;
+    for (const id of ['event-content','event-name','event-kind','event-window','call-id','tool-id','chat-speaker','delivery','weight','chain','replace-body','close-window','masked','begin','end','echo-chat','window-id','window-purpose','window-writable','window-effort','window-left-open','metadata-json','source-json','stage','split']) $(id).disabled = locked;
     let ownerLink = $('open-selected-job');
     if (!ownerLink) {
       ownerLink = button('Inspect owning job', () => this.inspectJob(this.record.owner), 'sm'); ownerLink.id = 'open-selected-job';
@@ -349,7 +350,7 @@ export class StudioUI {
     $('dependency-options').replaceChildren(...Object.keys(this.draft?.events || {}).filter(id => id !== this.event).map(id => { const n = node('option'); n.value = id; return n; }));
     toggleClass($('event-editor-panel'), 'no-event', !e);
     if (!e) { $('event-content').value = ''; $('dependencies').replaceChildren(); setText($('links-count'), ''); this.editorBaseline = null; if (this.record) this.renderDirty(); return; }
-    $('event-kind').value = e.kind; $('event-window').value = e.window; $('call-id').value = e.call_id || '';
+    $('event-name').value = this.event; $('event-kind').value = e.kind; $('event-window').value = e.window; $('call-id').value = e.call_id || '';
     $('tool-id').value = e.tool || ''; $('chat-speaker').value = e.chat?.speaker || 'User'; $('delivery').value = e.delivery?.mode || 'instant';
     $('chain').checked = e.delivery?.chain_immediately ?? true; $('replace-body').checked = e.replace_body ?? false;
     $('close-window').checked = e.close_window; $('masked').checked = e.supervision.masked; $('weight').value = e.supervision.weight;
@@ -409,6 +410,17 @@ export class StudioUI {
     if (kind === 'tool_response') Object.assign(e, {insert_response_begin: $('begin').checked, insert_response_end: $('end').checked});
     if (kind === 'chat_message') { e.chat = {speaker: $('chat-speaker').value}; if ($('call-id').value) e.call_id = $('call-id').value; }
     return e;
+  }
+  renameCurrentEvent() {
+    const current = this.event, next = $('event-name').value.trim();
+    if (!current || !this.draft?.events[current]) return;
+    const problem = renameProblem(this.draft.events, current, next);
+    if (problem) { $('event-name').value = current; if (next !== current) message(problem); return; }
+    if (next === current) return;
+    this.stashEditor();
+    renameEvent(this.draft, current, next);
+    if (this.editors.has(current)) { this.editors.set(next, this.editors.get(current)); this.editors.delete(current); }
+    this.event = next; this.renderDraft(); this.renderEvent(); this.changed();
   }
   applyEvent() { if (!this.event || !this.draft.events[this.event]) return; this.draft.events[this.event] = this.composeEvent(); this.editors.delete(this.event); this.editorBaseline = this.editorState(); this.changed(); }
   renderDependencies() {
@@ -958,6 +970,7 @@ export class StudioUI {
     on('delete-sample', 'click', async () => { if (!this.id || !confirm('Delete this trajectory? Undo can restore it during this session.')) return; const delta = await api(`/trajectories/${this.id}`, 'DELETE', {expected_revision: this.record.revision}); this.history([delta]); this.drafts.delete(this.id); this.id = null; this.draft = null; this.record = null; this.event = null; this.editors.clear(); this.comments.load(null); this.renderDirty(); this.renderEvent(); this.renderTimeline(); await this.listing(); });
     on('event-picker', 'change', e => this.selectEvent(e.target.value));
     on('event-apply', 'click', () => this.applyEvent());
+    on('event-name', 'change', () => this.renameCurrentEvent());
     on('new-event', 'click', () => {
       if (!this.draft) return; const id = $('new-event-id').value || 'event-' + crypto.randomUUID().slice(0, 8); if (this.draft.events[id]) throw new Error('Event ID exists');
       this.stashEditor(); this.draft.events[id] = {kind: 'agent_text', window: Object.keys(this.draft.windows)[0] || 'reasoning', after: [], content: '', close_window: false, supervision: {masked: false, weight: 1}};

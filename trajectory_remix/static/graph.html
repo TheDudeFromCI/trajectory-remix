@@ -192,6 +192,7 @@
       <div role="tabpanel" id="panel-content" aria-labelledby="tab-content" class="panel-body">
         <div id="event-empty" class="empty">No event selected. Add one with + above.</div>
         <div class="form-grid two event-context">
+          <label>Name <input id="event-name" spellcheck="false" aria-label="Event name" data-tip="Renaming also updates every dependency that points at this event"></label>
           <label>Kind <select id="event-kind"><option value="agent_text">Agent text</option><option value="external_text">External input</option><option value="tool_schema">Tool schema</option><option value="tool_call">Tool call</option><option value="tool_response">Tool result</option><option value="chat_message">Chat message</option></select></label>
           <label>Window <select id="event-window"></select></label>
           <label>Call ID <input id="call-id"></label>
