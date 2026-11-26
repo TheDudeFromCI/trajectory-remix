@@ -294,7 +294,8 @@ class Endpoint(DTO):
     use_responses_api: bool = False
     concurrency: Annotated[int, Field(ge=1)] = 1
     retries: Annotated[int, Field(ge=0)] = 2
-    timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    # Seconds allowed per request; -1 disables the limit for very slow endpoints.
+    timeout_seconds: Annotated[float, Field(ge=-1, allow_inf_nan=False)] = 120.0
     # When every retry fails the endpoint pauses. If set, it reconnects by itself after
     # this many seconds and tries again; None leaves it paused until a manual Resume.
     reconnect_seconds: Annotated[float, Field(gt=0)] | None = None
@@ -329,6 +330,13 @@ class Endpoint(DTO):
         if isinstance(data, dict) and "output_mode" in data:
             data = {k: v for k, v in data.items() if k != "output_mode"}
         return data
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def timeout_positive_or_disabled(cls, value):
+        if value != -1 and value <= 0:
+            raise ValueError("timeout_seconds must be greater than zero, or -1 to disable")
+        return value
 
     @model_validator(mode="after")
     def context_budget(self):
