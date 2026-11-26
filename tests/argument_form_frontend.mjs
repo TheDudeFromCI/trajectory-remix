@@ -50,5 +50,15 @@ renderArgumentForm(holder, {args: {}, schema: {properties: {}}, disabled: true, 
 assert.ok(holder.textContent.includes('no arguments'));
 renderArgumentForm(holder, {args: {a: 1}, disabled: true, onChange() {}, report() {}});
 assert.equal(field('a').disabled, true);
+// Broken fields get aria-invalid (red outline): omitted required arguments and bad JSON.
+renderArgumentForm(holder, {args: {}, schema, onChange() {}, report() {}});
+assert.equal(field('path').getAttribute('aria-invalid'), 'true'); assert.equal(field('limit').hasAttribute('aria-invalid'), false);
+{
+  const a = {}; renderArgumentForm(holder, {args: a, schema, onChange() {}, report() {}});
+  set('path', 'x', 'input'); assert.equal(field('path').hasAttribute('aria-invalid'), false);
+  set('path', '', 'input'); assert.equal(field('path').getAttribute('aria-invalid'), 'true');
+  set('filters', '[', 'change'); assert.equal(field('filters').getAttribute('aria-invalid'), 'true');
+  set('filters', '[1]', 'change'); assert.equal(field('filters').hasAttribute('aria-invalid'), false);
+}
 console.log('Argument form: typed fields, round trips, unset values, bad JSON and locking passed.');
 window.happyDOM.abort();

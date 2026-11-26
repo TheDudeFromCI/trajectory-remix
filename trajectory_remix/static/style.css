@@ -135,7 +135,7 @@ select { padding-right: 28px; appearance: none; background-image: linear-gradien
 textarea { padding: var(--space-2); font: 400 13px/18px var(--font-mono); resize: vertical; }
 input::placeholder, textarea::placeholder { color: var(--ink-faint); }
 input:disabled, select:disabled, textarea:disabled { color: var(--ink-faint); cursor: not-allowed; }
-input[aria-invalid='true'] { border-color: var(--danger); }
+input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: var(--danger); outline: 2px solid var(--danger); outline-offset: 0; }
 input[type=checkbox], input[type=radio] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); flex: none; }
 input[type=range] { accent-color: var(--accent); }
 input[type=file] { color: var(--ink-muted); font-size: 12px; }

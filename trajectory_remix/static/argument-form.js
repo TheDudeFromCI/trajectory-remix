@@ -2,6 +2,7 @@
    Strings get a text box, numbers a number box, booleans and enums a dropdown, and objects,
    arrays or untyped values a small JSON box. Arguments not in the schema are listed too. */
 import {node} from './ui-kit.js';
+import {isMissing, markInvalid} from './field-invalid.js';
 
 const UNSET = '';
 
@@ -73,11 +74,14 @@ export function renderArgumentForm(holder, {args, schema, disabled = false, onCh
   const keys = [...new Set([...Object.keys(properties), ...Object.keys(args)])];
   const fields = keys.map(key => {
     const known = key in properties, spec = properties[key] || {}, type = known ? fieldType(spec) : 'json';
-    const [input, read, event] = control(type, spec, args[key], !required.has(key));
+    const isRequired = required.has(key), [input, read, event] = control(type, spec, args[key], !isRequired);
+    // Omitted required arguments are outlined straight away, before any edit.
+    if (!disabled) markInvalid(input, isRequired && isMissing(args[key]));
     input.disabled = disabled; input.setAttribute('aria-label', 'Argument ' + key); input.dataset.argument = key;
     input.addEventListener(event, () => {
       let value;
-      try { value = read(); } catch { report(`Argument "${key}" needs valid JSON; the previous value is kept.`); return; }
+      try { value = read(); } catch { markInvalid(input, true); report(`Argument "${key}" needs valid JSON; the previous value is kept.`); return; }
+      markInvalid(input, isRequired && isMissing(value));
       if (value === undefined) delete args[key]; else args[key] = value;
       onChange(args);
     });
