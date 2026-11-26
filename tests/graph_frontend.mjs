@@ -131,6 +131,13 @@ $('first-tick').click(); assert.equal(ui.position,0);
  assert.deepEqual(new Set(Object.keys(events).filter(i=>level[i]===ui.position).map(i=>events[i].window)),ui.changedWindows);
  assert.equal($('scrubber'),null); assert.ok($('timeline').querySelector('.timeline-cursor'));
  assert.equal(ui.positionAt(ui.cursorX(top)),top); assert.equal(ui.positionAt(-500),0);
+ // Preference: closed windows can be hidden from the grid.
+ ui.position=top; ui.prefs.hideClosedWindows=false; ui.renderTimeline();
+ const total=ui.windowModels.size, closed=[...ui.windowModels.values()].filter(w=>w.closed).length;
+ assert.equal($('window-grid').querySelectorAll('.window-card').length,total);
+ ui.prefs.hideClosedWindows=true; ui.renderTimeline();
+ assert.equal($('window-grid').querySelectorAll('.window-card').length,total-closed);
+ ui.prefs.hideClosedWindows=false; ui.renderTimeline();
  $('first-tick').click();
 }
 // Zoom slider rescales the timeline horizontally and persists.
