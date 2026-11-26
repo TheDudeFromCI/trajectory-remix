@@ -15,6 +15,7 @@ import {duplicateTrajectory} from './duplicate.js';
 import {renameEvent, renameProblem} from './event-rename.js';
 import {describeMerge, mergeTools, toolImportControls} from './tool-import.js';
 import {renderToolPicker} from './tool-picker.js';
+import {parseArguments, renderArgumentForm} from './argument-form.js';
 import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {byId} from './panel-popout.js';
@@ -369,7 +370,7 @@ export class StudioUI {
   renderToolPicker() {
     const holder = $('tool-picker'), head = document.querySelector('#panel-content .content-head');
     const isSchema = $('event-kind').value === 'tool_schema' && $('content-mode').value === 'text';
-    holder.hidden = !isSchema; $('event-content').hidden = isSchema; if (head) head.hidden = isSchema;
+    this.toolPickerShown = isSchema; holder.hidden = !isSchema; $('event-content').hidden = isSchema || !!this.argumentForm; if (head) head.hidden = isSchema;
     if (!isSchema) { holder.replaceChildren(); return; }
     const saved = this.draft.events[this.event], extras = saved?.kind === 'tool_schema' ? saved.extra_tools || [] : [];
     renderToolPicker(holder, {text: $('event-content').value, extras, tools: this.settings?.tools || {}, hideExtras: !this.prefs.showRandomTools, disabled: !!this.record?.owner, report: message,
@@ -384,18 +385,19 @@ export class StudioUI {
     const external = response || kind === 'external_text' || kind === 'tool_schema';
     for (const [id, show] of Object.entries({'call-id': tool || response || chat, 'tool-id': tool, 'chat-speaker': chat, delivery: external, chain: external || chat, 'replace-body': external, begin: tool || response, end: tool || response, 'echo-chat': tool})) $(id).closest('label').hidden = !show;
   }
+  /** Form mode swaps the text box for one typed field per tool argument; unparseable content keeps the text box. */
   renderArguments() {
-    $('argument-form').replaceChildren();
-    if ($('content-mode').value !== 'form') return;
-    let args; try { args = JSON.parse($('event-content').value); } catch { message('Partial arguments retained. Complete JSON to use Form mode.'); return; }
-    if (!args || typeof args !== 'object' || Array.isArray(args)) { message('Form mode needs an argument object. Raw content retained.'); return; }
-    const schema = this.settings.tools[$('tool-id').value]?.input_schema;
-    const keys = new Set([...Object.keys(schema?.properties || {}), ...Object.keys(args)]);
-    for (const key of keys) {
-      const label = node('label', key), input = node('input'); input.value = key in args ? JSON.stringify(args[key]) : ''; input.setAttribute('aria-label', 'Argument ' + key);
-      input.onchange = () => { try { if (input.value === '') delete args[key]; else args[key] = JSON.parse(input.value); $('event-content').value = json(args); this.stashEditor(); this.applyEvent(); } catch { message('Argument values use JSON; original raw content retained.'); } };
-      label.append(input); $('argument-form').append(label);
+    const holder = $('argument-form'), form = $('content-mode').value === 'form';
+    const args = form ? parseArguments($('event-content').value) : null;
+    this.argumentForm = !!args; $('event-content').hidden = this.argumentForm || this.toolPickerShown;
+    if (!args) {
+      holder.replaceChildren();
+      if (form) message('Form mode needs a complete JSON argument object. Raw content retained.');
+      return;
     }
+    const schema = $('event-kind').value === 'tool_call' ? this.settings.tools[$('tool-id').value]?.input_schema : undefined;
+    renderArgumentForm(holder, {args, schema, disabled: !!this.record?.owner, report: message,
+      onChange: value => { $('event-content').value = json(value); this.stashEditor(); this.applyEvent(); }});
   }
   composeEvent() {
     const kind = $('event-kind').value, external = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes(kind);
@@ -980,7 +982,7 @@ export class StudioUI {
       this.event = id; this.renderDraft(); this.renderEvent(); this.changed();
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
-    on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderToolPicker(); });
+    on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderArguments(); this.renderToolPicker(); });
     on('content-mode', 'change', () => { this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
     on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
     for (const id of ['event-window', 'call-id', 'tool-id', 'chat-speaker', 'delivery', 'weight', 'chain', 'replace-body', 'close-window', 'masked', 'begin', 'end', 'echo-chat']) on(id, 'change', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
