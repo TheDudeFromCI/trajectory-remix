@@ -247,6 +247,8 @@ export class StudioUI {
     const id = this.id, generation = this.selectionGeneration;
     const latest = await api(`/trajectories/${id}`);
     if (id !== this.id || generation !== this.selectionGeneration) return;
+    // A save that landed (or is landing) while this was fetched is newer; the next poll catches up.
+    if (this.autoSave.running || latest.revision < this.record.revision) return;
     const settingsChanged = latest.diagnostics_settings_revision !== this.record.diagnostics_settings_revision;
     if (latest.revision === this.record.revision && latest.owner === this.record.owner && !settingsChanged) return;
     if (this.isDirty()) {
