@@ -115,12 +115,12 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
 6. Set the trajectory's **Stage**, **Split** and **Complexity** at the top of the **Metrics** tab.
 
 Every change saves as soon as you make it; there is no Save button. Choices, checkboxes and
-buttons save at once. Typing saves when you pause, so a sentence is one save. The badge reads
-*Saving…* and then *Saved · rev N*. Each save is one step for **Undo** and **Redo**, including
+buttons save at once. Typing saves when you pause, so a sentence is one save. The status bar at
+the bottom reads *Saving...* and then *Saved*. Each save is one step for **Undo** and **Redo**, including
 metric values.
 
-Some in-between states can't be stored yet, such as a tool call with no call ID. The badge
-then reads *Not saved* (hover it for the reason), your draft is kept, and it saves with your
+Some in-between states can't be stored yet, such as a tool call with no call ID. The status bar
+then reads *Failed to Save* (hover it for the reason), your draft is kept, and it saves with your
 next change.
 
 ### Manage windows

@@ -186,7 +186,7 @@ export class StudioUI {
   renderDirty() {
     const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.hasUnsavedChanges();
     const failed = dirty && !!this.autoSave.error && this.failedKey === this.draftKey();
-    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Not saved' : dirty ? 'Saving…' : `Saved · rev ${this.record.revision}`);
+    setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Failed to Save' : dirty ? 'Saving...' : 'Saved');
     setAttr(indicator, 'data-tip', failed ? 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.' : null);
     indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}`;
     indicator.hidden = !this.record;
