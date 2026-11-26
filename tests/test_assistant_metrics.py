@@ -1,7 +1,7 @@
 """Send to agent: the Assistant reviews a trajectory's metrics and records annotations."""
 
 import pytest
-from test_assistant import edit, flagged, reply, results, run, service, turn
+from test_assistant import applied, edit, flagged, reply, results, run, service, turn
 
 from trajectory_remix.graph import assistant_metrics
 from trajectory_remix.graph.metrics import MetricService
@@ -81,7 +81,8 @@ async def test_assistant_sets_metrics_after_edits_and_they_commit(tmp_path):
     ]
     await run(gen, record)
     assert len(fake.calls) == 1, "one exchange answers everything"
-    source = stored(gen, record).source
+    assert "metrics" not in stored(gen, record).source.metadata, "proposed, not committed"
+    source = applied(gen, record)
     assert source.events["x"].content == "after"
     saved = source.metadata["metrics"]["complexity"]
     assert saved["value"] == "medium" and saved["origin"] == assistant_metrics.ORIGIN
@@ -98,6 +99,7 @@ async def test_a_later_edit_makes_an_assistant_annotation_stale(tmp_path):
         turn(metric("complexity", "easy"), edit("changed"), reply(only, True, "Done."))
     ]
     await run(gen, record)
+    applied(gen, record)
     assert panel(gen, record)["complexity"]["status"] == "stale"
 
 
@@ -136,5 +138,6 @@ async def test_null_clears_an_existing_observation(tmp_path):
     service_.annotate(record.source.id, record.revision, "complexity", "hard", "manual_annotation")
     fake.responses = [turn(metric("complexity", None), reply(only, True, "Cleared."))]
     await run(gen, stored(gen, record))
+    applied(gen, record)
     assert "complexity" not in stored(gen, record).source.metadata.get("metrics", {})
     assert panel(gen, record)["complexity"]["status"] == "unavailable"

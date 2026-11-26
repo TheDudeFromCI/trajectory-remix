@@ -220,11 +220,13 @@ def create_studio_app(
     from .comments_api import add_comment_routes
     from .prompt_migration import migrate
     from .prompts_api import add_prompt_routes
+    from .proposal_api import add_proposal_routes
     from .tools_api import add_tool_routes
 
     migrate(studio.store)
     add_tool_routes(router, studio.store)
     add_comment_routes(router, studio.comments)
+    add_proposal_routes(router, studio)
     add_prompt_routes(router)
     from . import usage
 

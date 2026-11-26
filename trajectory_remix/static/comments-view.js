@@ -21,9 +21,10 @@ export function unresolvedCounts(items) {
 
 export class CommentsView {
   /** els: {target, body, add, list, count, send?}; inspect(kind, id) jumps to a comment's target.
-     autoSend() says whether new or reopened comments go to the assistant at once; onOpened() does the sending. */
-  constructor({api, report, els, inspect = () => {}, onChange = () => {}, autoSend = () => false, onOpened = async () => {}}) {
-    Object.assign(this, {api, report, els, inspect, onChange, autoSend, onOpened});
+     autoSend() says whether new or reopened comments go to the assistant at once; onOpened() does the sending.
+     proposed() is the set of comment IDs a pending Assistant proposal addresses: they resolve by applying it. */
+  constructor({api, report, els, inspect = () => {}, onChange = () => {}, autoSend = () => false, onOpened = async () => {}, proposed = () => new Set()}) {
+    Object.assign(this, {api, report, els, inspect, onChange, autoSend, onOpened, proposed});
     this.sendTip = els.send?.dataset.tip || '';
     this.items = []; this.counts = new Map(); this.trajectory = null; this.loaded = ''; this.replies = new Map();
     els.add.addEventListener('click', () => this.add().catch(report));
@@ -143,7 +144,11 @@ export class CommentsView {
     if (!replying) act('Reply', 'ghost', () => this.startReply(c));
     if (c.status === 'addressed') {
       if (!replying) act('Request changes', 'ghost', () => this.startReply(c, true)).dataset.tip = 'Reopen it with a reply saying what is still wrong';
-      act('Accept', 'primary', () => this.act(c, 'PATCH', {status: 'resolved'})).dataset.tip = 'The fix is right: resolve the comment';
+      if (this.proposed().has(c.id)) {
+        const note = node('span', 'Fix is in the proposed changes', 'small muted grow');
+        note.dataset.tip = 'Applying the proposed changes above resolves this comment; discarding them reopens it';
+        row.prepend(note);
+      } else act('Accept', 'primary', () => this.act(c, 'PATCH', {status: 'resolved'})).dataset.tip = 'The fix is right: resolve the comment';
     } else if (c.status === 'open') act('Resolve', 'ghost', () => this.act(c, 'PATCH', {status: 'resolved'}));
     else act('Reopen', 'ghost', () => this.act(c, 'PATCH', {status: 'open'}));
     act('Delete', 'ghost danger', () => { if (globalThis.confirm?.('Delete this comment?') === false) return; return this.act(c, 'DELETE'); });

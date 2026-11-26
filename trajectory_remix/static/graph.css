@@ -377,7 +377,23 @@ td.faint { color: var(--ink-faint); }
 .comment-card.addressed { border-left-color: var(--warning); }
 .comment-section { margin: var(--space-1) 0 0; color: var(--ink-muted); font-size: 13px; font-weight: 500; }
 .sample-comments.review { color: var(--warning); }
-.comment-actions { display: flex; justify-content: flex-end; gap: var(--space-1); }
+.comment-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-1); }
+/* The Assistant's proposed changes, above the comment list: inspect, then apply or discard. */
+.proposal { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-left: 3px solid var(--warning); border-radius: var(--radius-sm); background: var(--surface-200); }
+.proposal[hidden] { display: none; }
+.proposal > p { margin: 0; }
+.proposal-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.proposal-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.proposal-head .small.muted { white-space: nowrap; }
+.proposal-changes { display: flex; flex-direction: column; gap: var(--space-1); }
+.proposal-change { border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.proposal-change > summary { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-2); cursor: pointer; font-size: 12px; }
+.proposal-diff { margin: 0; padding: var(--space-1) 0; max-height: 320px; overflow: auto; border-top: 1px solid var(--border); font: 12px/18px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.proposal-diff > span { display: block; padding: 0 var(--space-2) 0 calc(var(--space-2) + 2ch); text-indent: -2ch; }
+.proposal-diff .diff-add { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.proposal-diff .diff-del { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.proposal-diff .diff-same { color: var(--ink-muted); }
+.proposal-diff .diff-skip { color: var(--ink-faint); font-style: italic; }
 .comment-resolved { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
 .comment-resolved > summary { cursor: pointer; color: var(--ink-muted); font-size: 13px; }
 .comment-resolved[open] > summary { margin-bottom: var(--space-2); }

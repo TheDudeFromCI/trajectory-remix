@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 from pydantic import ValidationError
-from test_assistant import flagged, run, service
+from test_assistant import applied, flagged, run, service
 
 from trajectory_remix.graph import usage
 from trajectory_remix.graph.jobs import Ticket
@@ -143,8 +143,8 @@ async def test_assistant_replays_reasoning_and_tool_results_with_responses(monke
     gen.transport = OpenAITransport()
     job = await run(gen, record)
     assert gen.jobs.inspect(job)["state"] == "completed"
-    assert gen.store.read(record.source.id).source.events["x"].content == "updated"
     assert gen.comments.for_trajectory(record.source.id)[0]["status"] == "addressed"
+    assert applied(gen, record).events["x"].content == "updated"
     first, second = (json.loads(request.content) for request in sent)
     assert first["reasoning"] == {"effort": "low"}
     assert "max_output_tokens" not in first

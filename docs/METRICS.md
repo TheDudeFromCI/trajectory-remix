@@ -48,7 +48,8 @@ the value is marked **Stale** until you **Confirm** it again, and the **Problems
 
 You can also ask the Assistant to do it: leave a comment such as "complexity should be hard" and
 [send the comments to the agent](DASHBOARD.md#send-comments-to-an-agent). It can read every metric and set
-categories, labels and outcomes, but not measured values. Its values are recorded with the origin
+categories, labels and outcomes, but not measured values. Its values arrive with its other
+[proposed changes](DASHBOARD.md#review-the-assistants-proposed-changes) and are saved when you apply them, with the origin
 `assistant_annotation` (visible through the API), and you can change or clear them here like any other value.
 
 ## Calculate what's missing
