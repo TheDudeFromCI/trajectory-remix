@@ -221,5 +221,7 @@ correction naming each failing field (it looks inside "object or null" alternati
 shortens quoted values).
 
 Tool schema: `python -m pytest -q tests/test_tool_listing.py` checks the repeatable random
-additions, that Assembly writes a `tool_schema` event (with `extra_tools`) before the opening,
-that the project's random-tool chance applies (0 disables it), and that manual authoring's listing route matches it (`graph/tool_listing.py`, `graph/tools_api.py`).
+additions, that Assembly writes a `tool_schema` event of the chosen tools before the opening,
+and that manual authoring's listing route lists only chosen tools. `tests/test_tool_schema.py`
+checks that the compiler adds random extras (`graph/tool_extras.py`) without changing the
+stored source, and that chance 0 disables them.

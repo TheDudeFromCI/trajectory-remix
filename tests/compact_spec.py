@@ -125,7 +125,7 @@ def schema(tool_ids):
     )
 
 
-def build(spec, base, tools, extra_tools=0.5):
+def build(spec, base, tools, extra_tools=0):
     """Return graph source data for spec on top of base (id, metadata).
 
     Raises ValueError with a correction an author can act on.
@@ -139,7 +139,6 @@ def build(spec, base, tools, extra_tools=0.5):
         window=LISTING,
         after=[],
         content=listed["content"],
-        extra_tools=listed["added"],
     )
     for window in spec["windows"]:
         if window["id"] in data["windows"]:

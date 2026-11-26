@@ -4,7 +4,6 @@ import json
 
 import pytest
 from test_graph_compiler import compile_source, event, source
-from test_graph_generation import service
 
 from trajectory_remix.graph.models import GraphSource, ProjectSettings, ToolDefinition
 
@@ -41,24 +40,19 @@ def test_project_chance_defaults_to_half_and_rejects_out_of_range():
         ProjectSettings(tool_schema_extra_chance=1.5)
 
 
-def test_listing_route_uses_the_project_chance_when_none_is_sent(tmp_path):
-    from fastapi.testclient import TestClient
+def test_extras_join_the_listing_at_compile_time_only():
+    from trajectory_remix.graph import tool_extras
 
-    from trajectory_remix.graph.studio_api import create_studio_app
-
-    gen, _ = service(tmp_path)
-    store = gen.store
-    record = store.settings()
-    settings = record.settings
+    settings = ProjectSettings(tool_schema_extra_chance=1)
     for name in ("a", "b", "c"):
         settings.tools[name] = ToolDefinition(name=name)
-    settings.tool_schema_extra_chance = 1
-    store.update_settings(settings, record.revision)
-    app = create_studio_app(store.path, artifact_root=tmp_path / "exports")
-    with TestClient(app) as client:
-        client.headers["X-Remix-Token"] = app.state.csrf
-        body = dict(trajectory_id="t", event_id="tools", tools=[])
-        served = client.post("/api/v1/tools/listing", json=body).json()
-        assert set(served["added"]) == set(settings.tools)  # Nothing chosen; chance 1 adds all.
-        explicit = client.post("/api/v1/tools/listing", json=dict(body, extra_tools=0)).json()
-        assert explicit["shown"] == [] and explicit["content"] == ""
+    data = source({"list": event("tool_schema", "tools", '{"name":"a","parameters":{}}')}).to_dict()
+    expanded, added = tool_extras.expand(data, settings)
+    assert set(added["list"]) == set(settings.tools) - {"a"}
+    assert expanded["events"]["list"]["content"].count("\n") == len(settings.tools) - 1
+    assert (
+        data["events"]["list"]["content"] == '{"name":"a","parameters":{}}'
+    )  # Stored source unchanged.
+    settings.tool_schema_extra_chance = 0
+    assert tool_extras.expand(data, settings) == (data, {})
+    assert tool_extras.expand(data, None) == (data, {})

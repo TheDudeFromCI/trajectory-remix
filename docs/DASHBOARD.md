@@ -111,7 +111,7 @@ Short recipes for common tasks. Each assumes the studio is open in your browser.
    pick a purpose, and click **Create window**. See [Manage windows](#manage-windows).
 5. Want the agent to see its tools? Add an event of kind **Tool schema** in a `tools`
    window and tick the tools. See [Show the agent its tools](TOOLS.md#show-the-agent-its-tools).
-   Randomly added tools are grayed out; hide them under **Preferences**.
+   Tools added at random when compiling are grayed out in the preview; hide them under **Preferences**.
 6. Set the trajectory's **Stage**, **Split** and **Complexity** at the top of the **Metrics** tab.
 
 Every change saves as soon as you make it; there is no Save button. Choices, checkboxes and
