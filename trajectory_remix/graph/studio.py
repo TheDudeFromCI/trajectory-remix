@@ -10,13 +10,12 @@ import json
 from collections import OrderedDict
 from threading import Lock
 
-from fastapi.encoders import jsonable_encoder
-
 from . import size_query
 from .bulk import BulkService
 from .commands import GraphCommands, GraphResult
 from .diagnostic_policy import choices
 from .jobs import page
+from .json_encoding import encode
 from .models import GraphSource, ProjectSettings, digest
 from .size_labels import size_of
 from .validation import diagnose
@@ -33,7 +32,7 @@ def result(value):
         metadata_revision=record.metadata_revision,
         settings_revision=record.settings_revision,
         diagnostics_settings_revision=record.settings_revision,
-        diagnostics=jsonable_encoder(value.diagnostics),
+        diagnostics=encode(value.diagnostics),
         has_errors=value.has_errors,
     )
 
@@ -159,7 +158,7 @@ class Studio:
                 return json.loads(encoded) | dict(revision=revision)
         compiler = GraphCompiler(selected, settings=settings, active_limit=active_limit, seed=seed)
         preview = compiler.preview(draft, max_frames=max_frames)
-        data = jsonable_encoder(preview) | dict(
+        data = encode(preview) | dict(
             profile=profile,
             profile_fingerprint=selected.fingerprint,
             settings_revision=settings_record.revision,

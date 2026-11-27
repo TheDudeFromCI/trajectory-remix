@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Query
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -18,6 +17,7 @@ from . import request_errors, size_query
 from .bulk import BulkService
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
+from .json_encoding import encode
 from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checklists
 from .query_export import iter_jsonl
 from .reviews import ReviewInput
@@ -301,8 +301,8 @@ def create_studio_app(
             generation_available="draft" in studio.store.settings().settings.endpoint_roles,
         )
 
-    # Settings are already JSON-safe. Returning them directly skips FastAPI's jsonable_encoder,
-    # which silently drops keys starting with "_sa" (e.g. tokenizer vocabulary like "_save").
+    # Settings are already JSON-safe; returning them directly skips re-encoding megabytes of
+    # tokenizer data.
     @router.get("/settings")
     def settings():
         return JSONResponse(studio.settings())
@@ -377,7 +377,7 @@ def create_studio_app(
             source=body.to_dict(),
             source_hash=body.intrinsic_hash,
             settings_revision=settings.revision,
-            diagnostics=jsonable_encoder(diagnose(body, settings.settings)),
+            diagnostics=encode(diagnose(body, settings.settings)),
         )
 
     @router.post("/trajectories", status_code=201)

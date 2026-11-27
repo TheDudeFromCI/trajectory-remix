@@ -54,6 +54,9 @@ prompt delivered verbatim to Draft and Assembly, the derived
 covered in `project_settings_frontend.mjs`. These use fake providers, so they check
 structure, not prompt quality.
 
+`python -m pytest -q tests/test_json_encoding.py` checks that API responses keep dict keys starting with `_sa`,
+which FastAPI drops by default.
+
 `python -m pytest -q tests/test_settings_storage.py` checks the settings tables: one stored copy per
 tokenizer, snapshots pruned except those used by recent saves, trajectories and jobs, stale saves merging inside
 that window and conflicting after it, and the in-place upgrade of projects in the earlier layout.
