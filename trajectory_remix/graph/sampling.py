@@ -228,11 +228,14 @@ class SamplerService:
         )
 
     def update(self, matrix, metric_options, expected_revision):
-        r = self.store.settings()
-        self.store._check_revision("settings", expected_revision, r)
-        data = r.settings.model_dump(mode="json")
+        # Edit the revision the matrix was loaded from; saves to other settings since then are kept.
+        try:
+            base = self.store.settings(expected_revision)
+        except KeyError:
+            base = self.store.settings()  # An unknown revision is reported as a conflict below.
+        data = base.settings.model_dump(mode="json")
         data["sampler_configuration"] = configuration(matrix, metric_options)
-        self.store.update_settings(data, expected_revision)
+        self.store.update_settings(data, expected_revision, rebase=True)
         return self.editor()
 
     def propose(self, *, seed=None, world_group_id=None, overrides=None, frozen=None, persist=True):

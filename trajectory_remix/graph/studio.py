@@ -84,7 +84,9 @@ class Studio:
         )
 
     def update_settings(self, settings, expected_revision):
-        self.store.update_settings(ProjectSettings.model_validate(settings), expected_revision)
+        self.store.update_settings(
+            ProjectSettings.model_validate(settings), expected_revision, rebase=True
+        )
         self.jobs.configure_endpoints()
         return self.settings()
 

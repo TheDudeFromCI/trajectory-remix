@@ -89,9 +89,11 @@ try {
  await page.locator('#event-content').fill('unsaved local text');
  record=await api('/trajectories/'+id);
  await api('/trajectories/'+id,'PATCH',{expected_revision:record.revision,patch:{metadata:{browser_update:2}}});
- await page.waitForFunction(()=>document.getElementById('status').textContent.includes('edits are retained'));
+ // The typed edit saves from the older revision and merges with the newer metadata change.
+ await page.waitForFunction(()=>graphStudio.draft.metadata.browser_update===2 && !graphStudio.isDirty());
  assert.equal(await page.locator('#event-content').inputValue(),'unsaved local text');
- assert.equal(await page.evaluate(()=>graphStudio.draft.metadata.browser_update),1);
+ record=await api('/trajectories/'+id);
+ assert.equal(record.source.events[event].content,'unsaved local text'); assert.equal(record.source.metadata.browser_update,2);
  // Re-selecting a clean source always gets latest saved revision rather than a stale cache.
  await page.evaluate(async id=>await graphStudio.select(id,true),id);
  assert.equal(await page.evaluate(()=>graphStudio.draft.metadata.browser_update),2);

@@ -19,7 +19,9 @@ Create a trajectory, add windows and events, and press **Save**. The
 - **Same-window writers must be ordered.** Two events writing one window need one
   to depend on the other.
 - **Conflicts keep your text.** Edits use per-trajectory revision guards and operational
-  locks. After a conflict, **Reload saved source** is an explicit step.
+  locks. A save from an older revision is merged onto newer saves when they changed
+  different values; only a change to the same value is a conflict. After a conflict,
+  **Reload saved source** is an explicit step.
 - **Duplicating copies the saved version.** **More → Duplicate trajectory** creates a
   copy with a new ID (same windows, events and metadata) and opens it. Unsaved edits
   stay on the original.

@@ -171,10 +171,17 @@ named('Required tool field payload').checked=true; named('Required tool field pa
 assert.deepEqual(JSON.parse($('settings-json').value).tools.fixture_tool.input_schema.required,['payload']);
 $('settings-save').click(); await until(()=>!$('settings-dialog').open);
 assert.equal(ui.settings.tools.fixture_tool.input_schema.properties.payload.type,'string');
-// CAS conflict leaves the browser draft intact.
-await ui.autoSave.flush(); ui.draft.events.first.content='unsaved';
-await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:(await module.api('/trajectories/'+ui.id)).revision,patch:{metadata:{test:true}}});
-await assert.rejects(()=>ui.save(),/Revision conflict/); assert.equal(ui.draft.events.first.content,'unsaved');
+// A save from an older revision merges onto a newer change to other fields, and Undo keeps that change.
+await ui.autoSave.flush();
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{metadata:{test:true}}});
+$('event-content').value='merged edit'; ui.applyEvent(); await ui.autoSave.flush();
+assert.equal(ui.autoSave.error,null); assert.equal(ui.draft.events.first.content,'merged edit'); assert.equal(ui.draft.metadata.test,true);
+assert.equal(ui.undo.at(-1)[0].before.metadata.test,true);
+// A newer change to the same field is still a conflict, and the browser draft stays intact.
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{events:{first:{content:'theirs'}}}});
+$('event-content').value='mine'; ui.applyEvent(); await ui.autoSave.flush();
+assert.match(ui.autoSave.error?.message||'',/Revision conflict.*events\/first\/content/); assert.equal(ui.draft.events.first.content,'mine');
+await ui.select(ui.id,true); assert.equal(ui.draft.events.first.content,'theirs');
 // Per-window acknowledgment persists, suppresses only its advisory, and is undoable.
 await until(()=>[...ui.ownedBulk].every(id=>ui.recorded.has(id)));
 const ack = await module.api('/trajectories', 'POST', {format:'kidra-trajectory-graph/1',id:crypto.randomUUID(),

@@ -138,6 +138,13 @@ REST or MCP.
 - **Every edit needs `expected_revision`**, scoped to that trajectory. A `RevisionConflict`
   carries the current revision and commit. Editing another trajectory, or the settings,
   doesn't invalidate it.
+- **Stale saves can rebase.** `replace(..., rebase=True)` and
+  `update_settings(..., rebase=True)` three-way merge a save made from an older revision
+  onto the current one (`graph/merge.py`): objects merge key by key, and lists and scalars
+  replace whole. Overlapping changes, or a merge that no longer validates, still raise
+  `RevisionConflict`, with the conflicting path in the message. The browser's
+  `PUT /trajectories/{id}`, `PUT /settings` and `PUT /sampler` rebase. Jobs, bulk edits,
+  patches, metric edits and Undo/Redo keep exact checks.
 - A `SourceRecord` carries the source, `revision`, `commit_id`, `intrinsic_hash` and
   separate intrinsic and metadata revisions. Metadata-only edits make commits but keep the
   intrinsic hash. `read(id, revision)` returns an old snapshot.

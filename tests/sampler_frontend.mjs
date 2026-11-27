@@ -100,8 +100,9 @@ try {
   await page.getByLabel('Pin focus.family',{exact:true}).selectOption('strategic_planning');
   await page.getByLabel('Pin lifecycle',{exact:true}).selectOption('closure'); await page.getByLabel('Pin task_length',{exact:true}).selectOption('XXS');
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>document.getElementById('sampler-message').textContent.includes('Preview rejected'));
-  // Revision conflicts retain the browser draft.
+  // Revision conflicts (another save changed the same entry) retain the browser draft.
   const current=await page.evaluate(async()=>await (await fetch('/api/v1/sampler',{headers:{'X-Remix-Token':document.querySelector('meta[name=remix-token]').content}})).json());
+  current.configuration.matrix.dimensions.user_tone[0].weight=5;
   await api('/sampler',{matrix:current.configuration.matrix,metric_options:current.configuration.metric_options,expected_revision:current.settings_revision},'PUT');
   await page.locator('.sw-table input[type=number]').first().fill('4'); await page.locator('#sampler-save').click();
   await page.waitForFunction(()=>document.getElementById('sampler-message').textContent.includes('Save rejected'));
@@ -109,7 +110,7 @@ try {
   page.once('dialog',d=>d.accept()); await page.locator('#sampler-reload').click(); await page.waitForFunction(()=>!samplerWorkbench.dirty());
   // A page reload proves persistence, including custom fields.
   await page.reload(); await page.locator('#sampler-tab').click(); await page.locator('#sampler-detail h2').waitFor();
-  assert.equal((await state()).matrix.dimensions.user_tone[0].weight,3.5);
+  assert.equal((await state()).matrix.dimensions.user_tone[0].weight,5); // The other save that won the conflict.
   assert.deepEqual((await state()).matrix.dimensions.user_tone[0].custom_fixture,{keep:['unknown','nested']});
   await page.getByLabel('Find a dimension or entry').fill('complexity');
   await page.locator('.sw-nav-row').filter({hasText:'complexity'}).first().click();
