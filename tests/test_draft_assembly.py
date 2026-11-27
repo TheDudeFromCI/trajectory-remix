@@ -1,7 +1,7 @@
 """Two-pass generation: a prose draft, one natively assembled graph, then the reviews."""
 
 import pytest
-from test_graph_generation import DRAFT, finish, service
+from test_graph_generation import DRAFT, finish, native_report, service, tool_message
 
 from trajectory_remix.graph import draft_assembly, prompt_defaults
 
@@ -38,6 +38,38 @@ async def test_a_failed_draft_is_not_reviewed(tmp_path):
     attempt = gen.jobs.attempts(job)[0]
     assert [c.payload["operation"] for c in fake.calls] == [draft_assembly.DRAFT]
     assert attempt["outcome"] == "fail"
+
+
+@pytest.mark.asyncio
+async def test_assembly_fixes_a_structural_error_with_only_a_draft_endpoint(tmp_path):
+    gen, fake = service(tmp_path, format_retries=0)
+    settings = gen.store.settings()
+    settings.settings.endpoint_roles = {"draft": "g"}
+    gen.store.update_settings(settings.settings, settings.revision)
+    fake.responses = [
+        DRAFT,
+        lambda t: tool_message(
+            ("create_event", dict(event_id="a", kind="agent_text", window="n", content="One")),
+            ("create_event", dict(event_id="b", kind="agent_text", window="n", content="Two")),
+            native_report(t.payload, ["a", "b"]),
+        ),
+        lambda t: tool_message(
+            ("update_event", {"event_id": "b", "after": ["a"], "close_window": True}),
+            native_report(t.payload, ["a", "b"]),
+        ),
+    ]
+    job = gen.start([{"seed": 18}], {})
+    await finish(gen, job)
+    attempt = gen.jobs.attempts(job)[0]
+    source = gen.store.read(attempt["trajectory_id"]).source
+    assert [(t.endpoint, t.payload["operation"]) for t in fake.calls] == [
+        ("g", "draft"),
+        ("g", "assembly"),
+        ("g", "assembly"),
+    ]
+    assert "unordered_window_writers" in str(fake.calls[-1].payload["messages"])
+    assert source.events["b"].after == ["a"]
+    assert source.metadata["stage"] == 0 and attempt["outcome"] == "pass"
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""Fresh-project browser workflow with a delayed fake provider; no live API calls."""
+"""Fresh-project browser workflow with a pausable fake provider."""
 
 import asyncio
 import socket
@@ -15,9 +15,11 @@ from trajectory_remix.graph.storage import GraphStore
 from trajectory_remix.graph.studio_api import create_studio_app
 
 
-class DelayedFake(Fake):
+class PauseFixture(Fake):
     async def __call__(self, ticket):
-        await asyncio.sleep(0.3)
+        if ticket.epoch == 1:
+            # Pause cancels this first request. The resumed worker runs in the next epoch.
+            await asyncio.Event().wait()
         return await super().__call__(ticket)
 
 
@@ -25,7 +27,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="dashboard-ui-", dir="/tmp") as tmp:
         path = Path(tmp) / "project.sqlite"
         GraphStore.initialize(path)
-        app = create_studio_app(path, artifact_root=Path(tmp) / "exports", provider=DelayedFake())
+        app = create_studio_app(path, artifact_root=Path(tmp) / "exports", provider=PauseFixture())
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
         server = uvicorn.Server(uvicorn.Config(app, log_level="error"))

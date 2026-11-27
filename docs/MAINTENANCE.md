@@ -191,9 +191,9 @@ Run the full Python suite with `python -m pytest -q tests` before opening a prom
 
 Phase barriers: `python -m pytest -q tests/test_phase_barrier.py` checks the per-job barriers
 (before Assembly, Fast review and Critical review): trajectories park at an enabled barrier
-(parked ones don't count toward the active cap), the job pauses when all have arrived and Resume
-continues to the next one, the state survives a restart, barriers are validated and frozen with
-the run, skipping them lets the run finish, and the phase routes. The old
+(parked and held attempts free their slots), the job pauses when all have arrived, finished or
+been held, and Resume respects the active cap on the way to the next barrier. It also checks
+restart, frozen configuration, skipping the barriers, and the phase routes. The old
 `generation.phase_barrier` setting is ignored on load.
 
 Held trajectories: `python -m pytest -q tests/test_trajectory_hold.py` checks that invalid review

@@ -364,7 +364,7 @@ export class StudioUI {
     const candidates = Object.keys(this.draft?.events || {}).filter(id => id !== this.event);
     options('dependency-picker', [['', candidates.length ? 'Choose an event' : 'No other events'], ...candidates.map(id => [id, id])], candidates.includes($('dependency-picker').value) ? $('dependency-picker').value : '');
     toggleClass($('event-editor-panel'), 'no-event', !e);
-    if (!e) { $('event-content').value = ''; $('dependencies').replaceChildren(); setText($('links-count'), ''); this.editorBaseline = null; if (this.record) this.renderDirty(); return; }
+    if (!e) { $('event-content').value = ''; $('tool-picker').replaceChildren(); $('dependencies').replaceChildren(); setText($('links-count'), ''); this.editorBaseline = null; if (this.record) this.renderDirty(); return; }
     $('event-name').value = this.event; $('event-kind').value = e.kind; $('event-window').value = e.window; $('call-id').value = e.call_id || '';
     $('tool-id').value = e.tool || ''; $('chat-speaker').value = e.chat?.speaker || 'User'; $('delivery').value = e.delivery?.mode || 'instant';
     $('chain').checked = e.delivery?.chain_immediately ?? true; $('replace-body').checked = e.replace_body ?? false;
@@ -385,10 +385,12 @@ export class StudioUI {
     const isSchema = $('event-kind').value === 'tool_schema' && $('content-mode').value === 'text';
     this.toolPickerShown = isSchema; holder.hidden = !isSchema; $('event-content').hidden = isSchema || !!this.argumentForm; if (head) head.hidden = isSchema;
     if (!isSchema) { holder.replaceChildren(); return; }
+    const trajectory = this.draft.id, event = this.event;
     renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
-      relist: async chosen => {
-        const listing = await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: chosen});
-        $('event-content').value = listing.content;
+      relist: chosen => api('/tools/listing', 'POST', {trajectory_id: trajectory, event_id: event, tools: chosen}),
+      apply: ({content}) => {
+        if (this.draft?.id !== trajectory || this.event !== event || this.record?.owner) return;
+        $('event-content').value = content;
         this.stashEditor(); this.applyEvent(); this.renderToolPicker();
       }});
   }

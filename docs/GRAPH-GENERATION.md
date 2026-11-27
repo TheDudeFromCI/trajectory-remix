@@ -106,9 +106,9 @@ trajectory is parked, held or finished, the job **pauses** and the log says so. 
 barriers on, the job pauses at each in turn. All three are off by default, and the choice is
 frozen with the job (the dialog remembers your last choice).
 
-Parked trajectories don't count toward the active-trajectory cap, so a run of 100 drafts all 100,
-not just the first 20. The barrier state is stored with the job, so it survives shutting the
-server down between sessions. Over the API, send `barriers` with the run:
+Parking or holding a trajectory frees its active slot so pending attempts can start. On Resume,
+these trajectories continue as slots become available. The barrier state is stored with the job,
+so it survives shutting the server down between sessions. Over the API, send `barriers` with the run:
 `{"requests": [...], "barriers": {"assembly": false, "fast": true, "critical": true}}`.
 
 A typical day-and-night cycle with two local models:
@@ -299,10 +299,10 @@ without calling a model.
 - **Context and exchange limits** end a pass and keep its edits. Assembly settles as
   Unfinished; a review records no verdict and keeps the stage. A Draft over its endpoint
   context allowance is held for attention.
-- **Held trajectories** never stall the rest of the job: the others keep running. A held
-  trajectory shows the reason in `metadata.needs_attention` and the job log. When only held
-  trajectories remain, the job pauses. **Resume** retries every held trajectory (with a fresh
-  bounded correction); **detach** settles one as Unfinished, keeping its edits.
+- **Held trajectories** free active slots for other attempts. A held trajectory shows the reason
+  in `metadata.needs_attention` and the job log. When only held trajectories remain, the job
+  pauses. **Resume** retries held trajectories as slots become available. **Detach** settles one
+  as Unfinished, keeping its edits.
 - **Server restart:** jobs pause, callbacks are fenced, unaccepted text is dropped, and you
   resume manually. Completed events and review edits survive.
 - **Cancel and detach** use the same fences as everywhere else ([Jobs](GRAPH-JOBS.md)).
