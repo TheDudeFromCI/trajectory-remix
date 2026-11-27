@@ -9,6 +9,7 @@ python -m pytest -q tests/test_graph*.py tests/test_ktremix_format.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
+node tests/tokenizer_store_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/window_markdown_frontend.mjs
@@ -52,6 +53,11 @@ prompt delivered verbatim to Draft and Assembly, the derived
 `python -m pytest -q tests/test_coordinator_defaults.py`. The reset button's confirmation is
 covered in `project_settings_frontend.mjs`. These use fake providers, so they check
 structure, not prompt quality.
+
+`tokenizer_store_frontend.mjs` checks that imported tokenizer definitions stay out of the
+settings JSON draft as short placeholders, are restored unchanged for saving and still fill
+the control dropdowns; `python -m pytest -q tests/test_request_errors.py` checks that a
+rejected settings save does not echo the submitted tokenizer back.
 
 Graph DOM tests use happy-dom. `studio_ui_frontend.mjs` checks that polling
 re-renders (job list, job detail, progress bars, keyed rows) cause no DOM mutations

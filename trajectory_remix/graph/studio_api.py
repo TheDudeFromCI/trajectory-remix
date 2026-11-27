@@ -14,7 +14,7 @@ from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
 
-from . import size_query
+from . import request_errors, size_query
 from .bulk import BulkService
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
@@ -190,6 +190,8 @@ def create_studio_app(
             ),
             status_code=422,
         )
+
+    request_errors.install(app)
 
     @app.get("/", response_class=HTMLResponse)
     def index():

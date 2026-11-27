@@ -4,6 +4,7 @@ import {renderChecklistSettings} from './checklist-settings.js';
 import {renderReviewPack} from './review-pack.js';
 import {persistCollapse} from './collapse-state.js';
 import {ChoiceField} from './choice-field.js';
+import {resolveDefinition} from './tokenizer-store.js';
 const copy = value => structuredClone(value);
 const node = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
 const button = (text, run) => { const n = node('button', text); n.type = 'button'; n.onclick = run; return n; };
@@ -176,7 +177,7 @@ export function renderProjectSettings(container, initial, options = {}) {
   for (const [id, profile] of Object.entries(current().tokenizer_profiles || {})) {
     const card = node('section', undefined, 'settings-card'), grid = node('div', undefined, 'settings-grid');
     card.append(node('h4', id), field('Display name', input(`Tokenizer ${id} name`, profile.name, value => write(d => { d.tokenizer_profiles[id].name = value; }))));
-    const dedicated = (profile.definition?.added_tokens || []).filter(t => t.special === true && Number.isInteger(t.id));
+    const dedicated = (resolveDefinition(profile.definition)?.added_tokens || []).filter(t => t.special === true && Number.isInteger(t.id));
     for (const control of controls) {
       const choices = [['', 'Select dedicated token'], ...dedicated.map(t => [String(t.id), `${t.content} · ${t.id}`])];
       grid.append(field(control.toUpperCase().replaceAll('_', ' '), select(`Tokenizer ${id} ${control}`, String(profile.special_tokens?.[control] ?? ''), choices, value => write(d => {
