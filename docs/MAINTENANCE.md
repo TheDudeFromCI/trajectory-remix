@@ -32,6 +32,9 @@ Paths below are relative to `trajectory_remix/`.
 - Settings snapshots and frozen job settings refer to tokenizers by `definition_hash`;
   never copy a tokenizer definition into them. A job that freezes settings records
   their `settings_revision` so the snapshot (and its tokenizers) stay pinned.
+- API responses must keep every dict key. FastAPI's default encoder drops keys starting
+  with `_sa`; `graph/json_encoding.py` turns that off for all endpoints. Encode with its
+  `encode`, never `jsonable_encoder` directly.
 - Tokens do not cross event boundaries. Headers/framing inherit source, mask and
   loss. EOS is a label, never a KV key. Same-pass targets cannot see each other;
   closed/replaced content must not return through surviving hidden states.

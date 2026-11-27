@@ -7,9 +7,10 @@ FastAPI's ``{"detail": [...]}`` shape but drops ``input`` and ``ctx``.
 """
 
 from fastapi import FastAPI
-from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+from .json_encoding import encode
 
 _ECHOED_FIELDS = frozenset({"input", "ctx"})
 
@@ -24,4 +25,4 @@ def install(app: FastAPI):
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, error):
-        return JSONResponse({"detail": jsonable_encoder(summarize(error.errors()))}, 422)
+        return JSONResponse({"detail": encode(summarize(error.errors()))}, 422)
