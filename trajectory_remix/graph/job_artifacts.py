@@ -42,8 +42,16 @@ class JobArtifacts:
             )
 
     def current(self, job, epoch):
-        j = self.jobs.inspect(job)
-        return j["state"] == "running" and j["epoch"] == epoch
+        # The native compiler polls this while scheduling. Read just the fence,
+        # without decoding the export's frozen source list or counting work.
+        with self.store.connect() as db:
+            return (
+                db.execute(
+                    "SELECT 1 FROM graph_jobs WHERE id=? AND state='running' AND epoch=?",
+                    (job, epoch),
+                ).fetchone()
+                is not None
+            )
 
     def build_export(self, job):
         from .export import ExportOptions

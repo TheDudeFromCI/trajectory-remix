@@ -11,21 +11,30 @@ export const listedNames = text => text.split('\n').map(nameOf).filter(Boolean);
 
 /**
  * Fill `container` with a checkbox per project tool (plus chosen names the project no longer has).
- * relist(chosen) → Promise runs after each tick with the new chosen names.
+ * Apply the latest listing for this picker, including any edits made while it was loading.
  */
-export function renderToolPicker(container, {text, tools, relist, disabled = false, report = () => {}}) {
+export function renderToolPicker(container, {text, tools, relist, apply, disabled = false, report = () => {}}) {
   const chosen = new Set(listedNames(text)), known = tools || {};
   const ids = [...Object.keys(known), ...[...chosen].filter(name => !(name in known))];
   const fieldset = node('fieldset', undefined, 'tool-picker'); fieldset.append(node('legend', 'Tools shown to the agent'));
+  const boxes = [];
+  let request = 0;
   if (!ids.length) fieldset.append(node('p', 'No tools in the project. Add or import some in Settings → Tools.', 'small muted'));
   for (const id of ids) {
     const box = node('input'); box.type = 'checkbox'; box.value = id; box.checked = chosen.has(id); box.disabled = disabled;
     box.setAttribute('aria-label', 'List tool ' + id);
+    boxes.push(box);
     box.onchange = async () => {
-      const next = [...ids.filter(other => other !== id && chosen.has(other)), ...(box.checked ? [id] : [])];
-      box.disabled = true;
-      try { await relist(next); }
-      catch (error) { box.checked = !box.checked; box.disabled = disabled; report(error.message); }
+      const sequence = ++request;
+      const current = () => sequence === request && fieldset.parentNode === container;
+      try {
+        const listing = await relist(boxes.filter(input => input.checked).map(input => input.value));
+        if (current()) apply(listing);
+      } catch (error) {
+        if (!current()) return;
+        for (const input of boxes) input.checked = chosen.has(input.value);
+        report(error.message);
+      }
     };
     const label = node('label', undefined, 'checkbox');
     label.append(box, ' ', node('code', id));

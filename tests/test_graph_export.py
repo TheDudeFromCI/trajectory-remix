@@ -10,7 +10,10 @@ from test_graph_compiler import event, profile, source
 from trajectory_remix.graph import ktremix as k
 from trajectory_remix.graph.compiler import Cancelled, GraphCompiler
 from trajectory_remix.graph.export import ArtifactService, ExportOptions, resolve_splits
+from trajectory_remix.graph.job_artifacts import JobArtifacts
+from trajectory_remix.graph.jobs import JobService
 from trajectory_remix.graph.models import ProjectSettings
+from trajectory_remix.graph.storage import GraphStore
 
 
 def records():
@@ -107,6 +110,56 @@ def test_cancellation_failure_partial_cleanup_and_startup(tmp_path):
     (abandoned / "broken.partial").touch()
     ArtifactService(service.root)
     assert not abandoned.exists()
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_compiled_job_polls_only_the_execution_fence(tmp_path, monkeypatch, cancel):
+    settings = ProjectSettings(tokenizer_profiles={"bytes": profile()})
+    store = GraphStore.initialize(tmp_path / "p.sqlite", settings)
+    graph = source(
+        {"write": event("agent_text", "w", "a" * 500, close_window=True)},
+        metadata={"stage": 3, "split": "Train"},
+    )
+    store.create(graph)
+    jobs = JobService(store)
+    artifacts = ArtifactService(tmp_path / "exports")
+    export = JobArtifacts(jobs, artifacts)
+    active_limit = 8
+    job = export.start_export({"compiled": True}, profile="bytes", active_limit=active_limit)
+    inspected = []
+    inspect = jobs.inspect
+
+    def tracked(*args, **kwargs):
+        inspected.append(args[0])
+        return inspect(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, "inspect", tracked)
+    if cancel:
+        compile_shard = GraphCompiler.write_shard
+
+        def interrupted(self, *args, cancelled, **kwargs):
+            jobs.control(job, "pause")
+            jobs.control(job, "resume")
+            return compile_shard(self, *args, cancelled=cancelled, **kwargs)
+
+        monkeypatch.setattr(GraphCompiler, "write_shard", interrupted)
+        with pytest.raises(Cancelled):
+            export.build_export(job)
+        assert not list(artifacts.root.glob("export-*"))
+        assert inspected == [job] * 3  # Startup plus Pause and Resume responses.
+        assert inspect(job)["artifact"] is None
+        return
+
+    manifest = export.build_export(job)
+    assert inspected == [job]  # Cancellation polls did not decode the full job.
+    directory = artifacts.root / inspect(job)["artifact"]
+    with k.Dataset([directory / manifest["files"][0]["name"]], verify_index=True) as dataset:
+        sample = dataset[0].validate()
+        compiler = GraphCompiler(
+            settings.tokenizer_profiles["bytes"], settings=settings, active_limit=active_limit
+        )
+        expected, _ = compiler.compile(graph)
+        assert list(sample.column("token_ids")) == expected["token_ids"]
 
 
 def test_default_stage_stale_and_projection(tmp_path):
