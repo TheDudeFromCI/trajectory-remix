@@ -44,6 +44,7 @@ try {
  await page.locator('#generation-start').click();await page.waitForFunction(()=>graphStudio.dialogs.size===1);
  const jobs=await api('/job-summaries'),job=jobs[0].id;
  await page.waitForFunction(()=>!document.getElementById('jobs-view').hidden);
+ await page.getByLabel('Job log',{exact:true}).filter({hasText:'Request started'}).waitFor();
  await page.getByRole('button',{name:'Pause',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#job-detail .job-panel')?.dataset.state==='run · paused');
  assert.match(await page.locator('#job-detail .progress-pct').first().textContent(), /^[0-2]\/2 stages$/);
  if(process.env.GENERATION_PROGRESS_SCREENSHOT) await page.screenshot({path:process.env.GENERATION_PROGRESS_SCREENSHOT});
@@ -86,11 +87,23 @@ try {
  await page.evaluate(event=>graphStudio.selectEvent(event),event);
  await api('/trajectories/'+id,'PATCH',{expected_revision:record.revision,patch:{metadata:{browser_update:1}}});
  await page.waitForFunction(()=>graphStudio.draft.metadata.browser_update===1);
+ const trajectoryPath='**/api/v1/trajectories/'+id;
+ let releaseSave;
+ const saveDelay=new Promise(resolve=>{releaseSave=resolve;});
+ await page.route(trajectoryPath,async route=>{
+  if(route.request().method()==='PUT') await saveDelay;
+  await route.continue();
+ });
+ const saving=page.waitForRequest(request=>request.url().endsWith('/api/v1/trajectories/'+id)&&request.method()==='PUT');
  await page.locator('#event-content').fill('unsaved local text');
- record=await api('/trajectories/'+id);
- await api('/trajectories/'+id,'PATCH',{expected_revision:record.revision,patch:{metadata:{browser_update:2}}});
+ await saving;
+ try {
+  record=await api('/trajectories/'+id);
+  await api('/trajectories/'+id,'PATCH',{expected_revision:record.revision,patch:{metadata:{browser_update:2}}});
+ } finally {releaseSave();}
  // The typed edit saves from the older revision and merges with the newer metadata change.
  await page.waitForFunction(()=>graphStudio.draft.metadata.browser_update===2 && !graphStudio.isDirty());
+ await page.unroute(trajectoryPath);
  assert.equal(await page.locator('#event-content').inputValue(),'unsaved local text');
  record=await api('/trajectories/'+id);
  assert.equal(record.source.events[event].content,'unsaved local text'); assert.equal(record.source.metadata.browser_update,2);
