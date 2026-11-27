@@ -286,3 +286,23 @@ def test_settings_api_keeps_keys_that_start_with_sa(tmp_path):
     for body in (loaded, saved):
         model = body["settings"]["tokenizer_profiles"]["bytes"]["definition"]["model"]
         assert "_save" in model["vocab"]
+
+
+def test_upgrade_is_safe_on_tables_layout_still_marked_format_one(tmp_path):
+    # Projects opened by a build that had the tables but still wrote format /1.
+    store = GraphStore.initialize(tmp_path / "p.sqlite", configured())
+    revision = save(store, 1, log_cache_mib=3)
+    store.create(source())
+    expected = store.settings().settings.model_dump(mode="json")
+    with store.connect() as db:
+        db.execute("DROP TRIGGER immutable_graph_project")
+        db.execute("UPDATE graph_project SET format='kidra-graph-project/1'")
+    upgraded = GraphStore(store.path)
+    assert upgraded.settings().settings.model_dump(mode="json") == expected
+    assert upgraded.settings().revision == revision
+    assert rows(upgraded, "SELECT format FROM graph_project") == [("kidra-graph-project/2",)]
+    assert rows(upgraded, "SELECT count(*) FROM graph_tokenizer_definitions") == [(1,)]
+    assert rows(upgraded, "PRAGMA foreign_key_check") == []
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        with upgraded.connect() as db:
+            db.execute("UPDATE graph_project SET format='x'")
