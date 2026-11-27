@@ -1,7 +1,8 @@
 """A person's decision on an Assistant proposal: apply it or discard it.
 
 Apply merges the proposal onto the trajectory as one ordinary edit (so Undo reverts it) and
-resolves the comments it addressed. Discard drops it, reopens those comments with a note and
+resolves the comments it addressed. A person may apply only some of its changes; the rest are
+dropped with the proposal. Discard drops it, reopens those comments with a note and
 forgets the conversation, so the next session starts from the trajectory as it is.
 """
 
@@ -13,15 +14,19 @@ from .comments import CommentEdit, NewReply
 DISCARD_NOTE = "Discarded the agent's proposed changes."
 
 
-def apply(commands, comments, trajectory_id, expected_revision):
-    """Returns the saved result and the Undo delta. Raises ProposalConflict or
-    RevisionConflict without changing anything."""
+def apply(commands, comments, trajectory_id, expected_revision, only=None):
+    """Returns the saved result and the Undo delta. `only` lists the (kind, id) changes to
+    apply; None applies them all. Raises ProposalConflict, RevisionConflict or ValueError
+    without changing anything."""
     store = commands.store
     proposal = assistant_proposals.load(store, trajectory_id)
     if proposal is None:
         raise KeyError(trajectory_id)
     before = store.read(trajectory_id).source.to_dict()
-    merged = source_delta.merge(proposal["base"], before, proposal["source"])
+    chosen = proposal["source"]
+    if only is not None:
+        chosen = source_delta.pick(proposal["base"], chosen, only)
+    merged = source_delta.merge(proposal["base"], before, chosen)
     saved = commands.replace(
         trajectory_id,
         merged,

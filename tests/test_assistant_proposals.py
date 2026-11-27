@@ -4,7 +4,12 @@ import pytest
 from test_assistant import applied, comment, edit, flagged, proposed, reply, run, service, turn
 from test_graph_studio import client, create  # noqa: F401  (pytest fixture)
 
-from trajectory_remix.graph import assistant_memory, assistant_proposals, proposal_review
+from trajectory_remix.graph import (
+    assistant_memory,
+    assistant_proposals,
+    proposal_review,
+    source_delta,
+)
 from trajectory_remix.graph.bulk import BulkService
 from trajectory_remix.graph.commands import GraphCommands
 from trajectory_remix.graph.source_delta import ProposalConflict
@@ -132,6 +137,39 @@ async def test_request_changes_continues_from_the_proposal(tmp_path):
     source = applied(gen, record)
     assert source.events["x"].content == "short" and source.metadata["note"] == "mine"
     assert set(statuses(gen, record).values()) == {"resolved"}
+
+
+def test_apply_takes_only_the_chosen_changes(client):  # noqa: F811
+    ident = create(client)["source"]["id"]
+    store = client.app.state.studio.store
+    base = store.read(ident).source.to_dict()
+    meta = base["metadata"] | {"note": "agent", "extra": "drop me"}
+    assistant_proposals.save(
+        store, ident, base_revision=1, base=base, source=base | {"metadata": meta}, comment_ids=[]
+    )
+    url = f"/api/v1/trajectories/{ident}/assistant/proposal/apply"
+    unknown = [{"kind": "event", "id": "nope"}]
+    r = client.post(url, json={"expected_revision": 1, "changes": unknown})
+    assert r.status_code == 422 and "Not a change in the proposal" in r.text
+    assert client.post(url, json={"expected_revision": 1, "changes": []}).status_code == 422
+    r = client.post(
+        url, json={"expected_revision": 1, "changes": [{"kind": "metadata", "id": "note"}]}
+    )
+    assert r.status_code == 200, r.text
+    metadata = r.json()["source"]["metadata"]
+    assert metadata["note"] == "agent" and "extra" not in metadata
+    assert assistant_proposals.load(store, ident) is None, "the unchosen change is dropped"
+
+
+def test_pick_reverts_unchosen_changes_and_ignores_their_conflicts():
+    base = dict(format="f", id="t", defaults={}, windows={}, events={"a": 1, "b": 2}, metadata={})
+    proposed = base | {"events": {"a": 10, "c": 3}}  # a changed, b removed, c added.
+    picked = source_delta.pick(base, proposed, [("event", "c")])
+    assert picked["events"] == {"a": 1, "b": 2, "c": 3}
+    current = base | {"events": {"a": 99, "b": 2}}  # The person also changed a.
+    with pytest.raises(source_delta.ProposalConflict):
+        source_delta.merge(base, current, proposed)
+    assert source_delta.merge(base, current, picked)["events"] == {"a": 99, "b": 2, "c": 3}
 
 
 def test_rest_routes_show_apply_and_discard_a_proposal(client):  # noqa: F811

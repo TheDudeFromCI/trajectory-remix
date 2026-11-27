@@ -388,6 +388,10 @@ td.faint { color: var(--ink-faint); }
 .proposal-changes { display: flex; flex-direction: column; gap: var(--space-1); }
 .proposal-change { border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .proposal-change > summary { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-2); cursor: pointer; font-size: 12px; }
+.proposal-pick { margin: 0; cursor: pointer; }
+.proposal-change.skipped > summary { color: var(--ink-muted); }
+.proposal-change.skipped > summary .mono { text-decoration: line-through; }
+.proposal-change.skipped > .proposal-diff { opacity: 0.5; }
 .proposal-diff { margin: 0; padding: var(--space-1) 0; max-height: 320px; overflow: auto; border-top: 1px solid var(--border); font: 12px/18px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .proposal-diff > span { display: block; padding: 0 var(--space-2) 0 calc(var(--space-2) + 2ch); text-indent: -2ch; }
 .proposal-diff .diff-add { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }

@@ -1,7 +1,8 @@
 /* The Assistant's proposed changes to the selected trajectory, at the top of the Comments tab.
    The Assistant never edits the trajectory itself: its edits wait here, like a pull request,
    until you apply them (one edit, so Undo reverts it), discard them, or request changes, which
-   sends a new comment and lets the agent keep working on the same proposal. */
+   sends a new comment and lets the agent keep working on the same proposal. Each change has a
+   checkbox: Apply takes only the ticked ones and drops the rest. */
 import {node, setText, tag} from './ui-kit.js';
 import {lineDiff, textLines, withContext} from './line-diff.js';
 
@@ -31,17 +32,31 @@ export class ProposalView {
   constructor({api, report, host, revision, ready = async () => {}, locked = () => false, onApplied = async () => {}, onChange = () => {}, requestChanges = async () => {}}) {
     Object.assign(this, {api, report, host, revision, ready, locked, onApplied, onChange, requestChanges});
     this.trajectory = null; this.proposal = null; this.loaded = ''; this.asking = null; this.busy = false;
+    this.skipped = new Set(); // Labels of the changes the person unticked.
   }
   /** Comment IDs the pending proposal addresses: they resolve when it is applied. */
   get pending() { return new Set(this.proposal?.comment_ids || []); }
   async load(trajectory) {
-    if (trajectory !== this.trajectory) { this.trajectory = trajectory; this.proposal = null; this.loaded = ''; this.asking = null; this.render(); this.onChange(); }
+    if (trajectory !== this.trajectory) { this.trajectory = trajectory; this.proposal = null; this.loaded = ''; this.asking = null; this.skipped.clear(); this.render(); this.onChange(); }
     if (!trajectory) return;
     const data = await this.api(`/trajectories/${trajectory}/assistant/proposal`);
     if (trajectory !== this.trajectory) return;
     const key = JSON.stringify(data.proposal);
     if (key === this.loaded) { this.renderButtons(); return; } // Polling: no DOM work when nothing changed.
-    this.loaded = key; this.proposal = data.proposal; this.render(); this.onChange();
+    this.loaded = key; this.proposal = data.proposal; this.forgetGone(); this.render(); this.onChange();
+  }
+  /** The changes Apply would take: every change not unticked. */
+  get selected() { return (this.proposal?.changes || []).filter(c => !this.skipped.has(changeLabel(c))); }
+  toggle(change, on) {
+    const key = changeLabel(change);
+    if (on) this.skipped.delete(key); else this.skipped.add(key);
+    this.host.querySelector(`details[data-key="${CSS.escape(key)}"]`)?.classList.toggle('skipped', !on);
+    this.renderButtons();
+  }
+  /** Drop unticks for changes the proposal no longer has, so a later one starts ticked. */
+  forgetGone() {
+    const present = new Set((this.proposal?.changes || []).map(changeLabel));
+    for (const key of this.skipped) if (!present.has(key)) this.skipped.delete(key);
   }
   async run(work) {
     if (this.busy) return;
@@ -49,9 +64,15 @@ export class ProposalView {
     try { await work(); } finally { this.busy = false; this.renderButtons(); }
   }
   apply() {
+    const chosen = this.selected, total = this.proposal.changes.length, partial = chosen.length < total;
+    if (!chosen.length) throw new Error('Tick at least one change to apply, or discard the proposal.');
+    if (partial && globalThis.confirm?.(`Apply ${chosen.length} of ${total} changes? The ${total - chosen.length} unticked will be dropped.`) === false) return;
     return this.run(async () => {
       await this.ready();
-      const result = await this.api(`/trajectories/${this.trajectory}/assistant/proposal/apply`, 'POST', {expected_revision: this.revision()});
+      const body = {expected_revision: this.revision()};
+      if (partial) body.changes = chosen.map(c => ({kind: c.kind, id: c.id ?? null}));
+      const result = await this.api(`/trajectories/${this.trajectory}/assistant/proposal/apply`, 'POST', body);
+      this.skipped.clear();
       this.proposal = null; this.loaded = ''; this.render(); this.onChange();
       await this.onApplied(result);
     });
@@ -82,10 +103,10 @@ export class ProposalView {
     const when = node('span', `from rev ${p.base_revision} · ${String(p.updated).slice(0, 16).replace('T', ' ')}`, 'small muted grow');
     when.dataset.tip = 'The assistant edits a copy. Nothing changes in the trajectory until you apply it.';
     head.append(when);
-    const parts = [head, node('p', 'Inspect what the assistant changed, then apply it, request changes, or discard it.', 'small muted')];
+    const parts = [head, node('p', 'Inspect what the assistant changed, then apply it, request changes, or discard it. Untick a change to leave it out when applying.', 'small muted')];
     if (p.conflicts.length) {
       const names = p.conflicts.map(changeLabel).join(', ');
-      parts.push(node('p', `Also changed in the trajectory since: ${names}. Undo your edit there or discard the proposal before applying.`, 'note tone-warning'));
+      parts.push(node('p', `Also changed in the trajectory since: ${names}. Undo your edit there, untick the change, or discard the proposal before applying.`, 'note tone-warning'));
     }
     const list = node('div', undefined, 'proposal-changes');
     const expand = count <= OPEN_LIMIT;
@@ -98,12 +119,17 @@ export class ProposalView {
   }
   /** One change; it keeps the open state the person gave it across re-renders. */
   changeCard(change, conflict, expand) {
-    const card = node('details', undefined, `proposal-change ${change.change}`);
-    const summary = node('summary');
-    summary.append(tag(CHANGE_WORDS[change.change], CHANGE_TONES[change.change]), node('span', changeLabel(change), 'mono'));
+    const key = changeLabel(change), kept = !this.skipped.has(key);
+    const card = node('details', undefined, `proposal-change ${change.change}${kept ? '' : ' skipped'}`);
+    const summary = node('summary'), pick = node('input');
+    pick.type = 'checkbox'; pick.checked = kept; pick.className = 'proposal-pick';
+    pick.setAttribute('aria-label', `Apply ${key}`); pick.dataset.tip = 'Include this change when applying';
+    pick.onclick = e => e.stopPropagation();
+    pick.onchange = () => this.toggle(change, pick.checked);
+    summary.append(pick, tag(CHANGE_WORDS[change.change], CHANGE_TONES[change.change]), node('span', key, 'mono'));
     if (conflict) summary.append(tag('Conflict', 'danger'));
     card.append(summary, diffBlock(change));
-    card.dataset.key = changeLabel(change);
+    card.dataset.key = key;
     card.open = this.host.querySelector(`details[data-key="${CSS.escape(card.dataset.key)}"]`)?.open ?? expand;
     return card;
   }
@@ -134,10 +160,11 @@ export class ProposalView {
   /** Enable the buttons for the current lock and conflict state. */
   renderButtons() {
     if (!this.proposal || !this.applyButton) return;
-    const locked = this.locked(), conflict = this.proposal.conflicts.length > 0;
-    this.applyButton.disabled = this.busy || locked || conflict;
+    const chosen = this.selected, total = this.proposal.changes.length;
+    const locked = this.locked(), conflict = chosen.some(c => this.proposal.conflicts.some(x => sameTarget(x, c)));
+    this.applyButton.disabled = this.busy || locked || conflict || !chosen.length;
     this.discardButton.disabled = this.busy || locked;
     if (this.askButton) this.askButton.disabled = this.busy || locked;
-    setText(this.applyButton, this.busy ? 'Working…' : 'Apply changes');
+    setText(this.applyButton, this.busy ? 'Working…' : chosen.length < total ? `Apply ${chosen.length} of ${total}` : 'Apply changes');
   }
 }
