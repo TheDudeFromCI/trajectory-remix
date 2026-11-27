@@ -688,10 +688,13 @@ export class StudioUI {
     if (!this.draft) return;
     this.applyEvent(); const before = copy(this.record.source), sent = copy(this.draft), id = this.id, generation = this.selectionGeneration;
     this.sentKey = this.draftKey(); // A failure is charged to this draft, not to later edits.
-    const value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: this.record.revision, source: sent});
-    this.history([{id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
-    // A reload (switching trajectory, Undo/Redo) during the save already shows newer state.
-    if (id !== this.id || generation !== this.selectionGeneration) return;
+    const base = this.record.revision, value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: base, source: sent});
+    // The server merges a save made from an older revision onto newer saves (a metric value, a job);
+    // Undo then steps back to the revision just before ours, keeping those changes.
+    const prior = value.revision > base + 1 ? (await api(`/trajectories/${id}?revision=${value.revision - 1}`)).source : before;
+    this.history([{id, before: prior, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
+    // A reload (switching trajectory, Undo/Redo) or a later save already shows newer state.
+    if (id !== this.id || generation !== this.selectionGeneration || value.revision < this.record.revision) return;
     // A save response has no `owner`; keep the known one so the next poll doesn't see a change and reload.
     this.record = {...value, owner: this.record.owner}; this.diagnostics = value.diagnostics;
     // Edits made while the save was in flight stay in the draft and are saved next.

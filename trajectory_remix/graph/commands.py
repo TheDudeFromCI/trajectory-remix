@@ -114,9 +114,10 @@ class GraphCommands:
         expected_revision: int,
         *,
         provenance: dict | None = None,
+        rebase: bool = False,
     ):
         return self._result(
-            self.store.replace(trajectory_id, source, expected_revision, provenance)
+            self.store.replace(trajectory_id, source, expected_revision, provenance, rebase=rebase)
         )
 
     def patch(self, trajectory_id: str, patch: dict, expected_revision: int):

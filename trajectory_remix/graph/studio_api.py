@@ -378,7 +378,9 @@ def create_studio_app(
     @router.put("/trajectories/{ident}")
     def replace(ident: str, body: Replace):
         return studio.present(
-            studio.commands.replace(ident, body.source.to_dict(), body.expected_revision)
+            studio.commands.replace(
+                ident, body.source.to_dict(), body.expected_revision, rebase=True
+            )
         )
 
     @router.patch("/trajectories/{ident}")

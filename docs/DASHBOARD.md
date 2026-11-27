@@ -453,8 +453,12 @@ events arrive, and unlocks when the work ends.
 
 - **Locked** trajectories can't be edited. Ownership is exclusive, and nothing saves
   until the lock clears.
-- Edits that haven't saved yet are never overwritten. A conflicting save reports
-  a revision conflict and leaves your text intact. Reloading the saved version is an
+- Edits that haven't saved yet are never overwritten. If something else saved first
+  (a metric value, a job, another tab), your save is merged with it when the two changed
+  different things. This works the same for trajectories, Project Settings, review
+  settings and the sampling matrix.
+- A save that changed the **same** value as a newer save reports a revision conflict,
+  names the value, and leaves your text intact. Reloading the saved version is an
   explicit step (**More → Reload saved source**).
 - **Detaching** a trajectory from its pipeline is permanent. That pipeline stops
   updating it, and no review verdict is invented.
