@@ -163,15 +163,20 @@ BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
 """
 
 
-def old_project(path, count):
+def old_project(path, count, raw=None, job_revision=None):
+    """An old-layout project; `raw` is merged into every stored revision unvalidated."""
     from trajectory_remix.graph.models import ProjectSettings
 
     settings = ProjectSettings.model_validate(configured()).model_dump(mode="json")
     trajectory = source()
     with sqlite3.connect(path) as db:
         db.executescript(OLD_SCHEMA)
+        if job_revision is not None:
+            db.execute("CREATE TABLE graph_jobs(id TEXT PRIMARY KEY, config TEXT NOT NULL)")
+            config = {"options": {"settings_revision": job_revision}}
+            db.execute("INSERT INTO graph_jobs VALUES('old-job',?)", (canonical(config),))
         for revision in range(1, count + 1):
-            data = settings | {"log_cache_mib": revision}
+            data = settings | {"log_cache_mib": revision} | (raw or {})
             db.execute(
                 "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(?,?,?)",
                 (revision, str(uuid.uuid4()), canonical(data)),
@@ -204,6 +209,61 @@ def test_old_projects_are_upgraded_in_place(tmp_path):
         with store.connect() as db:
             db.execute("DELETE FROM graph_trajectory_revisions")
     assert save(GraphStore(path), count, log_cache_mib=1) == count + 1
+    assert rows(store, "SELECT format FROM graph_project") == [("kidra-graph-project/2",)]
+
+
+def test_upgrade_normalizes_legacy_values_and_pins_existing_jobs(tmp_path):
+    path, count = tmp_path / "old.sqlite", settings_history.RECENT + 10
+    roles = {"draft": "local", "fast": "none", "critical": None}
+    old_project(path, count, raw={"endpoint_roles": roles}, job_revision=5)
+    store = GraphStore(path)
+    assert store.settings().settings.endpoint_roles == {"draft": "local"}
+    assert rows(store, "SELECT job_id,revision FROM graph_settings_pins") == [("old-job", 5)]
+    assert 5 in revisions(store)
+
+
+def test_new_projects_use_the_new_format(tmp_path):
+    store = GraphStore.initialize(tmp_path / "p.sqlite")
+    assert rows(store, "SELECT format FROM graph_project") == [("kidra-graph-project/2",)]
+
+
+def test_jobs_pin_settings_and_refuse_pruned_snapshots(tmp_path):
+    store = GraphStore.initialize(tmp_path / "p.sqlite", configured())
+    jobs = JobService(store, recover=False)
+    job = jobs.create_job("manual", {"settings_revision": 1})
+    assert rows(store, "SELECT job_id,revision FROM graph_settings_pins") == [(job, 1)]
+    revision = 1
+    for i in range(settings_history.RECENT + 2):
+        revision = save(store, revision, log_cache_mib=i)
+    assert 1 in revisions(store) and 2 not in revisions(store)
+    with pytest.raises(ValueError, match="settings changed"):
+        jobs.create_job("manual", {"options": {"settings_revision": 2}})
+    with store.connect() as db:  # Clearing a job deletes its pin with it.
+        db.execute("DELETE FROM graph_log_cursors WHERE job_id=?", (job,))
+        db.execute("DELETE FROM graph_jobs WHERE id=?", (job,))
+    assert rows(store, "SELECT count(*) FROM graph_settings_pins") == [(0,)]
+
+
+def test_endpoint_limits_follow_the_newest_save(tmp_path):
+    store = GraphStore.initialize(tmp_path / "p.sqlite", configured())
+    jobs = JobService(store, recover=False)
+    endpoints = store.settings().settings.model_dump(mode="json")["endpoints"]
+    older = store.update_settings(
+        {
+            **store.settings().settings.model_dump(mode="json"),
+            "endpoints": {"local": {**endpoints["local"], "concurrency": 2}},
+        },
+        1,
+    )
+    store.update_settings(
+        {
+            **older.settings.model_dump(mode="json"),
+            "endpoints": {"local": {**endpoints["local"], "concurrency": 5}},
+        },
+        2,
+    )
+    jobs.configure_endpoints(older)  # The slower save finishing last.
+    assert rows(store, "SELECT concurrency FROM graph_endpoints WHERE id='local'") == [(5,)]
 
 
 def test_settings_api_keeps_keys_that_start_with_sa(tmp_path):

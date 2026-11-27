@@ -6,7 +6,7 @@ Remix uses a few formats, each for a different job.
 | --- | --- | --- |
 | `kidra-trajectory-graph/1` | **Authoring.** The only source format: one trajectory as a graph of events. Raw exports are JSONL of these. | [Source format](GRAPH-SOURCE.md) |
 | `kidra-graph-settings/1` | Project settings: tools, endpoints, tokenizer profiles, checklists. | [Project settings](PROJECT-SETTINGS.md) |
-| `kidra-graph-project/1` | The project's SQLite database. | [Storage](STORAGE.md) |
+| `kidra-graph-project/2` | The project's SQLite database. Projects in format `/1` are upgraded when opened. | [Storage](STORAGE.md) |
 | **KTREMIX** (`.ktremix`) | **Training.** Compiled, compressed shards with indexed random access. Not an authoring format. | [KTREMIX format](KTREMIX.md) |
 
 `GET /api/v1/schema/source` serves the generated JSON Schema for the source format.

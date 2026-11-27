@@ -547,12 +547,12 @@ def test_no_overwrite_no_migration_or_silent_version_changes(tmp_path):
     with store.connect() as db:
         # Bypass the guard to simulate a future version, never upgrade on open.
         db.execute("DROP TRIGGER immutable_graph_project")
-        db.execute("UPDATE graph_project SET format='kidra-graph-project/2'")
+        db.execute("UPDATE graph_project SET format='kidra-graph-project/3'")
     with pytest.raises(ValueError, match="Unsupported"):
         GraphStore(path)
     with sqlite3.connect(path) as db:
         assert (
-            db.execute("SELECT format FROM graph_project").fetchone()[0] == "kidra-graph-project/2"
+            db.execute("SELECT format FROM graph_project").fetchone()[0] == "kidra-graph-project/3"
         )
     other = tmp_path / "old.sqlite"
     with sqlite3.connect(other) as db:

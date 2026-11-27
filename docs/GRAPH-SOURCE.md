@@ -132,7 +132,7 @@ size. `GET /api/v1/schema/settings` has its schema. Defaults need no tokenizer o
 This section is for code that uses the Python API directly. Most people use the studio,
 REST or MCP.
 
-- `GraphStore.initialize(path)` creates a `kidra-graph-project/1` SQLite database (WAL).
+- `GraphStore.initialize(path)` creates a `kidra-graph-project/2` SQLite database (WAL).
   Existing files and unsupported versions are rejected, with no migration.
 - `GraphCommands` offers `read`, `create`, `replace`, `patch`, `add_event`, `patch_event`,
   `delete_event`, `set_dependencies` and `remove_dependency`. Patches use RFC 7396 (a `null`

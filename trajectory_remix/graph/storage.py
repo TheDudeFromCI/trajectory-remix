@@ -14,7 +14,9 @@ from . import settings_history, settings_tables, size_query
 from .merge import MergeConflict, merge
 from .models import GraphSource, ProjectSettings, canonical
 
-PROJECT_FORMAT = "kidra-graph-project/1"
+PROJECT_FORMAT = "kidra-graph-project/2"
+# Settings stored as one full JSON copy per revision; upgraded on open (settings_migration.py).
+LEGACY_FORMAT = "kidra-graph-project/1"
 PROVENANCE = TypeAdapter(dict[str, JsonValue])
 
 
@@ -133,12 +135,13 @@ class GraphStore:
             raise ValueError(
                 "Not a graph project; no legacy reader or migration is available"
             ) from error
-        if row is None or row[0] != PROJECT_FORMAT:
+        if row is not None and row[0] == LEGACY_FORMAT:
+            from .settings_migration import migrate
+
+            migrate(self.path)
+        elif row is None or row[0] != PROJECT_FORMAT:
             raise ValueError("Unsupported graph project format")
         self.project_id = row[1]
-        from .settings_migration import migrate
-
-        migrate(self.path)
 
     @classmethod
     def initialize(cls, path: Path, settings: ProjectSettings | dict | None = None):

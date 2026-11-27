@@ -5,7 +5,7 @@ the database yourself: use the studio, [REST or MCP](MCP.md), which enforce the 
 
 ## What's in a project
 
-A project is one SQLite database in WAL mode (format `kidra-graph-project/1`). It holds:
+A project is one SQLite database in WAL mode (format `kidra-graph-project/2`). It holds:
 
 - the current head of every trajectory, plus **immutable revisions** of each source,
 - the current project settings, split into tables, plus snapshots of earlier settings while something still uses
@@ -39,12 +39,15 @@ snapshot is kept when it is:
 - one of the 20 most recent saves, so a save made from a settings dialog opened a little earlier can still be
   merged with other people's changes;
 - the settings that a trajectory's latest revision was saved with;
-- the settings a job started with, for as long as the job is listed. Jobs keep their frozen configuration.
+- the settings a job started with, for as long as the job is listed. Jobs keep their frozen configuration. Each
+  job's settings revision is recorded in `graph_settings_pins`, and the record goes when the job is cleared.
 
-A tokenizer file is deleted when no profile and no kept snapshot uses it. Projects saved by earlier versions, which kept
-a full copy of the settings for every save, are upgraded automatically the first time they are opened. The upgrade then
-compacts the file, which can take a few seconds for a large project. Back up the project first if you might need to
-open it with an older version of Remix, which can't read the new layout.
+A tokenizer file is deleted when no profile and no kept snapshot uses it.
+
+Projects saved by earlier versions (format `kidra-graph-project/1`), which kept a full copy of the settings for every
+save, are upgraded to `kidra-graph-project/2` the first time they are opened. The upgrade then compacts the file, which
+can take a few seconds for a large project. Older versions of Remix refuse an upgraded project, so back it up first if
+you might need to open it with one.
 
 ## What isn't in it
 

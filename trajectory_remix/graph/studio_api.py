@@ -22,6 +22,7 @@ from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checkl
 from .query_export import iter_jsonl
 from .reviews import ReviewInput
 from .static_files import RevalidatingStaticFiles
+from .storage import PROJECT_FORMAT
 from .studio import Studio
 from .validation import diagnose
 
@@ -296,7 +297,7 @@ def create_studio_app(
     def project():
         return dict(
             id=studio.store.project_id,
-            format="kidra-graph-project/1",
+            format=PROJECT_FORMAT,
             generation_available="draft" in studio.store.settings().settings.endpoint_roles,
         )
 
