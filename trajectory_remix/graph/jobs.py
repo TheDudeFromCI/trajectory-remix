@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from . import reconnect, trajectory_hold
+from . import reconnect, settings_history, trajectory_hold
 from . import usage as usage_log
 from .failure_reason import endpoint_failure
 from .log_levels import check as check_level
@@ -120,6 +120,7 @@ class JobService:
             db.executescript(SCHEMA)
             reconnect.ensure_columns(db)
             migrate_log_levels(db)
+            settings_history.ensure_pins(db)
         self.configure_endpoints()
         if recover:
             self.recover()
@@ -129,9 +130,14 @@ class JobService:
             if owner == job and (trajectory is None or trajectory == source):
                 task.get_loop().call_soon_threadsafe(task.cancel)
 
-    def configure_endpoints(self, settings=None):
-        settings = settings or self.store.settings().settings
+    def configure_endpoints(self, record=None):
+        """Apply endpoint limits; `record` is a settings record just saved, if any."""
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            # A slower concurrent save must not apply older limits than the current settings.
+            if record is None or record.revision != self.store._settings_head(db).revision:
+                record = self.store._settings(db)
+            settings = record.settings
             for ident, endpoint in settings.endpoints.items():
                 db.execute(
                     """INSERT INTO graph_endpoints(id,concurrency,retries,reconnect_seconds)
@@ -157,6 +163,7 @@ class JobService:
             (ident, kind, canonical(config), total, run_id, self.clock()),
         )
         db.execute("INSERT INTO graph_log_cursors(job_id) VALUES(?)", (ident,))
+        settings_history.pin(db, ident, config)  # Keeps the frozen settings snapshot.
         self._notify(db, ident)
         return ident
 

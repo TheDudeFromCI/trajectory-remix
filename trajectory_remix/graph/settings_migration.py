@@ -7,7 +7,10 @@ holds a foreign key to one. The upgrade, in one transaction:
 1. creates the settings tables and fills them from the current revision;
 2. rewrites each snapshot in the stored form, keeping one copy per tokenizer;
 3. rebuilds ``graph_trajectory_revisions`` without the foreign key, so unused
-   snapshots can be pruned, then prunes them (see settings_history.py).
+   snapshots can be pruned, then prunes them (see settings_history.py);
+4. records which settings revision each existing job uses;
+5. marks the project ``kidra-graph-project/2`` so older versions refuse it
+   rather than writing settings the tables would never see.
 
 The file is vacuumed afterwards to return the freed space to the disk.
 """
@@ -17,7 +20,7 @@ import sqlite3
 from contextlib import closing
 
 from . import settings_history, settings_tables
-from .models import canonical
+from .models import ProjectSettings, canonical
 
 _SNAPSHOT_TRIGGERS = (
     "DROP TRIGGER IF EXISTS immutable_graph_settings_update",
@@ -30,15 +33,25 @@ _SNAPSHOT_TRIGGERS = (
 )
 
 
+_PROJECT_TRIGGER = """CREATE TRIGGER immutable_graph_project BEFORE UPDATE OF id,format
+ON graph_project BEGIN SELECT RAISE(ABORT,'Project identity is immutable'); END"""
+
+
 def needed(db) -> bool:
-    sql = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='graph_tokenizer_profiles'"
-    return db.execute(sql).fetchone() is None
+    from .storage import LEGACY_FORMAT
+
+    row = db.execute("SELECT format FROM graph_project WHERE singleton=1").fetchone()
+    return row is not None and row[0] == LEGACY_FORMAT
 
 
 def _store_snapshots(db):
     db.execute("DROP TRIGGER IF EXISTS immutable_graph_settings_update")
-    rows = db.execute("SELECT revision,settings FROM graph_settings_revisions").fetchall()
-    for revision, text in rows:
+    # One snapshot in memory at a time: each may hold several megabytes of tokenizers.
+    revisions = [r for (r,) in db.execute("SELECT revision FROM graph_settings_revisions")]
+    for revision in revisions:
+        (text,) = db.execute(
+            "SELECT settings FROM graph_settings_revisions WHERE revision=?", (revision,)
+        ).fetchone()
         stored = settings_tables.stored_form(db, json.loads(text))
         db.execute(
             "UPDATE graph_settings_revisions SET settings=? WHERE revision=?",
@@ -62,14 +75,25 @@ def _rebuild_trajectory_revisions(db):
             db.execute(statement + "END")
 
 
+def _mark_upgraded(db):
+    from .storage import PROJECT_FORMAT
+
+    db.execute("DROP TRIGGER IF EXISTS immutable_graph_project")
+    db.execute("UPDATE graph_project SET format=?", (PROJECT_FORMAT,))
+    db.execute(_PROJECT_TRIGGER)
+
+
 def _upgrade(db):
     settings_tables.create(db)
     _store_snapshots(db)
     current = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
     data, _ = settings_history.load(db, current)
-    settings_tables.write(db, data)
+    # Apply the model's compatibility rules (e.g. an unassigned role saved as "none" or null).
+    settings_tables.write(db, ProjectSettings.model_validate(data).model_dump(mode="json"))
     _rebuild_trajectory_revisions(db)
+    settings_history.ensure_pins(db)
     settings_history.prune(db)
+    _mark_upgraded(db)
     problems = db.execute("PRAGMA foreign_key_check").fetchall()
     if problems:
         raise sqlite3.IntegrityError(f"Settings upgrade left broken references: {problems[:5]}")

@@ -88,7 +88,7 @@ class Studio:
             ProjectSettings.model_validate(settings), expected_revision, rebase=True
         )
         # Reuse the saved settings: reloading them would re-read and re-validate every tokenizer.
-        self.jobs.configure_endpoints(record.settings)
+        self.jobs.configure_endpoints(record)
         return self.settings(record)
 
     def read(self, ident, revision=None):

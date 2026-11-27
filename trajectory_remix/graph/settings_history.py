@@ -7,8 +7,9 @@ except for:
 * the current revision and the ``RECENT`` revisions before it, so a save made
   from a recently loaded dialog can still be merged onto the latest settings;
 * revisions referenced by the latest revision of any trajectory;
-* revisions referenced by any job still in the jobs table (jobs freeze the
-  settings they started with).
+* revisions pinned by any job still in the jobs table (jobs freeze the
+  settings they started with). Pins live in ``graph_settings_pins`` so pruning
+  never has to parse job configurations.
 
 Tokenizer definitions no longer referenced by the current profiles or by a kept
 snapshot are deleted with them.
@@ -20,6 +21,9 @@ from . import settings_tables
 from .models import canonical
 
 RECENT = 20
+PINS = """CREATE TABLE IF NOT EXISTS graph_settings_pins (
+    job_id TEXT PRIMARY KEY REFERENCES graph_jobs(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL)"""
 
 
 def record(db, revision, commit, data):
@@ -44,6 +48,40 @@ def _has_table(db, name):
     return db.execute(sql, (name,)).fetchone() is not None
 
 
+def config_revision(config):
+    """The settings revision a job configuration froze, if any."""
+    options = config.get("options")
+    revision = config.get("settings_revision")
+    if revision is None and isinstance(options, dict):
+        revision = options.get("settings_revision")
+    return revision if type(revision) is int else None
+
+
+def ensure_pins(db):
+    """Create the pin table; the first time, record the revisions of existing jobs."""
+    if not _has_table(db, "graph_jobs") or _has_table(db, "graph_settings_pins"):
+        return
+    db.execute(PINS)
+    db.execute(
+        """INSERT INTO graph_settings_pins SELECT id, revision FROM (
+        SELECT id, coalesce(json_extract(config,'$.settings_revision'),
+            json_extract(config,'$.options.settings_revision')) AS revision FROM graph_jobs)
+        WHERE typeof(revision)='integer'"""
+    )
+
+
+def pin(db, job_id, config):
+    """Pin the settings a new job froze, refusing a snapshot that was already pruned."""
+    revision = config_revision(config)
+    if revision is None:
+        return
+    sql = "SELECT 1 FROM graph_settings_revisions WHERE revision=?"
+    if db.execute(sql, (revision,)).fetchone() is None:
+        raise ValueError("Project settings changed while the job was starting; try again")
+    ensure_pins(db)
+    db.execute("INSERT INTO graph_settings_pins VALUES(?,?)", (job_id, revision))
+
+
 def in_use(db):
     """Revisions that must keep their snapshot."""
     current = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
@@ -55,12 +93,8 @@ def in_use(db):
             JOIN graph_trajectory_revisions r ON r.trajectory_id=t.id AND r.revision=t.revision"""
         )
     }
-    if _has_table(db, "graph_jobs"):
-        for top, nested in db.execute(
-            """SELECT json_extract(config,'$.settings_revision'),
-            json_extract(config,'$.options.settings_revision') FROM graph_jobs"""
-        ):
-            keep |= {r for r in (top, nested) if type(r) is int}
+    if _has_table(db, "graph_settings_pins"):
+        keep |= {r for (r,) in db.execute("SELECT DISTINCT revision FROM graph_settings_pins")}
     return keep
 
 
