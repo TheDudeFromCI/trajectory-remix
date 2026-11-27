@@ -64,8 +64,8 @@ class Studio:
             )
             return dict(items=[dict(r) for r in rows], total=total, limit=limit, offset=offset)
 
-    def settings(self):
-        r = self.store.settings()
+    def settings(self, record=None):
+        r = record or self.store.settings()
         return dict(
             settings=r.settings.model_dump(mode="json"),
             revision=r.revision,
@@ -77,18 +77,19 @@ class Studio:
         from .reviews import stale
 
         record = value.record
-        settings = self.store.settings(record.settings_revision).settings
+        settings = self.store.settings_or_current(record.settings_revision).settings
         return result(value) | dict(
             review_status=stale(record.source, settings),
             size=size_of(record.source, [label.model_dump() for label in settings.size_labels]),
         )
 
     def update_settings(self, settings, expected_revision):
-        self.store.update_settings(
+        record = self.store.update_settings(
             ProjectSettings.model_validate(settings), expected_revision, rebase=True
         )
-        self.jobs.configure_endpoints()
-        return self.settings()
+        # Reuse the saved settings: reloading them would re-read and re-validate every tokenizer.
+        self.jobs.configure_endpoints(record.settings)
+        return self.settings(record)
 
     def read(self, ident, revision=None):
         from .reviews import stale
@@ -97,7 +98,7 @@ class Studio:
             db.execute("BEGIN")
             record = self.store._read(db, ident, revision)
             owner = self.store._owner(db, ident)
-            snapshot = self.store._settings(
+            snapshot = self.store._settings_or_current(
                 db, record.settings_revision if revision or owner else None
             )
         source, settings = record.source, snapshot.settings

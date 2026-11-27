@@ -41,7 +41,10 @@ class GraphCommands:
     def _result(self, record):
         # Pin diagnostics to the settings version saved with this source commit.
         return GraphResult(
-            record, diagnose(record.source, self.store.settings(record.settings_revision).settings)
+            record,
+            diagnose(
+                record.source, self.store.settings_or_current(record.settings_revision).settings
+            ),
         )
 
     def read(self, trajectory_id: str, revision: int | None = None):
@@ -56,7 +59,9 @@ class GraphCommands:
                 self.store._check_revision(trajectory_id, expected_revision, record)
                 self.store._check_owner(db, trajectory_id)
             job_owned = read_only and self.store._owner(db, trajectory_id) is not None
-            snapshot = self.store._settings(db, record.settings_revision if job_owned else None)
+            snapshot = self.store._settings_or_current(
+                db, record.settings_revision if job_owned else None
+            )
             source, settings = record.source, snapshot.settings
             accepted = True
             if name == "signoff":
