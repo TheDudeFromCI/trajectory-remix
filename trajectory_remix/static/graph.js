@@ -24,6 +24,7 @@ import {bindViewTabs, currentView, showView} from './views.js';
 import {byId} from './panel-popout.js';
 import {ConflictResolver} from './conflict-resolver.js';
 import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
+import {parkSettings, restoreSettings} from './tokenizer-store.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
 const $ = byId; // Also finds elements in a popped-out panel.
 const copy = value => structuredClone(value);
@@ -754,13 +755,13 @@ export class StudioUI {
   }
   renderSettingsForms() {
     const settings = JSON.parse($('settings-json').value);
-    const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
+    const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(parkSettings(draft)); }};
     if ($('validation-settings-editor')) renderValidationSettings($('validation-settings-editor'), this.settingsRecord.validation_warnings || [], opts);
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
     if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, loadDefaultPrompts: async () => api('/generation/prompts/default'), footer: this.reviewFoot ||= $('review-settings-foot')});
   }
   async openSettings() {
-    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(parkSettings(this.settings)); this.renderToolSettings(); this.renderSettingsForms();
     await this.renderLogUsage(); $('settings-dialog').showModal();
   }
   async renderLogUsage() {
@@ -769,14 +770,14 @@ export class StudioUI {
     $('log-usage').replaceChildren(stat(String(usage.entries), 'Retained log lines'), stat(mib(usage.bytes || 0), 'Used'), stat(usage.cap_mib === null || usage.cap_mib === undefined ? 'Unlimited' : usage.cap_mib + ' MiB', 'Cache limit'));
   }
   async saveSettings(dialog) {
-    await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
+    await api('/settings', 'PUT', {settings: restoreSettings(JSON.parse($('settings-json').value)), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
     await this.loadSettings(); await this.refreshSelected(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
   }
   async openReview() {
     // Keep unsaved review-settings edits when returning to the tab; otherwise show the saved settings.
-    const dirty = $('settings-json').value && JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings));
+    const dirty = $('settings-json').value && JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(parkSettings(this.settings)));
     if (dirty) return;
-    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(parkSettings(this.settings)); this.renderSettingsForms();
   }
   async startReview({bulk = false} = {}) {
     if (!bulk && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
@@ -826,7 +827,7 @@ export class StudioUI {
     await this.sendToAssistant();
   }
   async openGenerationSettings() {
-    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(parkSettings(this.settings)); this.renderSettingsForms();
     const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
     const box = $('generation-run-controls'); box.replaceChildren(node('h3', 'New run'));
     const roles = this.settings.endpoint_roles || {}, roleList = node('div', undefined, 'role-list');
@@ -834,7 +835,7 @@ export class StudioUI {
       const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'draft' ? 'danger' : 'faint')); roleList.append(row);
     }
     box.append(roleList);
-    $('generation-endpoints-button').onclick = () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); };
+    $('generation-endpoints-button').onclick = () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(parkSettings(this.settings))) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); };
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
     const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); grid.append(label); return input; };
     const saved = loadRunInputs();
@@ -859,7 +860,7 @@ export class StudioUI {
     box.append(pinBox, barrierBox, node('p', 'Each run freezes its settings, prompts, matrix and pins when it starts.', 'note'));
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
-      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
+      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(parkSettings(this.settings)))) throw new Error('Save review settings before starting a run.');
       if (sampler?.dirty()) throw new Error('Save or discard the Workbench matrix draft before generating.');
       const n = Number(count.value); let first = Number(seed.value);
       if (!count.value || !Number.isInteger(n) || n < 1 || n > 1000 || !seed.value || !Number.isSafeInteger(first) || !Number.isSafeInteger(first + n - 1)) throw new Error('Supply 1–1000 attempts and a safe integer seed.');

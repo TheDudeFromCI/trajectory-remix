@@ -90,6 +90,7 @@ python -m pytest -q tests/test_graph*.py tests/test_ktremix*.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
+node tests/tokenizer_store_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/window_markdown_frontend.mjs
