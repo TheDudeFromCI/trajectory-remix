@@ -254,18 +254,21 @@ until you apply them.
 1. Read the list: one entry for each event, window, metadata value or the defaults that the
    Assistant added, removed or changed. Expand an entry to see its lines, with removed lines
    in red (`-`) and added lines in green (`+`).
-2. Decide:
+2. Choose which changes to keep. Every entry starts ticked. Untick the ones you don't want,
+   and **Apply changes** becomes **Apply 2 of 3** (for example). Unticked changes are dropped
+   when you apply, so you're asked to confirm first.
+3. Decide:
 
 | Button | What happens |
 | --- | --- |
-| **Apply changes** | The changes are saved to the trajectory as one edit, so **Undo** reverts them. The comments they fixed are resolved. |
+| **Apply changes** | The ticked changes are saved to the trajectory as one edit, so **Undo** reverts them, and any unticked ones are dropped. The comments they fixed are resolved. |
 | **Request changes** | Write what should be different. It's added as a comment on the whole trajectory and sent to the Assistant straight away. The agent keeps working on the same proposal, and the panel then shows all its changes together. |
 | **Discard** | The changes are dropped and the comments they fixed reopen with a note. The Assistant's conversation is forgotten, so the next send starts from the trajectory as it is. |
 
 You can keep editing the trajectory while a proposal waits. Applying it only replays what the
 Assistant changed, so your edits to other events, windows or values are kept. If you changed
 the same thing the Assistant did, the entry is marked **Conflict** and **Apply changes** is
-unavailable: undo your edit there, or discard the proposal. A new send can't build on a
+unavailable while it's ticked: undo your edit there, untick that entry, or discard the proposal. A new send can't build on a
 conflicting proposal either. To fix one of the Assistant's comments individually, use
 **Request changes** on that comment; the next run updates the same proposal.
 

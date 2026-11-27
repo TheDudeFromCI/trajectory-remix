@@ -90,6 +90,26 @@ button('Apply changes').click(); await settle(); await settle();
 assert.deepEqual(calls.at(-1), ['POST', '/trajectories/t1/assistant/proposal/apply', {expected_revision: 4}]);
 assert.deepEqual(applied, {delta: {id: 't1'}, resolved: 1}); assert.equal(host.hidden, true); assert.equal(view.pending.size, 0);
 
+// Per-change selection: untick one, Apply takes only the ticked ones (after a confirm).
+proposal = {base_revision: 4, updated: 'y', comment_ids: [], conflicts: [{kind: 'event', id: 'x'}],
+  changes: [{kind: 'event', id: 'x', change: 'changed', before, after}, {kind: 'metadata', id: 'note', change: 'added', before: null, after: 'hi'}]};
+await view.load('t1');
+const picks = () => [...host.querySelectorAll('.proposal-pick')];
+assert.deepEqual(picks().map(p => p.checked), [true, true]);
+assert.equal(button('Apply changes').disabled, true, 'a ticked conflicting change blocks Apply');
+picks()[0].checked = false; picks()[0].dispatchEvent(new window.Event('change'));
+assert.ok(host.querySelector('.proposal-change').classList.contains('skipped'));
+assert.equal(button('Apply 1 of 2').disabled, false, 'unticking the conflicting change unblocks Apply');
+proposal.updated = 'z'; await view.load('t1');
+assert.deepEqual(picks().map(p => p.checked), [false, true], 'polling keeps what the person unticked');
+picks()[1].checked = false; picks()[1].dispatchEvent(new window.Event('change'));
+assert.equal(button('Apply 0 of 2').disabled, true, 'nothing ticked, nothing to apply');
+picks()[1].checked = true; picks()[1].dispatchEvent(new window.Event('change'));
+globalThis.confirm = () => false; button('Apply 1 of 2').click(); await settle(); assert.notEqual(calls.at(-1)[0], 'POST');
+globalThis.confirm = () => true; button('Apply 1 of 2').click(); await settle(); await settle();
+assert.deepEqual(calls.at(-1), ['POST', '/trajectories/t1/assistant/proposal/apply', {expected_revision: 4, changes: [{kind: 'metadata', id: 'note'}]}]);
+assert.equal(host.hidden, true); assert.equal(view.skipped.size, 0);
+
 // Discard asks first, then drops it.
 proposal = {base_revision: 4, updated: 'x', comment_ids: [], conflicts: [], changes: [{kind: 'defaults', id: null, change: 'changed', before: {}, after: {a: 1}}]};
 await view.load('t1');

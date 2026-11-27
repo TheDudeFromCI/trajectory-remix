@@ -279,7 +279,7 @@ window, each event and each metadata key.
 | Route | What it does |
 | --- | --- |
 | `GET /api/v1/trajectories/{id}/assistant/proposal` | `{proposal: null}`, or the base revision, the comment IDs, `changes` (each `{kind, id, change, before, after}`, `change` being `added`, `removed` or `changed`) and `conflicts` with the current source. |
-| `POST /api/v1/trajectories/{id}/assistant/proposal/apply` | Body `{expected_revision}`. Three-way merges the proposal onto the current source and saves it as one edit with provenance `assistant_proposal`, then resolves the comments it addressed that still await review. Returns the saved trajectory with an Undo `delta` and the `resolved` count. A conflict returns 409 `proposal_conflict` and changes nothing. |
+| `POST /api/v1/trajectories/{id}/assistant/proposal/apply` | Body `{expected_revision, changes?}`. `changes` is an optional list of `{kind, id}` (as listed by the GET route) to apply; the proposal's other changes are dropped, and naming one it doesn't contain returns 422. Three-way merges the (selected) proposal onto the current source and saves it as one edit with provenance `assistant_proposal`, then resolves the comments it addressed that still await review. Returns the saved trajectory with an Undo `delta` and the `resolved` count. A conflict returns 409 `proposal_conflict` and changes nothing. |
 | `DELETE /api/v1/trajectories/{id}/assistant/proposal` | Drops the proposal, reopens the comments it addressed with a note, and forgets the kept conversation. |
 
 ### Stale reviews

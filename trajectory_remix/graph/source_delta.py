@@ -92,6 +92,25 @@ def merge(base: dict, current: dict, proposed: dict) -> dict:
     return _assemble(current, merged)
 
 
+def pick(base: dict, proposed: dict, keys) -> dict:
+    """`proposed` with only the changes to `keys` kept; every other entity as in `base`.
+    Raises ValueError for a key the proposal doesn't change."""
+    keys, changed = set(keys), changed_keys(base, proposed)
+    unknown = keys - set(changed)
+    if unknown:
+        names = ", ".join(label(kind, ident) for kind, ident in sorted(unknown, key=_order))
+        raise ValueError(f"Not a change in the proposal: {names}")
+    old, kept = entities(base), entities(proposed)
+    for key in changed:
+        if key in keys:
+            continue
+        if key in old:
+            kept[key] = old[key]
+        else:
+            kept.pop(key, None)
+    return _assemble(proposed, kept)
+
+
 def _assemble(template: dict, found: dict) -> dict:
     source = dict(format=template["format"], id=template["id"])
     source["defaults"] = found.get(("defaults", None), {})
