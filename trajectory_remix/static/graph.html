@@ -423,6 +423,16 @@
   <div class="dialog-foot"><button class="ghost" data-close>Cancel</button><button id="window-delete-confirm" class="danger">Delete window</button></div>
 </dialog>
 
+<dialog id="conflict-dialog" class="conflict-dialog" aria-labelledby="conflict-title">
+  <div class="dialog-head"><h2 id="conflict-title">Resolve save conflict</h2><button class="ghost sm" data-close>Close</button></div>
+  <div class="dialog-body">
+    <p id="conflict-summary"></p>
+    <p class="small muted conflict-legend"><span class="diff-del">− saved version</span> <span class="diff-add">+ your version</span></p>
+    <div id="conflict-list" class="conflict-list"></div>
+  </div>
+  <div class="dialog-foot"><button id="conflict-all-mine" class="ghost">Keep all mine</button><button id="conflict-all-theirs" class="ghost">Keep all theirs</button><span class="grow"></span><button class="ghost" data-close>Cancel</button><button id="conflict-save">Save with these choices</button></div>
+</dialog>
+
 <dialog id="export-dialog" aria-labelledby="export-title">
   <div class="dialog-head"><h2 id="export-title">Export dataset</h2><button class="ghost sm" data-close>Close</button></div>
   <div class="dialog-body">

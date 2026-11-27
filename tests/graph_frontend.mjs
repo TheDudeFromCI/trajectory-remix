@@ -181,7 +181,19 @@ assert.equal(ui.undo.at(-1)[0].before.metadata.test,true);
 await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{events:{first:{content:'theirs'}}}});
 $('event-content').value='mine'; ui.applyEvent(); await ui.autoSave.flush();
 assert.match(ui.autoSave.error?.message||'',/Revision conflict.*events\/first\/content/); assert.equal(ui.draft.events.first.content,'mine');
-await ui.select(ui.id,true); assert.equal(ui.draft.events.first.content,'theirs');
+// Failed to Save opens the resolver: a diff of what blocks the merge, then Keep mine saves mine.
+const marker = $('dirty-indicator');
+assert.equal(marker.textContent,'Failed to Save'); assert.ok(marker.classList.contains('is-actionable')); assert.equal(marker.getAttribute('role'),'button');
+marker.click(); await until(()=>$('conflict-dialog').open);
+assert.deepEqual([...$('conflict-list').querySelectorAll('.diff-del,.diff-add')].map(n=>n.textContent.trim()),['- theirs','+ mine']);
+$('conflict-save').click(); await until(()=>!$('conflict-dialog').open && !ui.autoSave.running && !ui.hasUnsavedChanges());
+assert.equal(ui.autoSave.error,null); assert.equal(ui.record.source.events.first.content,'mine'); assert.equal(marker.textContent,'Saved'); assert.ok(!marker.classList.contains('is-actionable'));
+// Keep theirs saves the newer version and puts it in the editor; other changes from both stay.
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{events:{first:{content:'newer'}},metadata:{resolved_note:1}}});
+$('event-content').value='local'; ui.applyEvent(); await ui.autoSave.flush(); assert.ok(ui.saveConflicts());
+marker.click(); await until(()=>$('conflict-dialog').open); $('conflict-all-theirs').click(); $('conflict-save').click();
+await until(()=>!ui.autoSave.running && !ui.hasUnsavedChanges());
+assert.equal(ui.record.source.events.first.content,'newer'); assert.equal($('event-content').value,'newer'); assert.equal(ui.record.source.metadata.resolved_note,1);
 // Per-window acknowledgment persists, suppresses only its advisory, and is undoable.
 await until(()=>[...ui.ownedBulk].every(id=>ui.recorded.has(id)));
 const ack = await module.api('/trajectories', 'POST', {format:'kidra-trajectory-graph/1',id:crypto.randomUUID(),

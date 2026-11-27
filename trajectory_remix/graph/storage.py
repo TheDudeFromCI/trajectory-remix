@@ -28,6 +28,7 @@ class RevisionConflict(ValueError):
         current_revision: int,
         commit_id: str,
         detail: str = "",
+        conflicts: list | None = None,
     ):
         super().__init__(
             f"Revision conflict for {entity_id}: expected {expected_revision}, current {current_revision}"
@@ -37,6 +38,9 @@ class RevisionConflict(ValueError):
         self.expected_revision = expected_revision
         self.current_revision = current_revision
         self.commit_id = commit_id  # Bounded reference for explicit reconciliation.
+        # From a stale save: each value both sides changed ({path, base, ours, theirs}).
+        if conflicts:
+            self.conflicts = conflicts
 
 
 @dataclass(frozen=True)
@@ -216,10 +220,15 @@ class GraphStore:
             return self._settings(db, revision)
 
     def update_settings(
-        self, settings: ProjectSettings | dict, expected_revision: int, *, rebase: bool = False
+        self,
+        settings: ProjectSettings | dict,
+        expected_revision: int,
+        *,
+        rebase: bool = False,
+        resolutions: dict | None = None,
     ):
         """Store new settings. With `rebase`, a save edited from an older revision is merged onto
-        the latest one when the changes don't overlap (see merge.py)."""
+        the latest one when the changes don't overlap, or as `resolutions` says (see merge.py)."""
         settings = ProjectSettings.model_validate(settings)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -232,6 +241,7 @@ class GraphStore:
                     lambda: self._settings(db, expected_revision).settings,
                     settings,
                     old.settings,
+                    resolutions,
                 )
                 expected_revision = old.revision
             self._check_revision("settings", expected_revision, old)
@@ -249,18 +259,25 @@ class GraphStore:
         return type(expected) is int and 1 <= expected < current.revision
 
     @staticmethod
-    def _rebase(entity_id, expected, current, load_base, ours, theirs):
+    def _rebase(entity_id, expected, current, load_base, ours, theirs, resolutions=None):
         """Merge `ours` (edited from revision `expected`) onto `theirs` (the current value).
-        Overlapping changes, or a merge that is no longer valid, stay a RevisionConflict."""
+        Overlapping changes not settled by `resolutions`, or a merge that is no longer valid,
+        stay a RevisionConflict; overlaps are listed in its `conflicts`."""
         try:
-            merged = merge(_dump(load_base()), _dump(ours), _dump(theirs))
+            merged = merge(_dump(load_base()), _dump(ours), _dump(theirs), resolutions)
             return type(ours).model_validate(merged)
-        except (KeyError, MergeConflict, ValueError) as error:
-            detail = (
-                f"{error}; reload to see the latest" if isinstance(error, MergeConflict) else ""
-            )
+        except MergeConflict as error:
             raise RevisionConflict(
-                entity_id, expected, current.revision, current.commit_id, detail
+                entity_id,
+                expected,
+                current.revision,
+                current.commit_id,
+                f"{error}; choose which version to keep",
+                error.conflicts,
+            ) from error
+        except (KeyError, ValueError) as error:
+            raise RevisionConflict(
+                entity_id, expected, current.revision, current.commit_id
             ) from error
 
     @staticmethod
@@ -301,9 +318,11 @@ class GraphStore:
         provenance: dict | None = None,
         *,
         rebase: bool = False,
+        resolutions: dict | None = None,
     ):
         """Store a new source revision. With `rebase`, a save edited from an older revision is
-        merged onto the latest one when the changes don't overlap (see merge.py)."""
+        merged onto the latest one when the changes don't overlap, or as `resolutions` says
+        (see merge.py)."""
         source = GraphSource.model_validate(source)
         if source.id != trajectory_id:
             raise ValueError("Trajectory identity is immutable")
@@ -321,6 +340,7 @@ class GraphStore:
                     lambda: self._read(db, trajectory_id, expected_revision).source,
                     source,
                     old.source,
+                    resolutions,
                 )
                 expected_revision = old.revision
             self._check_revision(trajectory_id, expected_revision, old)

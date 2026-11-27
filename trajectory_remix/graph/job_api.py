@@ -312,7 +312,13 @@ def create_job_app(
                 message=str(error),
                 **{
                     key: getattr(error, key)
-                    for key in ("entity_id", "expected_revision", "current_revision", "commit_id")
+                    for key in (
+                        "entity_id",
+                        "expected_revision",
+                        "current_revision",
+                        "commit_id",
+                        "conflicts",
+                    )
                     if hasattr(error, key)
                 },
             ),
