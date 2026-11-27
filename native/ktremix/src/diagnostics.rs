@@ -295,15 +295,26 @@ pub(crate) fn analyze<'a>(
                 "window",
             );
         }
-        if (matches!(event.kind, Kind::ToolCall | Kind::ToolResponse)
-            && event.call_id.as_ref().is_none_or(String::is_empty))
-            || (event.kind == Kind::ToolCall && event.tool.as_ref().is_none_or(String::is_empty))
-            || (event.kind == Kind::ChatMessage
-                && (event
-                    .chat
-                    .as_ref()
-                    .is_none_or(|chat| chat.speaker.is_empty())
-                    || !matches!(event.delivery.mode, Mode::Instant)))
+        // A missing call ID or tool is its own error so the editor can point at the field; the
+        // source still saves and only compilation is blocked.
+        if matches!(event.kind, Kind::ToolCall | Kind::ToolResponse)
+            && event.call_id.as_ref().is_none_or(String::is_empty)
+        {
+            emit(
+                "missing_call_id",
+                "Tool calls and responses need a call ID".into(),
+                "call_id",
+            );
+        }
+        if event.kind == Kind::ToolCall && event.tool.as_ref().is_none_or(String::is_empty) {
+            emit("missing_tool", "Tool calls need a tool".into(), "tool");
+        }
+        if (event.kind == Kind::ChatMessage
+            && (event
+                .chat
+                .as_ref()
+                .is_none_or(|chat| chat.speaker.is_empty())
+                || !matches!(event.delivery.mode, Mode::Instant)))
             || event
                 .supervision
                 .is_some_and(|value| !valid_weight(value.weight))
