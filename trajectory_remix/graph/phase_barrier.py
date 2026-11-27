@@ -10,7 +10,7 @@ A gate is the point a trajectory reaches next:
 A trajectory that reaches an enabled, closed gate parks: its owner row becomes mode 'parked',
 which does not count toward the active-trajectory cap, so later attempts can start. When no
 attempt is pending and every owned trajectory is parked or held, the gate opens and the job
-pauses, so models can be swapped. Resume releases the parked trajectories.
+pauses, so models can be swapped. On Resume the parked trajectories reacquire active slots.
 
 The number of opened gates is stored per job, so it survives a server restart.
 """
@@ -75,12 +75,13 @@ def gate(cp):
     return None
 
 
-def set_mode(store, job, trajectory, mode):
+def mode(store, job, trajectory):
     with store.connect() as db:
-        db.execute(
-            "UPDATE graph_owners SET mode=? WHERE trajectory_id=? AND job_id=?",
-            (mode, trajectory, job),
-        )
+        row = db.execute(
+            "SELECT mode FROM graph_owners WHERE trajectory_id=? AND job_id=?",
+            (trajectory, job),
+        ).fetchone()
+    return row[0] if row else None
 
 
 def modes(store, job):

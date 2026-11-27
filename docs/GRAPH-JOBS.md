@@ -13,7 +13,7 @@ into it. Jobs never execute synthetic tools.
 | Concept | In practice |
 | --- | --- |
 | **Ownership** | A pipeline working on a trajectory *owns* it exclusively. Edits from anywhere else are refused until it finishes or is detached. There is no force-unlock. |
-| **Attached cap** | The number of trajectories owned at once (including paused pipelines) is capped. |
+| **Active-trajectory cap** | Generation attempts use an active slot even if their job is paused. Parked and held attempts retain ownership and free their slots. |
 | **Frozen inputs** | A run freezes its settings, instructions, sampler proposals and checklists when it is created, with digests. Later edits never change an existing run. |
 | **Per-endpoint queue** | Each logical endpoint has one FIFO queue with its own concurrency and retry limits, even if two endpoints share a URL. |
 | **Pause / Resume / Cancel** | Per job. Pause keeps ownership and progress, and Cancel is final. |
@@ -32,12 +32,14 @@ into it. Jobs never execute synthetic tools.
   finishes when nothing is pending or working, even if it was paused when the last detach happened.
 - **Resume** is rejected for finished jobs.
 - **Phase barriers:** a run can wait before Assembly, Fast review or Critical review (chosen in
-  Generate trajectories, per job). Trajectories park at an enabled barrier (parked ones don't
-  count toward the active-trajectory cap) and the job pauses once all have arrived. See
+  Generate trajectories, per job). Trajectories park at an enabled barrier and the job pauses
+  once all attempts have arrived, finished or been held. On Resume, parked attempts continue as
+  slots become available. See
   [Generate and review in separate sessions](GRAPH-GENERATION.md#generate-and-review-in-separate-sessions).
 - **Held trajectories:** a trajectory that needs manual intervention (output that stays invalid,
-  a context limit, a local error) is held, and the rest of the job keeps running. The job pauses
-  only when nothing but held trajectories is left. Resume retries them; detach settles one.
+  a Draft context limit, a local error) is held and frees its active slot for other attempts.
+  When only held trajectories remain, the job pauses. Resume retries them as slots become
+  available. Detaching one settles it.
 
 ### Endpoints that run out of retries
 

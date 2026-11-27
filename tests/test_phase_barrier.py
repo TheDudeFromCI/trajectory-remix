@@ -36,11 +36,21 @@ async def test_all_trajectories_assemble_before_any_review_then_the_job_pauses(t
     assert phase_barrier.phase(gen.store, job) == 2  # The fast gate is open.
     assert "Phase barrier before fast: 4 trajectories are waiting" in logs(gen, job)
 
+    active_at_review = []
+
+    async def measure(ticket):
+        active_at_review.append(
+            list(phase_barrier.modes(gen.store, job).values()).count("attached")
+        )
+        return await fake(ticket)
+
+    gen.transport = measure
     gen.jobs.control(job, "resume")
     await finish(gen, job)
     assert gen.jobs.inspect(job)["state"] == "completed"
     assert [a["outcome"] for a in gen.jobs.attempts(job)] == ["pass"] * 4
     assert operations(fake)[8:].count("review") == 8  # Fast and Critical for each.
+    assert max(active_at_review) == gen.jobs.active_limit
 
 
 @pytest.mark.asyncio
@@ -131,7 +141,7 @@ async def test_a_barrier_before_assembly_stops_after_every_draft(tmp_path):
 @pytest.mark.asyncio
 async def test_each_enabled_barrier_pauses_in_turn(tmp_path):
     barriers = {"assembly": True, "fast": True, "critical": True}
-    gen, fake, job = await to_barrier(tmp_path, count=2, barriers=barriers)
+    gen, fake, job = await to_barrier(tmp_path, count=4, barriers=barriers)
     assert set(operations(fake)) == {"draft"}
     gen.jobs.control(job, "resume")
     await finish(gen, job)
@@ -142,12 +152,39 @@ async def test_each_enabled_barrier_pauses_in_turn(tmp_path):
     reviews = [
         c.payload["checkpoint"]["tier"] for c in fake.calls if c.payload["operation"] == "review"
     ]
-    assert reviews == ["fast", "fast"]
+    assert reviews == ["fast"] * 4
     assert gen.jobs.inspect(job)["state"] == "paused"
     assert "Phase barrier before critical" in logs(gen, job)
     gen.jobs.control(job, "resume")
     await finish(gen, job)
     assert gen.jobs.inspect(job)["state"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_held_drafts_free_slots_for_pending_attempts_at_a_barrier(tmp_path):
+    gen, fake = service(tmp_path, critical=False)
+    job = gen.start([{"seed": i} for i in range(50, 55)], {}, {"assembly": True})
+    attempts = [a["trajectory_id"] for a in gen.jobs.attempts(job)]
+    fail = set(attempts[1:3])
+
+    async def fixture(ticket):
+        if ticket.trajectory_id in fail:
+            return {"context_limit": True, "model": "fixture"}
+        return await fake(ticket)
+
+    gen.transport = fixture
+    await finish(gen, job)
+    assert gen.jobs.inspect(job)["state"] == "paused"
+    assert phase_barrier.modes(gen.store, job) == {
+        ident: "held" if ident in fail else "parked" for ident in attempts
+    }
+    assert "Phase barrier before assembly: 3 trajectories are waiting (2 held" in logs(gen, job)
+
+    fail.clear()
+    gen.jobs.control(job, "resume")
+    await finish(gen, job)
+    assert [a["outcome"] for a in gen.jobs.attempts(job)] == ["pass"] * 5
+    assert all("needs_attention" not in gen.store.read(i).source.metadata for i in attempts)
 
 
 @pytest.mark.asyncio
