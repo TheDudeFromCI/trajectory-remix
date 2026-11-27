@@ -300,15 +300,13 @@ def create_studio_app(
             generation_available="draft" in studio.store.settings().settings.endpoint_roles,
         )
 
-    # Settings are already JSON-safe. Returning them directly skips FastAPI's jsonable_encoder,
-    # which silently drops keys starting with "_sa" (e.g. tokenizer vocabulary like "_save").
     @router.get("/settings")
     def settings():
-        return JSONResponse(studio.settings())
+        return studio.settings()
 
     @router.put("/settings")
     def settings_update(body: SettingsEdit):
-        return JSONResponse(studio.update_settings(body.settings, body.expected_revision))
+        return studio.update_settings(body.settings, body.expected_revision)
 
     @router.get("/settings/default-review-checklists")
     def default_review_checklists():
@@ -371,7 +369,7 @@ def create_studio_app(
 
     @router.post("/diagnostics")
     def draft_diagnostics(body: GraphSource, settings_revision: int | None = Query(None, ge=1)):
-        settings = studio.store.settings_or_current(settings_revision)
+        settings = studio.store.settings(settings_revision)
         return dict(
             source=body.to_dict(),
             source_hash=body.intrinsic_hash,

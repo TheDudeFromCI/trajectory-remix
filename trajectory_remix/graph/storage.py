@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from pydantic import JsonValue, TypeAdapter
 
-from . import settings_history, settings_tables, size_query
+from . import size_query
 from .merge import MergeConflict, merge
 from .models import GraphSource, ProjectSettings, canonical
 
@@ -61,31 +61,7 @@ class SettingsRecord:
     commit_id: str
 
 
-# Shared with settings_migration.py, which rebuilds these on older projects.
-TRAJECTORY_REVISIONS = """CREATE TABLE graph_trajectory_revisions (
-    trajectory_id TEXT NOT NULL, revision INTEGER NOT NULL,
-    commit_id TEXT NOT NULL UNIQUE, parent_commit_id TEXT,
-    source TEXT NOT NULL CHECK(json_valid(source)), intrinsic_hash TEXT NOT NULL,
-    intrinsic_revision INTEGER NOT NULL, metadata_revision INTEGER NOT NULL,
-    settings_revision INTEGER NOT NULL,
-    provenance TEXT NOT NULL CHECK(json_valid(provenance)),
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    PRIMARY KEY(trajectory_id,revision),
-    CHECK(json_extract(source,'$.id') = trajectory_id),
-    CHECK(json_extract(source,'$.format') = 'kidra-trajectory-graph/1')
-);
-"""
-REVISION_TRIGGERS = """CREATE TRIGGER immutable_graph_source_update BEFORE UPDATE ON graph_trajectory_revisions
-BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_source_delete BEFORE DELETE ON graph_trajectory_revisions
-BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_settings_update BEFORE UPDATE ON graph_settings_revisions
-BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_settings_delete BEFORE DELETE ON graph_settings_revisions
-WHEN old.revision = (SELECT settings_revision FROM graph_project)
-BEGIN SELECT RAISE(ABORT,'The current settings revision is immutable'); END;
-"""
-SCHEMA = f"""
+SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE graph_project (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -96,7 +72,19 @@ CREATE TABLE graph_settings_revisions (
     settings TEXT NOT NULL CHECK(json_valid(settings)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-{TRAJECTORY_REVISIONS}CREATE TABLE graph_trajectories (
+CREATE TABLE graph_trajectory_revisions (
+    trajectory_id TEXT NOT NULL, revision INTEGER NOT NULL,
+    commit_id TEXT NOT NULL UNIQUE, parent_commit_id TEXT,
+    source TEXT NOT NULL CHECK(json_valid(source)), intrinsic_hash TEXT NOT NULL,
+    intrinsic_revision INTEGER NOT NULL, metadata_revision INTEGER NOT NULL,
+    settings_revision INTEGER NOT NULL REFERENCES graph_settings_revisions(revision),
+    provenance TEXT NOT NULL CHECK(json_valid(provenance)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY(trajectory_id,revision),
+    CHECK(json_extract(source,'$.id') = trajectory_id),
+    CHECK(json_extract(source,'$.format') = 'kidra-trajectory-graph/1')
+);
+CREATE TABLE graph_trajectories (
     id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
     FOREIGN KEY(id,revision) REFERENCES graph_trajectory_revisions(trajectory_id,revision)
 );
@@ -109,7 +97,15 @@ CREATE TABLE graph_project_changes (
     cursor INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
     entity_id TEXT NOT NULL, revision INTEGER NOT NULL, commit_id TEXT NOT NULL
 );
-{REVISION_TRIGGERS}CREATE TRIGGER immutable_graph_identity BEFORE UPDATE OF id ON graph_trajectories
+CREATE TRIGGER immutable_graph_source_update BEFORE UPDATE ON graph_trajectory_revisions
+BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_source_delete BEFORE DELETE ON graph_trajectory_revisions
+BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_settings_update BEFORE UPDATE ON graph_settings_revisions
+BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_settings_delete BEFORE DELETE ON graph_settings_revisions
+BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_identity BEFORE UPDATE OF id ON graph_trajectories
 BEGIN SELECT RAISE(ABORT,'Trajectory identity is immutable'); END;
 CREATE TRIGGER immutable_graph_project BEFORE UPDATE OF id,format ON graph_project
 BEGIN SELECT RAISE(ABORT,'Project identity is immutable'); END;
@@ -136,14 +132,11 @@ class GraphStore:
         if row is None or row[0] != PROJECT_FORMAT:
             raise ValueError("Unsupported graph project format")
         self.project_id = row[1]
-        from .settings_migration import migrate
-
-        migrate(self.path)
 
     @classmethod
     def initialize(cls, path: Path, settings: ProjectSettings | dict | None = None):
         settings = ProjectSettings.model_validate({} if settings is None else settings)
-        data = settings.model_dump(mode="json")
+        encoded = canonical(settings.model_dump(mode="json"))
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("xb"):
@@ -154,9 +147,11 @@ class GraphStore:
                 db.execute("PRAGMA journal_mode=WAL")
                 with db:
                     db.executescript(SCHEMA)
-                    settings_tables.create(db)
-                    settings_history.record(db, 1, str(uuid4()), data)
-                    settings_tables.write(db, data)
+                    commit = str(uuid4())
+                    db.execute(
+                        "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(1,?,?)",
+                        (commit, encoded),
+                    )
                     db.execute(
                         "INSERT INTO graph_project VALUES(1,?,?,1)", (PROJECT_FORMAT, str(uuid4()))
                     )
@@ -208,46 +203,16 @@ class GraphStore:
             return self._read(db, trajectory_id, revision)
 
     def _settings(self, db, revision=None):
-        current = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
-        if revision is None or revision == current:
-            commit = db.execute(
-                "SELECT commit_id FROM graph_settings_revisions WHERE revision=?", (current,)
-            ).fetchone()[0]
-            data, revision = settings_tables.read(db), current
-        else:
-            data, commit = settings_history.load(db, revision)
-        return SettingsRecord(ProjectSettings.model_validate(data), revision, commit)
-
-    @staticmethod
-    def _settings_head(db):
-        """The current settings revision and commit id, without loading the settings."""
+        if revision is None:
+            revision = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
         row = db.execute(
-            """SELECT s.revision,s.commit_id FROM graph_project p
-            JOIN graph_settings_revisions s ON s.revision=p.settings_revision"""
+            "SELECT * FROM graph_settings_revisions WHERE revision=?", (revision,)
         ).fetchone()
-        return SettingsRecord(None, row[0], row[1])
-
-    def _settings_or_current(self, db, revision=None):
-        """The settings of `revision` if its snapshot is still kept, else the current settings.
-        Snapshots are pruned once nothing uses them (see settings_history.py)."""
-        try:
-            return self._settings(db, revision)
-        except KeyError:
-            return self._settings(db)
-
-    def settings_or_current(self, revision: int | None = None):
-        with self.connect() as db:
-            db.execute("BEGIN")
-            return self._settings_or_current(db, revision)
-
-    def frozen(self, settings: ProjectSettings) -> dict:
-        """Settings JSON for a job's frozen configuration: tokenizers by hash, not copied."""
-        return settings_tables.frozen_form(settings.model_dump(mode="json"))
-
-    def thaw(self, data: dict) -> ProjectSettings:
-        """Settings from a frozen configuration (stored form or, for older jobs, full)."""
-        with self.connect() as db:
-            return ProjectSettings.model_validate(settings_tables.resolved_form(db, data))
+        if row is None:
+            raise KeyError("Settings revision not found")
+        return SettingsRecord(
+            ProjectSettings.model_validate_json(row["settings"]), revision, row["commit_id"]
+        )
 
     def settings(self, revision: int | None = None):
         with self.connect() as db:
@@ -267,9 +232,8 @@ class GraphStore:
         settings = ProjectSettings.model_validate(settings)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            old = self._settings_head(db)  # Full settings are only needed to merge.
+            old = self._settings(db)
             if rebase and self._stale(expected_revision, old):
-                old = self._settings(db)
                 settings = self._rebase(
                     "settings",
                     expected_revision,
@@ -282,15 +246,13 @@ class GraphStore:
                 expected_revision = old.revision
             self._check_revision("settings", expected_revision, old)
             revision, commit = old.revision + 1, str(uuid4())
-            data = settings.model_dump(mode="json")
-            stored = settings_tables.stored_form(db, data)  # Hash each tokenizer once.
-            settings_history.record(db, revision, commit, stored)
-            settings_tables.write(db, stored)
+            db.execute(
+                "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(?,?,?)",
+                (revision, commit, canonical(settings.model_dump(mode="json"))),
+            )
             db.execute("UPDATE graph_project SET settings_revision=?", (revision,))
-            settings_history.prune(db)
             self._change(db, "settings", self.project_id, revision, commit)
-            # A fresh object from the dump: far cheaper than deep-copying tokenizer definitions.
-            return SettingsRecord(ProjectSettings.model_validate(data), revision, commit)
+            return SettingsRecord(settings.model_copy(deep=True), revision, commit)
 
     @staticmethod
     def _stale(expected, current):

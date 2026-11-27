@@ -54,10 +54,6 @@ prompt delivered verbatim to Draft and Assembly, the derived
 covered in `project_settings_frontend.mjs`. These use fake providers, so they check
 structure, not prompt quality.
 
-`python -m pytest -q tests/test_settings_storage.py` checks the settings tables: one stored copy per
-tokenizer, snapshots pruned except those used by recent saves, trajectories and jobs, stale saves merging inside
-that window and conflicting after it, and the in-place upgrade of projects in the earlier layout.
-
 `tokenizer_store_frontend.mjs` checks that imported tokenizer definitions stay out of the
 settings JSON draft as short placeholders, are restored unchanged for saving and still fill
 the control dropdowns; `python -m pytest -q tests/test_request_errors.py` checks that a

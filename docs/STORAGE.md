@@ -7,9 +7,7 @@ the database yourself: use the studio, [REST or MCP](MCP.md), which enforce the 
 
 A project is one SQLite database in WAL mode (format `kidra-graph-project/1`). It holds:
 
-- the current head of every trajectory, plus **immutable revisions** of each source,
-- the current project settings, split into tables, plus snapshots of earlier settings while something still uses
-  them (see [How settings are stored](#how-settings-are-stored)),
+- the current head of every trajectory, plus **immutable revisions** of each source and of the project settings,
 - an index of which trajectories use which tool,
 - job state: ownership, FIFO request queues, frozen run inputs and committed checkpoints,
 - reviewer comments and their replies, the last finished Assistant conversation for each trajectory, and the
@@ -18,33 +16,6 @@ A project is one SQLite database in WAL mode (format `kidra-graph-project/1`). I
 
 Edits use compare-and-swap on a per-trajectory revision, so an edit to one trajectory never invalidates a save to another.
 A pipeline that owns a trajectory (generation, or a manual review) holds it exclusively, and other edits wait for it.
-
-## How settings are stored
-
-Current settings are kept in tables, not as one document:
-
-| Table | Holds |
-| --- | --- |
-| `graph_tokenizer_definitions` | Each tokenizer JSON file, stored once and keyed by a hash of its contents |
-| `graph_tokenizer_profiles` | Profile name, the hash of its tokenizer file and the control-token map |
-| `graph_settings_endpoints` | One row per model endpoint |
-| `graph_settings_endpoint_roles` | Which endpoint serves Draft, Assembly, Fast Review, Critical Review and Assistant |
-| `graph_settings_tools` | One row per tool schema |
-| `graph_settings_values` | The smaller sections: prompts, review checklists, generation options, size labels and so on |
-
-Each save also records a small snapshot of the settings in `graph_settings_revisions`. A snapshot refers to
-tokenizers by hash, so a large tokenizer file is never copied. Snapshots are deleted once nothing needs them. A
-snapshot is kept when it is:
-
-- one of the 20 most recent saves, so a save made from a settings dialog opened a little earlier can still be
-  merged with other people's changes;
-- the settings that a trajectory's latest revision was saved with;
-- the settings a job started with, for as long as the job is listed. Jobs keep their frozen configuration.
-
-A tokenizer file is deleted when no profile and no kept snapshot uses it. Projects saved by earlier versions, which kept
-a full copy of the settings for every save, are upgraded automatically the first time they are opened. The upgrade then
-compacts the file, which can take a few seconds for a large project. Back up the project first if you might need to
-open it with an older version of Remix, which can't read the new layout.
 
 ## What isn't in it
 

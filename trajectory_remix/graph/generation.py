@@ -18,7 +18,7 @@ from . import (
 from .draft_reply import draft_text
 from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
-from .models import GraphSource
+from .models import GraphSource, ProjectSettings
 from .progress import label
 from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
@@ -50,7 +50,7 @@ class GenerationService:
 
     def settings_for(self, job):
         config = self.jobs.inspect(job)["config"]
-        return self.store.thaw(
+        return ProjectSettings.model_validate(
             config["settings"] if "settings" in config else config["options"]["settings"]
         )
 
@@ -100,7 +100,7 @@ class GenerationService:
                 reviews.require_checklist(settings, tier)
         options = dict(
             mode=mode,
-            settings=self.store.frozen(settings),
+            settings=settings.model_dump(mode="json"),
             settings_revision=snapshot.revision,
             driver=DRIVER,
         )
@@ -121,16 +121,14 @@ class GenerationService:
 
     def start_assistant(self, trajectory, expected_revision, comments):
         """Queue an assistant session on one trajectory's open comments."""
-        snapshot = self.store.settings()
-        settings = snapshot.settings
+        settings = self.store.settings().settings
         if assistant.ROLE not in settings.endpoint_roles:
             raise ValueError("Assign the Assistant endpoint role in Project Settings first")
         frozen = assistant.frozen(comments.for_trajectory(trajectory, "open"))
         if not frozen:
             raise ValueError("This trajectory has no open comments to send")
         options = dict(
-            settings=self.store.frozen(settings),
-            settings_revision=snapshot.revision,
+            settings=settings.model_dump(mode="json"),
             comments=frozen,
             conversation=assistant_memory.load(self.store, trajectory),
         )

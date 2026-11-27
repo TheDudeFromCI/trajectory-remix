@@ -14,7 +14,6 @@ Paths below are relative to `trajectory_remix/`.
 | Area | Entry points | Review focus |
 | --- | --- | --- |
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
-| Settings storage | `graph/settings_tables.py`, `graph/settings_history.py`, `graph/settings_migration.py` | Current settings in tables, tokenizers stored once by hash, snapshots kept only while in use, one-time upgrade of older projects |
 | Compiler/export | `native/ktremix`, `graph/compiler.py`, `graph/export.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
 | Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/authoring_session.py`, `graph/endpoint_prompts.py`, `graph/reviews.py`, `graph/signoffs.py`, `graph/provider.py` | Frozen inputs and prompts, Draft and native Assembly/review sessions, checklist evidence and stage transitions; every review can edit and repairs what fails before signing off |
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js`, `static/checklist-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
@@ -29,9 +28,6 @@ Paths below are relative to `trajectory_remix/`.
 - Keep authoring tokenizer-free. Compilation happens only on export or explicit
   read-only Tick history. Never add tick anchors, sandbox execution or a legacy
   migration layer without new authorization.
-- Settings snapshots and frozen job settings refer to tokenizers by `definition_hash`;
-  never copy a tokenizer definition into them. A job that freezes settings records
-  their `settings_revision` so the snapshot (and its tokenizers) stay pinned.
 - Tokens do not cross event boundaries. Headers/framing inherit source, mask and
   loss. EOS is a label, never a KV key. Same-pass targets cannot see each other;
   closed/replaced content must not return through surviving hidden states.
