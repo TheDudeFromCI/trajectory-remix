@@ -10,13 +10,12 @@ import json
 from collections import OrderedDict
 from threading import Lock
 
-from fastapi.encoders import jsonable_encoder
-
 from . import size_query
 from .bulk import BulkService
 from .commands import GraphCommands, GraphResult
 from .diagnostic_policy import choices
 from .jobs import page
+from .json_encoding import encode
 from .models import GraphSource, ProjectSettings, digest
 from .size_labels import size_of
 from .validation import diagnose
@@ -33,7 +32,7 @@ def result(value):
         metadata_revision=record.metadata_revision,
         settings_revision=record.settings_revision,
         diagnostics_settings_revision=record.settings_revision,
-        diagnostics=jsonable_encoder(value.diagnostics),
+        diagnostics=encode(value.diagnostics),
         has_errors=value.has_errors,
     )
 
@@ -64,8 +63,8 @@ class Studio:
             )
             return dict(items=[dict(r) for r in rows], total=total, limit=limit, offset=offset)
 
-    def settings(self):
-        r = self.store.settings()
+    def settings(self, record=None):
+        r = record or self.store.settings()
         return dict(
             settings=r.settings.model_dump(mode="json"),
             revision=r.revision,
@@ -77,16 +76,19 @@ class Studio:
         from .reviews import stale
 
         record = value.record
-        settings = self.store.settings(record.settings_revision).settings
+        settings = self.store.settings_or_current(record.settings_revision).settings
         return result(value) | dict(
             review_status=stale(record.source, settings),
             size=size_of(record.source, [label.model_dump() for label in settings.size_labels]),
         )
 
     def update_settings(self, settings, expected_revision):
-        self.store.update_settings(ProjectSettings.model_validate(settings), expected_revision)
-        self.jobs.configure_endpoints()
-        return self.settings()
+        record = self.store.update_settings(
+            ProjectSettings.model_validate(settings), expected_revision, rebase=True
+        )
+        # Reuse the saved settings: reloading them would re-read and re-validate every tokenizer.
+        self.jobs.configure_endpoints(record)
+        return self.settings(record)
 
     def read(self, ident, revision=None):
         from .reviews import stale
@@ -95,7 +97,7 @@ class Studio:
             db.execute("BEGIN")
             record = self.store._read(db, ident, revision)
             owner = self.store._owner(db, ident)
-            snapshot = self.store._settings(
+            snapshot = self.store._settings_or_current(
                 db, record.settings_revision if revision or owner else None
             )
         source, settings = record.source, snapshot.settings
@@ -156,7 +158,7 @@ class Studio:
                 return json.loads(encoded) | dict(revision=revision)
         compiler = GraphCompiler(selected, settings=settings, active_limit=active_limit, seed=seed)
         preview = compiler.preview(draft, max_frames=max_frames)
-        data = jsonable_encoder(preview) | dict(
+        data = encode(preview) | dict(
             profile=profile,
             profile_fingerprint=selected.fingerprint,
             settings_revision=settings_record.revision,

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from . import reconnect
+from . import reconnect, settings_history, trajectory_hold
 from . import usage as usage_log
 from .failure_reason import endpoint_failure
 from .log_levels import check as check_level
@@ -120,6 +120,7 @@ class JobService:
             db.executescript(SCHEMA)
             reconnect.ensure_columns(db)
             migrate_log_levels(db)
+            settings_history.ensure_pins(db)
         self.configure_endpoints()
         if recover:
             self.recover()
@@ -129,9 +130,14 @@ class JobService:
             if owner == job and (trajectory is None or trajectory == source):
                 task.get_loop().call_soon_threadsafe(task.cancel)
 
-    def configure_endpoints(self):
-        settings = self.store.settings().settings
+    def configure_endpoints(self, record=None):
+        """Apply endpoint limits; `record` is a settings record just saved, if any."""
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            # A slower concurrent save must not apply older limits than the current settings.
+            if record is None or record.revision != self.store._settings_head(db).revision:
+                record = self.store._settings(db)
+            settings = record.settings
             for ident, endpoint in settings.endpoints.items():
                 db.execute(
                     """INSERT INTO graph_endpoints(id,concurrency,retries,reconnect_seconds)
@@ -157,6 +163,7 @@ class JobService:
             (ident, kind, canonical(config), total, run_id, self.clock()),
         )
         db.execute("INSERT INTO graph_log_cursors(job_id) VALUES(?)", (ident,))
+        settings_history.pin(db, ident, config)  # Keeps the frozen settings snapshot.
         self._notify(db, ident)
         return ident
 
@@ -181,7 +188,7 @@ class JobService:
         settings = settings_record or self.store.settings()
         snapshot = dict(
             config=config,
-            settings=settings.settings.model_dump(mode="json"),
+            settings=self.store.frozen(settings.settings),
             settings_revision=settings.revision,
             settings_commit=settings.commit_id,
         )
@@ -235,10 +242,7 @@ class JobService:
                 raise KeyError("Attempt not found")
             if attempt["state"] != "pending" or source.id != attempt["trajectory_id"]:
                 raise OwnershipConflict("Attempt already started or source ID differs")
-            if (
-                db.execute("SELECT count(*) FROM graph_owners WHERE mode='attached'").fetchone()[0]
-                >= self.active_limit
-            ):
+            if not self._has_attempt_slot(db):
                 raise OwnershipConflict("Global active-trajectory cap reached")
             if db.execute(
                 "SELECT 1 FROM graph_trajectory_revisions WHERE trajectory_id=?", (source.id,)
@@ -257,6 +261,38 @@ class JobService:
             db.execute("UPDATE graph_attempts SET state='active' WHERE id=?", (attempt["id"],))
             self._notify(db, job)
         return self.store.read(source.id)
+
+    def _has_attempt_slot(self, db):
+        active = db.execute("SELECT count(*) FROM graph_owners WHERE mode='attached'").fetchone()[0]
+        return active < self.active_limit
+
+    def park_attempt(self, job, epoch, trajectory):
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._fence(db, job, epoch, trajectory)
+            return (
+                db.execute(
+                    "UPDATE graph_owners SET mode='parked' WHERE trajectory_id=? AND mode='attached'",
+                    (trajectory,),
+                ).rowcount
+                == 1
+            )
+
+    def activate_attempt(self, job, epoch, trajectory):
+        """A parked or held attempt must reacquire a global slot before it can run."""
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._fence(db, job, epoch, trajectory)
+            if not self._has_attempt_slot(db):
+                return False
+            return (
+                db.execute(
+                    "UPDATE graph_owners SET mode='attached' WHERE trajectory_id=?"
+                    " AND mode IN ('parked','held')",
+                    (trajectory,),
+                ).rowcount
+                == 1
+            )
 
     def acquire(self, job, trajectory, expected_revision):
         """Shared exclusive manual review/repair slot, for detached sources only."""
@@ -391,6 +427,19 @@ class JobService:
                     "UPDATE graph_requests SET state='accepted',result=NULL WHERE id=?",
                     (request_id,),
                 )
+            if trajectory_hold.held(checkpoint, epoch):
+                if current_job["run_id"]:
+                    db.execute(
+                        "UPDATE graph_owners SET mode='held' WHERE trajectory_id=?", (trajectory,)
+                    )
+                if request is None:
+                    # A local failure can leave a request ready before its output is accepted.
+                    # Resume starts a new step from the held checkpoint.
+                    db.execute(
+                        """UPDATE graph_requests SET state='cancelled',result=NULL
+                        WHERE job_id=? AND trajectory_id=? AND state IN ('queued','running','ready')""",
+                        (job, trajectory),
+                    )
             if outcome is not None:
                 self._detach(db, job, trajectory, outcome)
             if bulk_position is not None:
@@ -585,6 +634,19 @@ class JobService:
     def recover(self):
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            # Older runs kept held attempts attached. Preserve the checkpoint while freeing
+            # its slot so a recovered job can admit other work before the hold is retried.
+            db.execute(
+                """UPDATE graph_owners AS o SET mode='held' WHERE mode='attached' AND EXISTS (
+                SELECT 1 FROM graph_checkpoints c WHERE c.job_id=o.job_id
+                AND c.trajectory_id=o.trajectory_id AND json_type(c.checkpoint, '$.held')='object')"""
+            )
+            db.execute(
+                """UPDATE graph_requests AS r SET state='cancelled',result=NULL
+                WHERE state IN ('queued','running','ready') AND EXISTS (
+                SELECT 1 FROM graph_owners o WHERE o.job_id=r.job_id
+                AND o.trajectory_id=r.trajectory_id AND o.mode='held')"""
+            )
             jobs = db.execute(
                 "SELECT id FROM graph_jobs WHERE state IN ('running','paused')"
             ).fetchall()
@@ -667,6 +729,7 @@ class JobService:
                 """SELECT r.*,j.epoch AS owner_epoch FROM graph_requests r
                 JOIN graph_jobs j ON j.id=r.job_id JOIN graph_owners o ON o.trajectory_id=r.trajectory_id
                 AND o.job_id=r.job_id WHERE r.endpoint=? AND r.state='queued' AND j.state='running'
+                AND o.mode IN ('attached','manual')
                 ORDER BY r.sequence LIMIT 1""",
                 (endpoint,),
             ).fetchone()

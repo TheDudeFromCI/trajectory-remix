@@ -8,20 +8,21 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Query
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import Field, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
 
-from . import size_query
+from . import request_errors, size_query
 from .bulk import BulkService
 from .flow import ProposalInput, SamplerRun
 from .job_api import create_job_app
+from .json_encoding import encode
 from .models import DTO, GraphSource, JsonValue, ProjectSettings, default_checklists
 from .query_export import iter_jsonl
 from .reviews import ReviewInput
 from .static_files import RevalidatingStaticFiles
+from .storage import PROJECT_FORMAT
 from .studio import Studio
 from .validation import diagnose
 
@@ -31,9 +32,17 @@ class Edit(DTO):
     patch: dict[str, JsonValue]
 
 
+class Resolution(DTO):
+    """Which version to keep for one conflicting value of a stale save."""
+
+    path: list[str] = Field(max_length=64)
+    keep: Literal["ours", "theirs"]
+
+
 class Replace(DTO):
     expected_revision: int = Field(ge=1)
     source: GraphSource
+    resolutions: list[Resolution] = Field(default_factory=list, max_length=10_000)
 
 
 class SettingsEdit(DTO):
@@ -183,6 +192,8 @@ def create_studio_app(
             status_code=422,
         )
 
+    request_errors.install(app)
+
     @app.get("/", response_class=HTMLResponse)
     def index():
         return (static / "graph.html").read_text().replace("__REMIX_TOKEN__", token)
@@ -286,17 +297,19 @@ def create_studio_app(
     def project():
         return dict(
             id=studio.store.project_id,
-            format="kidra-graph-project/1",
+            format=PROJECT_FORMAT,
             generation_available="draft" in studio.store.settings().settings.endpoint_roles,
         )
 
+    # Settings are already JSON-safe; returning them directly skips re-encoding megabytes of
+    # tokenizer data.
     @router.get("/settings")
     def settings():
-        return studio.settings()
+        return JSONResponse(studio.settings())
 
     @router.put("/settings")
     def settings_update(body: SettingsEdit):
-        return studio.update_settings(body.settings, body.expected_revision)
+        return JSONResponse(studio.update_settings(body.settings, body.expected_revision))
 
     @router.get("/settings/default-review-checklists")
     def default_review_checklists():
@@ -359,12 +372,12 @@ def create_studio_app(
 
     @router.post("/diagnostics")
     def draft_diagnostics(body: GraphSource, settings_revision: int | None = Query(None, ge=1)):
-        settings = studio.store.settings(settings_revision)
+        settings = studio.store.settings_or_current(settings_revision)
         return dict(
             source=body.to_dict(),
             source_hash=body.intrinsic_hash,
             settings_revision=settings.revision,
-            diagnostics=jsonable_encoder(diagnose(body, settings.settings)),
+            diagnostics=encode(diagnose(body, settings.settings)),
         )
 
     @router.post("/trajectories", status_code=201)
@@ -378,7 +391,13 @@ def create_studio_app(
     @router.put("/trajectories/{ident}")
     def replace(ident: str, body: Replace):
         return studio.present(
-            studio.commands.replace(ident, body.source.to_dict(), body.expected_revision)
+            studio.commands.replace(
+                ident,
+                body.source.to_dict(),
+                body.expected_revision,
+                rebase=True,
+                resolutions={tuple(r.path): r.keep for r in body.resolutions},
+            )
         )
 
     @router.patch("/trajectories/{ident}")

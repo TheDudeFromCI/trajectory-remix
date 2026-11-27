@@ -67,11 +67,15 @@ assert.ok($('timeline').querySelector('[title="Depends on: root"]'));
 ui.settings.tools.echo={name:'Echo',input_schema:{type:'object',properties:{text:{type:'string'}}}};
 const toolOption=document.createElement('option');toolOption.value='echo';toolOption.textContent='Echo';$('tool-id').append(toolOption);
 $('event-kind').value='tool_call'; $('event-kind').dispatchEvent(new Event('change'));
+// An empty Call ID on a tool call is outlined like a missing tool field; typing one clears it.
+assert.equal($('call-id').value,''); assert.equal($('call-id').getAttribute('aria-invalid'),'true');
+$('tool-id').value=''; $('tool-id').dispatchEvent(new Event('input')); assert.equal($('tool-id').getAttribute('aria-invalid'),'true','an empty Tool is outlined too');
+$('call-id').value='call-1'; $('call-id').dispatchEvent(new Event('input')); assert.equal($('call-id').hasAttribute('aria-invalid'),false);
 $('event-content').value='{"text":'; $('content-mode').value='json'; $('event-content').dispatchEvent(new Event('input'));
 $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":'); assert.equal($('event-content').hidden,false);
 $('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":');
 // Complete arguments swap the text box for typed fields; editing one rewrites the content.
-$('tool-id').value='echo'; $('event-content').value='{"text":"hi"}'; $('event-content').dispatchEvent(new Event('input'));
+$('tool-id').value='echo'; $('tool-id').dispatchEvent(new Event('input')); assert.equal($('tool-id').hasAttribute('aria-invalid'),false); $('event-content').value='{"text":"hi"}'; $('event-content').dispatchEvent(new Event('input'));
 $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change'));
 assert.equal($('event-content').hidden,true); const textField=$('argument-form').querySelector('[data-argument="text"]');
 assert.equal(textField.value,'hi'); textField.value='bye'; textField.dispatchEvent(new Event('input'));
@@ -171,10 +175,29 @@ named('Required tool field payload').checked=true; named('Required tool field pa
 assert.deepEqual(JSON.parse($('settings-json').value).tools.fixture_tool.input_schema.required,['payload']);
 $('settings-save').click(); await until(()=>!$('settings-dialog').open);
 assert.equal(ui.settings.tools.fixture_tool.input_schema.properties.payload.type,'string');
-// CAS conflict leaves the browser draft intact.
-await ui.autoSave.flush(); ui.draft.events.first.content='unsaved';
+// A save from an older revision merges onto a newer change to other fields, and Undo keeps that change.
+await ui.autoSave.flush(); ui.selectEvent('first');
 await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:(await module.api('/trajectories/'+ui.id)).revision,patch:{metadata:{test:true}}});
-await assert.rejects(()=>ui.save(),/Revision conflict/); assert.equal(ui.draft.events.first.content,'unsaved');
+$('event-content').value='merged edit'; ui.applyEvent(); await ui.autoSave.flush();
+assert.equal(ui.autoSave.error,null); assert.equal(ui.draft.events.first.content,'merged edit'); assert.equal(ui.draft.metadata.test,true);
+assert.equal(ui.undo.at(-1)[0].before.metadata.test,true);
+// A newer change to the same field is still a conflict, and the browser draft stays intact.
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{events:{first:{content:'theirs'}}}});
+$('event-content').value='mine'; ui.applyEvent(); await ui.autoSave.flush();
+assert.match(ui.autoSave.error?.message||'',/Revision conflict.*events\/first\/content/); assert.equal(ui.draft.events.first.content,'mine');
+// Failed to Save opens the resolver: a diff of what blocks the merge, then Keep mine saves mine.
+const marker = $('dirty-indicator');
+assert.equal(marker.textContent,'Failed to Save'); assert.ok(marker.classList.contains('is-actionable')); assert.equal(marker.getAttribute('role'),'button');
+marker.click(); await until(()=>$('conflict-dialog').open);
+assert.deepEqual([...$('conflict-list').querySelectorAll('.diff-del,.diff-add')].map(n=>n.textContent.trim()),['- theirs','+ mine']);
+$('conflict-save').click(); await until(()=>!$('conflict-dialog').open && !ui.autoSave.running && !ui.hasUnsavedChanges());
+assert.equal(ui.autoSave.error,null); assert.equal(ui.record.source.events.first.content,'mine'); assert.equal(marker.textContent,'Saved'); assert.ok(!marker.classList.contains('is-actionable'));
+// Keep theirs saves the newer version and puts it in the editor; other changes from both stay.
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{events:{first:{content:'newer'}},metadata:{resolved_note:1}}});
+$('event-content').value='local'; ui.applyEvent(); await ui.autoSave.flush(); assert.ok(ui.saveConflicts());
+marker.click(); await until(()=>$('conflict-dialog').open); $('conflict-all-theirs').click(); $('conflict-save').click();
+await until(()=>!ui.autoSave.running && !ui.hasUnsavedChanges());
+assert.equal(ui.record.source.events.first.content,'newer'); assert.equal($('event-content').value,'newer'); assert.equal(ui.record.source.metadata.resolved_note,1);
 // Per-window acknowledgment persists, suppresses only its advisory, and is undoable.
 await until(()=>[...ui.ownedBulk].every(id=>ui.recorded.has(id)));
 const ack = await module.api('/trajectories', 'POST', {format:'kidra-trajectory-graph/1',id:crypto.randomUUID(),

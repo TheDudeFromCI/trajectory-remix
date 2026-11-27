@@ -89,6 +89,11 @@ authoring, generation, review and metrics never touch a tokenizer.
 The twelve controls are `bos`, `eos`, `noop`, `ctx_begin`, `ctx_end`, `tool_begin`,
 `tool_end`, `response_begin`, `response_end`, `msg_begin`, `msg_end` and `window_ref`.
 
+Tokenizer files can be several megabytes, so **Advanced JSON** shows each imported
+tokenizer as a short placeholder such as `{"$stored_tokenizer": "7486123 chars · 1a2b3c4d"}`.
+The full file is kept in the page and sent unchanged when you save. Leave the placeholder
+as it is; to replace a tokenizer, remove the profile and import the new file.
+
 Pick the preview profile in **Project → Preferences…** (stored in your browser) and the
 export profile in the Export dialog. They are chosen independently.
 

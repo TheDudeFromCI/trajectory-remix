@@ -22,7 +22,9 @@ import {ContentModes} from './content-mode.js';
 import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {byId} from './panel-popout.js';
+import {ConflictResolver} from './conflict-resolver.js';
 import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
+import {parkSettings, restoreSettings} from './tokenizer-store.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
 const $ = byId; // Also finds elements in a popped-out panel.
 const copy = value => structuredClone(value);
@@ -58,7 +60,8 @@ export async function api(path, method = 'GET', body) {
     ...(body === undefined ? {} : {body: JSON.stringify(body)})
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.message || data.detail && JSON.stringify(data.detail) || data.errors && JSON.stringify(data.errors) || data.code || response.statusText);
+  // `data` stays on the error so callers can read details such as a conflict's values.
+  if (!response.ok) throw Object.assign(new Error(data.message || data.detail && JSON.stringify(data.detail) || data.errors && JSON.stringify(data.errors) || data.code || response.statusText), {data});
   return data;
 }
 
@@ -108,7 +111,7 @@ export class StudioUI {
     // A draft that failed to save is not retried until it changes again.
     this.autoSave = new AutoSave({pending: () => !this.restoring && this.hasUnsavedChanges() && this.draftKey() !== this.failedKey,
       save: () => this.save(), typing: () => isTyping(document.activeElement),
-      report: error => { this.failedKey = this.sentKey; message('Not saved: ' + error.message); this.renderDirty(); }});
+      report: error => { this.failedKey = this.sentKey; message(error.data?.conflicts?.length ? 'Not saved: your change clashes with a newer save. Click “Failed to Save” to choose which to keep.' : 'Not saved: ' + error.message); this.renderDirty(); }});
     if (!Number.isFinite(this.prefs.zoom)) this.prefs.zoom = 1;
     this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
@@ -188,9 +191,13 @@ export class StudioUI {
   renderDirty() {
     const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.hasUnsavedChanges();
     const failed = dirty && !!this.autoSave.error && this.failedKey === this.draftKey();
+    const resolvable = failed && !!this.saveConflicts();
     setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Failed to Save' : dirty ? 'Saving...' : 'Saved');
-    setAttr(indicator, 'data-tip', failed ? 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.' : null);
-    indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}`;
+    setAttr(indicator, 'data-tip', !failed ? null : resolvable ? 'Your change clashes with a newer save. Click to compare and choose which to keep.'
+      : 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.');
+    // A conflict can be resolved from the marker itself.
+    setAttr(indicator, 'role', resolvable ? 'button' : 'status'); setAttr(indicator, 'tabindex', resolvable ? '0' : null);
+    indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}${resolvable ? ' is-actionable' : ''}`;
     indicator.hidden = !this.record;
     this.metricsEditor?.sync({id: this.record ? this.id : null, revision: this.record?.revision, locked});
     setText($('trajectory-title'), this.id || 'No trajectory selected'); setAttr($('trajectory-title'), 'data-tip', null);
@@ -357,7 +364,7 @@ export class StudioUI {
     const candidates = Object.keys(this.draft?.events || {}).filter(id => id !== this.event);
     options('dependency-picker', [['', candidates.length ? 'Choose an event' : 'No other events'], ...candidates.map(id => [id, id])], candidates.includes($('dependency-picker').value) ? $('dependency-picker').value : '');
     toggleClass($('event-editor-panel'), 'no-event', !e);
-    if (!e) { $('event-content').value = ''; $('dependencies').replaceChildren(); setText($('links-count'), ''); this.editorBaseline = null; if (this.record) this.renderDirty(); return; }
+    if (!e) { $('event-content').value = ''; $('tool-picker').replaceChildren(); $('dependencies').replaceChildren(); setText($('links-count'), ''); this.editorBaseline = null; if (this.record) this.renderDirty(); return; }
     $('event-name').value = this.event; $('event-kind').value = e.kind; $('event-window').value = e.window; $('call-id').value = e.call_id || '';
     $('tool-id').value = e.tool || ''; $('chat-speaker').value = e.chat?.speaker || 'User'; $('delivery').value = e.delivery?.mode || 'instant';
     $('chain').checked = e.delivery?.chain_immediately ?? true; $('replace-body').checked = e.replace_body ?? false;
@@ -378,10 +385,12 @@ export class StudioUI {
     const isSchema = $('event-kind').value === 'tool_schema' && $('content-mode').value === 'text';
     this.toolPickerShown = isSchema; holder.hidden = !isSchema; $('event-content').hidden = isSchema || !!this.argumentForm; if (head) head.hidden = isSchema;
     if (!isSchema) { holder.replaceChildren(); return; }
+    const trajectory = this.draft.id, event = this.event;
     renderToolPicker(holder, {text: $('event-content').value, tools: this.settings?.tools || {}, disabled: !!this.record?.owner, report: message,
-      relist: async chosen => {
-        const listing = await api('/tools/listing', 'POST', {trajectory_id: this.draft.id, event_id: this.event, tools: chosen});
-        $('event-content').value = listing.content;
+      relist: chosen => api('/tools/listing', 'POST', {trajectory_id: trajectory, event_id: event, tools: chosen}),
+      apply: ({content}) => {
+        if (this.draft?.id !== trajectory || this.event !== event || this.record?.owner) return;
+        $('event-content').value = content;
         this.stashEditor(); this.applyEvent(); this.renderToolPicker();
       }});
   }
@@ -389,6 +398,14 @@ export class StudioUI {
     const kind = $('event-kind').value, tool = kind === 'tool_call', response = kind === 'tool_response', chat = kind === 'chat_message';
     const external = response || kind === 'external_text' || kind === 'tool_schema';
     for (const [id, show] of Object.entries({'call-id': tool || response || chat, 'tool-id': tool, 'chat-speaker': chat, delivery: external, chain: external || chat, 'replace-body': external, begin: tool || response, end: tool || response, 'echo-chat': tool})) $(id).closest('label').hidden = !show;
+    this.markRequiredIds();
+  }
+  /** Red outline on an empty Call ID (tool call or response) or Tool (tool call). The event still
+     saves; compiling reports missing_call_id / missing_tool. */
+  markRequiredIds() {
+    const kind = $('event-kind').value;
+    markInvalid($('call-id'), ['tool_call', 'tool_response'].includes(kind) && !$('call-id').value.trim());
+    markInvalid($('tool-id'), kind === 'tool_call' && !$('tool-id').value);
   }
   /** Form mode swaps the text box for one typed field per tool argument; unparseable content keeps the text box. */
   renderArguments() {
@@ -684,14 +701,30 @@ export class StudioUI {
     if (restored.length) inverse.push(restored); this.historyButtons(); this.drafts.clear();
     if (this.id) { try { await this.select(this.id, true); } catch { this.id = null; this.draft = null; } } await this.listing();
   }
+  /** The values the last failed save clashed on, when it can be resolved by choosing. */
+  saveConflicts() { const c = this.autoSave.error?.data?.conflicts; return Array.isArray(c) && c.length ? c : null; }
+  /** Failed to Save → compare each clashing value and save again keeping mine or theirs. */
+  async resolveConflicts() {
+    const conflicts = this.saveConflicts();
+    if (!conflicts || this.record?.owner) return;
+    const resolutions = await this.conflictResolver.open(conflicts);
+    if (!resolutions) return;
+    this.resolutions = resolutions; this.failedKey = null;
+    try { await this.autoSave.flush(); } finally { this.resolutions = null; this.renderDirty(); }
+    if (!this.autoSave.error) message('Conflict resolved and saved. Undo reverts it.');
+  }
   async save() {
     if (!this.draft) return;
     this.applyEvent(); const before = copy(this.record.source), sent = copy(this.draft), id = this.id, generation = this.selectionGeneration;
     this.sentKey = this.draftKey(); // A failure is charged to this draft, not to later edits.
-    const value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: this.record.revision, source: sent});
-    this.history([{id, before, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
-    // A reload (switching trajectory, Undo/Redo) during the save already shows newer state.
-    if (id !== this.id || generation !== this.selectionGeneration) return;
+    const base = this.record.revision, resolutions = this.resolutions;
+    const value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: base, source: sent, ...(resolutions ? {resolutions} : {})});
+    // The server merges a save made from an older revision onto newer saves (a metric value, a job);
+    // Undo then steps back to the revision just before ours, keeping those changes.
+    const prior = value.revision > base + 1 ? (await api(`/trajectories/${id}?revision=${value.revision - 1}`)).source : before;
+    this.history([{id, before: prior, after: value.source, expected_revision: value.revision, expected_commit: value.commit_id}]);
+    // A reload (switching trajectory, Undo/Redo) or a later save already shows newer state.
+    if (id !== this.id || generation !== this.selectionGeneration || value.revision < this.record.revision) return;
     // A save response has no `owner`; keep the known one so the next poll doesn't see a change and reload.
     this.record = {...value, owner: this.record.owner}; this.diagnostics = value.diagnostics;
     // Edits made while the save was in flight stay in the draft and are saved next.
@@ -724,13 +757,13 @@ export class StudioUI {
   }
   renderSettingsForms() {
     const settings = JSON.parse($('settings-json').value);
-    const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(draft); }};
+    const opts = {getSettings: () => JSON.parse($('settings-json').value), onChange: draft => { $('settings-json').value = json(parkSettings(draft)); }};
     if ($('validation-settings-editor')) renderValidationSettings($('validation-settings-editor'), this.settingsRecord.validation_warnings || [], opts);
     if ($('endpoint-settings-editor')) renderProjectSettings($('endpoint-settings-editor'), settings, opts);
     if ($('review-settings-editor')) renderGenerationSettings($('review-settings-editor'), settings, {...opts, loadDefaultChecklists: async () => (await api('/settings/default-review-checklists')).review_checklists, loadDefaultPrompts: async () => api('/generation/prompts/default'), footer: this.reviewFoot ||= $('review-settings-foot')});
   }
   async openSettings() {
-    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderToolSettings(); this.renderSettingsForms();
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(parkSettings(this.settings)); this.renderToolSettings(); this.renderSettingsForms();
     await this.renderLogUsage(); $('settings-dialog').showModal();
   }
   async renderLogUsage() {
@@ -739,14 +772,14 @@ export class StudioUI {
     $('log-usage').replaceChildren(stat(String(usage.entries), 'Retained log lines'), stat(mib(usage.bytes || 0), 'Used'), stat(usage.cap_mib === null || usage.cap_mib === undefined ? 'Unlimited' : usage.cap_mib + ' MiB', 'Cache limit'));
   }
   async saveSettings(dialog) {
-    await api('/settings', 'PUT', {settings: JSON.parse($('settings-json').value), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
+    await api('/settings', 'PUT', {settings: restoreSettings(JSON.parse($('settings-json').value)), expected_revision: this.settingsDraftRevision ?? this.settingsRecord.revision});
     await this.loadSettings(); await this.refreshSelected(); this.preview.invalidate(); this.schedulePreview(); if (dialog) $(dialog).close(); message('Project settings saved. New runs use these settings; existing runs retain their frozen configuration.');
   }
   async openReview() {
     // Keep unsaved review-settings edits when returning to the tab; otherwise show the saved settings.
-    const dirty = $('settings-json').value && JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings));
+    const dirty = $('settings-json').value && JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(parkSettings(this.settings)));
     if (dirty) return;
-    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(parkSettings(this.settings)); this.renderSettingsForms();
   }
   async startReview({bulk = false} = {}) {
     if (!bulk && (!this.id || this.isDirty())) throw new Error('Save or reload the selected draft before review.');
@@ -796,7 +829,7 @@ export class StudioUI {
     await this.sendToAssistant();
   }
   async openGenerationSettings() {
-    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(this.settings); this.renderSettingsForms();
+    await this.loadSettings(); this.settingsDraftRevision = this.settingsRecord.revision; $('settings-json').value = json(parkSettings(this.settings)); this.renderSettingsForms();
     const sampler = globalThis.samplerWorkbench; if (sampler) await sampler.open();
     const box = $('generation-run-controls'); box.replaceChildren(node('h3', 'New run'));
     const roles = this.settings.endpoint_roles || {}, roleList = node('div', undefined, 'role-list');
@@ -804,7 +837,7 @@ export class StudioUI {
       const row = node('div', undefined, 'role-row'); row.append(node('span', name, 'muted'), roles[role] ? tag(roles[role], 'accent', 'mono') : tag('Not configured', role === 'draft' ? 'danger' : 'faint')); roleList.append(row);
     }
     box.append(roleList);
-    $('generation-endpoints-button').onclick = () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings)) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); };
+    $('generation-endpoints-button').onclick = () => { if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(parkSettings(this.settings))) && !confirm('Discard unsaved settings and open Project Settings?')) return; $('generation-settings-dialog').close(); return this.openSettings(); };
     const grid = node('div', undefined, 'form-grid two'); box.append(grid);
     const field = (text, id, value) => { const label = node('label', text), input = node('input'); input.type = 'number'; input.id = id; input.value = value; label.append(input); grid.append(label); return input; };
     const saved = loadRunInputs();
@@ -829,7 +862,7 @@ export class StudioUI {
     box.append(pinBox, barrierBox, node('p', 'Each run freezes its settings, prompts, matrix and pins when it starts.', 'note'));
     const status = node('p', '', 'status-line'); status.setAttribute('role', 'status'); status.dataset.status = '';
     const start = button('Start generation', async () => {
-      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(this.settings))) throw new Error('Save review settings before starting a run.');
+      if (JSON.stringify(stable(JSON.parse($('settings-json').value))) !== JSON.stringify(stable(parkSettings(this.settings)))) throw new Error('Save review settings before starting a run.');
       if (sampler?.dirty()) throw new Error('Save or discard the Workbench matrix draft before generating.');
       const n = Number(count.value); let first = Number(seed.value);
       if (!count.value || !Number.isInteger(n) || n < 1 || n > 1000 || !seed.value || !Number.isSafeInteger(first) || !Number.isSafeInteger(first + n - 1)) throw new Error('Supply 1–1000 attempts and a safe integer seed.');
@@ -1013,6 +1046,7 @@ export class StudioUI {
       this.event = id; this.renderDraft(); this.renderEvent(); this.changed();
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
+    for (const id of ['call-id', 'tool-id']) for (const type of ['input', 'change']) on(id, type, () => this.markRequiredIds());
     on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderArguments(); this.renderToolPicker(); });
     on('content-mode', 'change', () => { this.contentModes.remember(this.id, this.event, $('content-mode').value); this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
     on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
@@ -1053,6 +1087,9 @@ export class StudioUI {
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-action', 'change', () => { $('bulk-value-label').hidden = !['stage', 'split'].includes($('bulk-action').value); });
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review') return this.startReview({bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
+    this.conflictResolver = new ConflictResolver($('conflict-dialog'));
+    on('dirty-indicator', 'click', () => this.resolveConflicts());
+    on('dirty-indicator', 'keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && this.saveConflicts()) { e.preventDefault(); return this.resolveConflicts(); } });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
     on('review-source', 'click', () => this.startReview());
     on('comment-send', 'click', () => this.sendToAssistant());

@@ -14,6 +14,7 @@ Paths below are relative to `trajectory_remix/`.
 | Area | Entry points | Review focus |
 | --- | --- | --- |
 | Source and edits | `graph/models.py`, `validation.py`, `commands.py`, `storage.py` within `graph/` | Strict DTOs, structural diagnostics, stable IDs, immutable snapshots and source CAS |
+| Settings storage | `graph/settings_tables.py`, `graph/settings_history.py`, `graph/settings_migration.py` | Current settings in tables, tokenizers stored once by hash, snapshots kept only while in use, one-time upgrade of older projects |
 | Compiler/export | `native/ktremix`, `graph/compiler.py`, `graph/export.py` | Causal visibility, lifecycle/masks, metadata projection, split families and leased artifacts |
 | Generation/review | `graph/generation.py`, `graph/draft_assembly.py`, `graph/authoring_session.py`, `graph/endpoint_prompts.py`, `graph/reviews.py`, `graph/signoffs.py`, `graph/provider.py` | Frozen inputs and prompts, Draft and native Assembly/review sessions, checklist evidence and stage transitions; every review can edit and repairs what fails before signing off |
 | Prompts | `graph/draft_assembly.yaml`, `graph/prompt_defaults.py`, `graph/prompt_migration.py`, `graph/prompts_api.py`, `static/prompt-settings.js`, `static/checklist-settings.js` | Packaged defaults, per-project `settings.prompts`, the one-time Flow prompt migration |
@@ -28,6 +29,12 @@ Paths below are relative to `trajectory_remix/`.
 - Keep authoring tokenizer-free. Compilation happens only on export or explicit
   read-only Tick history. Never add tick anchors, sandbox execution or a legacy
   migration layer without new authorization.
+- Settings snapshots and frozen job settings refer to tokenizers by `definition_hash`;
+  never copy a tokenizer definition into them. A job that freezes settings records
+  their `settings_revision` so the snapshot (and its tokenizers) stay pinned.
+- API responses must keep every dict key. FastAPI's default encoder drops keys starting
+  with `_sa`; `graph/json_encoding.py` turns that off for all endpoints. Encode with its
+  `encode`, never `jsonable_encoder` directly.
 - Tokens do not cross event boundaries. Headers/framing inherit source, mask and
   loss. EOS is a label, never a KV key. Same-pass targets cannot see each other;
   closed/replaced content must not return through surviving hidden states.
@@ -90,6 +97,7 @@ python -m pytest -q tests/test_graph*.py tests/test_ktremix*.py
 npm ci --prefix tests
 python tests/run_graph_frontend.py
 node tests/project_settings_frontend.mjs
+node tests/tokenizer_store_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
 node tests/window_markdown_frontend.mjs
@@ -112,6 +120,7 @@ node tests/auto_save_frontend.mjs
 node tests/assistant_indicator_frontend.mjs
 node tests/assistant_queue_frontend.mjs
 node tests/assistant_proposal_frontend.mjs
+node tests/conflict_resolver_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 node tests/job_names_tabs_frontend.mjs
 node tests/duplicate_frontend.mjs
@@ -185,9 +194,9 @@ Run the full Python suite with `python -m pytest -q tests` before opening a prom
 
 Phase barriers: `python -m pytest -q tests/test_phase_barrier.py` checks the per-job barriers
 (before Assembly, Fast review and Critical review): trajectories park at an enabled barrier
-(parked ones don't count toward the active cap), the job pauses when all have arrived and Resume
-continues to the next one, the state survives a restart, barriers are validated and frozen with
-the run, skipping them lets the run finish, and the phase routes. The old
+(parked and held attempts free their slots), the job pauses when all have arrived, finished or
+been held, and Resume respects the active cap on the way to the next barrier. It also checks
+restart, frozen configuration, skipping the barriers, and the phase routes. The old
 `generation.phase_barrier` setting is ignored on load.
 
 Held trajectories: `python -m pytest -q tests/test_trajectory_hold.py` checks that invalid review

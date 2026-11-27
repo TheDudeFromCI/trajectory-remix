@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
+from . import json_encoding
 from .bulk import BulkService
 from .failure_reason import local_failure, log_local_error
 from .jobs import TERMINAL, Fenced, JobService, OwnershipConflict
@@ -299,6 +300,7 @@ def create_job_app(
             await asyncio.gather(task, return_exceptions=True)
             await worker.close()
 
+    json_encoding.install()  # Keep "_sa..." keys in responses (see json_encoding.py).
     app = FastAPI(title="Graph jobs", lifespan=lifespan)
     app.state.jobs, app.state.bulk, app.state.worker = jobs, bulk, worker
     app.state.artifacts = artifacts
@@ -312,7 +314,13 @@ def create_job_app(
                 message=str(error),
                 **{
                     key: getattr(error, key)
-                    for key in ("entity_id", "expected_revision", "current_revision", "commit_id")
+                    for key in (
+                        "entity_id",
+                        "expected_revision",
+                        "current_revision",
+                        "commit_id",
+                        "conflicts",
+                    )
                     if hasattr(error, key)
                 },
             ),

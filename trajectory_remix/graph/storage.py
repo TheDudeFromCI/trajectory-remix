@@ -10,10 +10,13 @@ from uuid import uuid4
 
 from pydantic import JsonValue, TypeAdapter
 
-from . import size_query
+from . import settings_history, settings_tables, size_query
+from .merge import MergeConflict, merge
 from .models import GraphSource, ProjectSettings, canonical
 
-PROJECT_FORMAT = "kidra-graph-project/1"
+PROJECT_FORMAT = "kidra-graph-project/2"
+# Settings stored as one full JSON copy per revision; upgraded on open (settings_migration.py).
+LEGACY_FORMAT = "kidra-graph-project/1"
 PROVENANCE = TypeAdapter(dict[str, JsonValue])
 
 
@@ -21,15 +24,25 @@ class RevisionConflict(ValueError):
     code = "revision_conflict"
 
     def __init__(
-        self, entity_id: str, expected_revision: int, current_revision: int, commit_id: str
+        self,
+        entity_id: str,
+        expected_revision: int,
+        current_revision: int,
+        commit_id: str,
+        detail: str = "",
+        conflicts: list | None = None,
     ):
         super().__init__(
             f"Revision conflict for {entity_id}: expected {expected_revision}, current {current_revision}"
+            + (f". {detail}" if detail else "")
         )
         self.entity_id = entity_id
         self.expected_revision = expected_revision
         self.current_revision = current_revision
         self.commit_id = commit_id  # Bounded reference for explicit reconciliation.
+        # From a stale save: each value both sides changed ({path, base, ours, theirs}).
+        if conflicts:
+            self.conflicts = conflicts
 
 
 @dataclass(frozen=True)
@@ -50,7 +63,31 @@ class SettingsRecord:
     commit_id: str
 
 
-SCHEMA = """
+# Shared with settings_migration.py, which rebuilds these on older projects.
+TRAJECTORY_REVISIONS = """CREATE TABLE graph_trajectory_revisions (
+    trajectory_id TEXT NOT NULL, revision INTEGER NOT NULL,
+    commit_id TEXT NOT NULL UNIQUE, parent_commit_id TEXT,
+    source TEXT NOT NULL CHECK(json_valid(source)), intrinsic_hash TEXT NOT NULL,
+    intrinsic_revision INTEGER NOT NULL, metadata_revision INTEGER NOT NULL,
+    settings_revision INTEGER NOT NULL,
+    provenance TEXT NOT NULL CHECK(json_valid(provenance)),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY(trajectory_id,revision),
+    CHECK(json_extract(source,'$.id') = trajectory_id),
+    CHECK(json_extract(source,'$.format') = 'kidra-trajectory-graph/1')
+);
+"""
+REVISION_TRIGGERS = """CREATE TRIGGER immutable_graph_source_update BEFORE UPDATE ON graph_trajectory_revisions
+BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_source_delete BEFORE DELETE ON graph_trajectory_revisions
+BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_settings_update BEFORE UPDATE ON graph_settings_revisions
+BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
+CREATE TRIGGER immutable_graph_settings_delete BEFORE DELETE ON graph_settings_revisions
+WHEN old.revision = (SELECT settings_revision FROM graph_project)
+BEGIN SELECT RAISE(ABORT,'The current settings revision is immutable'); END;
+"""
+SCHEMA = f"""
 BEGIN IMMEDIATE;
 CREATE TABLE graph_project (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -61,19 +98,7 @@ CREATE TABLE graph_settings_revisions (
     settings TEXT NOT NULL CHECK(json_valid(settings)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-CREATE TABLE graph_trajectory_revisions (
-    trajectory_id TEXT NOT NULL, revision INTEGER NOT NULL,
-    commit_id TEXT NOT NULL UNIQUE, parent_commit_id TEXT,
-    source TEXT NOT NULL CHECK(json_valid(source)), intrinsic_hash TEXT NOT NULL,
-    intrinsic_revision INTEGER NOT NULL, metadata_revision INTEGER NOT NULL,
-    settings_revision INTEGER NOT NULL REFERENCES graph_settings_revisions(revision),
-    provenance TEXT NOT NULL CHECK(json_valid(provenance)),
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    PRIMARY KEY(trajectory_id,revision),
-    CHECK(json_extract(source,'$.id') = trajectory_id),
-    CHECK(json_extract(source,'$.format') = 'kidra-trajectory-graph/1')
-);
-CREATE TABLE graph_trajectories (
+{TRAJECTORY_REVISIONS}CREATE TABLE graph_trajectories (
     id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
     FOREIGN KEY(id,revision) REFERENCES graph_trajectory_revisions(trajectory_id,revision)
 );
@@ -86,19 +111,16 @@ CREATE TABLE graph_project_changes (
     cursor INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
     entity_id TEXT NOT NULL, revision INTEGER NOT NULL, commit_id TEXT NOT NULL
 );
-CREATE TRIGGER immutable_graph_source_update BEFORE UPDATE ON graph_trajectory_revisions
-BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_source_delete BEFORE DELETE ON graph_trajectory_revisions
-BEGIN SELECT RAISE(ABORT,'Source revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_settings_update BEFORE UPDATE ON graph_settings_revisions
-BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_settings_delete BEFORE DELETE ON graph_settings_revisions
-BEGIN SELECT RAISE(ABORT,'Settings revisions are immutable'); END;
-CREATE TRIGGER immutable_graph_identity BEFORE UPDATE OF id ON graph_trajectories
+{REVISION_TRIGGERS}CREATE TRIGGER immutable_graph_identity BEFORE UPDATE OF id ON graph_trajectories
 BEGIN SELECT RAISE(ABORT,'Trajectory identity is immutable'); END;
 CREATE TRIGGER immutable_graph_project BEFORE UPDATE OF id,format ON graph_project
 BEGIN SELECT RAISE(ABORT,'Project identity is immutable'); END;
 """
+
+
+def _dump(value):
+    """JSON form of a source (keeping whether metadata was given) or of settings."""
+    return value.to_dict() if isinstance(value, GraphSource) else value.model_dump(mode="json")
 
 
 class GraphStore:
@@ -113,14 +135,18 @@ class GraphStore:
             raise ValueError(
                 "Not a graph project; no legacy reader or migration is available"
             ) from error
-        if row is None or row[0] != PROJECT_FORMAT:
+        if row is not None and row[0] == LEGACY_FORMAT:
+            from .settings_migration import migrate
+
+            migrate(self.path)
+        elif row is None or row[0] != PROJECT_FORMAT:
             raise ValueError("Unsupported graph project format")
         self.project_id = row[1]
 
     @classmethod
     def initialize(cls, path: Path, settings: ProjectSettings | dict | None = None):
         settings = ProjectSettings.model_validate({} if settings is None else settings)
-        encoded = canonical(settings.model_dump(mode="json"))
+        data = settings.model_dump(mode="json")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("xb"):
@@ -131,11 +157,9 @@ class GraphStore:
                 db.execute("PRAGMA journal_mode=WAL")
                 with db:
                     db.executescript(SCHEMA)
-                    commit = str(uuid4())
-                    db.execute(
-                        "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(1,?,?)",
-                        (commit, encoded),
-                    )
+                    settings_tables.create(db)
+                    settings_history.record(db, 1, str(uuid4()), data)
+                    settings_tables.write(db, data)
                     db.execute(
                         "INSERT INTO graph_project VALUES(1,?,?,1)", (PROJECT_FORMAT, str(uuid4()))
                     )
@@ -187,36 +211,115 @@ class GraphStore:
             return self._read(db, trajectory_id, revision)
 
     def _settings(self, db, revision=None):
-        if revision is None:
-            revision = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
+        current = db.execute("SELECT settings_revision FROM graph_project").fetchone()[0]
+        if revision is None or revision == current:
+            commit = db.execute(
+                "SELECT commit_id FROM graph_settings_revisions WHERE revision=?", (current,)
+            ).fetchone()[0]
+            data, revision = settings_tables.read(db), current
+        else:
+            data, commit = settings_history.load(db, revision)
+        return SettingsRecord(ProjectSettings.model_validate(data), revision, commit)
+
+    @staticmethod
+    def _settings_head(db):
+        """The current settings revision and commit id, without loading the settings."""
         row = db.execute(
-            "SELECT * FROM graph_settings_revisions WHERE revision=?", (revision,)
+            """SELECT s.revision,s.commit_id FROM graph_project p
+            JOIN graph_settings_revisions s ON s.revision=p.settings_revision"""
         ).fetchone()
-        if row is None:
-            raise KeyError("Settings revision not found")
-        return SettingsRecord(
-            ProjectSettings.model_validate_json(row["settings"]), revision, row["commit_id"]
-        )
+        return SettingsRecord(None, row[0], row[1])
+
+    def _settings_or_current(self, db, revision=None):
+        """The settings of `revision` if its snapshot is still kept, else the current settings.
+        Snapshots are pruned once nothing uses them (see settings_history.py)."""
+        try:
+            return self._settings(db, revision)
+        except KeyError:
+            return self._settings(db)
+
+    def settings_or_current(self, revision: int | None = None):
+        with self.connect() as db:
+            db.execute("BEGIN")
+            return self._settings_or_current(db, revision)
+
+    def frozen(self, settings: ProjectSettings) -> dict:
+        """Settings JSON for a job's frozen configuration: tokenizers by hash, not copied."""
+        return settings_tables.frozen_form(settings.model_dump(mode="json"))
+
+    def thaw(self, data: dict) -> ProjectSettings:
+        """Settings from a frozen configuration (stored form or, for older jobs, full)."""
+        with self.connect() as db:
+            return ProjectSettings.model_validate(settings_tables.resolved_form(db, data))
 
     def settings(self, revision: int | None = None):
         with self.connect() as db:
             db.execute("BEGIN")
             return self._settings(db, revision)
 
-    def update_settings(self, settings: ProjectSettings | dict, expected_revision: int):
+    def update_settings(
+        self,
+        settings: ProjectSettings | dict,
+        expected_revision: int,
+        *,
+        rebase: bool = False,
+        resolutions: dict | None = None,
+    ):
+        """Store new settings. With `rebase`, a save edited from an older revision is merged onto
+        the latest one when the changes don't overlap, or as `resolutions` says (see merge.py)."""
         settings = ProjectSettings.model_validate(settings)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            old = self._settings(db)
+            old = self._settings_head(db)  # Full settings are only needed to merge.
+            if rebase and self._stale(expected_revision, old):
+                old = self._settings(db)
+                settings = self._rebase(
+                    "settings",
+                    expected_revision,
+                    old,
+                    lambda: self._settings(db, expected_revision).settings,
+                    settings,
+                    old.settings,
+                    resolutions,
+                )
+                expected_revision = old.revision
             self._check_revision("settings", expected_revision, old)
             revision, commit = old.revision + 1, str(uuid4())
-            db.execute(
-                "INSERT INTO graph_settings_revisions(revision,commit_id,settings) VALUES(?,?,?)",
-                (revision, commit, canonical(settings.model_dump(mode="json"))),
-            )
+            data = settings.model_dump(mode="json")
+            stored = settings_tables.stored_form(db, data)  # Hash each tokenizer once.
+            settings_history.record(db, revision, commit, stored)
+            settings_tables.write(db, stored)
             db.execute("UPDATE graph_project SET settings_revision=?", (revision,))
+            settings_history.prune(db)
             self._change(db, "settings", self.project_id, revision, commit)
-            return SettingsRecord(settings.model_copy(deep=True), revision, commit)
+            # A fresh object from the dump: far cheaper than deep-copying tokenizer definitions.
+            return SettingsRecord(ProjectSettings.model_validate(data), revision, commit)
+
+    @staticmethod
+    def _stale(expected, current):
+        return type(expected) is int and 1 <= expected < current.revision
+
+    @staticmethod
+    def _rebase(entity_id, expected, current, load_base, ours, theirs, resolutions=None):
+        """Merge `ours` (edited from revision `expected`) onto `theirs` (the current value).
+        Overlapping changes not settled by `resolutions`, or a merge that is no longer valid,
+        stay a RevisionConflict; overlaps are listed in its `conflicts`."""
+        try:
+            merged = merge(_dump(load_base()), _dump(ours), _dump(theirs), resolutions)
+            return type(ours).model_validate(merged)
+        except MergeConflict as error:
+            raise RevisionConflict(
+                entity_id,
+                expected,
+                current.revision,
+                current.commit_id,
+                f"{error}; choose which version to keep",
+                error.conflicts,
+            ) from error
+        except (KeyError, ValueError) as error:
+            raise RevisionConflict(
+                entity_id, expected, current.revision, current.commit_id
+            ) from error
 
     @staticmethod
     def _check_revision(entity_id, expected, current):
@@ -254,7 +357,13 @@ class GraphStore:
         source: GraphSource | dict,
         expected_revision: int,
         provenance: dict | None = None,
+        *,
+        rebase: bool = False,
+        resolutions: dict | None = None,
     ):
+        """Store a new source revision. With `rebase`, a save edited from an older revision is
+        merged onto the latest one when the changes don't overlap, or as `resolutions` says
+        (see merge.py)."""
         source = GraphSource.model_validate(source)
         if source.id != trajectory_id:
             raise ValueError("Trajectory identity is immutable")
@@ -264,6 +373,17 @@ class GraphStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             old = self._read(db, trajectory_id)
+            if rebase and self._stale(expected_revision, old):
+                source = self._rebase(
+                    trajectory_id,
+                    expected_revision,
+                    old,
+                    lambda: self._read(db, trajectory_id, expected_revision).source,
+                    source,
+                    old.source,
+                    resolutions,
+                )
+                expected_revision = old.revision
             self._check_revision(trajectory_id, expected_revision, old)
             self._check_owner(db, trajectory_id)
             return self._commit(db, source, old, provenance)

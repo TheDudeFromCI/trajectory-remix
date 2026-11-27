@@ -388,6 +388,10 @@ td.faint { color: var(--ink-faint); }
 .proposal-changes { display: flex; flex-direction: column; gap: var(--space-1); }
 .proposal-change { border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .proposal-change > summary { display: flex; align-items: center; gap: var(--space-2); padding: 4px var(--space-2); cursor: pointer; font-size: 12px; }
+.proposal-pick { margin: 0; cursor: pointer; }
+.proposal-change.skipped > summary { color: var(--ink-muted); }
+.proposal-change.skipped > summary .mono { text-decoration: line-through; }
+.proposal-change.skipped > .proposal-diff { opacity: 0.5; }
 .proposal-diff { margin: 0; padding: var(--space-1) 0; max-height: 320px; overflow: auto; border-top: 1px solid var(--border); font: 12px/18px var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .proposal-diff > span { display: block; padding: 0 var(--space-2) 0 calc(var(--space-2) + 2ch); text-indent: -2ch; }
 .proposal-diff .diff-add { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
@@ -445,3 +449,17 @@ td.faint { color: var(--ink-faint); }
 .metric-label-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px var(--space-2); padding: var(--space-1) 0; max-height: 220px; overflow: auto; }
 .metric-label-grid label { display: flex; align-items: center; gap: 4px; }
 .metric-value { font-size: 13px; }
+
+/* Save conflict: the Failed to Save marker opens a per-value Keep mine / Keep theirs dialog. */
+#dirty-indicator.is-actionable { cursor: pointer; text-decoration: underline dotted; }
+#dirty-indicator.is-actionable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conflict-dialog { width: min(820px, calc(100vw - 32px)); }
+.conflict-dialog .dialog-foot .grow { flex: 1; }
+.conflict-legend .diff-del { color: var(--danger); margin-right: var(--space-2); }
+.conflict-legend .diff-add { color: var(--success); }
+.conflict-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.conflict-card { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.conflict-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) var(--space-2); }
+.conflict-path { margin: 0; font: 600 13px/18px var(--font-mono); overflow-wrap: anywhere; }
+.conflict-choices { display: flex; gap: var(--space-2); flex-shrink: 0; }
+.conflict-choice { font-size: 13px; }

@@ -89,6 +89,9 @@ Tools here are *authored*: you write the call and its response, and nothing runs
 [Synthetic tools and chat](TOOLS.md) for the practical side.
 
 - Events sharing a `call_id` use one tool window and must be ordered by dependencies.
+- An empty `call_id` (or an empty `tool` on a call) still saves, so a half-finished event isn't
+  lost. Compiling reports it as `missing_call_id` / `missing_tool`, and the editor outlines the
+  field in red until it's filled in.
 - A complete call has both `insert_tool_begin` and `insert_tool_end` (the defaults). To split
   a call, use begin-only, then neither for middle fragments, then end-only. Calls and
   responses can't interleave within a window.
@@ -129,7 +132,7 @@ size. `GET /api/v1/schema/settings` has its schema. Defaults need no tokenizer o
 This section is for code that uses the Python API directly. Most people use the studio,
 REST or MCP.
 
-- `GraphStore.initialize(path)` creates a `kidra-graph-project/1` SQLite database (WAL).
+- `GraphStore.initialize(path)` creates a `kidra-graph-project/2` SQLite database (WAL).
   Existing files and unsupported versions are rejected, with no migration.
 - `GraphCommands` offers `read`, `create`, `replace`, `patch`, `add_event`, `patch_event`,
   `delete_event`, `set_dependencies` and `remove_dependency`. Patches use RFC 7396 (a `null`
@@ -138,6 +141,17 @@ REST or MCP.
 - **Every edit needs `expected_revision`**, scoped to that trajectory. A `RevisionConflict`
   carries the current revision and commit. Editing another trajectory, or the settings,
   doesn't invalidate it.
+- **Stale saves can rebase.** `replace(..., rebase=True)` and
+  `update_settings(..., rebase=True)` three-way merge a save made from an older revision
+  onto the current one (`graph/merge.py`): objects merge key by key, and lists and scalars
+  replace whole. Overlapping changes, or a merge that no longer validates, still raise
+  `RevisionConflict`, with the conflicting path in the message. Overlaps are listed in its
+  `conflicts` (each `{path, base, ours, theirs}`, leaving out a side that removed the value;
+  the 409 body carries the same list). Passing `resolutions` (`{path tuple: "ours" |
+  "theirs"}`) settles them, and `PUT /trajectories/{id}` accepts them as
+  `resolutions: [{path, keep}]`; the browser's **Failed to Save** marker builds that list.
+  The browser's `PUT /trajectories/{id}`, `PUT /settings` and `PUT /sampler` rebase. Jobs,
+  bulk edits, patches, metric edits and Undo/Redo keep exact checks.
 - A `SourceRecord` carries the source, `revision`, `commit_id`, `intrinsic_hash` and
   separate intrinsic and metadata revisions. Metadata-only edits make commits but keep the
   intrinsic hash. `read(id, revision)` returns an old snapshot.

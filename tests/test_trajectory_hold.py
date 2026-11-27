@@ -3,7 +3,8 @@
 import pytest
 from test_graph_generation import finish, service
 
-from trajectory_remix.graph import authoring_session
+from trajectory_remix.graph import authoring_session, phase_barrier
+from trajectory_remix.graph.jobs import JobService
 
 
 def picky(fake, broken):
@@ -77,3 +78,36 @@ async def test_a_held_trajectory_can_be_detached_to_finish_the_job(tmp_path):
     await finish(gen, job)
     gen.jobs.detach(job, chosen["id"])
     assert gen.jobs.inspect(job)["state"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_recovered_hold_retries_from_its_checkpoint_after_a_local_failure(
+    tmp_path, monkeypatch
+):
+    gen, fake = service(tmp_path, critical=False)
+    consume = gen.consume
+    failing = True
+
+    def consume_review(ticket):
+        if failing and ticket.payload["operation"] == "review":
+            raise ValueError("fixture cannot process its first review")
+        consume(ticket)
+
+    monkeypatch.setattr(gen, "consume", consume_review)
+    job = gen.start([{"seed": 47}], {})
+    await finish(gen, job)
+    ident = gen.jobs.attempts(job)[0]["trajectory_id"]
+    assert phase_barrier.modes(gen.store, job) == {ident: "held"}
+    assert {row["state"] for row in gen.jobs.inspect(job)["requests"]} == {"accepted", "cancelled"}
+
+    # Simulate a project saved when held attempts still occupied an attached slot.
+    with gen.store.connect() as db:
+        db.execute("UPDATE graph_owners SET mode='attached' WHERE trajectory_id=?", (ident,))
+    JobService(gen.store, active_limit=2)
+    assert phase_barrier.modes(gen.store, job) == {ident: "held"}
+
+    failing = False
+    gen.jobs.control(job, "resume")
+    await finish(gen, job)
+    assert gen.jobs.attempts(job)[0]["outcome"] == "pass"
+    assert len([t for t in fake.calls if t.payload["operation"] == "review"]) == 2

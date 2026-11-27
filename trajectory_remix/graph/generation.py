@@ -19,7 +19,7 @@ from . import (
 from .draft_reply import draft_text
 from .failure_reason import local_failure, log_local_error
 from .jobs import Fenced, OwnershipConflict
-from .models import GraphSource, ProjectSettings
+from .models import GraphSource
 from .progress import label
 from .provider import assistant_message, invalid_reason
 from .sampling import SamplerService
@@ -51,7 +51,7 @@ class GenerationService:
 
     def settings_for(self, job):
         config = self.jobs.inspect(job)["config"]
-        return ProjectSettings.model_validate(
+        return self.store.thaw(
             config["settings"] if "settings" in config else config["options"]["settings"]
         )
 
@@ -101,7 +101,7 @@ class GenerationService:
                 reviews.require_checklist(settings, tier)
         options = dict(
             mode=mode,
-            settings=settings.model_dump(mode="json"),
+            settings=self.store.frozen(settings),
             settings_revision=snapshot.revision,
             driver=DRIVER,
         )
@@ -122,14 +122,16 @@ class GenerationService:
 
     def start_assistant(self, trajectory, expected_revision, comments):
         """Queue an assistant session on one trajectory's open comments."""
-        settings = self.store.settings().settings
+        snapshot = self.store.settings()
+        settings = snapshot.settings
         if assistant.ROLE not in settings.endpoint_roles:
             raise ValueError("Assign the Assistant endpoint role in Project Settings first")
         frozen = assistant.frozen(comments.for_trajectory(trajectory, "open"))
         if not frozen:
             raise ValueError("This trajectory has no open comments to send")
         options = dict(
-            settings=settings.model_dump(mode="json"),
+            settings=self.store.frozen(settings),
+            settings_revision=snapshot.revision,
             comments=frozen,
             conversation=assistant_memory.load(self.store, trajectory),
         )
@@ -392,11 +394,11 @@ class GenerationService:
         if trajectory_hold.held(cp, epoch):
             return
         cp.update(_epoch=epoch, _revision=record.revision)
+        if j["kind"] == "run" and self._waiting_for_slot(j, ident, cp, epoch):
+            return
         if cp.get("held"):  # Resumed: retry it, with a fresh bounded correction.
             cp.pop("held")
             self._save(job, trajectory_hold.unflag(source), cp)
-            return
-        if self._parked(job, ident, cp):
             return
         phase = cp["phase"]
         plan = self._plan(job, ident) if phase == "event" else None
@@ -490,34 +492,46 @@ class GenerationService:
         cause = f" ({local_failure(error)}; traceback in the server output)" if error else ""
         self._hold(job, record.source, cp, f"A local error interrupted it{cause}; edits are kept.")
 
-    def _parked(self, job, ident, cp):
-        """A trajectory waits at an enabled barrier until every trajectory has reached it."""
+    def _waiting_for_slot(self, j, ident, cp, epoch):
+        """Wait at a closed gate, or until a released attempt has an active slot."""
+        enabled = phase_barrier.configured(j)
+        if not enabled and not cp.get("held"):
+            return False
+        job = j["id"]
+        mode = phase_barrier.mode(self.store, job, ident)
         gate = phase_barrier.gate(cp)
-        enabled = phase_barrier.configured(self.jobs.inspect(job))
-        opened = phase_barrier.phase(self.store, job)
-        if gate in phase_barrier.closed(enabled, opened):
-            if phase_barrier.modes(self.store, job).get(ident) != "parked":
-                phase_barrier.set_mode(self.store, job, ident, "parked")
+        if (
+            gate in enabled
+            and not cp.get("held")
+            and gate in phase_barrier.closed(enabled, phase_barrier.phase(self.store, job))
+        ):
+            if mode == "attached" and self.jobs.park_attempt(job, epoch, ident):
                 self.jobs.progress(job, f"Trajectory parked before {gate}: {label(ident)}")
             return True
-        if phase_barrier.modes(self.store, job).get(ident) == "parked":
-            phase_barrier.set_mode(self.store, job, ident, "attached")
-        return False
+        return mode in {"parked", "held"} and not self.jobs.activate_attempt(job, epoch, ident)
 
     def _barrier(self, job, epoch):
         """Pause the run once every trajectory is parked (or held) at a barrier."""
         j = self.jobs.inspect(job)
-        if j["state"] != "running" or not phase_barrier.configured(j):
+        enabled = phase_barrier.configured(j)
+        if j["state"] != "running" or not enabled:
             return
         if phase_barrier.pending_attempts(self.store, job):
             return
+        closed = phase_barrier.closed(enabled, phase_barrier.phase(self.store, job))
+        if not closed:
+            return
         owners = phase_barrier.modes(self.store, job)
-        parked = [i for i, mode in owners.items() if mode == "parked"]
-        held = [i for i in owners if trajectory_hold.held(self.jobs.checkpoint(job, i), epoch)]
+        checkpoints = {i: self.jobs.checkpoint(job, i) for i in owners}
+        parked = [
+            gate
+            for i, mode in owners.items()
+            if mode == "parked" and (gate := phase_barrier.gate(checkpoints[i])) in closed
+        ]
+        held = [i for i, cp in checkpoints.items() if trajectory_hold.held(cp, epoch)]
         if not parked or len(parked) + len(held) < len(owners):
             return
-        gates = [phase_barrier.gate(self.jobs.checkpoint(job, i)) for i in parked]
-        gate = min(gates, key=phase_barrier.GATES.index)
+        gate = min(parked, key=phase_barrier.GATES.index)
         phase_barrier.advance(self.store, job, phase_barrier.GATES.index(gate) + 1)
         self.jobs.control(job, "pause")
         self.jobs.append_log(
@@ -530,9 +544,12 @@ class GenerationService:
 
     def _pause_if_only_held(self, job, epoch):
         owners = self._owners(job)
-        if not owners or self.jobs.inspect(job)["state"] != "running":
+        j = self.jobs.inspect(job)
+        if not owners or j["state"] != "running":
             return
         if all(trajectory_hold.held(self.jobs.checkpoint(job, i), epoch) for i in owners):
+            if j["run_id"] and phase_barrier.pending_attempts(self.store, job):
+                return
             self.jobs.control(job, "pause")
             self.jobs.append_log(
                 job,
