@@ -67,11 +67,15 @@ assert.ok($('timeline').querySelector('[title="Depends on: root"]'));
 ui.settings.tools.echo={name:'Echo',input_schema:{type:'object',properties:{text:{type:'string'}}}};
 const toolOption=document.createElement('option');toolOption.value='echo';toolOption.textContent='Echo';$('tool-id').append(toolOption);
 $('event-kind').value='tool_call'; $('event-kind').dispatchEvent(new Event('change'));
+// An empty Call ID on a tool call is outlined like a missing tool field; typing one clears it.
+assert.equal($('call-id').value,''); assert.equal($('call-id').getAttribute('aria-invalid'),'true');
+$('tool-id').value=''; $('tool-id').dispatchEvent(new Event('input')); assert.equal($('tool-id').getAttribute('aria-invalid'),'true','an empty Tool is outlined too');
+$('call-id').value='call-1'; $('call-id').dispatchEvent(new Event('input')); assert.equal($('call-id').hasAttribute('aria-invalid'),false);
 $('event-content').value='{"text":'; $('content-mode').value='json'; $('event-content').dispatchEvent(new Event('input'));
 $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":'); assert.equal($('event-content').hidden,false);
 $('content-mode').value='json'; $('content-mode').dispatchEvent(new Event('change')); assert.equal($('event-content').value,'{"text":');
 // Complete arguments swap the text box for typed fields; editing one rewrites the content.
-$('tool-id').value='echo'; $('event-content').value='{"text":"hi"}'; $('event-content').dispatchEvent(new Event('input'));
+$('tool-id').value='echo'; $('tool-id').dispatchEvent(new Event('input')); assert.equal($('tool-id').hasAttribute('aria-invalid'),false); $('event-content').value='{"text":"hi"}'; $('event-content').dispatchEvent(new Event('input'));
 $('content-mode').value='form'; $('content-mode').dispatchEvent(new Event('change'));
 assert.equal($('event-content').hidden,true); const textField=$('argument-form').querySelector('[data-argument="text"]');
 assert.equal(textField.value,'hi'); textField.value='bye'; textField.dispatchEvent(new Event('input'));
@@ -172,8 +176,8 @@ assert.deepEqual(JSON.parse($('settings-json').value).tools.fixture_tool.input_s
 $('settings-save').click(); await until(()=>!$('settings-dialog').open);
 assert.equal(ui.settings.tools.fixture_tool.input_schema.properties.payload.type,'string');
 // A save from an older revision merges onto a newer change to other fields, and Undo keeps that change.
-await ui.autoSave.flush();
-await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:ui.record.revision,patch:{metadata:{test:true}}});
+await ui.autoSave.flush(); ui.selectEvent('first');
+await module.api('/trajectories/'+ui.id,'PATCH',{expected_revision:(await module.api('/trajectories/'+ui.id)).revision,patch:{metadata:{test:true}}});
 $('event-content').value='merged edit'; ui.applyEvent(); await ui.autoSave.flush();
 assert.equal(ui.autoSave.error,null); assert.equal(ui.draft.events.first.content,'merged edit'); assert.equal(ui.draft.metadata.test,true);
 assert.equal(ui.undo.at(-1)[0].before.metadata.test,true);

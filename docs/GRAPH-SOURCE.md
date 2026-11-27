@@ -89,6 +89,9 @@ Tools here are *authored*: you write the call and its response, and nothing runs
 [Synthetic tools and chat](TOOLS.md) for the practical side.
 
 - Events sharing a `call_id` use one tool window and must be ordered by dependencies.
+- An empty `call_id` (or an empty `tool` on a call) still saves, so a half-finished event isn't
+  lost. Compiling reports it as `missing_call_id` / `missing_tool`, and the editor outlines the
+  field in red until it's filled in.
 - A complete call has both `insert_tool_begin` and `insert_tool_end` (the defaults). To split
   a call, use begin-only, then neither for middle fragments, then end-only. Calls and
   responses can't interleave within a window.

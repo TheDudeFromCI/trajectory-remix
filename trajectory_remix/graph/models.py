@@ -127,8 +127,9 @@ class ToolSchema(Event):
 class ToolCall(Event):
     kind: Literal["tool_call"]
     supervision: Supervision = Field(default_factory=Supervision)
-    call_id: Identifier
-    tool: Identifier
+    # May be empty while editing: the source saves, and the compiler reports missing_call_id.
+    call_id: str = ""
+    tool: str = ""  # Likewise reported as missing_tool when empty.
     insert_tool_begin: bool = True
     insert_tool_end: bool = True
     echo_chat: bool = True
@@ -138,7 +139,7 @@ class ToolResponse(Event):
     kind: Literal["tool_response"]
     supervision: Supervision = Field(default_factory=external_supervision)
     delivery: Delivery = Field(default_factory=Delivery)
-    call_id: Identifier
+    call_id: str = ""  # Empty is reported by the compiler (missing_call_id), not rejected.
     insert_response_begin: bool = True
     insert_response_end: bool = True
     replace_body: bool = False

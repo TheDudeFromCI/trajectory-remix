@@ -79,7 +79,9 @@ preferences when it presents diagnostics.
 | Error | `empty_replacement` | A body replacement contains neither text nor a window reference. |
 | Error | `encoding_error` | Tokenized content cannot be represented in the compiled format. For example, literal text produces a reserved control ID or window references cannot be encoded as one token per hex digit. |
 | Error | `invalid_source` | The source cannot be decoded as graph JSON, uses an unsupported graph format, or contains invalid identifiers, window definitions, event fields, or loss weights. |
+| Error | `missing_call_id` | A tool call or tool response has no call ID. The studio still saves such a source; only compilation is blocked. |
 | Error | `missing_dependency` | An event depends on an event ID absent from the graph. |
+| Error | `missing_tool` | A tool call names no tool. The studio still saves such a source; only compilation is blocked. |
 | Error | `missing_window` | An event targets a window ID absent from the graph. |
 | Error | `missing_window_reference` | An inline window reference names a window ID absent from the graph. |
 | Error | `output_after_close` | An event writes to a logical window after a causal predecessor closes it. |

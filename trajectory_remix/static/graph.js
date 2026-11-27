@@ -395,6 +395,14 @@ export class StudioUI {
     const kind = $('event-kind').value, tool = kind === 'tool_call', response = kind === 'tool_response', chat = kind === 'chat_message';
     const external = response || kind === 'external_text' || kind === 'tool_schema';
     for (const [id, show] of Object.entries({'call-id': tool || response || chat, 'tool-id': tool, 'chat-speaker': chat, delivery: external, chain: external || chat, 'replace-body': external, begin: tool || response, end: tool || response, 'echo-chat': tool})) $(id).closest('label').hidden = !show;
+    this.markRequiredIds();
+  }
+  /** Red outline on an empty Call ID (tool call or response) or Tool (tool call). The event still
+     saves; compiling reports missing_call_id / missing_tool. */
+  markRequiredIds() {
+    const kind = $('event-kind').value;
+    markInvalid($('call-id'), ['tool_call', 'tool_response'].includes(kind) && !$('call-id').value.trim());
+    markInvalid($('tool-id'), kind === 'tool_call' && !$('tool-id').value);
   }
   /** Form mode swaps the text box for one typed field per tool argument; unparseable content keeps the text box. */
   renderArguments() {
@@ -1035,6 +1043,7 @@ export class StudioUI {
       this.event = id; this.renderDraft(); this.renderEvent(); this.changed();
     });
     on('delete-event', 'click', () => { if (!this.event) return; delete this.draft.events[this.event]; this.editors.delete(this.event); this.event = Object.keys(this.draft.events)[0]; this.renderDraft(); this.renderEvent(); this.changed(); });
+    for (const id of ['call-id', 'tool-id']) for (const type of ['input', 'change']) on(id, type, () => this.markRequiredIds());
     on('event-kind', 'change', () => { $('masked').checked = ['external_text', 'tool_schema', 'tool_response', 'chat_message'].includes($('event-kind').value); this.kindControls(); this.renderArguments(); this.renderToolPicker(); });
     on('content-mode', 'change', () => { this.contentModes.remember(this.id, this.event, $('content-mode').value); this.stashEditor(); this.renderArguments(); this.renderToolPicker(); });
     on('event-content', 'input', () => { this.stashEditor(); this.applyEvent(); this.renderToolPicker(); });
