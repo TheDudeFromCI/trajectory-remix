@@ -129,8 +129,8 @@ class JobService:
             if owner == job and (trajectory is None or trajectory == source):
                 task.get_loop().call_soon_threadsafe(task.cancel)
 
-    def configure_endpoints(self):
-        settings = self.store.settings().settings
+    def configure_endpoints(self, settings=None):
+        settings = settings or self.store.settings().settings
         with self.store.connect() as db:
             for ident, endpoint in settings.endpoints.items():
                 db.execute(
@@ -181,7 +181,7 @@ class JobService:
         settings = settings_record or self.store.settings()
         snapshot = dict(
             config=config,
-            settings=settings.settings.model_dump(mode="json"),
+            settings=self.store.frozen(settings.settings),
             settings_revision=settings.revision,
             settings_commit=settings.commit_id,
         )
