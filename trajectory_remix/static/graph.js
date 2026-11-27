@@ -22,6 +22,7 @@ import {ContentModes} from './content-mode.js';
 import {WindowsPanel} from './windows-panel.js';
 import {bindViewTabs, currentView, showView} from './views.js';
 import {byId} from './panel-popout.js';
+import {ConflictResolver} from './conflict-resolver.js';
 import {icon, jobProgress, KIND_TONES, kindName, pastel, progressBar, reconcile, setAttr, setText, shortId, stageInfo, tag, toggleClass} from './ui-kit.js';
 /* Graph studio transport and controller. Project operations use REST exclusively. */
 const $ = byId; // Also finds elements in a popped-out panel.
@@ -58,7 +59,8 @@ export async function api(path, method = 'GET', body) {
     ...(body === undefined ? {} : {body: JSON.stringify(body)})
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.message || data.detail && JSON.stringify(data.detail) || data.errors && JSON.stringify(data.errors) || data.code || response.statusText);
+  // `data` stays on the error so callers can read details such as a conflict's values.
+  if (!response.ok) throw Object.assign(new Error(data.message || data.detail && JSON.stringify(data.detail) || data.errors && JSON.stringify(data.errors) || data.code || response.statusText), {data});
   return data;
 }
 
@@ -108,7 +110,7 @@ export class StudioUI {
     // A draft that failed to save is not retried until it changes again.
     this.autoSave = new AutoSave({pending: () => !this.restoring && this.hasUnsavedChanges() && this.draftKey() !== this.failedKey,
       save: () => this.save(), typing: () => isTyping(document.activeElement),
-      report: error => { this.failedKey = this.sentKey; message('Not saved: ' + error.message); this.renderDirty(); }});
+      report: error => { this.failedKey = this.sentKey; message(error.data?.conflicts?.length ? 'Not saved: your change clashes with a newer save. Click “Failed to Save” to choose which to keep.' : 'Not saved: ' + error.message); this.renderDirty(); }});
     if (!Number.isFinite(this.prefs.zoom)) this.prefs.zoom = 1;
     this.prefs.zoom = Math.min(3, Math.max(0.25, this.prefs.zoom));
     if (!['graph', 'ticks'].includes(this.prefs.mode)) this.prefs.mode = 'graph';
@@ -188,9 +190,13 @@ export class StudioUI {
   renderDirty() {
     const indicator = $('dirty-indicator'), locked = !!this.record?.owner, dirty = !locked && this.hasUnsavedChanges();
     const failed = dirty && !!this.autoSave.error && this.failedKey === this.draftKey();
+    const resolvable = failed && !!this.saveConflicts();
     setText(indicator, !this.record ? '' : locked ? 'Locked' : failed ? 'Failed to Save' : dirty ? 'Saving...' : 'Saved');
-    setAttr(indicator, 'data-tip', failed ? 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.' : null);
-    indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}`;
+    setAttr(indicator, 'data-tip', !failed ? null : resolvable ? 'Your change clashes with a newer save. Click to compare and choose which to keep.'
+      : 'The last change could not be saved: ' + this.autoSave.error.message + ' It saves with your next change.');
+    // A conflict can be resolved from the marker itself.
+    setAttr(indicator, 'role', resolvable ? 'button' : 'status'); setAttr(indicator, 'tabindex', resolvable ? '0' : null);
+    indicator.className = `tag tone-${locked || failed ? 'warning' : dirty ? 'accent' : 'muted'}${resolvable ? ' is-actionable' : ''}`;
     indicator.hidden = !this.record;
     this.metricsEditor?.sync({id: this.record ? this.id : null, revision: this.record?.revision, locked});
     setText($('trajectory-title'), this.id || 'No trajectory selected'); setAttr($('trajectory-title'), 'data-tip', null);
@@ -684,11 +690,24 @@ export class StudioUI {
     if (restored.length) inverse.push(restored); this.historyButtons(); this.drafts.clear();
     if (this.id) { try { await this.select(this.id, true); } catch { this.id = null; this.draft = null; } } await this.listing();
   }
+  /** The values the last failed save clashed on, when it can be resolved by choosing. */
+  saveConflicts() { const c = this.autoSave.error?.data?.conflicts; return Array.isArray(c) && c.length ? c : null; }
+  /** Failed to Save → compare each clashing value and save again keeping mine or theirs. */
+  async resolveConflicts() {
+    const conflicts = this.saveConflicts();
+    if (!conflicts || this.record?.owner) return;
+    const resolutions = await this.conflictResolver.open(conflicts);
+    if (!resolutions) return;
+    this.resolutions = resolutions; this.failedKey = null;
+    try { await this.autoSave.flush(); } finally { this.resolutions = null; this.renderDirty(); }
+    if (!this.autoSave.error) message('Conflict resolved and saved. Undo reverts it.');
+  }
   async save() {
     if (!this.draft) return;
     this.applyEvent(); const before = copy(this.record.source), sent = copy(this.draft), id = this.id, generation = this.selectionGeneration;
     this.sentKey = this.draftKey(); // A failure is charged to this draft, not to later edits.
-    const base = this.record.revision, value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: base, source: sent});
+    const base = this.record.revision, resolutions = this.resolutions;
+    const value = await api(`/trajectories/${id}`, 'PUT', {expected_revision: base, source: sent, ...(resolutions ? {resolutions} : {})});
     // The server merges a save made from an older revision onto newer saves (a metric value, a job);
     // Undo then steps back to the revision just before ours, keeping those changes.
     const prior = value.revision > base + 1 ? (await api(`/trajectories/${id}?revision=${value.revision - 1}`)).source : before;
@@ -1056,6 +1075,9 @@ export class StudioUI {
     on('export-start', 'click', async () => { const r = await api('/exports', 'POST', {profile: $('export-profile').value || null, options: {compiled: $('export-format').value === 'compiled', trajectories_per_file: Number($('export-shard').value), minimum_stage: $('export-stage').value === '' ? null : Number($('export-stage').value), include_stale: $('export-stale').checked, exclude_missing_split: $('export-exclude').checked, metadata: $('export-metadata').value}}); $('export-dialog').close(); await this.inspectJob(r.job_id); });
     on('bulk-action', 'change', () => { $('bulk-value-label').hidden = !['stage', 'split'].includes($('bulk-action').value); });
     on('bulk-start', 'click', async () => { const action = $('bulk-action').value; if (action === 'export') return this.exportMatches(); if (action === 'review') return this.startReview({bulk: true}); const config = action === 'delete' ? {} : {value: action === 'stage' ? Number($('bulk-value').value) : $('bulk-value').value}; const r = await api('/bulk', 'POST', {query: this.query(), action, config}); this.ownedBulk.add(r.job_id); await this.inspectJob(r.job_id); });
+    this.conflictResolver = new ConflictResolver($('conflict-dialog'));
+    on('dirty-indicator', 'click', () => this.resolveConflicts());
+    on('dirty-indicator', 'keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && this.saveConflicts()) { e.preventDefault(); return this.resolveConflicts(); } });
     on('undo-edit', 'click', () => this.restore(true)); on('redo-edit', 'click', () => this.restore(false));
     on('review-source', 'click', () => this.startReview());
     on('comment-send', 'click', () => this.sendToAssistant());

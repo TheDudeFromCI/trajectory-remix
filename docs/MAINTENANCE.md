@@ -112,6 +112,7 @@ node tests/auto_save_frontend.mjs
 node tests/assistant_indicator_frontend.mjs
 node tests/assistant_queue_frontend.mjs
 node tests/assistant_proposal_frontend.mjs
+node tests/conflict_resolver_frontend.mjs
 node tests/job_log_levels_frontend.mjs
 node tests/job_names_tabs_frontend.mjs
 node tests/duplicate_frontend.mjs

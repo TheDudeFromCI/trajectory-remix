@@ -31,9 +31,17 @@ class Edit(DTO):
     patch: dict[str, JsonValue]
 
 
+class Resolution(DTO):
+    """Which version to keep for one conflicting value of a stale save."""
+
+    path: list[str] = Field(max_length=64)
+    keep: Literal["ours", "theirs"]
+
+
 class Replace(DTO):
     expected_revision: int = Field(ge=1)
     source: GraphSource
+    resolutions: list[Resolution] = Field(default_factory=list, max_length=10_000)
 
 
 class SettingsEdit(DTO):
@@ -379,7 +387,11 @@ def create_studio_app(
     def replace(ident: str, body: Replace):
         return studio.present(
             studio.commands.replace(
-                ident, body.source.to_dict(), body.expected_revision, rebase=True
+                ident,
+                body.source.to_dict(),
+                body.expected_revision,
+                rebase=True,
+                resolutions={tuple(r.path): r.keep for r in body.resolutions},
             )
         )
 

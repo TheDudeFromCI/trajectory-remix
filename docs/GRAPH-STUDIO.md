@@ -113,7 +113,7 @@ and a strict content security policy apply. Tokens are never put in download URL
 | `POST /diagnostics` | Validate a draft without saving or tokenizing. |
 | `POST /trajectories` | Create one. Returns 201 with revision and diagnostics. |
 | `GET /trajectories/{id}?revision=` | A current or historical record, plus its current lock owner. |
-| `PUT`, `PATCH`, `DELETE /trajectories/{id}` | Replace, RFC 7396 merge patch, or delete (all revision-guarded). |
+| `PUT`, `PATCH`, `DELETE /trajectories/{id}` | Replace, RFC 7396 merge patch, or delete (all revision-guarded). A stale `PUT` merges onto newer saves; overlaps return 409 with `conflicts`, settled by resending with `resolutions: [{path, keep: "ours" \| "theirs"}]`. |
 | `POST`, `PATCH`, `DELETE /trajectories/{id}/events/{event}` | Edit one event by stable ID. |
 | `PUT /trajectories/{id}/events/{event}/dependencies` | Replace its `after` list. |
 | `GET /trajectories/{id}/graph`, `/diagnostics` | Tokenizer-free order and diagnostics. |

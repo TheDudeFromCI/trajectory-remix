@@ -457,9 +457,13 @@ events arrive, and unlocks when the work ends.
   (a metric value, a job, another tab), your save is merged with it when the two changed
   different things. This works the same for trajectories, Project Settings, review
   settings and the sampling matrix.
-- A save that changed the **same** value as a newer save reports a revision conflict,
-  names the value, and leaves your text intact. Reloading the saved version is an
-  explicit step (**More → Reload saved source**).
+- A save that changed the **same** value as a newer save is a conflict. Your text stays
+  intact and the save marker in the status bar shows **Failed to Save**. Click it to
+  resolve: for each clashing value you see a diff (**−** the saved version, **+** yours)
+  and choose **Keep mine** or **Keep theirs** (or **Keep all mine** / **Keep all
+  theirs**). **Save with these choices** saves once, keeping everything else from both
+  saves, and Undo reverts it like any other edit.
+- You can still discard your edits instead with **More → Reload saved source**.
 - **Detaching** a trajectory from its pipeline is permanent. That pipeline stops
   updating it, and no review verdict is invented.
 
