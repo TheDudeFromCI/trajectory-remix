@@ -15,10 +15,13 @@ workflow guide. The sampler itself and the linked metrics are described in
 2. **Pick a group** and compare its choices: numeric weights and base shares line up in a table you can edit
    with the keyboard. To change several at once, tick the choices and use **Set selected**. It affects only
    checked entries in that group, even ones a filter is hiding.
-3. **Pin a choice.** The **Pin** column has a small button per supported choice. Muted is unpinned, and a
+3. **Pin a choice.** The **Pin** column has a small button on every choice: families, behaviors, decision
+   choices, domains and every dimension. Muted is unpinned, and a
    filled, highlighted pin is selected. Click again to unpin, and picking a sibling moves the pin. Pins stay
    in sync with the preview dropdowns and survive navigation. They apply to previews and generation requests
-   **without changing weights or saving anything**. A dash means the sampler can't pin that field.
+   **without changing weights or saving anything**. Fields you leave unpinned are sampled as usual, given the
+   pins. Pins that contradict each other under the matrix's rules are refused with the reason, as on a
+   trajectory's [Metrics tab](METRICS.md#how-set-values-are-kept).
 4. **Inspect a choice.** Click it to see its constraints and the rules that reference it. Expand its linked
    metric to edit the label, units, target description and absolute and relative **tolerance bands**. Both
    bands go together, and clearing both leaves tolerance unspecified.
@@ -34,7 +37,8 @@ workflow guide. The sampler itself and the linked metrics are described in
 ## Preview a proposal
 
 Expand **Proposal preview** **after saving**, because the preview samples the *saved* matrix, not the browser
-draft. Set a fixed integer seed and optional pins, then sample one proposal. You'll see its payload and matrix
+draft. Set a fixed integer seed and optional pins (one field per category, including **Decision / Axis**, which
+has no table of its own), then sample one proposal. You'll see its payload and matrix
 digests and the settings revision it used. The preview creates an immutable proposal snapshot and doesn't start
 generation, and existing runs keep their frozen inputs.
 

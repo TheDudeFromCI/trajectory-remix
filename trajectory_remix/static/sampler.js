@@ -29,6 +29,8 @@ export function groups(matrix, definitions) {
     {id: 'sampler', section: 'Advanced', title: 'Sampler settings', items: [], raw: true}
   ];
 }
+/** The field a group's choices pin: behaviors and decision choices are grouped per family and axis. */
+export const pinKey = g => g.id.startsWith('behavior:') || g.id.startsWith('axis:') ? g.metric : g.id;
 export class SamplerWorkbench {
   constructor(root, transport = request) { this.root = root; this.api = transport; this.pins = {}; this.selectedRows = new Set(); this.selected = 'focus.family'; this.query = ''; this.filter = ''; this.choiceQuery = ''; this.invalid = new Map(); this.generation = 0; }
   async open() {
@@ -227,10 +229,11 @@ export class SamplerWorkbench {
       check.onchange = () => { check.checked ? this.selectedRows.add(item.id) : this.selectedRows.delete(item.id); count.textContent = `${this.selectedRows.size} selected`; all.checked = visible.length > 0 && visible.every(i => this.selectedRows.has(i.id)); }; checkCell.append(check);
       const name = el('td'); name.append(action(label(item.id), () => this.inspect(item, g), 'sw-choice'), ...((item.description || item.objective || item.scenario_condition) ? [el('small', item.description || item.objective || item.scenario_condition)] : []));
       const pinCell = el('td', undefined, 'sw-pin-cell');
-      if (this.record.overrides[g.id]?.includes(item.id)) {
-        const pin = action('', () => this.setPin(g.id, this.pins[g.id] === item.id ? '' : item.id), 'sw-pin');
-        pin.dataset.pinKey = g.id; pin.dataset.pinValue = item.id;
-        pin.setAttribute('aria-label', `Pin ${label(item.id)} for ${label(g.id)}`);
+      const key = pinKey(g);
+      if (this.record.overrides[key]?.includes(item.id)) {
+        const pin = action('', () => this.setPin(key, this.pins[key] === item.id ? '' : item.id), 'sw-pin');
+        pin.dataset.pinKey = key; pin.dataset.pinValue = item.id;
+        pin.setAttribute('aria-label', `Pin ${label(item.id)} for ${label(key)}`);
         pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4z"/><path d="M7 17l-4 4"/></svg>';
         pinCell.append(pin);
       } else { pinCell.textContent = '—'; pinCell.title = 'This field is not supported as a sampler pin.'; }

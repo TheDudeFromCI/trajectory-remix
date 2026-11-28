@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import Field, create_model
 
-from . import comment_tasks
+from . import comment_tasks, pass_tasks
 from .authoring_tools import READ_ONLY, TOOLS
 from .flow import SamplerRun
 from .models import DTO, GraphSource, JsonValue
@@ -107,6 +107,7 @@ TASKS = {
         "List completed artifact names and authenticated download paths; no binary dump.",
     ),
     **comment_tasks.TASKS,
+    **pass_tasks.TASKS,
 }
 
 AUTHORING_TASKS = {
@@ -178,6 +179,8 @@ class GraphAgent:
             return s.read(args.id) | dict(open_comments=s.comments.for_trajectory(args.id, "open"))
         if name in comment_tasks.TASKS:
             return comment_tasks.call(s.comments, name, args)
+        if name in pass_tasks.TASKS:
+            return pass_tasks.call(s, name, args)
         if name in AUTHORING_TASKS:
             return s.commands.author(
                 args.id,

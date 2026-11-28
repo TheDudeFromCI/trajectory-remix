@@ -216,18 +216,16 @@ class SamplerService:
             """)
 
     def editor(self):
+        from . import matrix_pins  # It samples through this service.
+
         r = self.store.settings()
         c = r.settings.sampler_configuration or configuration()
         return dict(
             configuration=deepcopy(c),
             settings_revision=r.revision,
             settings_commit=r.commit_id,
-            overrides={
-                k: [x["id"] for x in choices[k]]
-                for choices in [options(c["matrix"])]
-                for k in OVERRIDES
-                if k in choices
-            },
+            # Every category can be pinned (matrix_pins); the supplied sampler takes OVERRIDES.
+            overrides=matrix_pins.pinnable(c["matrix"]),
         )
 
     def update(self, matrix, metric_options, expected_revision):
@@ -251,9 +249,17 @@ class SamplerService:
         persist=True,
         matrix=None,
     ):
-        """Sample one proposal. `matrix` replaces the frozen matrix for this draw only: a copy
-        restricted to pinned options (matrix_pins); the snapshot still records `frozen`."""
+        """Sample one proposal. Pins beyond the supplied sampler's OVERRIDES go through
+        matrix_pins. `matrix` replaces the frozen matrix for this draw only: matrix_pins' copy
+        restricted to the pinned options; the snapshot still records `frozen`."""
         frozen = deepcopy(self.editor() if frozen is None else frozen)
+        if matrix is None and overrides and not set(overrides) <= set(OVERRIDES):
+            from . import matrix_pins
+
+            snapshot = matrix_pins.sample(
+                self, overrides, seed, frozen=frozen, world_group_id=world_group_id
+            )
+            return self.keep(snapshot) if persist else snapshot
         c = frozen["configuration"]
         if seed is not None and type(seed) is not int:
             raise ValueError("seed must be an integer")

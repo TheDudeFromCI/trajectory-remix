@@ -55,7 +55,10 @@ for you to copy, not calls this document makes.
 | Post initial tool schemas | `post_tool_schema` | `{"id":"UUID","expected_revision":3,"tool_ids":["chat"]}` |
 | Change dependencies | `update_event` | `{"id":"UUID","event_id":"think","expected_revision":2,"after":["input"]}` |
 | Mark an intentional Auto split | `patch_graph` | `{"id":"UUID","expected_revision":3,"patch":{"metadata":{"split":"Auto"}}}` |
-| Generate (only when authorized) | `generate_graphs` | `{"requests":[{"seed":137,"overrides":{"domain":"software_engineering"}}],"instructions":{}}` |
+| Generate (only when authorized) | `generate_graphs` | `{"requests":[{"seed":137,"overrides":{"domain":"software_engineering","stakes":"high"}}],"instructions":{}}` |
+| Write a new draft for one trajectory (only when authorized) | `draft_graph` | `{"id":"UUID","expected_revision":4}` |
+| Assemble its draft into the graph in place (only when authorized) | `assemble_graph` | `{"id":"UUID","expected_revision":5}` |
+| Fill unset metrics from the matrix, keeping set ones | `sample_graph_metrics` | `{"id":"UUID","expected_revision":4}` |
 | Review a saved detached source | `review_graphs` | `{"trajectory":"UUID","expected_revision":4,"mode":"standard"}` |
 | Job status | `inspect_graph_job` | `{"id":"JOB_UUID"}` |
 | Outcomes, paged | `graph_job_items` | `{"id":"JOB_UUID","limit":10,"offset":0}` |
