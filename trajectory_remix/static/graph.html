@@ -182,6 +182,7 @@
         <button role="tab" id="tab-content" aria-controls="panel-content" aria-selected="true">Content</button>
         <button role="tab" id="tab-options" aria-controls="panel-options" aria-selected="false">Options</button>
         <button role="tab" id="tab-windows" aria-controls="panel-windows" aria-selected="false">Windows</button>
+        <button role="tab" id="tab-draft" aria-controls="panel-draft" aria-selected="false" data-tip="The trajectory's prose draft: view or edit it, generate a new one, or assemble it into the graph">Draft</button>
         <button role="tab" id="tab-json" aria-controls="panel-json" aria-selected="false">JSON</button>
         <button role="tab" id="tab-metrics" aria-controls="panel-metrics" aria-selected="false" data-tip="Set this trajectory's metric categories, labels and outcomes">Metrics</button>
         <button role="tab" id="tab-problems" class="issue-tab" aria-controls="panel-problems" aria-selected="false" aria-label="Problems" data-tip="Problems: compiler errors and warnings, plus studio warnings such as a missing split"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg><span id="problems-count" class="badge"></span></button>
@@ -278,7 +279,10 @@
         </section>
         <div class="metrics-editor-head">
           <span id="metrics-editor-note" class="small muted metrics-note"></span>
-          <label class="small inline-label"><input type="checkbox" id="metrics-only-unset"> Only show unset</label>
+          <div class="metrics-editor-tools">
+            <label class="small inline-label"><input type="checkbox" id="metrics-only-unset"> Only show unset</label>
+            <button id="metrics-sample-unset" class="sm ghost" data-tip="Fill every unset category and label with a sample from the matrix that fits the values already set. One Undo step.">Sample unset from matrix</button>
+          </div>
         </div>
         <div id="metrics-editor-list" class="metrics-editor-list"></div>
       </div>
@@ -295,6 +299,15 @@
         <section id="assistant-proposal" class="proposal" aria-label="Proposed changes" hidden></section>
         <div id="comment-list" class="comment-list"></div>
         <div id="assistant-status" class="assistant-working" hidden></div>
+      </div>
+
+      <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft" class="panel-body draft-panel" hidden>
+        <div class="draft-head">
+          <span id="draft-note" class="small muted grow"></span>
+          <button id="draft-generate" class="sm" data-tip="Runs the Draft pass. Assigned metrics set the matrix choices; unset ones are sampled from the matrix and assigned to this trajectory.">New draft</button>
+        </div>
+        <textarea id="draft-text" aria-label="Trajectory draft" placeholder="No draft yet. Write one, or click New draft."></textarea>
+        <div class="panel-actions"><button id="draft-assemble" class="sm primary">Assemble</button></div>
       </div>
 
       <div role="tabpanel" id="panel-json" aria-labelledby="tab-json" class="panel-body" hidden>

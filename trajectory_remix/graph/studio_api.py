@@ -122,6 +122,8 @@ def create_studio_app(
     app.state.worker.handlers["run"] = generation.run
     app.state.worker.handlers["bulk:review_repair"] = generation.run
     app.state.worker.handlers["bulk:assistant"] = generation.run
+    app.state.worker.handlers["bulk:draft"] = generation.run
+    app.state.worker.handlers["bulk:assemble"] = generation.run
     app.state.worker.review_start = generation.start_review
     studio.generation = generation
     app.state.worker.bulk_handlers["metrics"] = metrics.calculate
@@ -229,6 +231,7 @@ def create_studio_app(
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
     from .comments_api import add_comment_routes
+    from .passes_api import add_pass_routes
     from .prompt_migration import migrate
     from .prompts_api import add_prompt_routes
     from .proposal_api import add_proposal_routes
@@ -238,6 +241,7 @@ def create_studio_app(
     add_tool_routes(router, studio.store)
     add_comment_routes(router, studio.comments)
     add_proposal_routes(router, studio)
+    add_pass_routes(router, studio, generation, metrics)
     add_prompt_routes(router)
     from . import usage
 

@@ -260,10 +260,14 @@ class SamplerService:
         )
         if not persist:  # A preview sample stays with the caller; nothing is stored.
             return snapshot
+        return self.keep(snapshot)
+
+    def keep(self, snapshot):
+        """Store a proposal snapshot; stored snapshots are immutable."""
         with self.store.connect() as db:
             db.execute(
                 "INSERT INTO graph_proposals VALUES(?,?,?)",
-                (ident, digest(snapshot), canonical(snapshot)),
+                (snapshot["id"], digest(snapshot), canonical(snapshot)),
             )
         return snapshot
 

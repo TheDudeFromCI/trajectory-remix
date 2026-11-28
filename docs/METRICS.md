@@ -39,6 +39,10 @@ source or definition; **Confirm** records it again for the current source. Tick 
 list just the values still missing. Each change is one **Undo** step. The tab is read-only while a job
 holds the trajectory.
 
+**Sample unset from matrix** fills every unset category and label in one step. It draws one sample from
+the [Sampler matrix](SAMPLER-WORKBENCH.md) that fits the values you already set, and keeps those values.
+Filled values are recorded with origin `matrix_sample`. It is one **Undo** step, like any other change.
+
 **Complexity** sits in the **Trajectory** section, next to Stage and Split, rather than in the category
 list. When it's unset, the picker shows the sampler's target as a hint.
 

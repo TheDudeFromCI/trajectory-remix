@@ -90,6 +90,19 @@ conversation open. The Draft and signoff stay with the trajectory in `metadata.d
 `metadata.authoring_signoffs`. Jobs started before review and repair became one step pause with a
 message; start a new run or review instead.
 
+### Draft or assemble one trajectory
+
+The editor's **Draft** tab runs either pass on one saved trajectory (see
+[Dashboard](DASHBOARD.md#draft-and-assemble-one-trajectory)). Each is a one-item job like a selected
+review: it freezes the settings and plan, locks the trajectory, is never segmented and never starts a
+review.
+
+| Route | What happens |
+| --- | --- |
+| `POST /api/v1/trajectories/{id}/draft` | Body `{expected_revision, seed?}`. Samples a proposal around the trajectory's category and label metrics: values the sampler can pin are pinned, the closest of a few samples is kept for the rest, and any value still differing is written into the proposal with a requirement to follow it. Unset metrics take the sampled values (origin `matrix_sample`), and the proposal becomes `metadata.proposal` and `metadata.targets`. This edit returns as an Undo `delta`, with the `filled` keys. The Draft pass then replaces `metadata.draft`. A failed draft leaves the stage and graph untouched. |
+| `POST /api/v1/trajectories/{id}/assemble` | Body `{expected_revision}`; needs a non-empty `metadata.draft`. Runs Assembly on the current graph, which it edits in place, and records the signoff like a run. Unfinished becomes Pending on success; other stages stay. |
+| `POST /api/v1/metrics/trajectories/{id}/sample-unset` | Body `{expected_revision, seed?}`. Fills only the unset category and label metrics from one such sample, without touching the proposal. Returns the metrics view with an Undo `delta` and the `filled` keys. |
+
 ## Long-trajectory experiment
 
 Turn on **Enable long-trajectory experiment** in **Review Settings** and save before

@@ -143,6 +143,9 @@ body.resizing * { cursor: inherit !important; }
 .panel-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 .content-head { display: flex; align-items: center; justify-content: space-between; }
 #event-content { flex: 1; min-height: 160px; }
+.draft-head { display: flex; align-items: center; gap: var(--space-2); }
+#draft-text { flex: 1; min-height: 200px; width: 100%; resize: vertical; }
+.metrics-editor-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
 #source-json, #metadata-json, #settings-json { width: 100%; min-height: 240px; }
 #settings-json { flex: 1; min-height: 360px; }
 #argument-form:empty { display: none; }

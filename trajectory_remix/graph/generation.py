@@ -15,6 +15,7 @@ from . import (
     scaling,
     signoffs,
     trajectory_hold,
+    trajectory_passes,
 )
 from .draft_reply import draft_text
 from .failure_reason import local_failure, log_local_error
@@ -156,6 +157,8 @@ class GenerationService:
         config = job["config"]
         if config.get("action") == assistant.ACTION:
             return assistant.ROLE, assistant.PHASE
+        if config.get("action") in trajectory_passes.PHASES:
+            return trajectory_passes.operation(config["action"], settings)
         return reviews.manual_operation(
             source.metadata.get("stage", -3), config["options"]["mode"], settings
         )
@@ -401,28 +404,36 @@ class GenerationService:
             self._save(job, trajectory_hold.unflag(source), cp)
             return
         phase = cp["phase"]
-        plan = self._plan(job, ident) if phase == "event" else None
-        segmented = bool((plan or {}).get("scaling")) or scaling.is_scaled(source)
+        # A Draft-tab pass on one trajectory: a whole (never segmented) Draft or Assembly.
+        single = cp.get("manual") and phase in trajectory_passes.MANUAL_PHASES
+        plan = self._plan(job, ident) if phase == "event" or single else None
+        segmented = not single and (bool((plan or {}).get("scaling")) or scaling.is_scaled(source))
         if phase == "event" and cp.get("assembled"):
             self._after_generation(job, source, cp)
             return
-        if phase == "review" or (phase == "event" and "draft" in cp):
+        if (
+            phase == "review"
+            or (single and phase == "assembly")
+            or (phase == "event" and "draft" in cp)
+        ):
             session = cp.get("authoring_session")
             if session is None:
                 session = authoring_session.begin(
                     source,
                     settings,
                     "assembly" if plan else phase,
-                    cp.get("tier"),
+                    None if single else cp.get("tier"),
                     plan=plan,
                     segmented=segmented,
                 )
+                if single:
+                    trajectory_passes.in_place_note(session, source)
                 if segmented:
                     scaling.begin_pass(source, cp, session, settings)
                 cp["authoring_session"] = session
             tier = draft_assembly.role(settings, "assembly") if phase == "event" else cp["tier"]
             payload = authoring_session.payload(session)
-        elif phase == "event":
+        elif phase == "event" or single:
             payload = draft_assembly.payload(cp, plan)
             tier = draft_assembly.role(settings, draft_assembly.DRAFT)
         elif phase == assistant.PHASE:
@@ -463,6 +474,9 @@ class GenerationService:
         )
 
     def _plan(self, job, ident):
+        j = self.jobs.inspect(job)
+        if j["kind"] == "bulk":  # A Draft-tab pass freezes its plan in the job options.
+            return j["config"]["options"]["plan"]
         with self.store.connect() as db:
             proposal = json.loads(
                 db.execute(
@@ -570,6 +584,10 @@ class GenerationService:
         if cp["errors"] <= settings.generation.format_retries:
             self._save(ticket.job_id, source, cp, ticket=ticket)
             return
+        if cp.get("manual"):  # A Draft-tab pass keeps the trajectory and its stage as they are.
+            cp["phase"] = "done"
+            self._save(ticket.job_id, source, cp, ticket=ticket, outcome="fail")
+            return
         data = source.to_dict()
         data["metadata"]["stage"] = -1
         data["metadata"]["generation_failure"] = {
@@ -623,6 +641,12 @@ class GenerationService:
         else:
             cp["draft"] = draft
             source = draft_assembly.with_draft(source, draft)
+        if cp.get("manual"):
+            cp.pop("draft")
+            cp["phase"] = "done"
+            self._save(ticket.job_id, source, cp, ticket=ticket, outcome="pass")
+            self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
+            return
         self._save(ticket.job_id, source, cp, ticket=ticket)
         if "draft" in cp:
             self.jobs.progress(ticket.job_id, f"Draft written: trajectory={label(source.id)}")
@@ -721,6 +745,7 @@ class GenerationService:
         cp.pop("authoring_session")
         if session["phase"] == "assembly":
             live = self.jobs.inspect(ticket.job_id)["config"]
+            live = live.get("options", live)  # A Draft-tab job keeps its settings in options.
             source = signoffs.record(
                 source,
                 settings,
@@ -743,6 +768,18 @@ class GenerationService:
                 ticket.job_id,
                 f"Graph assembled: trajectory={label(source.id)} events={len(source.events)}",
             )
+            if cp.get("manual"):
+                data = source.to_dict()
+                data["metadata"]["stage"] = trajectory_passes.finished_stage(source)
+                cp["phase"] = "done"
+                self._save(
+                    ticket.job_id,
+                    GraphSource.model_validate(data),
+                    cp,
+                    ticket=ticket,
+                    outcome="pass",
+                )
+                return
             cp["assembled"] = True
             self._save(ticket.job_id, source, cp, ticket=ticket)
         else:
@@ -758,7 +795,7 @@ class GenerationService:
         phase = session["phase"]
         data = source.to_dict()
         metadata = data.setdefault("metadata", {})
-        if phase != "review":
+        if phase != "review" and not cp.get("manual"):
             metadata["stage"] = -3
         key = f"{phase}_outcomes"
         outcomes = metadata[key] if isinstance(metadata.get(key), list) else []

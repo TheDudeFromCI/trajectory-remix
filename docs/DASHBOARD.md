@@ -28,7 +28,7 @@ tooltips rather than in extra text on screen.
 | **Dataset** (left) | Search and filter trajectories by text, stage, split, tool, comment state or size (type `@size:m` or `@size:<=xs` in the search box; see [Metrics](METRICS.md#character-counts-and-trajectory-sizes)). Each row shows a short ID, its stage and split, a speech bubble with the number of unresolved comments (amber when some await your review), and a lock if a job owns it. Hover a row for the full ID. |
 | **Windows** (centre) | One card per context window, as it looks at the current timeline position, in a readable view. **Raw** shows the exact tokens; the expand button opens the window in a large panel. The speech bubble leaves a comment on the window. |
 | **Timeline** (bottom) | One lane per window. Click an event to edit it; Shift-click to make it a dependency of the selected event. Scrub, step or press **Play**. |
-| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state and problem count. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
+| **Event panel** (right) | At the top, the **trajectory bar**: one fixed row with the selected trajectory's ID, save state and problem count. Every change saves itself, so there is no Save button. **More** holds Review, Export, Duplicate, Reload and Delete. While a job holds the trajectory, a lock notice appears under the bar. Below it, tabs for the selected event: **Content**, **Options** (dependencies, closing, masks, delivery, framing), **Windows**, **Draft** (the trajectory's prose draft; see [Draft and assemble one trajectory](#draft-and-assemble-one-trajectory)), **JSON** and **Metrics** (the trajectory's **Stage**, **Split**, **Complexity** and size, then its categories, labels and outcomes; see [Metrics](METRICS.md#set-a-trajectorys-metrics)), and on the right two icon tabs with counters: **Problems** (the warning triangle) and **Comments** (the speech bubble). |
 
 Each window keeps **one colour** everywhere: its card, its timeline lane and its event
 blocks. That makes it easy to follow one window across the screen.
@@ -122,6 +122,27 @@ metric values.
 Some in-between states can't be stored yet, such as a tool call with no call ID. The status bar
 then reads *Failed to Save* (hover it for the reason), your draft is kept, and it saves with your
 next change.
+
+### Draft and assemble one trajectory
+
+Generation writes a prose **draft** of each trajectory, then **assembles** it into the graph. The
+**Draft** tab in the event panel lets you do both steps on the selected trajectory yourself. Both use the
+endpoint assigned to the *Draft* role (and *Assembly*, if set) in [Project settings](PROJECT-SETTINGS.md).
+
+| Control | What it does |
+| --- | --- |
+| **Draft text** | The trajectory's draft. Read it, or edit it like any other field: edits save as you type. |
+| **New draft** | Writes a new draft with the standard Draft pass. The metrics you set on the **Metrics** tab decide the sampler choices; every unset category and label is sampled from the matrix and assigned to the trajectory. Asks first if a draft already exists. |
+| **Assemble** | Runs the standard Assembly pass on the draft. It edits the current graph in place, keeping what already fits, rather than replacing the trajectory. An **Unfinished** trajectory becomes **Pending** when it's done; other stages stay as they are. |
+
+1. Set the metrics you care about on the **Metrics** tab, for example `domain` and `complexity`.
+2. Open the **Draft** tab and click **New draft**. The trajectory locks while the job runs; follow it in **Jobs**.
+3. Read the draft and adjust it if you like.
+4. Click **Assemble**. The windows and timeline update when it finishes.
+
+Both run as jobs, and **Undo** reverts what they changed. Neither starts a review; use **More → Review** afterwards.
+A value you set that the sampler can't pin directly is written into the sampled proposal with an instruction
+to follow it, so the draft still honors it.
 
 ### Manage windows
 

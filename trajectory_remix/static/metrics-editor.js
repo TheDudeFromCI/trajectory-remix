@@ -34,6 +34,7 @@ export class MetricsEditor {
     Object.assign(this, {api, report, els, beforeSave, onSaved, onView, shownElsewhere: new Set(shownElsewhere)});
     this.view = null; this.key = ''; this.busy = Promise.resolve(); this.state = {id: null};
     els.unset.addEventListener('change', () => this.render());
+    els.sample?.addEventListener('click', () => this.sampleUnset());
   }
   /** Follow the selected trajectory; reloads only when its id or revision changed. */
   sync({id, revision, locked}) {
@@ -57,6 +58,7 @@ export class MetricsEditor {
       : 'Changes save at once. Undo reverts them like any other edit.';
     setText(note, text); note.className = 'small ' + (locked ? 'tone-warning metrics-note' : 'muted metrics-note');
     for (const input of this.els.list.querySelectorAll('[data-metric-input]')) input.disabled = !this.editable;
+    if (this.els.sample) this.els.sample.disabled = !this.editable;
   }
   render() {
     this.onView(this.view, this.state);
@@ -134,6 +136,23 @@ export class MetricsEditor {
   save(key, value) {
     this.busy = this.busy.then(() => this.store(key, value)).catch(error => { this.report(error); return this.load().catch(this.report); });
     return this.busy;
+  }
+  /** Fill every unset category and label from one matrix sample that fits the set values. */
+  sampleUnset() {
+    this.busy = this.busy.then(() => this.storeSample()).catch(error => { this.report(error); return this.load().catch(this.report); });
+    return this.busy;
+  }
+  async storeSample() {
+    const id = this.state.id;
+    if (!this.editable || !id) return;
+    await this.beforeSave();
+    if (id !== this.state.id) return;
+    const view = await this.api(`/metrics/trajectories/${id}/sample-unset`, 'POST', {expected_revision: this.state.revision});
+    if (id !== this.state.id) return;
+    this.view = view; this.key = `${id}@${view.revision}`; this.state.revision = view.revision;
+    this.render();
+    this.report(view.filled?.length ? `Sampled ${view.filled.length} unset metrics from the matrix.` : 'Every category and label already has a value.');
+    if (view.delta) await this.onSaved(view);
   }
   async store(key, value) {
     const id = this.state.id;
