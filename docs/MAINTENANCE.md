@@ -100,6 +100,7 @@ node tests/project_settings_frontend.mjs
 node tests/tokenizer_store_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
+node tests/agent_name_frontend.mjs
 node tests/window_markdown_frontend.mjs
 node tests/run_inputs_frontend.mjs
 node tests/provider_options_frontend.mjs

@@ -605,9 +605,10 @@ export class StudioUI {
     if (!ticks) $('preview-status').textContent = '';
     this.renderPopout();
   }
+  agentName() { return this.settings?.agent_name || 'agent'; }
   isAgentMessage(eventId, speaker) {
     const e = this.draft?.events[eventId];
-    if (String(eventId || '').endsWith(':echo') || speaker === 'agent') return true;
+    if (String(eventId || '').endsWith(':echo') || speaker === 'agent' || speaker === this.agentName()) return true;
     return !!(e?.call_id && Object.values(this.draft.events).some(o => o.kind === 'tool_call' && o.call_id === e.call_id));
   }
   windowCard(id, w, popout = false) {
@@ -632,7 +633,7 @@ export class StudioUI {
     head.append(comment, toggle, size);
     head.classList.add('clickable'); head.title = 'Jump to the latest event that edits this window';
     head.addEventListener('click', click => { if (!click.target.closest('button')) this.selectLatestWindowEvent(w); });
-    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), toolExtras: event => this.previewToolExtras?.[event] || [], hideExtras: !this.prefs.showRandomTools}));
+    card.append(head, windowBody(w.tokens, {raw, purpose, isAgent: (event, speaker) => this.isAgentMessage(event, speaker), agentName: this.agentName(), toolExtras: event => this.previewToolExtras?.[event] || [], hideExtras: !this.prefs.showRandomTools}));
     return card;
   }
   /** Select the last event (at or before the current position) that wrote tokens into this window. */
@@ -1020,7 +1021,7 @@ export class StudioUI {
     this.assistantQueue = new AssistantQueue();
     this.windowsPanel = new WindowsPanel({$, draft: () => this.draft, report: message,
       onChange: removed => this.windowsChanged(removed)});
-    this.comments = new CommentsView({api, report: message, inspect: (kind, id) => this.inspectTarget(kind, id),
+    this.comments = new CommentsView({api, report: message, agentName: () => this.agentName(), inspect: (kind, id) => this.inspectTarget(kind, id),
       autoSend: () => this.prefs.autoSendComments === true, onOpened: () => this.autoSendToAssistant(),
       proposed: () => this.proposal?.pending || new Set(),
       els: {target: $('comment-target'), body: $('comment-body'), add: $('comment-add'), list: $('comment-list'), count: $('comments-count'), send: $('comment-send')},

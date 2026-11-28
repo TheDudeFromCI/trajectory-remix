@@ -141,6 +141,7 @@ Changing the enabled warnings can make earlier signoffs stale.
 
 | Setting | Notes |
 | --- | --- |
+| Agent name | What chat windows and comments call the agent. Defaults to `agent`. It is display only: stored events keep the speaker `agent`, so renaming never changes a trajectory. Chat messages whose speaker is the agent name are also shown as the agent. |
 | Train / development / test fractions | Must total 1. Used when export assigns splits. |
 | Reasoning effort levels | Defaults to Low, Medium and High. |
 | Log cache size (MiB) | Project-wide retained log cap. Default 1024, blank means unlimited. |

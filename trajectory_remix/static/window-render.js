@@ -133,7 +133,7 @@ function noopChip(count) {
 }
 
 /** Formatted view: chat bubbles for chatrooms, tool name lists for tools windows, JSON blocks for tool traffic. */
-function formattedBody(tokens, {purpose, isAgent, toolExtras = () => [], hideExtras = false}) {
+function formattedBody(tokens, {purpose, isAgent, agentName = 'agent', toolExtras = () => [], hideExtras = false}) {
   const body = node('div', undefined, 'window-formatted');
   const chat = purpose === 'chatroom', speakers = new Map();
   const tone = name => { if (!speakers.has(name)) speakers.set(name, SPEAKER_TONES[speakers.size % SPEAKER_TONES.length]); return speakers.get(name); };
@@ -151,7 +151,9 @@ function formattedBody(tokens, {purpose, isAgent, toolExtras = () => [], hideExt
       const {speaker, text} = splitSpeaker(part.text), agent = isAgent(part.event, speaker);
       const bubble = node('div', undefined, 'wt-bubble' + (agent ? ' agent' : '') + (part.open ? ' open' : ''));
       bubble.style.setProperty('--tone', `var(--pastel-${agent ? 'mint' : tone(speaker)})`);
-      bubble.append(node('span', speaker || 'Message', 'wt-speaker'), markdownBlock(text, 'wt-text', 'span'));
+      // The stored speaker for the agent is "agent"; show the project's agent name instead.
+      const label = agent && (!speaker || speaker === 'agent') ? agentName : speaker;
+      bubble.append(node('span', label || 'Message', 'wt-speaker'), markdownBlock(text, 'wt-text', 'span'));
       body.append(bubble);
     } else if (['msg', 'tool', 'response'].includes(part.type)) {
       const block = node('div', undefined, `wt-block ${part.type}` + (part.open ? ' open' : ''));
