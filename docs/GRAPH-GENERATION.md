@@ -107,8 +107,8 @@ review.
 
 Turn on **Enable long-trajectory experiment** in **Review Settings** and save before
 starting a generation job. The experiment uses the task length already selected by the
-sampler. XXS through S aim for about 32,500 content tokens and 2,000 supervised agent
-tokens. M aims for about 65,000 and 4,000. L through XXL aim for about 130,000 and 8,000.
+sampler. XXXS through S aim for about 32,500 content tokens and 2,000 supervised agent
+tokens. M aims for about 65,000 and 4,000. L through XXXL aim for about 130,000 and 8,000.
 Projects using older matrices derive the same three bands from the combined complexity
 axis. These guide the models. Actual lengths can vary.
 

@@ -4,7 +4,7 @@ The supplied sampler has one ``complexity`` dimension that mixes task scale (tas
 dependency depth, agents, windows, tool calls) with difficulty. The editor matrix splits it:
 
 * ``complexity``: how hard the task is, Trivial to Expert. Sampled here, independently.
-* ``task_length``: how big the task is, XXS to XXL (the size-label names). It carries the
+* ``task_length``: how big the task is, XXXS to XXXL (the size-label names). It carries the
   structural ranges and a 0-3 ``level`` and is handed to the supplied sampler in place of its
   own ``complexity``, so behavior eligibility and structure keep working unchanged.
 
@@ -26,6 +26,7 @@ COMPLEXITY = [
 # rather than a flat or linear spread: most tasks are S-L, few are XXS or XXL.
 # (id, weight, level, tasks, dependency depth, max agents, windows, tool calls, ~total tokens)
 TASK_LENGTH = [
+    ("XXXS", 0.02, 0, (1, 1), (0, 0), 1, (1, 2), (0, 1), "4k"),
     ("XXS", 0.05, 0, (1, 2), (0, 0), 1, (1, 2), (0, 1), "8k"),
     ("XS", 0.12, 0, (1, 3), (0, 1), 2, (1, 3), (1, 3), "16k"),
     ("S", 0.22, 1, (2, 5), (0, 2), 3, (1, 4), (1, 5), "32k"),
@@ -33,13 +34,17 @@ TASK_LENGTH = [
     ("L", 0.19, 2, (7, 14), (1, 4), 5, (2, 7), (5, 14), "128k"),
     ("XL", 0.11, 3, (12, 22), (2, 6), 7, (3, 9), (6, 20), "256k"),
     ("XXL", 0.05, 3, (18, 32), (3, 8), 8, (4, 12), (10, 30), "512k"),
+    ("XXXL", 0.02, 3, (28, 48), (4, 10), 10, (6, 16), (16, 44), "1M"),
 ]
+# The two extremes were missing before this version; extend_lengths adds them to saved matrices.
+EXTREMES = {"XXXS": "XXS", "XXXL": "XXL"}  # New size -> the neighbour whose rules it shares.
+LENGTHS_VERSION = 2
 # Rules in the supplied matrix that refer to its scale choices.
 LEGACY_SCALE = {
-    "trivial": ["XXS"],
+    "trivial": ["XXXS", "XXS"],
     "small": ["XS", "S"],
     "medium": ["M", "L"],
-    "large": ["XL", "XXL"],
+    "large": ["XL", "XXL", "XXXL"],
 }
 
 
@@ -97,7 +102,42 @@ def split(matrix):
     tracked = m["metrics_schema"]["tracked_one_of"]
     tracked.insert(tracked.index("complexity") + 1, "task_length")
     m["metrics_schema"]["cross_tabs"].append(["complexity", "focus.family"])
+    m["task_length_version"] = LENGTHS_VERSION
     return m
+
+
+def _conditions(matrix):
+    """Every rule or option condition (field -> allowed values) in the matrix."""
+    for rule in [*matrix.get("conditional_weights", []), *matrix.get("hard_implications", [])]:
+        yield rule["when"]
+    for items in [*matrix.get("dimensions", {}).values(), matrix.get("domains", [])]:
+        for item in items:
+            yield from (item[k] for k in ("requires", "forbids") if isinstance(item.get(k), dict))
+
+
+def extend_lengths(matrix):
+    """Add XXXS and XXXL to a split matrix saved before they existed. Returns True if changed.
+
+    Each joins the rules of its neighbour (XXS, XXL), so a rule for the smallest or largest
+    tasks still applies. Runs once per matrix: the version mark keeps deleted sizes deleted."""
+    if not is_split(matrix) or matrix.get("task_length_version", 1) >= LENGTHS_VERSION:
+        return False
+    choices = matrix["dimensions"]["task_length"]
+    have = {x["id"] for x in choices}
+    defaults = {x["id"]: x for x in task_length_options()}
+    for new, neighbour in EXTREMES.items():
+        if new in have:
+            continue
+        if new == "XXXS":
+            choices.insert(0, defaults[new])
+        else:
+            choices.append(defaults[new])
+        for condition in _conditions(matrix):
+            values = condition.get("task_length")
+            if isinstance(values, list) and neighbour in values and new not in values:
+                values.append(new)
+    matrix["task_length_version"] = LENGTHS_VERSION
+    return True
 
 
 def to_supplied(matrix):

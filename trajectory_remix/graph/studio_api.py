@@ -231,6 +231,7 @@ def create_studio_app(
         return dict(job_id=job, status_url=f"/api/v1/jobs/{job}")
 
     from .comments_api import add_comment_routes
+    from .matrix_migration import migrate as migrate_matrix
     from .passes_api import add_pass_routes
     from .prompt_migration import migrate
     from .prompts_api import add_prompt_routes
@@ -238,6 +239,7 @@ def create_studio_app(
     from .tools_api import add_tool_routes
 
     migrate(studio.store)
+    migrate_matrix(studio.store)
     add_tool_routes(router, studio.store)
     add_comment_routes(router, studio.comments)
     add_proposal_routes(router, studio)

@@ -50,7 +50,7 @@ the category list. When one is unset, its picker shows the sampler's target as a
 ### Target size
 
 **Target size** is the size the trajectory should reach, such as `XL`. It's the matrix's `task_length`
-category, whose choices (`XXS` to `XXL`) use the same names as the [size labels](#character-counts-and-trajectory-sizes).
+category, whose choices (`XXXS` to `XXXL`) use the same names as the [size labels](#character-counts-and-trajectory-sizes).
 
 | What uses it | How |
 | --- | --- |

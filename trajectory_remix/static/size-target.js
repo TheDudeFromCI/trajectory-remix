@@ -1,4 +1,4 @@
-/* Target size: the trajectory's `task_length` metric (XXS…XXL, the size-label names), or the
+/* Target size: the trajectory's `task_length` metric (XXXS…XXXL, the size-label names), or the
    sampled proposal's task length when the metric is unset. Compared with the saved size label
    to warn when a trajectory is larger or smaller than intended. */
 
