@@ -41,8 +41,23 @@ list just the values still missing. Each change is one **Undo** step. The tab is
 holds the trajectory.
 
 **Sample unset from matrix** fills every unset category and label in one step. It draws one sample from
-the [Sampler matrix](SAMPLER-WORKBENCH.md) that fits the values you already set, and keeps those values.
-Filled values are recorded with origin `matrix_sample`. It is one **Undo** step, like any other change.
+the [Sampler matrix](SAMPLER-WORKBENCH.md) that keeps every value you already set, and fills the rest from that
+sample. Filled values are recorded with origin `matrix_sample`. It is one **Undo** step, like any other change.
+**New draft** on the Draft tab samples the same way.
+
+#### How set values are kept
+
+Every category and label you set is *pinned*: the sample always keeps it exactly.
+
+| Values | How they're chosen |
+| --- | --- |
+| **Nothing set** | An ordinary sample from the matrix. |
+| **Unset values, when some are pinned** | Sampled by the matrix's own weights and rules, given the pins. A pinned value is often unusual, so the result can stray from the matrix's usual mix. |
+| **Pins that contradict each other** | Nothing changes, and the message names the clash, for example *entry_state fresh requires lifecycle in ['initiation']* or *incident stale_decision forces information_state stale*. Change or clear one of them. |
+
+Pins still follow the matrix's rules. For example, pinning the incident `stale_decision` also makes the
+information state `stale`, because the matrix requires it. A pinned choice is used even if its weight in the
+matrix is zero.
 
 **Complexity** and **Target size** sit in the **Trajectory** section, next to Stage and Split, rather than in
 the category list. When one is unset, its picker shows the sampler's target as a hint.

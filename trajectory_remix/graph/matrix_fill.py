@@ -1,40 +1,17 @@
 """Sample a proposal from the matrix around a trajectory's assigned metrics.
 
-The trajectory's category and label metrics are the settings to keep. Assigned values the
-supplied sampler can pin (sampling.OVERRIDES) are pinned; among a few candidate samples the
-one agreeing with the most other assigned values is chosen; any assigned value still
-differing is written into the proposal, with a requirement telling the Draft to honor it.
-Unset metrics take the sampled values, recorded with origin ``matrix_sample``.
+The trajectory's category and label metrics are the settings to keep: each assigned value is a
+pin (matrix_pins), and pins the matrix's rules rule out raise IncompatiblePins. Unset metrics
+take the sampled values, recorded with origin ``matrix_sample``.
 """
 
-import secrets
 from copy import deepcopy
 
+from . import matrix_pins
 from .models import digest
-from .sampling import OVERRIDES, SamplerService
+from .sampling import SamplerService
 
 ORIGIN = "matrix_sample"
-CANDIDATES = 32
-
-# Where a sampled category also appears in the proposal's scenario and objective.
-SCENARIO_PATHS = {
-    "focus.family": ("learning_objective", "primary_family"),
-    "focus.behavior": ("learning_objective", "primary_behavior"),
-    "decision.axis": ("learning_objective", "decision_axis"),
-    "decision.choice": ("learning_objective", "target_decision"),
-    "domain": ("scenario", "domain", "id"),
-    "resource_posture": ("scenario", "resources", "posture"),
-    "tool_access": ("scenario", "resources", "tool_access"),
-    "agent_reliability": ("scenario", "resources", "agent_reliability"),
-    "user_competence": ("scenario", "user", "competence"),
-    "user_patience": ("scenario", "user", "patience"),
-    "user_involvement": ("scenario", "user", "involvement"),
-    "user_tone": ("scenario", "user", "tone"),
-    "execution_pattern": ("scenario", "execution", "pattern"),
-    "observation_source": ("scenario", "execution", "observation_source"),
-    "window_role_profile": ("scenario", "execution", "window_role_profile"),
-    "episode_horizon": ("scenario", "execution", "episode_horizon"),
-}
 
 
 def _sampled(proposal, key, spec):
@@ -64,63 +41,9 @@ def assigned(source, defs):
     return result
 
 
-def _agreement(proposal, values, defs):
-    return sum(_sampled(proposal, k, defs[k]) == v for k, v in values.items())
-
-
-def _set_path(proposal, path, value):
-    node = proposal
-    for part in path[:-1]:
-        node = node.get(part)
-        if not isinstance(node, dict):
-            return
-    node[path[-1]] = value
-
-
-def honor(proposal, values, defs):
-    """Write assigned values the sample differs on into the proposal. Returns the keys."""
-    changed = []
-    for key, value in values.items():
-        if _sampled(proposal, key, defs[key]) == value:
-            continue
-        group = "sampling" if defs[key]["kind"] == "category" else "multi_labels"
-        proposal["metrics"][group][key] = deepcopy(value)
-        if key in SCENARIO_PATHS:
-            _set_path(proposal, SCENARIO_PATHS[key], value)
-        elif key in proposal.get("scenario", {}).get("project_state", {}):
-            proposal["scenario"]["project_state"][key] = value
-        changed.append(key)
-    if changed:
-        shown = "; ".join(f"{k} = {values[k]}" for k in changed)
-        proposal["generation_directive"]["requirements"].append(
-            "These settings were assigned on the trajectory and replace the sampled choices;"
-            f" follow them over any conflicting detail: {shown}."
-        )
-        proposal["sampling_provenance"]["assigned_overrides"] = {k: values[k] for k in changed}
-    return changed
-
-
 def sample(sampler, source, defs, seed=None):
     """A proposal snapshot (not yet stored) that keeps every assigned value."""
-    values = assigned(source, defs)
-    pins = {k: v for k, v in values.items() if k in OVERRIDES}
-    rest = {k: v for k, v in values.items() if k not in pins}
-    if seed is not None and type(seed) is not int:
-        raise ValueError("seed must be an integer")
-    seeds = [
-        seed + i if seed is not None else secrets.randbits(62)
-        for i in range(CANDIDATES if rest else 1)
-    ]
-    best = None
-    for candidate in seeds:
-        snapshot = sampler.propose(seed=candidate, overrides=pins or None, persist=False)
-        score = _agreement(snapshot["proposal"], rest, defs)
-        if best is None or score > best[0]:
-            best = (score, snapshot)
-        if score == len(rest):
-            break
-    snapshot = best[1]
-    honor(snapshot["proposal"], values, defs)
+    snapshot = matrix_pins.sample(sampler, assigned(source, defs), seed)
     snapshot["payload_digest"] = digest(snapshot["proposal"])
     return snapshot
 

@@ -142,8 +142,9 @@ endpoint assigned to the *Draft* role (and *Assembly*, if set) in [Project setti
 4. Click **Assemble**. The windows and timeline update when it finishes.
 
 Both run as jobs, and **Undo** reverts what they changed. Neither starts a review; use **More → Review** afterwards.
-A value you set that the sampler can't pin directly is written into the sampled proposal with an instruction
-to follow it, so the draft still honors it.
+Every metric you set is kept exactly. If the values you set contradict each other under the matrix's rules,
+New draft stops before changing anything and says which values clash. See
+[How set values are kept](METRICS.md#how-set-values-are-kept).
 
 ### Manage windows
 

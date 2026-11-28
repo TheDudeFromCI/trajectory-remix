@@ -33,6 +33,7 @@ def definitions(gen):
     return gen.sampler.editor()["configuration"]["definitions"]
 
 
+# domain and complexity go to the supplied sampler; stakes is pinned through the matrix.
 ASSIGNED = dict(domain="scientific_research", stakes="high", complexity="hard")
 
 
@@ -64,30 +65,19 @@ async def test_new_draft_keeps_assigned_metrics_and_assigns_the_rest(tmp_path):
     assert source.metadata["targets"] == source.metadata["proposal"]["proposal"]["metrics"]
 
 
-def test_an_assigned_value_the_sampler_cannot_pin_is_written_into_the_proposal(tmp_path):
+def test_an_unknown_choice_is_not_a_pin(tmp_path):
     gen, _ = service(tmp_path)
-    defs = definitions(gen)
-    record = trajectory(gen, metrics={"stakes": metric("high"), "decision.choice": metric("x")})
-    snapshot = matrix_fill.sample(gen.sampler, record.source, defs, seed=1)
-    proposal = snapshot["proposal"]
-    assert proposal["metrics"]["sampling"]["stakes"] == "high"
-    assert proposal["scenario"]["project_state"]["stakes"] == "high"
-    # An unknown choice is not an assignment: the sampled value stands.
-    assert "decision.choice" not in matrix_fill.assigned(record.source, defs)
+    record = trajectory(gen, metrics={"decision.choice": metric("x"), "stakes": metric("high")})
+    assert matrix_fill.assigned(record.source, definitions(gen)) == {"stakes": "high"}
 
 
-def test_honor_rewrites_scenario_and_adds_a_requirement():
-    proposal = dict(
-        metrics=dict(sampling={"user_tone": "warm"}, multi_labels={}),
-        scenario=dict(user={"tone": "warm"}, project_state={}),
-        generation_directive=dict(requirements=[]),
-        sampling_provenance={},
-    )
-    defs = {"user_tone": dict(kind="category")}
-    assert matrix_fill.honor(proposal, {"user_tone": "curt"}, defs) == ["user_tone"]
-    assert proposal["scenario"]["user"]["tone"] == "curt"
-    assert "user_tone = curt" in proposal["generation_directive"]["requirements"][-1]
-    assert proposal["sampling_provenance"]["assigned_overrides"] == {"user_tone": "curt"}
+def test_incompatible_assigned_metrics_refuse_a_new_draft(tmp_path):
+    gen, _ = service(tmp_path)
+    pins = {"entry_state": metric("fresh"), "lifecycle": metric("active")}
+    record = trajectory(gen, metrics=pins)
+    with pytest.raises(ValueError, match="entry_state fresh requires lifecycle"):
+        trajectory_passes.start_draft(gen, record.source.id, record.revision, 1)
+    assert gen.store.read(record.source.id).revision == record.revision, "nothing is saved"
 
 
 @pytest.mark.asyncio

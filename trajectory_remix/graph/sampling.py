@@ -238,7 +238,18 @@ class SamplerService:
         self.store.update_settings(data, expected_revision, rebase=True)
         return self.editor()
 
-    def propose(self, *, seed=None, world_group_id=None, overrides=None, frozen=None, persist=True):
+    def propose(
+        self,
+        *,
+        seed=None,
+        world_group_id=None,
+        overrides=None,
+        frozen=None,
+        persist=True,
+        matrix=None,
+    ):
+        """Sample one proposal. `matrix` replaces the frozen matrix for this draw only: a copy
+        restricted to pinned options (matrix_pins); the snapshot still records `frozen`."""
         frozen = deepcopy(self.editor() if frozen is None else frozen)
         c = frozen["configuration"]
         if seed is not None and type(seed) is not int:
@@ -246,7 +257,11 @@ class SamplerService:
         # Default provisional seed groups are provenance, never dataset families.
         try:
             proposal = task_axes.sample(
-                original.sample_one, c["matrix"], seed, world_group_id, overrides
+                original.sample_one,
+                c["matrix"] if matrix is None else matrix,
+                seed,
+                world_group_id,
+                overrides,
             )
         except (TypeError, KeyError, AssertionError) as e:
             raise ValueError(f"Invalid sampler configuration or pins: {e}") from e
