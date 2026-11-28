@@ -12,6 +12,7 @@ node tests/project_settings_frontend.mjs
 node tests/tokenizer_store_frontend.mjs
 node tests/studio_ui_frontend.mjs
 node tests/window_render_frontend.mjs
+node tests/agent_name_frontend.mjs
 node tests/window_markdown_frontend.mjs
 node tests/tool_picker_frontend.mjs
 node tests/comments_view_frontend.mjs

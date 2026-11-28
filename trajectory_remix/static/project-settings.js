@@ -207,6 +207,11 @@ export function renderProjectSettings(container, initial, options = {}) {
   profiles.append(field('New profile ID', profileId), field('Tokenizer JSON file', upload)); container.append(profiles);
   const other = node('details', undefined, 'settings-subsection'); other.append(node('summary', 'Project defaults'));
   const grid = node('div', undefined, 'settings-grid');
+  const agentName = input('Agent name', current().agent_name ?? 'agent', value => write(d => { d.agent_name = value.trim() || 'agent'; }));
+  agentName.maxLength = 64; agentName.placeholder = 'agent';
+  const agentNameField = field('Agent name (shown in chat windows and comments)', agentName);
+  agentNameField.append(node('span', 'Display only. Stored events keep the speaker "agent", so renaming never rewrites trajectories.', 'settings-help'));
+  grid.append(agentNameField);
   for (const split of ['train', 'development', 'test']) {
     const n = input(`${split} split ratio`, current().split_ratios?.[split], value => write(d => { d.split_ratios ||= {}; d.split_ratios[split] = value; }), 'number'); n.min = 0; n.max = 1; n.step = 'any'; grid.append(field(`${split} fraction`, n));
   }

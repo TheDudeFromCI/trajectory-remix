@@ -551,6 +551,8 @@ class ProjectSettings(DTO):
     # Chance that each tool outside a tool_schema event's chosen tools is listed anyway (0 = never).
     tool_schema_extra_chance: Annotated[float, Field(ge=0, le=1)] = 0.5
     disabled_warnings: list[Identifier] = Field(default_factory=list)
+    # Name shown for the agent in chat windows and comments; the stored speaker stays "agent".
+    agent_name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S(.*\S)?$")] = "agent"
     size_labels: list[SizeLabel] = Field(default_factory=default_size_labels)
 
     @field_validator("size_labels")

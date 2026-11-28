@@ -23,14 +23,16 @@ export class CommentsView {
   /** els: {target, body, add, list, count, send?}; inspect(kind, id) jumps to a comment's target.
      autoSend() says whether new or reopened comments go to the assistant at once; onOpened() does the sending.
      proposed() is the set of comment IDs a pending Assistant proposal addresses: they resolve by applying it. */
-  constructor({api, report, els, inspect = () => {}, onChange = () => {}, autoSend = () => false, onOpened = async () => {}, proposed = () => new Set()}) {
-    Object.assign(this, {api, report, els, inspect, onChange, autoSend, onOpened, proposed});
+  constructor({api, report, els, inspect = () => {}, onChange = () => {}, autoSend = () => false, onOpened = async () => {}, proposed = () => new Set(), agentName = () => 'agent'}) {
+    Object.assign(this, {api, report, els, inspect, onChange, autoSend, onOpened, proposed, agentName});
     this.sendTip = els.send?.dataset.tip || '';
     this.items = []; this.counts = new Map(); this.trajectory = null; this.loaded = ''; this.replies = new Map();
     els.add.addEventListener('click', () => this.add().catch(report));
     els.body.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.add().catch(report); } });
     els.target.addEventListener('change', () => { this.pinned = true; });
   }
+  /** Tag text for the agent: the project's agent name, capitalised ("agent" shows as "Agent"). */
+  agentLabel() { const name = this.agentName() || 'agent'; return name[0].toUpperCase() + name.slice(1); }
   count(kind, id) { return this.counts.get(targetKey(kind, id)) || 0; }
   /** Offer every event and window as a target; follow the selected event until the user picks one. */
   setContext(draft, event) {
@@ -126,7 +128,7 @@ export class CommentsView {
     jump.onclick = () => this.inspect(c.target_kind, c.target_id);
     head.append(jump);
     if (!c.target_exists) head.append(tag('Removed', 'warning'));
-    head.append(tag(c.author === 'agent' ? 'Agent' : 'You', c.author === 'agent' ? 'accent' : 'muted'));
+    head.append(tag(c.author === 'agent' ? this.agentLabel() : 'You', c.author === 'agent' ? 'accent' : 'muted'));
     if (c.status === 'addressed') { const t = tag('Awaiting review', 'warning'); t.dataset.tip = 'An agent says this is fixed. Accept it, or request changes.'; head.append(t); }
     const when = node('span', `rev ${c.source_revision ?? '?'} · ${String(c.created).slice(0, 10)}`, 'small muted grow');
     when.dataset.tip = `Written against source revision ${c.source_revision ?? 'unknown'} at ${c.created}`;
@@ -158,7 +160,7 @@ export class CommentsView {
     const list = node('ol', undefined, 'comment-thread');
     for (const r of c.replies) {
       const item = node('li', undefined, 'comment-reply'), head = node('div', undefined, 'comment-head');
-      head.append(tag(r.author === 'agent' ? 'Agent' : 'You', r.author === 'agent' ? 'accent' : 'muted'), node('span', String(r.created).slice(0, 10), 'small muted grow'));
+      head.append(tag(r.author === 'agent' ? this.agentLabel() : 'You', r.author === 'agent' ? 'accent' : 'muted'), node('span', String(r.created).slice(0, 10), 'small muted grow'));
       const remove = node('button', '×', 'ghost sm comment-reply-delete'); remove.setAttribute('aria-label', 'Delete reply');
       remove.onclick = () => this.act(c, 'DELETE', undefined, `/replies/${r.id}`).catch(this.report);
       head.append(remove); item.append(head, node('p', r.body, 'comment-body')); list.append(item);

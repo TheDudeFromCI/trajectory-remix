@@ -102,6 +102,7 @@ jobs:
       - run: node tests/tokenizer_store_frontend.mjs
       - run: node tests/studio_ui_frontend.mjs
       - run: node tests/window_render_frontend.mjs
+      - run: node tests/agent_name_frontend.mjs
       - run: node tests/window_markdown_frontend.mjs
       - run: node tests/run_inputs_frontend.mjs
       - run: node tests/provider_options_frontend.mjs
