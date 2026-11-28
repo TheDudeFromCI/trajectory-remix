@@ -64,6 +64,8 @@ async def test_scaled_assistant_keeps_paged_reads_and_metric_annotations(tmp_pat
     assert viewed["accepted"] is True
     assert viewed["event"]["content"]["items"] == "fore"
     assert metrics["accepted"] is True
+    assert panel(gen, record)["complexity"]["observation"] is None
+    applied(gen, record)
     assert panel(gen, record)["complexity"]["observation"]["value"] == "medium"
 
 
