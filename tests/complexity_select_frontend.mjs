@@ -20,5 +20,8 @@ assert.equal(select.options[1], first, 'same choices reuse the options'); assert
 
 renderComplexity(select, view('available', 'easy'), true); assert.equal(select.disabled, true);
 renderComplexity(select, null, false); assert.equal(select.disabled, true);
-console.log('Complexity picker: choices, target hint, value, option reuse and locking passed.');
+const sizes = {targets: {sampling: {task_length: 'L'}}, values: {task_length: {status: 'available', observation: {value: 'XL'}, definition: {choices: ['S', 'L', 'XL']}}}};
+const target = document.createElement('select'); renderComplexity(target, sizes, false, 'task_length');
+assert.deepEqual([...target.options].map(o => o.textContent), ['Not set (target L)', 'S', 'L', 'XL']); assert.equal(target.value, 'XL');
+console.log('Complexity and Target size pickers: choices, target hint, value, option reuse and locking passed.');
 window.happyDOM.abort();

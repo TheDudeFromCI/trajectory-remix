@@ -15,7 +15,15 @@ VERSION = 1
 CHARS_PER_TOKEN = 3.5
 TARGETS = {"small": (32500, 2000), "standard": (65000, 4000), "large": (130000, 8000)}
 TASK_LENGTH_SIZES = dict(
-    XXS="small", XS="small", S="small", M="standard", L="large", XL="large", XXL="large"
+    XXXS="small",
+    XXS="small",
+    XS="small",
+    S="small",
+    M="standard",
+    L="large",
+    XL="large",
+    XXL="large",
+    XXXL="large",
 )
 LEGACY_COMPLEXITY_SIZES = dict(trivial="small", small="small", large="large")
 

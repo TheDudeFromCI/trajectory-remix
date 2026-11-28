@@ -6,6 +6,7 @@ import {windowBody} from './window-render.js';
 import {CommentsView} from './comments-view.js';
 import {ProposalView} from './assistant-proposal.js';
 import {MetricsEditor} from './metrics-editor.js';
+import {DraftTab} from './draft-tab.js';
 import {renderComplexity} from './complexity-select.js';
 import {studioWarnings} from './studio-warnings.js';
 import {AssistantStatus, isAssistantOwner} from './assistant-indicator.js';
@@ -298,6 +299,7 @@ export class StudioUI {
     if (locked) setAttr(ownerLink, 'data-tip', 'Job ' + this.record.owner);
     $('workspace').classList.toggle('is-locked', locked);
     this.windowsPanel?.setLocked(locked);
+    this.draftTab?.render();
     this.renderDirty();
   }
   changed() {
@@ -320,7 +322,7 @@ export class StudioUI {
     this.renderTimeline();
   }
   renderDiagnostics() {
-    const studio = studioWarnings({draft: this.draft, record: this.record, metrics: this.metricsView});
+    const studio = studioWarnings({draft: this.draft, record: this.record, metrics: this.metricsView, sizeLabels: this.settings?.size_labels});
     const list = [...(this.diagnostics || []), ...studio], errors = list.filter(d => d.severity === 'error').length, warnings = list.length - errors;
     $('diagnostics').replaceChildren(...list.map(d => {
       const n = node('div', undefined, 'diagnostic ' + d.severity), head = node('div', undefined, 'row');
@@ -788,6 +790,15 @@ export class StudioUI {
     this.reviewJob = r.job_id; this.ownedBulk.add(r.job_id);
     message('Review running… Progress also appears in Jobs.');
   }
+  /** Draft tab: run the Draft or Assembly pass on the saved trajectory as a job. */
+  async startDraftPass(action) {
+    const r = await api(`/trajectories/${this.id}/${action}`, 'POST', {expected_revision: this.record.revision});
+    if (r.delta) this.history([r.delta]);
+    this.ownedBulk.add(r.job_id);
+    const sampled = r.filled?.length ? ` Sampled ${r.filled.length} unset metrics from the matrix.` : '';
+    message((action === 'draft' ? 'Writing a new draft…' : 'Assembling the draft into this trajectory…') + sampled + ' Follow it in Jobs.');
+    await this.refreshSelected(); this.metricsEditor.load().catch(message);
+  }
   async sendToAssistant() {
     if (!this.id) return;
     if (!this.settings.endpoint_roles?.assistant) throw new Error('Assign the Assistant endpoint role in Project Settings first.');
@@ -1027,11 +1038,19 @@ export class StudioUI {
       onSaved: view => { if (view.delta) this.history([view.delta]); return this.refreshSelected(); },
       onView: (view, state) => {
         renderComplexity($('complexity'), view, state.locked);
+        renderComplexity($('target-size'), view, state.locked, 'task_length');
         if (view !== this.metricsView) { this.metricsView = view; this.renderDiagnostics(); }
       },
-      shownElsewhere: ['complexity'],
-      els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset')}});
+      shownElsewhere: ['complexity', 'task_length'],
+      els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset'), sample: $('metrics-sample-unset')}});
+    this.draftTab = new DraftTab({report: message, source: () => this.draft, locked: () => this.record?.owner,
+      roles: () => this.settings?.endpoint_roles,
+      els: {text: $('draft-text'), generate: $('draft-generate'), assemble: $('draft-assemble'), note: $('draft-note')},
+      edit: text => { this.draft.metadata ||= {}; if (text) this.draft.metadata.draft = text; else delete this.draft.metadata.draft; keepTyping('metadata-json', json(this.draft.metadata)); this.changed(); },
+      ready: async () => { await this.autoSave.flush(); if (this.hasUnsavedChanges()) throw new Error('Your latest edit could not be saved yet. Fix it or reload the saved source first.'); },
+      start: action => this.startDraftPass(action)});
     on('complexity', 'change', () => this.metricsEditor.save('complexity', $('complexity').value || undefined));
+    on('target-size', 'change', () => this.metricsEditor.save('task_length', $('target-size').value || undefined));
     $('tab-metrics').addEventListener('click', () => this.metricsEditor.load().catch(message));
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);

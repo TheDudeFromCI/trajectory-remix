@@ -1,4 +1,4 @@
-"""Complexity (Trivial..Expert) and task length (XXS..XXL) as separate sampler axes."""
+"""Complexity (Trivial..Expert) and task length (XXXS..XXXL) as separate sampler axes."""
 
 import pytest
 
@@ -28,6 +28,7 @@ def test_default_matrix_has_both_axes_and_metrics():
         "expert",
     ]
     assert [x["id"] for x in m["dimensions"]["task_length"]] == [
+        "XXXS",
         "XXS",
         "XS",
         "S",
@@ -35,10 +36,11 @@ def test_default_matrix_has_both_axes_and_metrics():
         "L",
         "XL",
         "XXL",
+        "XXXL",
     ]
     defs = configuration()["definitions"]
     assert defs["complexity"]["choices"][-1] == "expert"
-    assert defs["task_length"]["choices"][0] == "XXS"
+    assert defs["task_length"]["choices"][0] == "XXXS"
 
 
 def test_length_weights_peak_in_the_middle_not_linear():
@@ -53,9 +55,10 @@ def test_scale_rules_move_to_task_length():
     m = editor_default_matrix()
     whens = [r["when"] for r in m["conditional_weights"]]
     assert not any("complexity" in w for w in whens)
-    assert {"task_length": ["XL", "XXL"]} in whens and {"task_length": ["XXS"]} in whens
+    assert {"task_length": ["XL", "XXL", "XXXL"]} in whens
+    assert {"task_length": ["XXXS", "XXS"]} in whens
     supplied = task_axes.to_supplied(m)
-    assert [x["id"] for x in supplied["dimensions"]["complexity"]][0] == "XXS"
+    assert [x["id"] for x in supplied["dimensions"]["complexity"]][0] == "XXXS"
     assert "task_length" not in supplied["dimensions"]
     original.validate_matrix(supplied)
 
@@ -91,5 +94,5 @@ def test_coverage_compares_task_length(tmp_path):
     assert "task_length" in sampler.editor()["overrides"]
     report = MetricService(sampler).population({}, "all")
     rows = report["proposal_coverage"]["configured_target_comparison"]
-    assert set(rows["task_length"]) == {"XXS", "XS", "S", "M", "L", "XL", "XXL"}
+    assert set(rows["task_length"]) == {"XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"}
     assert set(rows["complexity"]) == {"trivial", "easy", "medium", "hard", "expert"}

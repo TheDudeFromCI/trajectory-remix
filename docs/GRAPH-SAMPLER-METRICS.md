@@ -24,12 +24,17 @@ into two axes:
 | Axis | Choices | What it controls |
 | --- | --- | --- |
 | `complexity` | `trivial`, `easy`, `medium`, `hard`, `expert` | How hard the task is. Sampled independently and added to the generation directive. |
-| `task_length` | `XXS`, `XS`, `S`, `M`, `L`, `XL`, `XXL` (the size-label names) | How big the task is: task count, dependency depth, agents, window budget and tool calls, plus a 0-3 level for behavior eligibility. |
+| `task_length` | `XXXS`, `XXS`, `XS`, `S`, `M`, `L`, `XL`, `XXL`, `XXXL` (the size-label names) | How big the task is: task count, dependency depth, agents, window budget and tool calls, plus a 0-3 level for behavior eligibility. |
 
 Sizes double at each step, so task length is not weighted linearly. The default weights form a bell over that
-log scale (5, 12, 22, 26, 19, 11 and 5 percent), so most proposals are S to L. You can edit both axes in the
-Sampler workbench. Rules in the supplied matrix that named its scale choices now name task lengths
-(`large` becomes `XL`/`XXL`, `trivial` becomes `XXS`). Coverage compares both axes.
+log scale (weights 2, 5, 12, 22, 26, 19, 11, 5 and 2 from XXXS to XXXL), so most proposals are S to L.
+You can edit both axes in the Sampler workbench. Rules in the supplied matrix that named its scale choices now
+name task lengths (`large` becomes `XL`/`XXL`/`XXXL`, `trivial` becomes `XXXS`/`XXS`). Coverage compares both
+axes.
+
+Matrices saved before `XXXS` and `XXXL` existed gain them once when the studio starts, with the default
+weights. Each joins its neighbour's rules (`XXS` or `XXL`), and the save is one settings revision. A size you
+delete afterwards stays deleted.
 
 The split lives in `graph/task_axes.py`; the supplied sampler files are unchanged. A matrix saved before the
 split, without `task_length`, still samples exactly as before.

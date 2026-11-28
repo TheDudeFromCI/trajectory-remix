@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
-from . import task_axes
+from . import matrix_numbers, task_axes
 from .models import canonical, digest
 from .sampler_originals import kidra_sampler as original
 from .size_labels import agent_characters, total_characters
@@ -152,6 +152,9 @@ def definitions(matrix, custom=None):
         result[key] = dict(kind="labels", scope="annotation", choices=choices)
     for key in matrix["metrics_schema"]["post_generation_actual_fields"]:
         result.setdefault(key, dict(kind="annotation", scope="annotation"))
+    # The sampler's numeric targets: set one on a trajectory to pin it (matrix_pins).
+    for key in matrix_numbers.NAMES:
+        result.setdefault(key, dict(kind="number", scope="annotation", unit="count", sampled=True))
     for key in CALCULATORS:
         result[key] = dict(kind="number", scope="source", unit="count")
     # These require an explicit compiled export/profile; source fragments are no proxy.
@@ -238,7 +241,18 @@ class SamplerService:
         self.store.update_settings(data, expected_revision, rebase=True)
         return self.editor()
 
-    def propose(self, *, seed=None, world_group_id=None, overrides=None, frozen=None, persist=True):
+    def propose(
+        self,
+        *,
+        seed=None,
+        world_group_id=None,
+        overrides=None,
+        frozen=None,
+        persist=True,
+        matrix=None,
+    ):
+        """Sample one proposal. `matrix` replaces the frozen matrix for this draw only: a copy
+        restricted to pinned options (matrix_pins); the snapshot still records `frozen`."""
         frozen = deepcopy(self.editor() if frozen is None else frozen)
         c = frozen["configuration"]
         if seed is not None and type(seed) is not int:
@@ -246,7 +260,11 @@ class SamplerService:
         # Default provisional seed groups are provenance, never dataset families.
         try:
             proposal = task_axes.sample(
-                original.sample_one, c["matrix"], seed, world_group_id, overrides
+                original.sample_one,
+                c["matrix"] if matrix is None else matrix,
+                seed,
+                world_group_id,
+                overrides,
             )
         except (TypeError, KeyError, AssertionError) as e:
             raise ValueError(f"Invalid sampler configuration or pins: {e}") from e
@@ -260,10 +278,14 @@ class SamplerService:
         )
         if not persist:  # A preview sample stays with the caller; nothing is stored.
             return snapshot
+        return self.keep(snapshot)
+
+    def keep(self, snapshot):
+        """Store a proposal snapshot; stored snapshots are immutable."""
         with self.store.connect() as db:
             db.execute(
                 "INSERT INTO graph_proposals VALUES(?,?,?)",
-                (ident, digest(snapshot), canonical(snapshot)),
+                (snapshot["id"], digest(snapshot), canonical(snapshot)),
             )
         return snapshot
 

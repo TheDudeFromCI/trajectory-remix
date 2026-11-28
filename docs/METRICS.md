@@ -23,14 +23,16 @@ Categories, labels and outcomes can't be calculated, so you set them by hand in 
 
 1. Select a trajectory.
 2. Open the **Metrics** tab in the event panel (after **JSON**).
-3. At the top, under **Trajectory**, set **Stage**, **Split** and **Complexity**, and read the trajectory's
-   **Size**. A missing split or stale values show up as warnings on the **Problems** tab.
+3. At the top, under **Trajectory**, set **Stage**, **Split**, **Complexity** and **Target size**, and read the
+   trajectory's **Size**. A missing split, stale values or a size off its target show up as warnings on the
+   **Problems** tab.
 4. Below that, pick a value, tick labels or type an outcome. Each change saves at once.
 
 | Group | What it holds | How you set it |
 | --- | --- | --- |
 | **Categories** | One choice per sampler dimension, such as `complexity`, `task_length` or `domain` | A dropdown |
 | **Labels** | Event tags and secondary competencies or behaviors | Checkboxes (click the summary to open them) |
+| **Targets** | The sampler's suggested numbers: task count, dependency depth, available agents, active window capacity, tool calls and coordination events | A whole number |
 | **Outcomes and notes** | Free values such as `actual_outcome` or `accepted` | Text, a number, `true`/`false` or JSON |
 | **Measured** | Values calculated from the source or an export | Read-only; use **Calculate missing metrics** |
 
@@ -39,8 +41,45 @@ source or definition; **Confirm** records it again for the current source. Tick 
 list just the values still missing. Each change is one **Undo** step. The tab is read-only while a job
 holds the trajectory.
 
-**Complexity** sits in the **Trajectory** section, next to Stage and Split, rather than in the category
-list. When it's unset, the picker shows the sampler's target as a hint.
+**Sample unset from matrix** fills every unset category, label and target in one step. It draws one sample from
+the [Sampler matrix](SAMPLER-WORKBENCH.md) that keeps every value you already set, and fills the rest from that
+sample. Filled values are recorded with origin `matrix_sample`. It is one **Undo** step, like any other change.
+**New draft** on the Draft tab samples the same way.
+
+#### How set values are kept
+
+Every category, label and target you set is *pinned*: the sample always keeps it exactly. Every one you leave
+unset is sampled, and New draft or Sample unset assigns it to the trajectory.
+
+| Values | How they're chosen |
+| --- | --- |
+| **Nothing set** | An ordinary sample from the matrix. |
+| **Unset values, when some are pinned** | Sampled by the matrix's own weights and rules, given the pins. A pinned value is often unusual, so the result can stray from the matrix's usual mix. |
+| **Pins that contradict each other** | Nothing changes, and the message names the clash, for example *entry_state fresh requires lifecycle in ['initiation']* or *incident stale_decision forces information_state stale*. Change or clear one of them. |
+
+A target must fit the ranges the matrix gives it. For example, task length `XL` has 12 to 22 tasks, so
+pinning both `XL` and a task count of 3 is refused. Pinning a task count on its own keeps only the task
+lengths whose range includes it.
+
+Pins still follow the matrix's rules. For example, pinning the incident `stale_decision` also makes the
+information state `stale`, because the matrix requires it. A pinned choice is used even if its weight in the
+matrix is zero.
+
+**Complexity** and **Target size** sit in the **Trajectory** section, next to Stage and Split, rather than in
+the category list. When one is unset, its picker shows the sampler's target as a hint.
+
+### Target size
+
+**Target size** is the size the trajectory should reach, such as `XL`. It's the matrix's `task_length`
+category, whose choices (`XXXS` to `XXXL`) use the same names as the [size labels](#character-counts-and-trajectory-sizes).
+
+| What uses it | How |
+| --- | --- |
+| **New draft** (Draft tab) | The draft is written for the target size, not the trajectory's current size. An unset target is sampled from the matrix and assigned. |
+| **Problems** tab | Warns with `size_below_target` or `size_above_target` when the saved size label is smaller or larger than the target. Empty trajectories are skipped. |
+
+When the target is unset, the warning compares against the task length in the trajectory's sampled proposal, if
+it has one. A target with no matching size label (after you rename the labels) isn't compared.
 
 A value you set is recorded against the trajectory's current content. If the content changes afterwards,
 the value is marked **Stale** until you **Confirm** it again, and the **Problems** tab lists it under

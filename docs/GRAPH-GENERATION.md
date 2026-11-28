@@ -90,12 +90,25 @@ conversation open. The Draft and signoff stay with the trajectory in `metadata.d
 `metadata.authoring_signoffs`. Jobs started before review and repair became one step pause with a
 message; start a new run or review instead.
 
+### Draft or assemble one trajectory
+
+The editor's **Draft** tab runs either pass on one saved trajectory (see
+[Dashboard](DASHBOARD.md#draft-and-assemble-one-trajectory)). Each is a one-item job like a selected
+review: it freezes the settings and plan, locks the trajectory, is never segmented and never starts a
+review.
+
+| Route | What happens |
+| --- | --- |
+| `POST /api/v1/trajectories/{id}/draft` | Body `{expected_revision, seed?}`. Samples a proposal that keeps every category, label and numeric-target metric the trajectory has (`matrix_pins.py`, `matrix_numbers.py`): pins the supplied sampler accepts are passed to it, and the rest restrict a copy of the matrix to the pinned options, so the sampler draws the unpinned fields under its own rules. Contradictory pins return 422 with the reason, and nothing is saved. The proposal records them under `sampling_provenance.pinned`. Unset metrics take the sampled values (origin `matrix_sample`), and the proposal becomes `metadata.proposal` and `metadata.targets`. This edit returns as an Undo `delta`, with the `filled` keys. The Draft pass then replaces `metadata.draft`. A failed draft leaves the stage and graph untouched. |
+| `POST /api/v1/trajectories/{id}/assemble` | Body `{expected_revision}`; needs a non-empty `metadata.draft`. Runs Assembly on the current graph, which it edits in place, and records the signoff like a run. Unfinished becomes Pending on success; other stages stay. |
+| `POST /api/v1/metrics/trajectories/{id}/sample-unset` | Body `{expected_revision, seed?}`. Fills only the unset category, label and numeric-target metrics from one such sample, without touching the proposal. Returns the metrics view with an Undo `delta` and the `filled` keys. |
+
 ## Long-trajectory experiment
 
 Turn on **Enable long-trajectory experiment** in **Review Settings** and save before
 starting a generation job. The experiment uses the task length already selected by the
-sampler. XXS through S aim for about 32,500 content tokens and 2,000 supervised agent
-tokens. M aims for about 65,000 and 4,000. L through XXL aim for about 130,000 and 8,000.
+sampler. XXXS through S aim for about 32,500 content tokens and 2,000 supervised agent
+tokens. M aims for about 65,000 and 4,000. L through XXXL aim for about 130,000 and 8,000.
 Projects using older matrices derive the same three bands from the combined complexity
 axis. These guide the models. Actual lengths can vary.
 
