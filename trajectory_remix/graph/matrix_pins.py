@@ -370,22 +370,66 @@ def _provenance(proposal, matrix, pins):
         provenance["matrix_sha256"] = actual
 
 
-def sample(sampler, pins, seed=None):
-    """A proposal snapshot (not stored) keeping every pinned value; IncompatiblePins if none can."""
+def pinnable(matrix):
+    """Every category a pin can select: {field: choice IDs}, in the matrix's order."""
+    from .sampling import options
+
+    return {
+        key: list(dict.fromkeys(x["id"] for x in items)) for key, items in options(matrix).items()
+    }
+
+
+def validate(matrix, pins):
+    """Refuse unknown fields and choices before sampling."""
+    known = pinnable(matrix)
+    labels = {"event_tags": list(matrix["event_tags"])}
+    labels["secondary_competencies"] = known["focus.family"]
+    labels["secondary_behaviors"] = known["focus.behavior"]
+    for key, value in pins.items():
+        if key in known:
+            if value not in known[key]:
+                raise ValueError(f"Unknown pin {key}={value}")
+        elif key in labels:
+            if not isinstance(value, list) or any(x not in labels[key] for x in value):
+                raise ValueError(f"Unknown pin {key}={value}")
+        elif key in matrix_numbers.NAMES:
+            if type(value) is not int or value < 0:
+                raise ValueError(f"Pin {key} must be a whole number of 0 or more")
+        else:
+            raise ValueError(f"Unsupported pin: {key}")
+
+
+def _seed(seed, attempt):
+    """The first try uses the seed itself, so a seed reproduces; retries derive new ones."""
+    if seed is None:
+        return secrets.randbits(62)
+    if attempt == 0:
+        return seed
+    digest = hashlib.sha256(f"{seed}:{attempt}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") >> 2
+
+
+def sample(sampler, pins, seed=None, *, frozen=None, world_group_id=None):
+    """A proposal snapshot (not stored) keeping every pinned value; IncompatiblePins if none can.
+
+    `frozen` is the sampler editor state to draw from (a run's frozen copy), else the current."""
     if seed is not None and type(seed) is not int:
         raise ValueError("seed must be an integer")
-    matrix = sampler.editor()["configuration"]["matrix"]
+    frozen = sampler.editor() if frozen is None else frozen
+    matrix = frozen["configuration"]["matrix"]
+    common = dict(persist=False, frozen=frozen, world_group_id=world_group_id)
     if not pins:
-        return sampler.propose(seed=seed, persist=False)
+        return sampler.propose(seed=seed, **common)
+    validate(matrix, pins)
     check(matrix, pins)
     restricted, native = restrict(matrix, pins)
     pairs = _secondary_pairs(matrix, pins)
     failures = Counter()
     for attempt in range(ATTEMPTS):
-        current = seed + attempt if seed is not None else secrets.randbits(62)
+        current = _seed(seed, attempt)
         try:
             snapshot = sampler.propose(
-                seed=current, overrides=native or None, persist=False, matrix=restricted
+                seed=current, overrides=native or None, matrix=restricted, **common
             )
             proposal = snapshot["proposal"]
             _secondary(matrix, proposal, pairs, random.Random(f"secondary:{current}"))

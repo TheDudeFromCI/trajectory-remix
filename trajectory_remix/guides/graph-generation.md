@@ -5,10 +5,17 @@ for `generate_graphs`; Assembly and the review roles are optional. Requests invo
 Confirm that model use is within the current task authorization.
 
 Call `generate_graphs(requests=[{"seed":137,"overrides":{"domain":"software_engineering"}}], instructions={})`
-for one attempt. Pins are overrides, separate from weights. Inputs, settings,
+for one attempt. Pins are overrides, separate from weights; any category can be pinned, and pins
+the matrix's rules contradict are refused with the reason. Inputs, settings,
 checklists and proposals freeze before any attempt starts. Inspect the returned
 job; pause/resume/cancel remain explicit lifecycle controls. No replacement
 attempt is created for failure or detachment.
+
+One existing trajectory: `draft_graph(id="UUID",expected_revision=REV)` writes a new draft
+(metadata.draft) from a proposal that keeps the trajectory's set category, label and target
+metrics and samples the unset ones; `assemble_graph(id="UUID",expected_revision=REV)` then edits
+its current graph in place to match the draft. Both are Draft/Assembly model jobs.
+`sample_graph_metrics` fills unset metrics the same way without any model call.
 
 Read a detached source and its revision before
 `review_graphs(trajectory="UUID",expected_revision=REV,mode="standard")`.

@@ -97,6 +97,13 @@ try {
   const second=JSON.parse(await page.locator('#sampler-proposal').textContent());
   assert.equal(first.payload_digest,second.payload_digest); assert.equal(second.proposal.metrics.sampling.domain,'software_engineering');
   assert.equal((await state()).matrix.dimensions.user_tone[0].weight,3.5);
+  // Any category pins, not only the supplied sampler's overrides: stakes, behaviors and decision choices.
+  await page.getByLabel('Pin stakes',{exact:true}).selectOption('high');
+  await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>!document.getElementById('sampler-preview').disabled);
+  const staked=JSON.parse(await page.locator('#sampler-proposal').textContent());
+  assert.equal(staked.proposal.metrics.sampling.stakes,'high'); assert.equal(staked.proposal.sampling_provenance.pinned.stakes,'high');
+  await page.getByLabel('Pin stakes',{exact:true}).selectOption('');
+  assert.ok(await page.getByLabel('Pin focus.behavior',{exact:true}).count(), 'behaviors have a pin field');
   await page.getByLabel('Pin focus.family',{exact:true}).selectOption('strategic_planning');
   await page.getByLabel('Pin lifecycle',{exact:true}).selectOption('closure'); await page.getByLabel('Pin task_length',{exact:true}).selectOption('XXS');
   await page.locator('#sampler-preview').click(); await page.waitForFunction(()=>document.getElementById('sampler-message').textContent.includes('Preview rejected'));
