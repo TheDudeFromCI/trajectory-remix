@@ -173,6 +173,9 @@ named('New tool field ID').value='payload';
 [...toolBox.querySelectorAll('button')].find(n=>n.textContent==='Add tool field').click();
 named('Required tool field payload').checked=true; named('Required tool field payload').dispatchEvent(new Event('change'));
 assert.deepEqual(JSON.parse($('settings-json').value).tools.fixture_tool.input_schema.required,['payload']);
+named('Tool description (shown to the agent)').value='Sends a payload.'; named('Tool description (shown to the agent)').dispatchEvent(new Event('input'));
+named('Description of tool field payload').value='The data to send.'; named('Description of tool field payload').dispatchEvent(new Event('input'));
+{ const schema=JSON.parse($('settings-json').value).tools.fixture_tool.input_schema; assert.equal(schema.description,'Sends a payload.'); assert.equal(schema.properties.payload.description,'The data to send.'); }
 $('settings-save').click(); await until(()=>!$('settings-dialog').open);
 assert.equal(ui.settings.tools.fixture_tool.input_schema.properties.payload.type,'string');
 // A save from an older revision merges onto a newer change to other fields, and Undo keeps that change.

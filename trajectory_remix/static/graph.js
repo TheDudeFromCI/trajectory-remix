@@ -968,10 +968,14 @@ export class StudioUI {
     card.append(cardHead);
     const [nameLabel, name] = control('Tool display name', tool.name); name.oninput = () => { tool.name = name.value; write(); }; card.append(nameLabel);
     const schema = tool.input_schema;
+    if (schema && typeof schema === 'object') {
+      const [descLabel, desc] = control('Tool description (shown to the agent)', schema.description ?? '');
+      desc.oninput = () => { if (desc.value) schema.description = desc.value; else delete schema.description; write(); }; card.append(descLabel);
+    }
     if (schema.type !== 'object') { card.append(node('p', 'This input schema uses advanced JSON. Object schemas support the field editor.', 'note')); return; }
     schema.properties ||= {};
     const table = node('table', undefined, 'data'), head = node('tr'), body = node('tbody');
-    for (const text of ['Field', 'Type', 'Required', '']) head.append(node('th', text));
+    for (const text of ['Field', 'Type', 'Description', 'Required', '']) head.append(node('th', text));
     const thead = node('thead'); thead.append(head); table.append(thead, body);
     for (const [key, spec] of Object.entries(schema.properties)) {
       const row = node('tr'), required = node('input'); required.type = 'checkbox'; required.checked = (schema.required || []).includes(key); required.setAttribute('aria-label', 'Required tool field ' + key);
@@ -980,7 +984,9 @@ export class StudioUI {
       const removeButton = button('Remove', () => {
         delete schema.properties[key]; if (schema.required) schema.required = schema.required.filter(x => x !== key); write(); this.renderToolSettings(select.value);
       }, 'sm ghost'); removeButton.setAttribute('aria-label', 'Remove tool field ' + key); remove.append(removeButton);
-      row.append(node('td', key, 'mono'), node('td', spec.type || 'advanced schema', 'muted'), req, remove); body.append(row);
+      const descCell = node('td'), desc = node('input'); desc.value = spec.description ?? ''; desc.setAttribute('aria-label', 'Description of tool field ' + key);
+      desc.oninput = () => { if (desc.value) spec.description = desc.value; else delete spec.description; write(); }; descCell.append(desc);
+      row.append(node('td', key, 'mono'), node('td', spec.type || 'advanced schema', 'muted'), descCell, req, remove); body.append(row);
     }
     if (Object.keys(schema.properties).length) card.append(table); else card.append(node('p', 'No input fields yet.', 'muted small'));
     const [fieldLabel, fieldId] = control('New tool field ID'), type = node('select'); type.setAttribute('aria-label', 'New tool field type');
