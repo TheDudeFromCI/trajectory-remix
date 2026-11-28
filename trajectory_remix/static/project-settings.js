@@ -245,12 +245,14 @@ export function renderGenerationSettings(container, initial, options = {}) {
   };
   settingsColumn.append(toggle('fast','Enable Fast Review'), toggle('critical','Enable Critical Review'));
   settingsColumn.append(toggle('review_include_draft','Include Draft in review', false));
+  settingsColumn.append(toggle('scaling_experiment','Enable long-trajectory experiment', false));
   const limits = node('div', undefined, 'settings-limits'); limits.append(node('h4', 'Authoring limits'));
   const retries = input('Incomplete response retries', current().generation?.format_retries ?? 2, value => write(d => { d.generation ||= {}; d.generation.format_retries = value; }), 'number'); retries.min = 0; retries.max = 5; retries.step = 1;
   const exchanges = input('Maximum exchanges per pass', current().generation?.max_authoring_exchanges ?? 10, value => write(d => { d.generation ||= {}; d.generation.max_authoring_exchanges = value; }), 'number'); exchanges.min = 1; exchanges.step = 1;
+  const sectionTokens = input('Approximate tokens per section', current().generation?.scaling_section_tokens ?? 4000, value => write(d => { d.generation ||= {}; d.generation.scaling_section_tokens = value; }), 'number'); sectionTokens.min = 2000; sectionTokens.max = 16000; sectionTokens.step = 1000;
   const retriesField = field('Incomplete response retries', retries);
   retriesField.dataset.tip = 'How many times to ask the model again when its response is cut off (it hit the output token limit) or malformed. Bad tool arguments are sent back to the model instead and do not use a retry.';
-  limits.append(retriesField, field('Maximum exchanges per pass', exchanges), node('p', 'Assembly and each review use one conversation. The exchange count and the configured endpoint context limit bound each pass.', 'settings-help')); settingsColumn.append(limits);
+  limits.append(retriesField, field('Maximum exchanges per pass', exchanges), field('Approximate tokens per section', sectionTokens), node('p', 'Each conversation is bounded by the exchange count and endpoint context limit. Experimental long trajectories use several conversations.', 'settings-help')); settingsColumn.append(limits);
   tipHeading(promptsColumn, 'Generation prompts', 'Runs freeze the prompts when they start; edits apply to new runs.');
   const defaultsBox = node('div', undefined, 'settings-limits');
   renderPromptSettings(promptsColumn, {current, write, error, render, loadDefault: options.loadDefaultPrompts, actions: defaultsBox});

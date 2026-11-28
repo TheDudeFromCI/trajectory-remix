@@ -484,6 +484,8 @@ class GenerationOptions(DTO):
     fast: bool = True
     critical: bool = True
     review_include_draft: bool = False
+    scaling_experiment: bool = False
+    scaling_section_tokens: Annotated[int, Field(ge=2000, le=16000)] = 4000
     max_authoring_exchanges: Annotated[int, Field(ge=1)] = 10
     format_retries: Annotated[int, Field(ge=0, le=5)] = 2
     # An explicit byte budget for Assistant history when the endpoint has a local context limit.

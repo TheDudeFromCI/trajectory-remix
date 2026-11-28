@@ -40,6 +40,36 @@ async def test_assistant_sees_metric_tools_and_reads_current_values(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_scaled_assistant_keeps_paged_reads_and_metric_annotations(tmp_path):
+    gen, fake = service(tmp_path)
+    record, (only,) = flagged(gen, "Read the event and annotate its complexity.")
+    source = record.source.model_copy(deep=True)
+    source.metadata["scaling"] = {"version": 1, "outline": [{"title": "Part one"}]}
+    record = gen.store.replace(source.id, source, record.revision)
+    fake.responses = [
+        turn(("view_event", {"event_id": "x", "content_offset": 2}), ("view_metrics", {})),
+        turn(metric("complexity", "medium"), reply(only, True, "Reviewed and annotated.")),
+    ]
+    await run(gen, record)
+    tools = {tool["function"]["name"]: tool["function"] for tool in fake.calls[0].payload["tools"]}
+    assert {
+        "view_metrics",
+        "set_metric",
+        "view_section",
+        "view_project_tool",
+        "reply",
+    } <= tools.keys()
+    assert "content_offset" in tools["view_event"]["parameters"]["properties"]
+    viewed, metrics = results(fake.calls[1].payload)
+    assert viewed["accepted"] is True
+    assert viewed["event"]["content"]["items"] == "fore"
+    assert metrics["accepted"] is True
+    assert panel(gen, record)["complexity"]["observation"] is None
+    applied(gen, record)
+    assert panel(gen, record)["complexity"]["observation"]["value"] == "medium"
+
+
+@pytest.mark.asyncio
 async def test_assistant_sets_metrics_after_edits_and_they_commit(tmp_path):
     gen, fake = service(tmp_path)
     record, (only,) = flagged(gen, "Complexity should be medium; tag ambiguity.")

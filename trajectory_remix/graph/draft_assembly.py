@@ -7,7 +7,7 @@ The prompts come from the project settings (settings.prompts) and freeze with th
 
 from copy import deepcopy
 
-from . import endpoint_prompts, prompt_defaults
+from . import endpoint_prompts, prompt_defaults, scaling
 from .models import GraphSource, digest
 
 # Runs and manual reviews record the pipeline they were made for. Jobs made for an
@@ -42,7 +42,7 @@ def role(settings, stage):
 def plan(proposal, settings):
     """The frozen per-trajectory plan: proposal, tools and the project's prompts."""
     frozen = prompts(settings)
-    return dict(
+    result = dict(
         method="draft_assembly",
         windows={},
         proposal=deepcopy(proposal),
@@ -50,6 +50,9 @@ def plan(proposal, settings):
         actor_instruction=frozen["actor_instruction"],
         prompts=frozen,
     )
+    if settings.generation.scaling_experiment:
+        result["scaling"] = scaling.plan(proposal, settings)
+    return result
 
 
 def authoring_instruction(plan):
@@ -68,6 +71,8 @@ def _draft_messages(plan, correction):
 
 def payload(cp, plan):
     """The Draft request, with a correction after an unusable reply."""
+    if "scaling" in plan:
+        return scaling.draft_request(cp, plan)
     correction = cp.get("flow_error", "") if cp["errors"] else ""
     return dict(
         operation=DRAFT,
