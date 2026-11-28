@@ -4,7 +4,7 @@ import pytest
 
 from trajectory_remix.graph import matrix_pins
 from trajectory_remix.graph.jobs import JobService
-from trajectory_remix.graph.matrix_fill import matrix_keys
+from trajectory_remix.graph.matrix_fill import GROUPS, matrix_keys
 from trajectory_remix.graph.sampling import SamplerService
 from trajectory_remix.graph.storage import GraphStore
 
@@ -15,10 +15,10 @@ def sampler(tmp_path):
 
 
 def values(sampler, proposal):
-    """Every category and label metric a proposal sets."""
+    """Every category, label and numeric-target metric a proposal sets."""
     defs = sampler.editor()["configuration"]["definitions"]
     return {
-        key: proposal["metrics"]["sampling" if spec["kind"] == "category" else "multi_labels"][key]
+        key: proposal["metrics"][GROUPS[spec["kind"]]][key]
         for key, spec in matrix_keys(defs).items()
     }
 
@@ -32,7 +32,7 @@ def kept(got, pins):
 @pytest.mark.parametrize("seed", range(12))
 def test_every_value_of_a_sample_can_be_pinned_at_once(sampler, seed):
     pins = values(sampler, sampler.propose(seed=seed, persist=False)["proposal"])
-    assert len(pins) > 30
+    assert len(pins) > 35 and "suggested_task_count" in pins
     got = matrix_pins.sample(sampler, pins, seed=seed + 1000)["proposal"]
     assert kept(values(sampler, got), pins)
 
@@ -118,3 +118,51 @@ def test_provenance_records_the_pins_and_the_project_matrix(sampler):
     assert provenance["pinned"] == {"stakes": "high"}
     assert provenance["matrix_sha256"] == plain["matrix_sha256"]
     assert provenance["restricted_matrix_sha256"] != plain["matrix_sha256"]
+
+
+@pytest.mark.parametrize(
+    "pins",
+    [
+        {"suggested_task_count": 9},
+        {"suggested_dependency_depth": 0},
+        {"suggested_dependency_depth": 3, "suggested_task_count": 6},
+        {"available_agent_count": 4},
+        {"target_active_window_capacity": 5},
+        {"suggested_tool_observations_or_calls": 0},
+        {"suggested_tool_observations_or_calls": 12},
+        {"suggested_coordination_events": 20},
+    ],
+)
+def test_numeric_targets_can_be_pinned(sampler, pins):
+    for seed in range(5):
+        proposal = matrix_pins.sample(sampler, pins, seed)["proposal"]
+        numbers = proposal["metrics"]["numeric_targets"]
+        assert {k: numbers[k] for k in pins} == pins
+        assert {k: proposal["scenario"]["execution"][k] for k in pins} == pins
+    if pins.get("suggested_dependency_depth") == 0:
+        assert proposal["metrics"]["sampling"]["dependency_pattern"] == "independent"
+
+
+@pytest.mark.parametrize(
+    ("pins", "message"),
+    [
+        (
+            {"suggested_task_count": 3, "task_length": "XL"},
+            r"suggested_task_count 3 is outside task_length XL \(12-22\)",
+        ),
+        (
+            {"suggested_tool_observations_or_calls": 4, "tool_access": "offline"},
+            "offline means no tool calls",
+        ),
+        ({"suggested_dependency_depth": 4, "suggested_task_count": 4}, "needs more than 4 tasks"),
+        (
+            {"suggested_dependency_depth": 0, "dependency_pattern": "chain"},
+            "does not fit dependency_pattern chain",
+        ),
+        ({"available_agent_count": 8, "task_length": "S"}, "allows at most 3 agents"),
+        ({"suggested_task_count": 500}, "No task_length allows suggested_task_count 500"),
+    ],
+)
+def test_numeric_pins_that_cannot_fit_are_refused(sampler, pins, message):
+    with pytest.raises(matrix_pins.IncompatiblePins, match=message):
+        matrix_pins.sample(sampler, pins, 1)

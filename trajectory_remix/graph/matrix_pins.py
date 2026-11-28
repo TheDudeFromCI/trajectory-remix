@@ -1,7 +1,8 @@
 """Pin any category or label metric when sampling from the matrix.
 
 The supplied sampler takes pins for only a few dimensions (sampling.OVERRIDES). Every other pin
-is applied by sampling from a copy of the matrix restricted to the pinned options, so the
+(categories, labels and numeric targets, see matrix_numbers) is applied by sampling from a copy
+of the matrix restricted to the pinned options, so the
 sampler itself draws the unpinned fields, under its own rules, given the pins. The supplied
 sampler is unchanged, and with no pins this is one ordinary sample.
 
@@ -19,7 +20,7 @@ import secrets
 from collections import Counter
 from copy import deepcopy
 
-from . import task_axes
+from . import matrix_numbers, task_axes
 from .sampling import OVERRIDES, original
 
 ATTEMPTS = 300
@@ -185,6 +186,7 @@ def check(m, pins):
                 _variant(m, axis, pins["decision.choice"]),
             )
     found += _rule_conflicts(m, pins)
+    found += matrix_numbers.conflicts(m, pins)
     pairs = _secondary_pairs(m, pins)
     primary = pins.get("focus.family") or (
         pins.get("focus.behavior") and _behaviors(m)[pins["focus.behavior"]][0]["id"]
@@ -256,6 +258,9 @@ def restrict(matrix, pins):
         if key in m["dimensions"] and key not in native and key not in DERIVED:
             m["dimensions"][key] = [x for x in m["dimensions"][key] if x["id"] == value]
         _keep(_option(m, key, value) if isinstance(value, str) else None)
+    emptied = matrix_numbers.restrict(m, pins)
+    if emptied:
+        raise IncompatiblePins(emptied)
     tags = pins.get("event_tags")
     if tags is not None:
         for tag, descriptor in m["event_tags"].items():
@@ -346,6 +351,7 @@ def _holds(proposal, pins):
     for key, value in pins.items():
         if isinstance(value, str) and sampled.get(key) != value:
             raise ValueError(f"{key} was not kept")
+    matrix_numbers.holds(proposal, pins)
 
 
 def _reason(error):

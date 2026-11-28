@@ -14,18 +14,24 @@ from .sampling import SamplerService
 ORIGIN = "matrix_sample"
 
 
+GROUPS = {"category": "sampling", "labels": "multi_labels", "number": "numeric_targets"}
+
+
 def _sampled(proposal, key, spec):
-    group = "sampling" if spec["kind"] == "category" else "multi_labels"
-    return proposal["metrics"][group].get(key)
+    return proposal["metrics"][GROUPS[spec["kind"]]].get(key)
 
 
 def matrix_keys(defs):
-    """Category and label metrics the sampler produces a value for."""
-    return {k: s for k, s in defs.items() if s["scope"] == "annotation" and s.get("choices")}
+    """Category, label and numeric-target metrics the sampler produces a value for."""
+    return {
+        k: s
+        for k, s in defs.items()
+        if s["scope"] == "annotation" and (s.get("choices") or s.get("sampled"))
+    }
 
 
 def assigned(source, defs):
-    """The trajectory's recorded category and label values that are still valid choices."""
+    """The trajectory's recorded values that still fit their metric: these are the pins."""
     saved = source.metadata.get("metrics", {})
     result = {}
     for key, spec in matrix_keys(defs).items():
@@ -38,6 +44,8 @@ def assigned(source, defs):
             and all(x in spec["choices"] for x in value)
         ):
             result[key] = list(value)
+        elif spec["kind"] == "number" and type(value) is int and value >= 0:
+            result[key] = value
     return result
 
 

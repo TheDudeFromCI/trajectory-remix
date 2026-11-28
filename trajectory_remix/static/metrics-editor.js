@@ -5,8 +5,9 @@
 import {node, setAttr, setText, tag} from './ui-kit.js';
 
 const GROUPS = [
-  ['category', 'Categories', 'One choice from the sampling matrix.'],
-  ['labels', 'Labels', 'Any number of choices.'],
+  ['category', 'Categories', 'One choice from the sampling matrix. A set value is kept when sampling; an unset one is sampled.'],
+  ['labels', 'Labels', 'Any number of choices. Set labels are kept when sampling, even an empty set.'],
+  ['number', 'Targets', 'Numbers the sampler suggests, such as task count and agents. A set number is kept when sampling.'],
   ['annotation', 'Outcomes and notes', 'Free values: text, a number, true/false or JSON.'],
   ['measured', 'Measured', 'Filled by “Calculate missing metrics” (Metrics view) or by an export. Read-only here.'],
 ];
@@ -55,7 +56,7 @@ export class MetricsEditor {
     this.onView(this.view, this.state);
     const {locked} = this.state, note = this.els.note;
     const text = !this.state.id ? '' : locked ? 'A job holds this trajectory. Metrics unlock when it settles.'
-      : 'Changes save at once. Undo reverts them like any other edit.';
+      : 'Changes save at once, and Undo reverts them. Set values are kept when the matrix is sampled (New draft, Sample unset); unset ones are sampled and assigned.';
     setText(note, text); note.className = 'small ' + (locked ? 'tone-warning metrics-note' : 'muted metrics-note');
     for (const input of this.els.list.querySelectorAll('[data-metric-input]')) input.disabled = !this.editable;
     if (this.els.sample) this.els.sample.disabled = !this.editable;
@@ -97,6 +98,7 @@ export class MetricsEditor {
     if (group === 'category') return this.select(key, spec, current);
     if (group === 'labels') return this.labels(key, spec, Array.isArray(current) ? current : []);
     if (group === 'annotation') return this.note(key, current);
+    if (group === 'number') return this.number(key, spec, current);
     const shown = node('span', current === undefined ? '—' : String(current), 'num metric-value');
     if (spec.unit) shown.append(node('span', ' ' + spec.unit, 'muted small'));
     return shown;
@@ -124,6 +126,17 @@ export class MetricsEditor {
     box.open = this.openLabels === key;
     box.addEventListener('toggle', () => { if (box.open) this.openLabels = key; else if (this.openLabels === key) this.openLabels = null; });
     return box;
+  }
+  number(key, spec, current) {
+    const input = node('input'); input.type = 'number'; input.min = '0'; input.step = '1'; input.dataset.metricInput = '';
+    input.value = Number.isInteger(current) ? String(current) : ''; input.placeholder = 'Not set'; setAttr(input, 'aria-label', spec.label || words(key));
+    input.addEventListener('change', () => {
+      const value = input.value.trim() === '' ? undefined : Number(input.value);
+      if (value !== undefined && !(Number.isInteger(value) && value >= 0)) { input.value = Number.isInteger(current) ? String(current) : ''; return this.report(new Error('Targets are whole numbers of 0 or more.')); }
+      this.save(key, value);
+    });
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+    return input;
   }
   note(key, current) {
     const input = node('input'); input.dataset.metricInput = ''; input.value = showNote(current);

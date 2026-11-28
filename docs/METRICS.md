@@ -32,6 +32,7 @@ Categories, labels and outcomes can't be calculated, so you set them by hand in 
 | --- | --- | --- |
 | **Categories** | One choice per sampler dimension, such as `complexity`, `task_length` or `domain` | A dropdown |
 | **Labels** | Event tags and secondary competencies or behaviors | Checkboxes (click the summary to open them) |
+| **Targets** | The sampler's suggested numbers: task count, dependency depth, available agents, active window capacity, tool calls and coordination events | A whole number |
 | **Outcomes and notes** | Free values such as `actual_outcome` or `accepted` | Text, a number, `true`/`false` or JSON |
 | **Measured** | Values calculated from the source or an export | Read-only; use **Calculate missing metrics** |
 
@@ -40,20 +41,25 @@ source or definition; **Confirm** records it again for the current source. Tick 
 list just the values still missing. Each change is one **Undo** step. The tab is read-only while a job
 holds the trajectory.
 
-**Sample unset from matrix** fills every unset category and label in one step. It draws one sample from
+**Sample unset from matrix** fills every unset category, label and target in one step. It draws one sample from
 the [Sampler matrix](SAMPLER-WORKBENCH.md) that keeps every value you already set, and fills the rest from that
 sample. Filled values are recorded with origin `matrix_sample`. It is one **Undo** step, like any other change.
 **New draft** on the Draft tab samples the same way.
 
 #### How set values are kept
 
-Every category and label you set is *pinned*: the sample always keeps it exactly.
+Every category, label and target you set is *pinned*: the sample always keeps it exactly. Every one you leave
+unset is sampled, and New draft or Sample unset assigns it to the trajectory.
 
 | Values | How they're chosen |
 | --- | --- |
 | **Nothing set** | An ordinary sample from the matrix. |
 | **Unset values, when some are pinned** | Sampled by the matrix's own weights and rules, given the pins. A pinned value is often unusual, so the result can stray from the matrix's usual mix. |
 | **Pins that contradict each other** | Nothing changes, and the message names the clash, for example *entry_state fresh requires lifecycle in ['initiation']* or *incident stale_decision forces information_state stale*. Change or clear one of them. |
+
+A target must fit the ranges the matrix gives it. For example, task length `XL` has 12 to 22 tasks, so
+pinning both `XL` and a task count of 3 is refused. Pinning a task count on its own keeps only the task
+lengths whose range includes it.
 
 Pins still follow the matrix's rules. For example, pinning the incident `stale_decision` also makes the
 information state `stale`, because the matrix requires it. A pinned choice is used even if its weight in the

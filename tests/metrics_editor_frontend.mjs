@@ -18,6 +18,7 @@ const values = () => ({
   event_tags: {status: 'available', observation: {value: ['x']}, definition: def('labels', 'annotation', ['x', 'y'])},
   actual_outcome: {status: 'stale', observation: {value: 'ok'}, definition: def('annotation', 'annotation')},
   authored_windows: {status: 'available', observation: {value: 2}, definition: {...def('number', 'source'), unit: 'count'}},
+  suggested_task_count: {status: 'unavailable', observation: undefined, definition: {...def('number', 'annotation'), unit: 'count', sampled: true}},
 });
 const calls = [];
 const api = async (path, method = 'GET', body) => {
@@ -32,7 +33,7 @@ const editor = new MetricsEditor({api, report: e => { throw e; }, els, beforeSav
 
 editor.sync({id: 't1', revision: 1, locked: false}); await settle();
 const text = els.list.textContent;
-for (const heading of ['Categories', 'Labels', 'Outcomes and notes', 'Measured']) assert.match(text, new RegExp(heading));
+for (const heading of ['Categories', 'Labels', 'Targets', 'Outcomes and notes', 'Measured']) assert.match(text, new RegExp(heading));
 assert.equal(els.list.querySelectorAll('select').length, 1);
 assert.equal(els.list.querySelectorAll('.metric-label-grid input').length, 2);
 const measured = [...els.list.querySelectorAll('.metric-row')].find(r => r.textContent.includes('authored windows'));
@@ -44,6 +45,17 @@ const select = els.list.querySelector('select'); select.value = 'closed'; select
 await editor.busy;
 assert.deepEqual(calls.at(-1), ['PUT', '/metrics/trajectories/t1/lifecycle', {expected_revision: 1, value: 'closed', origin: 'manual_annotation'}]);
 assert.equal(saved, 1); assert.equal(flushed, 1, 'pending trajectory edits save first');
+
+// A numeric target takes a whole number; anything else is refused without saving.
+const target = els.list.querySelector('input[type=number]');
+assert.equal(target.placeholder, 'Not set');
+target.value = '7'; target.dispatchEvent(new Event('change')); await editor.busy;
+assert.deepEqual(calls.at(-1), ['PUT', '/metrics/trajectories/t1/suggested_task_count', {expected_revision: 2, value: 7, origin: 'manual_annotation'}]);
+const refused = new MetricsEditor({api, report: () => { refusals += 1; }, els: {list: document.createElement('div'), note: document.createElement('span'), unset: document.createElement('input')}});
+let refusals = 0, before = calls.length;
+refused.sync({id: 't1', revision: 2, locked: false}); await settle();
+const bad = refused.els.list.querySelector('input[type=number]'); bad.value = '2.5'; bad.dispatchEvent(new Event('change')); await refused.busy;
+assert.equal(calls.length, before); assert.equal(refusals, 1);
 
 // Clearing uses DELETE on the latest revision.
 editor.sync({id: 't1', revision: 2, locked: false});
@@ -65,5 +77,5 @@ assert.doesNotMatch(trimmed.els.list.textContent, /lifecycle/); assert.match(tri
 editor.sync({id: 't1', revision: 3, locked: false}); await settle();
 els.unset.checked = true; els.unset.dispatchEvent(new Event('change'));
 assert.doesNotMatch(els.list.textContent, /authored windows/); assert.match(els.list.textContent, /lifecycle/);
-console.log('Metrics editor: grouping, parsing, read-only measured values, saves, clears and locking, flush-first and Undo deltas passed.');
+console.log('Metrics editor: grouping, numeric targets, parsing, read-only measured values, saves, clears and locking, flush-first and Undo deltas passed.');
 window.happyDOM.abort();

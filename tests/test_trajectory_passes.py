@@ -57,10 +57,10 @@ async def test_new_draft_keeps_assigned_metrics_and_assigns_the_rest(tmp_path):
     assert set(filled).isdisjoint(ASSIGNED) and "lifecycle" in filled
     for key in filled:
         assert saved[key]["origin"] == matrix_fill.ORIGIN
-        assert saved[key]["value"] == (
-            sampled.get(key)
-            or source.metadata["proposal"]["proposal"]["metrics"]["multi_labels"][key]
+        assert saved[key]["value"] == matrix_fill._sampled(
+            source.metadata["proposal"]["proposal"], key, definitions(gen)[key]
         )
+    assert "suggested_task_count" in filled, "numeric targets are assigned too"
     assert delta["before"]["metadata"]["metrics"].keys() == set(ASSIGNED)
     assert source.metadata["targets"] == source.metadata["proposal"]["proposal"]["metrics"]
 

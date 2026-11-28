@@ -132,7 +132,7 @@ endpoint assigned to the *Draft* role (and *Assembly*, if set) in [Project setti
 | Control | What it does |
 | --- | --- |
 | **Draft text** | The trajectory's draft. Read it, or edit it like any other field: edits save as you type. |
-| **New draft** | Writes a new draft with the standard Draft pass. The metrics you set on the **Metrics** tab decide the sampler choices; every unset category and label is sampled from the matrix and assigned to the trajectory. Asks first if a draft already exists. |
+| **New draft** | Writes a new draft with the standard Draft pass. The metrics you set on the **Metrics** tab decide the sampler choices; every unset category, label and target is sampled from the matrix and assigned to the trajectory. Asks first if a draft already exists. |
 | **Assemble** | Runs the standard Assembly pass on the draft. It edits the current graph in place, keeping what already fits, rather than replacing the trajectory. An **Unfinished** trajectory becomes **Pending** when it's done; other stages stay as they are. |
 
 1. Set the metrics you care about on the **Metrics** tab, for example **Target size**, **Complexity** and `domain`.

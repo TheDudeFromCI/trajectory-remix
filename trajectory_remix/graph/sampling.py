@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
-from . import task_axes
+from . import matrix_numbers, task_axes
 from .models import canonical, digest
 from .sampler_originals import kidra_sampler as original
 from .size_labels import agent_characters, total_characters
@@ -152,6 +152,9 @@ def definitions(matrix, custom=None):
         result[key] = dict(kind="labels", scope="annotation", choices=choices)
     for key in matrix["metrics_schema"]["post_generation_actual_fields"]:
         result.setdefault(key, dict(kind="annotation", scope="annotation"))
+    # The sampler's numeric targets: set one on a trajectory to pin it (matrix_pins).
+    for key in matrix_numbers.NAMES:
+        result.setdefault(key, dict(kind="number", scope="annotation", unit="count", sampled=True))
     for key in CALCULATORS:
         result[key] = dict(kind="number", scope="source", unit="count")
     # These require an explicit compiled export/profile; source fragments are no proxy.

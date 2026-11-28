@@ -65,3 +65,15 @@ def test_startup_migration_saves_the_upgraded_matrix_once(tmp_path):
     revision = store.settings().revision
     assert not migrate(store) and store.settings().revision == revision
     assert deepcopy(saved["matrix"])["task_length_version"] == task_axes.LENGTHS_VERSION
+
+
+def test_a_saved_configuration_gains_new_metric_definitions_on_load(tmp_path):
+    store = GraphStore.initialize(tmp_path / "p.sqlite")
+    record = store.settings()
+    config = configuration(editor_default_matrix())
+    del config["definitions"]["suggested_task_count"]  # Saved before numeric targets existed.
+    data = record.settings.model_dump(mode="json")
+    data["sampler_configuration"] = config
+    store.update_settings(data, record.revision)
+    defs = store.settings().settings.sampler_configuration["definitions"]
+    assert defs["suggested_task_count"]["kind"] == "number", "definitions derive on load"
