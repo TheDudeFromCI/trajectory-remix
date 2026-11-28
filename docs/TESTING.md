@@ -27,6 +27,7 @@ node tests/endpoint_collapse_frontend.mjs
 node tests/usage_view_frontend.mjs
 node tests/metrics_editor_frontend.mjs
 node tests/draft_tab_frontend.mjs
+node tests/size_target_frontend.mjs
 node tests/complexity_select_frontend.mjs
 node tests/choice_field_frontend.mjs
 node tests/argument_form_frontend.mjs

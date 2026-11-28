@@ -23,8 +23,9 @@ Categories, labels and outcomes can't be calculated, so you set them by hand in 
 
 1. Select a trajectory.
 2. Open the **Metrics** tab in the event panel (after **JSON**).
-3. At the top, under **Trajectory**, set **Stage**, **Split** and **Complexity**, and read the trajectory's
-   **Size**. A missing split or stale values show up as warnings on the **Problems** tab.
+3. At the top, under **Trajectory**, set **Stage**, **Split**, **Complexity** and **Target size**, and read the
+   trajectory's **Size**. A missing split, stale values or a size off its target show up as warnings on the
+   **Problems** tab.
 4. Below that, pick a value, tick labels or type an outcome. Each change saves at once.
 
 | Group | What it holds | How you set it |
@@ -43,8 +44,21 @@ holds the trajectory.
 the [Sampler matrix](SAMPLER-WORKBENCH.md) that fits the values you already set, and keeps those values.
 Filled values are recorded with origin `matrix_sample`. It is one **Undo** step, like any other change.
 
-**Complexity** sits in the **Trajectory** section, next to Stage and Split, rather than in the category
-list. When it's unset, the picker shows the sampler's target as a hint.
+**Complexity** and **Target size** sit in the **Trajectory** section, next to Stage and Split, rather than in
+the category list. When one is unset, its picker shows the sampler's target as a hint.
+
+### Target size
+
+**Target size** is the size the trajectory should reach, such as `XL`. It's the matrix's `task_length`
+category, whose choices (`XXS` to `XXL`) use the same names as the [size labels](#character-counts-and-trajectory-sizes).
+
+| What uses it | How |
+| --- | --- |
+| **New draft** (Draft tab) | The draft is written for the target size, not the trajectory's current size. An unset target is sampled from the matrix and assigned. |
+| **Problems** tab | Warns with `size_below_target` or `size_above_target` when the saved size label is smaller or larger than the target. Empty trajectories are skipped. |
+
+When the target is unset, the warning compares against the task length in the trajectory's sampled proposal, if
+it has one. A target with no matching size label (after you rename the labels) isn't compared.
 
 A value you set is recorded against the trajectory's current content. If the content changes afterwards,
 the value is marked **Stale** until you **Confirm** it again, and the **Problems** tab lists it under

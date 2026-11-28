@@ -164,3 +164,17 @@ def test_sample_unset_fills_only_unset_metrics_with_an_undo_step(tmp_path):
     assert view["delta"]["before"]["metadata"]["metrics"].keys() == {"domain"}
     again = trajectory_passes.sample_unset(metrics, record.source.id, view["revision"], seed=3)
     assert again["filled"] == [] and again["revision"] == view["revision"]
+
+
+@pytest.mark.asyncio
+async def test_new_draft_writes_for_the_target_size_not_the_current_size(tmp_path):
+    gen, fake = service(tmp_path)
+    record = trajectory(gen, metrics={"task_length": metric("XL")})  # One short event: tiny.
+    job, _, filled = trajectory_passes.start_draft(gen, record.source.id, record.revision, 4)
+    await finish(gen, job)
+    proposal = gen.store.read(record.source.id).source.metadata["proposal"]["proposal"]
+    assert "task_length" not in filled
+    assert proposal["scenario"]["project_state"]["task_length"] == "XL"
+    assert (
+        "Size the trajectory for task length XL" in fake.calls[0].payload["messages"][1]["content"]
+    )

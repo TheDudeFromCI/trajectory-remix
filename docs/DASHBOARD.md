@@ -135,7 +135,8 @@ endpoint assigned to the *Draft* role (and *Assembly*, if set) in [Project setti
 | **New draft** | Writes a new draft with the standard Draft pass. The metrics you set on the **Metrics** tab decide the sampler choices; every unset category and label is sampled from the matrix and assigned to the trajectory. Asks first if a draft already exists. |
 | **Assemble** | Runs the standard Assembly pass on the draft. It edits the current graph in place, keeping what already fits, rather than replacing the trajectory. An **Unfinished** trajectory becomes **Pending** when it's done; other stages stay as they are. |
 
-1. Set the metrics you care about on the **Metrics** tab, for example `domain` and `complexity`.
+1. Set the metrics you care about on the **Metrics** tab, for example **Target size**, **Complexity** and `domain`.
+   The draft is written for the target size, whatever size the trajectory is now.
 2. Open the **Draft** tab and click **New draft**. The trajectory locks while the job runs; follow it in **Jobs**.
 3. Read the draft and adjust it if you like.
 4. Click **Assemble**. The windows and timeline update when it finishes.
@@ -189,7 +190,7 @@ Problems come from two places, labelled on each row:
 | Label | What it checks | Examples |
 | --- | --- | --- |
 | **Compiler** | The trajectory's structure, on the server | Missing dependencies, windows left open |
-| **Studio** | Editor housekeeping, worked out in your browser | `missing_split` (**Set split**), `review_stale` or `signoff_stale`, `stale_metrics` (**Show metrics**) |
+| **Studio** | Editor housekeeping, worked out in your browser | `missing_split` (**Set split**), `review_stale` or `signoff_stale`, `stale_metrics` and `size_below_target` / `size_above_target` (**Show metrics**) |
 
 Studio warnings update as you edit, never block export, and aren't shown to the review or
 assembly agents. Choosing **Auto** as the split clears `missing_split` without a warning

@@ -322,7 +322,7 @@ export class StudioUI {
     this.renderTimeline();
   }
   renderDiagnostics() {
-    const studio = studioWarnings({draft: this.draft, record: this.record, metrics: this.metricsView});
+    const studio = studioWarnings({draft: this.draft, record: this.record, metrics: this.metricsView, sizeLabels: this.settings?.size_labels});
     const list = [...(this.diagnostics || []), ...studio], errors = list.filter(d => d.severity === 'error').length, warnings = list.length - errors;
     $('diagnostics').replaceChildren(...list.map(d => {
       const n = node('div', undefined, 'diagnostic ' + d.severity), head = node('div', undefined, 'row');
@@ -1032,9 +1032,10 @@ export class StudioUI {
       onSaved: view => { if (view.delta) this.history([view.delta]); return this.refreshSelected(); },
       onView: (view, state) => {
         renderComplexity($('complexity'), view, state.locked);
+        renderComplexity($('target-size'), view, state.locked, 'task_length');
         if (view !== this.metricsView) { this.metricsView = view; this.renderDiagnostics(); }
       },
-      shownElsewhere: ['complexity'],
+      shownElsewhere: ['complexity', 'task_length'],
       els: {list: $('metrics-editor-list'), note: $('metrics-editor-note'), unset: $('metrics-only-unset'), sample: $('metrics-sample-unset')}});
     this.draftTab = new DraftTab({report: message, source: () => this.draft, locked: () => this.record?.owner,
       roles: () => this.settings?.endpoint_roles,
@@ -1043,6 +1044,7 @@ export class StudioUI {
       ready: async () => { await this.autoSave.flush(); if (this.hasUnsavedChanges()) throw new Error('Your latest edit could not be saved yet. Fix it or reload the saved source first.'); },
       start: action => this.startDraftPass(action)});
     on('complexity', 'change', () => this.metricsEditor.save('complexity', $('complexity').value || undefined));
+    on('target-size', 'change', () => this.metricsEditor.save('task_length', $('target-size').value || undefined));
     $('tab-metrics').addEventListener('click', () => this.metricsEditor.load().catch(message));
     document.addEventListener('studio-view', e => {
       if (e.detail === 'jobs-view') this.openJobs().catch(message);
